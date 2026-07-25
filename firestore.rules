@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Basic rules for the blueprint
+    
+    // Check if user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+    
+    // settings collection
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAuth(); // We should ideally check for admin, but let's keep it simple for now
+    }
+    
+    // users collection
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+    
+    // departments collection
+    match /departments/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+    
+    // documents collection
+    match /documents/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // documents_inbox collection
+    match /documents_inbox/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // documents_outbox collection
+    match /documents_outbox/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // documents_internal collection
+    match /documents_internal/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+  }
+}
