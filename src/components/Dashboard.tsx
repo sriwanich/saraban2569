@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone } from 'lucide-react';
+import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone, FileEdit } from 'lucide-react';
 
 import { db } from '../firebase';
 import { DocumentItem, DocType } from '../types';
@@ -11,6 +11,7 @@ import DocumentFormModal from './DocumentModal';
 import DocumentDetailModal from './DocumentDetailModal';
 import AdminDocsView from './views/AdminDocsView';
 import FoldersView from './views/FoldersView';
+import DraftDocsView from './views/DraftDocsView';
 import { ThemeMode } from '../App';
 
 export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogout: () => void, theme: ThemeMode, setTheme: (mode: ThemeMode) => void, user: any }) {
@@ -383,6 +384,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
     { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
     { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
     { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ' },
+    { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร' },
     { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล' },
   ];
 
@@ -423,6 +425,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
           onEditDoc={handleEditDoc}
           onDeleteDoc={handleDeleteDoc}
           user={currentUser}
+        />;
+      case 'draft_docs':
+        return <DraftDocsView 
+          user={currentUser} 
+          onSaveToRegistry={() => {
+            setCreateDocType('outbox');
+            setIsCreateModalOpen(true);
+          }}
         />;
       case 'folders':
         return <FoldersView 

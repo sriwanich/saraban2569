@@ -14,8 +14,10 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
   const [startSequence, setStartSequence] = useState<number>(1);
   const [orgName, setOrgName] = useState<string>('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
   const [logoUrl, setLogoUrl] = useState<string>('');
+  const [garuda15Url, setGaruda15Url] = useState<string>('');
+  const [garuda30Url, setGaruda30Url] = useState<string>('');
   const [faviconUrl, setFaviconUrl] = useState<string>('');
-  const [footerText, setFooterText] = useState<string>('© 2026 ระบบสารบรรณอิเล็กทรอนิกส์');
+  const [footerText, setFooterText] = useState<string>('© 2026 ระบบสารบรรณอิเล็กทรอนิกส์ - สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
   
   const [smtpHost, setSmtpHost] = useState<string>('');
   const [smtpPort, setSmtpPort] = useState<number>(587);
@@ -196,6 +198,14 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         if (data.startSequence) setStartSequence(data.startSequence);
         if (data.orgName) setOrgName(data.orgName || '');
         if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl || '');
+        if (data.garuda15Url !== undefined) {
+          setGaruda15Url(data.garuda15Url || '');
+          if (data.garuda15Url) localStorage.setItem('moi_garuda15', data.garuda15Url);
+        }
+        if (data.garuda30Url !== undefined) {
+          setGaruda30Url(data.garuda30Url || '');
+          if (data.garuda30Url) localStorage.setItem('moi_garuda30', data.garuda30Url);
+        }
         if (data.faviconUrl !== undefined) setFaviconUrl(data.faviconUrl || '');
         if (data.footerText) setFooterText(data.footerText || '');
         if (data.smtpHost !== undefined) setSmtpHost(data.smtpHost || '');
@@ -220,6 +230,8 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
           startSequence,
           orgName,
           logoUrl,
+          garuda15Url,
+          garuda30Url,
           faviconUrl,
           footerText,
           smtpHost,
@@ -229,7 +241,9 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
           smtpFrom
         })
       });
-      alert('บันทึกการตั้งค่าระบบเรียบร้อยแล้ว');
+      if (garuda15Url) localStorage.setItem('moi_garuda15', garuda15Url);
+      if (garuda30Url) localStorage.setItem('moi_garuda30', garuda30Url);
+      alert('บันทึกการตั้งค่าระบบและตราครุฑเรียบร้อยแล้ว');
       if (onSettingsUpdated) onSettingsUpdated();
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -239,7 +253,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
     }
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon') => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon' | 'garuda15' | 'garuda30') => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       const formData = new FormData();
@@ -255,10 +269,17 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         if (res.ok) {
           const data = await res.json();
           if (data.files && data.files.length > 0) {
+            const uploadedUrl = data.files[0].url;
             if (type === 'logo') {
-              setLogoUrl(data.files[0].url);
-            } else {
-              setFaviconUrl(data.files[0].url);
+              setLogoUrl(uploadedUrl);
+            } else if (type === 'favicon') {
+              setFaviconUrl(uploadedUrl);
+            } else if (type === 'garuda15') {
+              setGaruda15Url(uploadedUrl);
+              localStorage.setItem('moi_garuda15', uploadedUrl);
+            } else if (type === 'garuda30') {
+              setGaruda30Url(uploadedUrl);
+              localStorage.setItem('moi_garuda30', uploadedUrl);
             }
           }
         } else {
@@ -651,6 +672,104 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                   onChange={e => setOrgName(e.target.value)}
                   className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-4 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors"
                 />
+              </div>
+            </div>
+
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                  <Crown className="w-5 h-5 text-[var(--primary-color)]" /> ตราครุฑ ๑.๕ ซม. (หนังสือภายใน/บันทึกข้อความ)
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex items-start gap-4">
+                    <div className="relative group">
+                      <div className="w-24 h-24 rounded-lg border-2 border-dashed border-[var(--border-medium)] bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative">
+                        {garuda15Url ? (
+                          <img src={garuda15Url} alt="Garuda 1.5cm" className="max-w-full max-h-full object-contain" />
+                        ) : (
+                          <Crown className="w-8 h-8 text-[var(--text-muted)]" />
+                        )}
+                        <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-white">
+                          <Upload className="w-5 h-5 mb-1" />
+                          <span className="text-[10px]">อัปโหลดรูป</span>
+                          <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'garuda15')} />
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <label className="text-sm text-[var(--text-secondary)]">URL ตราครุฑ ๑.๕ ซม.</label>
+                      <input 
+                        type="text" 
+                        value={garuda15Url}
+                        onChange={e => {
+                          setGaruda15Url(e.target.value);
+                          localStorage.setItem('moi_garuda15', e.target.value);
+                        }}
+                        placeholder="ปล่อยว่างเพื่อใช้ค่าเริ่มต้น"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors"
+                      />
+                      {garuda15Url && (
+                        <button
+                          onClick={() => {
+                            setGaruda15Url('');
+                            localStorage.removeItem('moi_garuda15');
+                          }}
+                          className="text-xs text-red-500 hover:text-red-600 font-medium"
+                        >
+                          ลบตราครุฑ ๑.๕ ซม.
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                  <Crown className="w-5 h-5 text-[var(--primary-color)]" /> ตราครุฑ ๓.๐ ซม. (หนังสือภายนอก/คำสั่ง/ประกาศ)
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex items-start gap-4">
+                    <div className="relative group">
+                      <div className="w-24 h-24 rounded-lg border-2 border-dashed border-[var(--border-medium)] bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative">
+                        {garuda30Url ? (
+                          <img src={garuda30Url} alt="Garuda 3.0cm" className="max-w-full max-h-full object-contain" />
+                        ) : (
+                          <Crown className="w-8 h-8 text-[var(--text-muted)]" />
+                        )}
+                        <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-white">
+                          <Upload className="w-5 h-5 mb-1" />
+                          <span className="text-[10px]">อัปโหลดรูป</span>
+                          <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'garuda30')} />
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <label className="text-sm text-[var(--text-secondary)]">URL ตราครุฑ ๓.๐ ซม.</label>
+                      <input 
+                        type="text" 
+                        value={garuda30Url}
+                        onChange={e => {
+                          setGaruda30Url(e.target.value);
+                          localStorage.setItem('moi_garuda30', e.target.value);
+                        }}
+                        placeholder="ปล่อยว่างเพื่อใช้ค่าเริ่มต้น"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors"
+                      />
+                      {garuda30Url && (
+                        <button
+                          onClick={() => {
+                            setGaruda30Url('');
+                            localStorage.removeItem('moi_garuda30');
+                          }}
+                          className="text-xs text-red-500 hover:text-red-600 font-medium"
+                        >
+                          ลบตราครุฑ ๓.๐ ซม.
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

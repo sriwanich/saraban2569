@@ -222,7 +222,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const initCat = formData.category || 'order';
       const initYear = formData.year || currentYear || '2569';
       const newDocNum = newType === 'admin' 
-        ? getNextAdminDocNumber(initCat, initYear) 
+        ? getNextAdminDocNumber(initCat, String(initYear)) 
         : (newType === 'outbox' ? `${isCirc ? 'รย 0021/ว' : 'รย 0021/'}${seq}` : formData.docNumber);
       setFormData(prev => ({
         ...prev,
@@ -594,7 +594,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 <label className="text-sm font-medium text-[var(--text-secondary)]">ชั้นความลับ</label>
                 <select 
                   value={formData.secrecy || 'ปกติ'}
-                  onChange={(e) => handleChange('secrecy', e.target.value as DocSecrecy)}
+                  onChange={(e) => handleChange('secrecy', e.target.value as any)}
                   className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-4 py-2.5 text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors"
                 >
                   <option value="ปกติ">ปกติ</option>

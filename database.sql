@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS settings (
   startSequence INT DEFAULT 1,
   orgName VARCHAR(255),
   logoUrl TEXT,
+  garuda15Url TEXT,
+  garuda30Url TEXT,
   faviconUrl TEXT,
   footerText VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -172,6 +174,28 @@ CREATE TABLE IF NOT EXISTS admin_documents (
 
 -- Add memos table
 
+
+CREATE TABLE IF NOT EXISTS draft_documents (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  docType VARCHAR(100) NOT NULL,
+  title VARCHAR(500) NOT NULL,
+  docNumber VARCHAR(255),
+  date VARCHAR(255),
+  urgency VARCHAR(50) DEFAULT 'ปกติ',
+  secrecy VARCHAR(50) DEFAULT 'ปกติ',
+  fromDept VARCHAR(255),
+  toDept VARCHAR(255),
+  subject VARCHAR(500),
+  content LONGTEXT,
+  signatory VARCHAR(255),
+  signatoryPosition VARCHAR(255),
+  sealMode VARCHAR(50) DEFAULT 'garuda30',
+  status VARCHAR(50) DEFAULT 'draft',
+  createdBy VARCHAR(255),
+  extraData LONGTEXT,
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS department_receives (
   id INT AUTO_INCREMENT PRIMARY KEY,

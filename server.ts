@@ -327,6 +327,8 @@ const initialSeedData = {
       startSequence: 1,
       orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
       logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg',
+      garuda15Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
+      garuda30Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
       faviconUrl: '',
       footerText: '© 2026 ระบบสารบรรณอิเล็กทรอนิกส์ - สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
       smtpHost: '',
@@ -807,6 +809,37 @@ async function setupDatabase() {
       } catch (e) {
         // column already exists
       }
+      try { await pool.query('ALTER TABLE settings ADD COLUMN garuda15Url TEXT', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN garuda30Url TEXT', []); } catch (e) {}
+
+      // Ensure draft_documents table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS draft_documents (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            docType VARCHAR(100) NOT NULL,
+            title VARCHAR(500) NOT NULL,
+            docNumber VARCHAR(255),
+            date VARCHAR(255),
+            urgency VARCHAR(50) DEFAULT 'ปกติ',
+            secrecy VARCHAR(50) DEFAULT 'ปกติ',
+            fromDept VARCHAR(255),
+            toDept VARCHAR(255),
+            subject VARCHAR(500),
+            content LONGTEXT,
+            signatory VARCHAR(255),
+            signatoryPosition VARCHAR(255),
+            sealMode VARCHAR(50) DEFAULT 'garuda30',
+            status VARCHAR(50) DEFAULT 'draft',
+            createdBy VARCHAR(255),
+            extraData LONGTEXT,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+      } catch (e) {
+        console.warn('Note checking/creating draft_documents table:', e);
+      }
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpHost VARCHAR(255)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpPort INT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpUser VARCHAR(255)', []); } catch (e) {}
@@ -987,6 +1020,8 @@ app.get('/api/settings', async (req, res) => {
           startSequence: 1,
           orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
           logoUrl: '',
+          garuda15Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
+          garuda30Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
           faviconUrl: '',
           footerText: "© 2026 ระบบสารบรรณอิเล็กทรอนิกส์",
           smtpHost: "",
@@ -1009,13 +1044,13 @@ app.put("/api/settings", async (req, res) => {
       const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
       if (rows.length > 0) {
         await pool.query(
-          "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, logoUrl=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=? WHERE id=?",
-          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, rows[0].id]
+          "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=? WHERE id=?",
+          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, rows[0].id]
         );
       } else {
         await pool.query(
-          "INSERT INTO settings (currentYear, startSequence, orgName, logoUrl, faviconUrl, footerText, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom]
+          "INSERT INTO settings (currentYear, startSequence, orgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom]
         );
       }
       await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
@@ -2238,6 +2273,202 @@ app.post('/api/restore', backupUpload.single('file'), async (req, res) => {
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการคืนค่าข้อมูล: ' + error.message });
   }
 });
+
+// AI Document Scanner Endpoint via Gemini API
+import { GoogleGenAI } from '@google/genai';
+
+let aiClient: GoogleGenAI | null = null;
+function getAiClient(): GoogleGenAI {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY environment variable is missing');
+    }
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+}
+
+app.post('/api/ai-scan', async (req, res) => {
+  try {
+    const { base64, mimeType, outputType, hint } = req.body;
+    if (!base64) {
+      return res.status(400).json({ error: 'กรุณาส่งข้อมูลไฟล์เอกสาร (base64)' });
+    }
+
+    const ai = getAiClient();
+    const systemPrompt = `คุณคือผู้เชี่ยวชาญงานสารบรรณราชการไทย ที่มีความสามารถในการอ่านและแปลงเอกสารราชการ
+อ่านเอกสารในภาพและสกัดข้อมูลออกมาในรูปแบบ JSON ที่กำหนด ตอบเป็น JSON เท่านั้น`;
+
+    const userPrompt = `อ่านเอกสารราชการในภาพนี้และแปลงข้อมูลออกมาในรูปแบบ JSON ดังนี้:
+{
+  "docType": "ประเภทหนังสือ (หนังสือภายนอก/หนังสือภายใน/บันทึกข้อความ/คำสั่ง/ประกาศ/หนังสือรับรอง/หนังสือเวียน/ระเบียบ/ข้อบังคับ/แถลงการณ์/ข่าว/อื่นๆ)",
+  "docNum": "เลขที่หนังสือ เช่น ศธ 04034/123 หรือ ว.15 หรือ - ถ้าไม่มี",
+  "date": "วันที่ในรูปแบบ YYYY-MM-DD เช่น 2026-07-25 หรือ null ถ้าไม่มี",
+  "urgency": "ปกติ หรือ ด่วน หรือ ด่วนมาก หรือ ด่วนที่สุด",
+  "secrecy": "ลับ หรือ ลับมาก หรือ ลับที่สุด หรือ '' ถ้าไม่ลับ",
+  "subject": "เรื่องของหนังสือ",
+  "to": "เรียน ถึงใคร หรือ ใครเป็นผู้รับ",
+  "from": "หน่วยงานหรือบุคคลที่ออกหนังสือ",
+  "ref": "อ้างถึงหนังสือฉบับใด (ถ้ามี) หรือ ''",
+  "att": "สิ่งที่ส่งมาด้วย (ถ้ามี) หรือ ''",
+  "body": "เนื้อความสำคัญของหนังสือ รวมถึงเหตุผล วัตถุประสงค์ สาระสำคัญ ให้ครบถ้วนที่สุด",
+  "signer": "ชื่อผู้ลงนาม",
+  "signerPos": "ตำแหน่งผู้ลงนาม",
+  "rawText": "ข้อความทั้งหมดที่อ่านได้จากเอกสาร",
+  "confidence": "สูง หรือ ปานกลาง หรือ ต่ำ",
+  "confidenceNote": "หมายเหตุเกี่ยวกับความชัดเจนของเอกสาร"
+}
+
+${outputType && outputType !== 'auto' ? `ผู้ใช้ต้องการแปลงเป็นประเภท: ${outputType}` : 'ตรวจจับประเภทหนังสือจากเอกสารจริง'}
+${hint ? 'คำแนะนำเพิ่มเติมจากผู้ใช้: ' + hint : ''}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          inlineData: {
+            mimeType: mimeType || 'image/jpeg',
+            data: base64
+          }
+        },
+        { text: userPrompt }
+      ],
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const text = response.text || '';
+    let parsedJson = {};
+    try {
+      parsedJson = JSON.parse(text);
+    } catch {
+      parsedJson = { rawText: text, subject: 'เอกสารจากการสแกน' };
+    }
+
+    return res.json({ success: true, result: parsedJson });
+  } catch (err: any) {
+    console.error('Error in AI scan:', err);
+    return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการสแกนเอกสารด้วย AI' });
+  }
+});
+
+// Draft Documents CRUD Endpoints
+app.get('/api/drafts', async (req, res) => {
+  try {
+    const [rows]: any = await pool.query('SELECT * FROM draft_documents ORDER BY updatedAt DESC');
+    return res.json(rows || []);
+  } catch (error: any) {
+    console.error('Error fetching drafts:', error.message);
+    const drafts = localDb.draft_documents || [];
+    return res.json(drafts);
+  }
+});
+
+app.post('/api/drafts', async (req, res) => {
+  const {
+    docType, title, docNumber, date, urgency, secrecy,
+    fromDept, toDept, subject, content, signatory,
+    signatoryPosition, sealMode, status, createdBy, extraData
+  } = req.body;
+  const ip = getClientIp(req);
+
+  try {
+    const [result]: any = await pool.query(
+      `INSERT INTO draft_documents 
+      (docType, title, docNumber, date, urgency, secrecy, fromDept, toDept, subject, content, signatory, signatoryPosition, sealMode, status, createdBy, extraData)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        docType || 'memo', title || 'ร่างเอกสาร', docNumber || '', date || '', urgency || 'ปกติ', secrecy || 'ปกติ',
+        fromDept || '', toDept || '', subject || '', content || '', signatory || '',
+        signatoryPosition || '', sealMode || 'garuda30', status || 'draft', createdBy || 'ผู้ใช้งาน',
+        typeof extraData === 'object' ? JSON.stringify(extraData) : (extraData || '')
+      ]
+    );
+    await addSystemLog('CREATE_DRAFT', `บันทึกร่างเอกสาร: ${title || 'ร่างเอกสาร'}`, createdBy || 'ผู้ใช้งาน', ip);
+    return res.json({ success: true, id: result.insertId });
+  } catch (error: any) {
+    console.error('Error saving draft:', error.message);
+    if (!localDb.draft_documents) localDb.draft_documents = [];
+    const newDraft = {
+      id: Date.now(),
+      docType, title, docNumber, date, urgency, secrecy,
+      fromDept, toDept, subject, content, signatory,
+      signatoryPosition, sealMode, status, createdBy, extraData,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    localDb.draft_documents.push(newDraft);
+    saveLocalDb();
+    return res.json({ success: true, id: newDraft.id });
+  }
+});
+
+app.put('/api/drafts/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    docType, title, docNumber, date, urgency, secrecy,
+    fromDept, toDept, subject, content, signatory,
+    signatoryPosition, sealMode, status, createdBy, extraData
+  } = req.body;
+  const ip = getClientIp(req);
+
+  try {
+    await pool.query(
+      `UPDATE draft_documents SET
+        docType=?, title=?, docNumber=?, date=?, urgency=?, secrecy=?,
+        fromDept=?, toDept=?, subject=?, content=?, signatory=?,
+        signatoryPosition=?, sealMode=?, status=?, createdBy=?, extraData=?
+       WHERE id=?`,
+      [
+        docType, title, docNumber, date, urgency, secrecy,
+        fromDept, toDept, subject, content, signatory,
+        signatoryPosition, sealMode, status, createdBy,
+        typeof extraData === 'object' ? JSON.stringify(extraData) : (extraData || ''),
+        id
+      ]
+    );
+    await addSystemLog('UPDATE_DRAFT', `อัปเดตร่างเอกสาร ID: ${id}`, createdBy || 'ผู้ใช้งาน', ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error updating draft:', error.message);
+    if (localDb.draft_documents) {
+      const idx = localDb.draft_documents.findIndex((d: any) => String(d.id) === String(id));
+      if (idx !== -1) {
+        localDb.draft_documents[idx] = {
+          ...localDb.draft_documents[idx],
+          docType, title, docNumber, date, urgency, secrecy,
+          fromDept, toDept, subject, content, signatory,
+          signatoryPosition, sealMode, status, createdBy, extraData,
+          updatedAt: new Date().toISOString()
+        };
+        saveLocalDb();
+      }
+    }
+    return res.json({ success: true });
+  }
+});
+
+app.delete('/api/drafts/:id', async (req, res) => {
+  const { id } = req.params;
+  const username = (req.query.username || 'ผู้ใช้งาน').toString();
+  const ip = getClientIp(req);
+
+  try {
+    await pool.query('DELETE FROM draft_documents WHERE id=?', [id]);
+    await addSystemLog('DELETE_DRAFT', `ลบร่างเอกสาร ID: ${id}`, username, ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting draft:', error.message);
+    if (localDb.draft_documents) {
+      localDb.draft_documents = localDb.draft_documents.filter((d: any) => String(d.id) !== String(id));
+      saveLocalDb();
+    }
+    return res.json({ success: true });
+  }
+});
+
 
 async function startServer() {
   const PORT = 3000;

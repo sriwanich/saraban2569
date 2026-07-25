@@ -4,6 +4,7 @@ import { Search, Plus, Calendar, FileText, Eye, Edit2, Trash2, Tag, Layers, Chec
 
 interface Props {
   documents: DocumentItem[];
+  user?: any;
   onViewDoc: (doc: DocumentItem) => void;
   onCreateDoc: () => void;
   onEditDoc: (doc: DocumentItem) => void;
