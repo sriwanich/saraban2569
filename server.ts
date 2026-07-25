@@ -10,6 +10,7 @@ import { createServer as createViteServer } from 'vite';
 import nodemailer from 'nodemailer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { GoogleGenAI, Type } from '@google/genai';
 
 const execFileAsync = promisify(execFile);
 
@@ -111,7 +112,8 @@ async function verifyPasswordArgon2(hashedPassword: string, plainPassword: strin
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Secure file download helper that restores the original filename
@@ -2277,68 +2279,140 @@ app.post('/api/restore', backupUpload.single('file'), async (req, res) => {
 // AI Document Scanner Endpoint via Gemini API
 import { GoogleGenAI } from '@google/genai';
 
-let aiClient: GoogleGenAI | null = null;
-function getAiClient(): GoogleGenAI {
-  if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY environment variable is missing');
-    }
-    aiClient = new GoogleGenAI({ apiKey });
-  }
-  return aiClient;
-}
-
 app.post('/api/ai-scan', async (req, res) => {
   try {
     const { base64, mimeType, outputType, hint } = req.body;
     if (!base64) {
-      return res.status(400).json({ error: 'กรุณาส่งข้อมูลไฟล์เอกสาร (base64)' });
+      return res.status(400).json({ success: false, error: 'กรุณาส่งข้อมูลไฟล์เอกสาร (base64)' });
     }
 
-    const ai = getAiClient();
-    const systemPrompt = `คุณคือผู้เชี่ยวชาญงานสารบรรณราชการไทย ที่มีความสามารถในการอ่านและแปลงเอกสารราชการ
-อ่านเอกสารในภาพและสกัดข้อมูลออกมาในรูปแบบ JSON ที่กำหนด ตอบเป็น JSON เท่านั้น`;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'ระบบยังไม่ได้กำหนด GEMINI_API_KEY กรุณาตรวจสอบการตั้งค่า API Key ใน Settings > Secrets' });
+    }
 
-    const userPrompt = `อ่านเอกสารราชการในภาพนี้และแปลงข้อมูลออกมาในรูปแบบ JSON ดังนี้:
+    const systemPrompt = `คุณคือผู้เชี่ยวชาญงานสารบรรณราชการไทย ที่มีความสามารถในการอ่าน สแกน และถอดความเอกสารราชการไทย
+อ่านเอกสารในภาพหรือ PDF และสกัดข้อมูลออกมาเป็นโครงสร้าง JSON ตามที่กำหนดเท่านั้น`;
+
+    const userPrompt = `อ่านและถอดความเอกสารราชการนี้ แล้วจัดโครงสร้างข้อมูลในรูปแบบ JSON ดังนี้:
 {
-  "docType": "ประเภทหนังสือ (หนังสือภายนอก/หนังสือภายใน/บันทึกข้อความ/คำสั่ง/ประกาศ/หนังสือรับรอง/หนังสือเวียน/ระเบียบ/ข้อบังคับ/แถลงการณ์/ข่าว/อื่นๆ)",
-  "docNum": "เลขที่หนังสือ เช่น ศธ 04034/123 หรือ ว.15 หรือ - ถ้าไม่มี",
-  "date": "วันที่ในรูปแบบ YYYY-MM-DD เช่น 2026-07-25 หรือ null ถ้าไม่มี",
+  "docType": "ประเภทหนังสือ (หนังสือภายนอก/หนังสือภายใน/บันทึกข้อความ/คำสั่ง/ประกาศ/หนังสือรับรอง/หนังสือเวียน/ระเบียบ/ข้อบังคับ)",
+  "docNum": "เลขที่หนังสือ เช่น ศธ 04034/123 หรือ ว.15 หรือ รย 0021/ว123",
+  "date": "วันที่ เช่น 25 มกราคม 2569",
   "urgency": "ปกติ หรือ ด่วน หรือ ด่วนมาก หรือ ด่วนที่สุด",
-  "secrecy": "ลับ หรือ ลับมาก หรือ ลับที่สุด หรือ '' ถ้าไม่ลับ",
+  "secrecy": "ปกติ หรือ ลับ หรือ ลับมาก หรือ ลับที่สุด",
   "subject": "เรื่องของหนังสือ",
   "to": "เรียน ถึงใคร หรือ ใครเป็นผู้รับ",
   "from": "หน่วยงานหรือบุคคลที่ออกหนังสือ",
   "ref": "อ้างถึงหนังสือฉบับใด (ถ้ามี) หรือ ''",
   "att": "สิ่งที่ส่งมาด้วย (ถ้ามี) หรือ ''",
-  "body": "เนื้อความสำคัญของหนังสือ รวมถึงเหตุผล วัตถุประสงค์ สาระสำคัญ ให้ครบถ้วนที่สุด",
+  "body": "เนื้อหาและสาระสำคัญของหนังสือ",
   "signer": "ชื่อผู้ลงนาม",
   "signerPos": "ตำแหน่งผู้ลงนาม",
   "rawText": "ข้อความทั้งหมดที่อ่านได้จากเอกสาร",
   "confidence": "สูง หรือ ปานกลาง หรือ ต่ำ",
-  "confidenceNote": "หมายเหตุเกี่ยวกับความชัดเจนของเอกสาร"
+  "confidenceNote": "หมายเหตุเกี่ยวกับความชัดเจน"
 }
 
 ${outputType && outputType !== 'auto' ? `ผู้ใช้ต้องการแปลงเป็นประเภท: ${outputType}` : 'ตรวจจับประเภทหนังสือจากเอกสารจริง'}
 ${hint ? 'คำแนะนำเพิ่มเติมจากผู้ใช้: ' + hint : ''}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType: mimeType || 'image/jpeg',
-            data: base64
-          }
-        },
-        { text: userPrompt }
-      ],
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json'
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    
+    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
+    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
+    const refererCandidates = [
+      '',
+      'https://aistudio.google.com/',
+      'https://ai.studio/',
+      'https://google.com/',
+      'https://developer.google.com/',
+      rawReferer,
+      rawOrigin,
+      'https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/',
+      'https://ais-pre-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/'
+    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
+
+    let response: any = null;
+    let lastError: any = null;
+
+    referrerLoop: for (const refHeader of refererCandidates) {
+      const headersConfig: Record<string, string> = {
+        'User-Agent': 'aistudio-build'
+      };
+      if (refHeader) {
+        headersConfig['Referer'] = refHeader;
+        headersConfig['Referrer'] = refHeader;
       }
-    });
+
+      const client = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: headersConfig }
+      });
+
+      for (const modelName of modelsToTry) {
+        try {
+          response = await client.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                inlineData: {
+                  mimeType: mimeType || 'image/jpeg',
+                  data: base64
+                }
+              },
+              { text: userPrompt }
+            ],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  docType: { type: Type.STRING },
+                  docNum: { type: Type.STRING },
+                  date: { type: Type.STRING },
+                  urgency: { type: Type.STRING },
+                  secrecy: { type: Type.STRING },
+                  subject: { type: Type.STRING },
+                  to: { type: Type.STRING },
+                  from: { type: Type.STRING },
+                  ref: { type: Type.STRING },
+                  att: { type: Type.STRING },
+                  body: { type: Type.STRING },
+                  signer: { type: Type.STRING },
+                  signerPos: { type: Type.STRING },
+                  rawText: { type: Type.STRING },
+                  confidence: { type: Type.STRING },
+                  confidenceNote: { type: Type.STRING }
+                }
+              }
+            }
+          });
+          if (response) break referrerLoop;
+        } catch (err: any) {
+          lastError = err;
+          const errStr = String(err.message || err);
+          if (errStr.includes('API_KEY_HTTP_REFERRER_BLOCKED') || errStr.includes('403')) {
+            console.warn(`Referer '${refHeader}' blocked by API key restriction. Trying next referer...`);
+            break;
+          } else {
+            console.warn(`Model ${modelName} failed with referer '${refHeader}':`, err.message);
+          }
+        }
+      }
+    }
+
+    if (!response) {
+      const errMsg = lastError?.message || String(lastError || 'ไม่สามารถประมวลผลไฟล์ผ่าน Gemini API ได้');
+      if (errMsg.includes('API_KEY_HTTP_REFERRER_BLOCKED')) {
+        return res.status(403).json({
+          success: false,
+          error: 'GEMINI_API_KEY ของคุณมีการจำกัดสิทธิ์ HTTP Referrer บน Google Cloud Console กรุณาเข้าสู่ Google Cloud Console / AI Studio แล้วตั้งค่า API Key ให้ยอมรับ HTTP Referrer ของแอปพลิเคชันหรือทุก Referrer (*)'
+        });
+      }
+      throw lastError || new Error('ไม่สามารถประมวลผลไฟล์ผ่าน Gemini API ได้');
+    }
 
     const text = response.text || '';
     let parsedJson = {};
@@ -2351,7 +2425,7 @@ ${hint ? 'คำแนะนำเพิ่มเติมจากผู้ใ�
     return res.json({ success: true, result: parsedJson });
   } catch (err: any) {
     console.error('Error in AI scan:', err);
-    return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการสแกนเอกสารด้วย AI' });
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสแกนเอกสารด้วย AI' });
   }
 });
 

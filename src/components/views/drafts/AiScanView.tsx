@@ -94,7 +94,13 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
             })
           });
 
-          const data = await resp.json();
+          let data: any = {};
+          try {
+            data = await resp.json();
+          } catch {
+            throw new Error(`เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง (HTTP ${resp.status}) กรุณาลองใหม่อีกครั้ง`);
+          }
+
           if (!resp.ok || !data.success) {
             throw new Error(data.error || 'การสแกนเอกสารด้วย AI ล้มเหลว');
           }
