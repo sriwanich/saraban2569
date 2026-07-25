@@ -129,9 +129,10 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
   };
 
   const handleInsertGaruda = () => {
-    const src = localStorage.getItem('moi_garudaCustom');
+    const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+    const src = localStorage.getItem('moi_garudaCustom') || localStorage.getItem('moi_garuda15') || localStorage.getItem('moi_garuda30') || settings.garuda15Url || settings.garuda30Url;
     if (!src) {
-      alert('ยังไม่ได้อัปโหลดภาพตราครุฑในระบบ\nกรุณาอัปโหลดที่ ตั้งค่าระบบ -> ตราครุฑ ก่อนใช้งาน');
+      alert('ยังไม่ได้อัปโหลดภาพตราครุฑในระบบ\nกรุณาอัปโหลดที่ ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน (ตราครุฑ) ก่อนใช้งาน');
       return;
     }
     const alignStyle = garudaAlign === 'left' ? 'text-align:left;' : garudaAlign === 'right' ? 'text-align:right;' : 'text-align:center;';

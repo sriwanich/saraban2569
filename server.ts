@@ -847,6 +847,7 @@ async function setupDatabase() {
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpUser VARCHAR(255)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpPassword VARCHAR(255)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpFrom VARCHAR(255)', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN geminiApiKey TEXT', []); } catch (e) {}
       
       try { await pool.query('ALTER TABLE users ADD COLUMN email VARCHAR(255)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE users ADD COLUMN resetOtp VARCHAR(10)', []); } catch (e) {}
@@ -1026,6 +1027,7 @@ app.get('/api/settings', async (req, res) => {
           garuda30Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
           faviconUrl: '',
           footerText: "© 2026 ระบบสารบรรณอิเล็กทรอนิกส์",
+          geminiApiKey: "",
           smtpHost: "",
           smtpPort: 587,
           smtpUser: "",
@@ -1046,13 +1048,13 @@ app.put("/api/settings", async (req, res) => {
       const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
       if (rows.length > 0) {
         await pool.query(
-          "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=? WHERE id=?",
-          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, rows[0].id]
+          "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=? WHERE id=?",
+          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey, rows[0].id]
         );
       } else {
         await pool.query(
-          "INSERT INTO settings (currentYear, startSequence, orgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom]
+          "INSERT INTO settings (currentYear, startSequence, orgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, geminiApiKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey]
         );
       }
       await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
@@ -2286,9 +2288,30 @@ app.post('/api/ai-scan', async (req, res) => {
       return res.status(400).json({ success: false, error: 'กรุณาส่งข้อมูลไฟล์เอกสาร (base64)' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    let apiKey = (req.body.apiKey || '').trim();
+
+    // 1. First check MySQL database settings
     if (!apiKey) {
-      return res.status(400).json({ success: false, error: 'ระบบยังไม่ได้กำหนด GEMINI_API_KEY กรุณาตรวจสอบการตั้งค่า API Key ใน Settings > Secrets' });
+      try {
+        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {
+        console.warn('Could not query settings for geminiApiKey:', e);
+      }
+    }
+
+    // 2. Fallback to process.env.GEMINI_API_KEY if database settings key is empty
+    if (!apiKey) {
+      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'ระบบยังไม่ได้กำหนด GEMINI_API_KEY กรุณากำหนด API Key ในเมนู "ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน" หรือกำหนดใน Settings > Secrets' 
+      });
     }
 
     const systemPrompt = `คุณคือผู้เชี่ยวชาญงานสารบรรณราชการไทย ที่มีความสามารถในการอ่าน สแกน และถอดความเอกสารราชการไทย

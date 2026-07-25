@@ -18,6 +18,8 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
   const [garuda30Url, setGaruda30Url] = useState<string>('');
   const [faviconUrl, setFaviconUrl] = useState<string>('');
   const [footerText, setFooterText] = useState<string>('© 2026 ระบบสารบรรณอิเล็กทรอนิกส์ - สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
+  const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false);
   
   const [smtpHost, setSmtpHost] = useState<string>('');
   const [smtpPort, setSmtpPort] = useState<number>(587);
@@ -197,22 +199,37 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         if (data.currentYear) setCurrentYear(data.currentYear);
         if (data.startSequence) setStartSequence(data.startSequence);
         if (data.orgName) setOrgName(data.orgName || '');
-        if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl || '');
+        if (data.logoUrl !== undefined) {
+          setLogoUrl(data.logoUrl || '');
+          if (data.logoUrl) {
+            localStorage.setItem('moi_logo', data.logoUrl);
+            localStorage.setItem('moi_schoolLogo', data.logoUrl);
+          }
+        }
         if (data.garuda15Url !== undefined) {
           setGaruda15Url(data.garuda15Url || '');
-          if (data.garuda15Url) localStorage.setItem('moi_garuda15', data.garuda15Url);
+          if (data.garuda15Url) {
+            localStorage.setItem('moi_garuda15', data.garuda15Url);
+            localStorage.setItem('moi_garudaCustom', data.garuda15Url);
+          }
         }
         if (data.garuda30Url !== undefined) {
           setGaruda30Url(data.garuda30Url || '');
-          if (data.garuda30Url) localStorage.setItem('moi_garuda30', data.garuda30Url);
+          if (data.garuda30Url) {
+            localStorage.setItem('moi_garuda30', data.garuda30Url);
+            if (!data.garuda15Url) localStorage.setItem('moi_garudaCustom', data.garuda30Url);
+          }
         }
         if (data.faviconUrl !== undefined) setFaviconUrl(data.faviconUrl || '');
         if (data.footerText) setFooterText(data.footerText || '');
+        if (data.geminiApiKey !== undefined) setGeminiApiKey(data.geminiApiKey || '');
         if (data.smtpHost !== undefined) setSmtpHost(data.smtpHost || '');
         if (data.smtpPort !== undefined) setSmtpPort(data.smtpPort || 587);
         if (data.smtpUser !== undefined) setSmtpUser(data.smtpUser || '');
         if (data.smtpPassword !== undefined) setSmtpPassword(data.smtpPassword || '');
         if (data.smtpFrom !== undefined) setSmtpFrom(data.smtpFrom || '');
+        
+        localStorage.setItem('moi_settings', JSON.stringify(data));
       }
     } catch (error: any) {
       console.error('Error fetching settings:', error);
@@ -234,6 +251,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
           garuda30Url,
           faviconUrl,
           footerText,
+          geminiApiKey,
           smtpHost,
           smtpPort,
           smtpUser,
@@ -241,9 +259,32 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
           smtpFrom
         })
       });
-      if (garuda15Url) localStorage.setItem('moi_garuda15', garuda15Url);
-      if (garuda30Url) localStorage.setItem('moi_garuda30', garuda30Url);
-      alert('บันทึกการตั้งค่าระบบและตราครุฑเรียบร้อยแล้ว');
+      if (logoUrl) {
+        localStorage.setItem('moi_logo', logoUrl);
+        localStorage.setItem('moi_schoolLogo', logoUrl);
+      } else {
+        localStorage.removeItem('moi_logo');
+        localStorage.removeItem('moi_schoolLogo');
+      }
+      if (garuda15Url) {
+        localStorage.setItem('moi_garuda15', garuda15Url);
+        localStorage.setItem('moi_garudaCustom', garuda15Url);
+      } else {
+        localStorage.removeItem('moi_garuda15');
+      }
+      if (garuda30Url) {
+        localStorage.setItem('moi_garuda30', garuda30Url);
+        if (!garuda15Url) localStorage.setItem('moi_garudaCustom', garuda30Url);
+      } else {
+        localStorage.removeItem('moi_garuda30');
+      }
+      if (!garuda15Url && !garuda30Url) {
+        localStorage.removeItem('moi_garudaCustom');
+      }
+      localStorage.setItem('moi_settings', JSON.stringify({
+        currentYear, startSequence, orgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, geminiApiKey, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom
+      }));
+      alert('บันทึกการตั้งค่าระบบ, ตราครุฑ/โลโก้ และ Gemini API Key เรียบร้อยแล้ว');
       if (onSettingsUpdated) onSettingsUpdated();
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -272,14 +313,18 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
             const uploadedUrl = data.files[0].url;
             if (type === 'logo') {
               setLogoUrl(uploadedUrl);
+              localStorage.setItem('moi_logo', uploadedUrl);
+              localStorage.setItem('moi_schoolLogo', uploadedUrl);
             } else if (type === 'favicon') {
               setFaviconUrl(uploadedUrl);
             } else if (type === 'garuda15') {
               setGaruda15Url(uploadedUrl);
               localStorage.setItem('moi_garuda15', uploadedUrl);
+              localStorage.setItem('moi_garudaCustom', uploadedUrl);
             } else if (type === 'garuda30') {
               setGaruda30Url(uploadedUrl);
               localStorage.setItem('moi_garuda30', uploadedUrl);
+              if (!garuda15Url) localStorage.setItem('moi_garudaCustom', uploadedUrl);
             }
           }
         } else {
@@ -856,6 +901,43 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
+              <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-1 flex items-center gap-2">
+                <Key className="w-5 h-5 text-[var(--primary-color)]" /> ตั้งค่า Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] mb-4">
+                กำหนด Key จาก Google AI Studio เพื่อใช้สแกน อ่าน และถอดความเอกสารราชการโดยอัตโนมัติ ข้อมูลจะถูกจัดเก็บไว้ในฐานข้อมูล MySQL
+              </p>
+              <div className="space-y-2">
+                <label className="text-sm text-[var(--text-secondary)] font-medium">Google Gemini API Key</label>
+                <div className="relative flex items-center">
+                  <input 
+                    type={showGeminiKey ? "text" : "password"} 
+                    value={geminiApiKey}
+                    onChange={e => setGeminiApiKey(e.target.value)}
+                    placeholder="ระบุ Gemini API Key (เช่น AIzaSy...)"
+                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg pl-4 pr-24 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGeminiKey(!showGeminiKey)}
+                    className="absolute right-2 px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-md font-medium transition-colors"
+                  >
+                    {showGeminiKey ? 'ซ่อน Key' : 'แสดง Key'}
+                  </button>
+                </div>
+                {geminiApiKey ? (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mt-1.5 font-medium">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> บันทึก Gemini API Key ในระบบเรียบร้อยแล้ว พร้อมใช้งาน AI สแกนเอกสาร
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mt-1.5 font-medium">
+                    <AlertTriangle className="w-4 h-4 text-amber-500" /> ยังไม่ได้กำหนด API Key ในฐานข้อมูล (ระบบจะลองใช้จาก Settings &gt; Secrets เป็นลำดับถัดไป)
+                  </p>
+                )}
               </div>
             </div>
 

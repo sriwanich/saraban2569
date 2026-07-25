@@ -101,7 +101,7 @@ export function thDateFull(isoDate: string | null | undefined): string {
 
 export function getLogoHTML(size = 80): string {
   const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
-  const logo = localStorage.getItem('moi_schoolLogo') || settings.logoUrl || null;
+  const logo = localStorage.getItem('moi_logo') || localStorage.getItem('moi_schoolLogo') || settings.logoUrl || null;
   if (logo) {
     return `<div style="text-align:center;margin-bottom:6px;">
       <img src="${logo}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;" alt="ตราประจำหน่วยงาน">
@@ -113,7 +113,8 @@ export function getLogoHTML(size = 80): string {
 }
 
 export function getSingleSealHTML(size = 80): string {
-  const garudaSrc = localStorage.getItem('moi_garudaCustom');
+  const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+  const garudaSrc = localStorage.getItem('moi_garudaCustom') || localStorage.getItem('moi_garuda15') || localStorage.getItem('moi_garuda30') || settings.garuda15Url || settings.garuda30Url || null;
   if (garudaSrc) {
     return `<div style="text-align:center;margin-bottom:6px;">
       <img src="${garudaSrc}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;" alt="ตราครุฑ">
@@ -273,7 +274,8 @@ export function buildMemoDoc({
   const docNumThai = toThaiNumeral(docNum || 'อด ๗๑๒๐๑/..........');
   const dateThai = thDateFull(date);
 
-  const garudaSrc = localStorage.getItem('moi_garudaCustom');
+  const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+  const garudaSrc = localStorage.getItem('moi_garudaCustom') || localStorage.getItem('moi_garuda15') || localStorage.getItem('moi_garuda30') || settings.garuda15Url || settings.garuda30Url || null;
   const seal = garudaSrc
     ? `<img src="${garudaSrc}" width="57" height="57" style="width:57px;height:57px;object-fit:contain;" alt="ตราครุฑ">`
     : `<div style="width:57px;height:57px;border:1px dashed #ccc;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:#bbb;">ครุฑ ๑.๕ ซม.</div>`;

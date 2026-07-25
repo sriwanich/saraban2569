@@ -83,6 +83,9 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
         const mimeType = file.type || 'image/jpeg';
 
         try {
+          const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+          const savedKey = (settings.geminiApiKey || '').trim();
+
           const resp = await fetch('/api/ai-scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -90,7 +93,8 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
               base64: base64Str,
               mimeType,
               outputType,
-              hint
+              hint,
+              apiKey: savedKey
             })
           });
 

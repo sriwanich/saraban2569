@@ -19,7 +19,13 @@ CREATE TABLE IF NOT EXISTS settings (
   garuda15Url TEXT,
   garuda30Url TEXT,
   faviconUrl TEXT,
-  footerText VARCHAR(255)
+  footerText VARCHAR(255),
+  geminiApiKey TEXT,
+  smtpHost VARCHAR(255),
+  smtpPort INT,
+  smtpUser VARCHAR(255),
+  smtpPassword VARCHAR(255),
+  smtpFrom VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS departments (

@@ -26,6 +26,19 @@ export default function App() {
         const res = await fetch('/api/settings');
         if (res.ok) {
           const data = await res.json();
+          localStorage.setItem('moi_settings', JSON.stringify(data));
+          if (data.logoUrl) {
+            localStorage.setItem('moi_logo', data.logoUrl);
+            localStorage.setItem('moi_schoolLogo', data.logoUrl);
+          }
+          if (data.garuda15Url) {
+            localStorage.setItem('moi_garuda15', data.garuda15Url);
+            localStorage.setItem('moi_garudaCustom', data.garuda15Url);
+          }
+          if (data.garuda30Url) {
+            localStorage.setItem('moi_garuda30', data.garuda30Url);
+            if (!data.garuda15Url) localStorage.setItem('moi_garudaCustom', data.garuda30Url);
+          }
           if (data.orgName) {
             document.title = `${data.orgName} - ระบบสารบรรณอิเล็กทรอนิกส์`;
           }
