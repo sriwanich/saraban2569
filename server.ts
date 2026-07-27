@@ -1008,7 +1008,11 @@ async function addSystemLog(action: string, details: string, username: string = 
     } catch (e: any) {
       console.error('Failed to insert log into MySQL:', e.message);
     }
-  }
+  if (!localDb.system_logs) localDb.system_logs = [];
+  localDb.system_logs.unshift({ id: Date.now(), action, details, username, ipAddress, timestamp });
+  if (localDb.system_logs.length > 500) localDb.system_logs = localDb.system_logs.slice(0, 500);
+  saveLocalDb();
+}
 
 
 // 1. Settings API Endpoints
@@ -1993,8 +1997,9 @@ app.get('/api/logs', async (req, res) => {
       const [rows]: any = await pool.query('SELECT * FROM system_logs ORDER BY id DESC LIMIT 200');
       return res.json(rows);
     } catch (error: any) {
-      console.error('Database error:', error.message);
-      return res.status(500).json({ error: 'Database error' });
+      console.error('Database error fetching logs:', error.message);
+      const logs = localDb.system_logs || [];
+      return res.json(logs);
     }
 });
 

@@ -116,6 +116,15 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
           const updated = [res, ...scanHistory];
           setScanHistory(updated);
           localStorage.setItem('moi_aiscan_history', JSON.stringify(updated));
+          fetch('/api/logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'AI_SCAN_DRAFT',
+              details: `สแกนเอกสารด้วย AI สำเร็จ: ${res.subject || 'เอกสารสแกน'}`,
+              username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน'
+            })
+          }).catch(console.error);
 
         } catch (err: any) {
           setErrorMsg(err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');

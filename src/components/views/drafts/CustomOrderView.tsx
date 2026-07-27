@@ -135,6 +135,15 @@ ${sealHTML ? `<div style="text-align:center;margin-bottom:8pt;">${sealHTML}</div
     const updated = [newItem, ...customOrders];
     setCustomOrders(updated);
     localStorage.setItem('moi_custom_orders', JSON.stringify(updated));
+    fetch('/api/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'CREATE_DRAFT',
+        details: `บันทึกร่าง${docType === 'order' ? 'คำสั่ง' : 'ประกาศ'}: ${subject}`,
+        username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน'
+      })
+    }).catch(console.error);
 
     if (onSendToSignQueue) {
       onSendToSignQueue({
@@ -152,9 +161,19 @@ ${sealHTML ? `<div style="text-align:center;margin-bottom:8pt;">${sealHTML}</div
 
   const handleDelete = (id: number) => {
     if (!confirm('ต้องการลบรายการนี้ใช่หรือไม่?')) return;
+    const item = customOrders.find(o => o.id === id);
     const updated = customOrders.filter(o => o.id !== id);
     setCustomOrders(updated);
     localStorage.setItem('moi_custom_orders', JSON.stringify(updated));
+    fetch('/api/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'DELETE_DRAFT',
+        details: `ลบร่าง${item?.doctype === 'order' ? 'คำสั่ง' : 'ประกาศ'}: ${item?.subject || id}`,
+        username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน'
+      })
+    }).catch(console.error);
   };
 
   const filteredOrders = customOrders.filter(o => {

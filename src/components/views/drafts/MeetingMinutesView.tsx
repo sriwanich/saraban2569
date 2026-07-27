@@ -193,11 +193,21 @@ ${agendas.map(ag => `<div style="margin-[12pt 0 6pt];">
     const updated = [newItem, ...meetingsHistory];
     setMeetingsHistory(updated);
     localStorage.setItem('moi_meetings', JSON.stringify(updated));
+    fetch('/api/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'CREATE_DRAFT',
+        details: `บันทึกร่างรายงานการประชุม ครั้งที่ ${meetingNo}: ${title}`,
+        username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน'
+      })
+    }).catch(console.error);
     alert('บันทึกรายงานการประชุมเรียบร้อยแล้ว');
     setActiveTab('list');
   };
 
   const handleDelete = (id: number) => {
+    const item = meetingsHistory.find(m => m.id === id);
     if (!confirm('ต้องการลบรายงานการประชุมฉบับนี้ใช่หรือไม่?')) return;
     const updated = meetingsHistory.filter(m => m.id !== id);
     setMeetingsHistory(updated);

@@ -46,14 +46,26 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('moi_drafts');
-    if (saved) {
-      try {
-        setDraftsHistory(JSON.parse(saved));
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    fetch('/api/drafts')
+      .then(res => res.json())
+      .then(data => {
+        const drafts = data
+          .filter((d: any) => d.docType === 'draft_letter')
+          .map((d: any) => ({
+            ...JSON.parse(d.extraData || '{}'),
+            dbId: d.id
+          }));
+        setDraftsHistory(drafts);
+      })
+      .catch(e => {
+        console.error('Error fetching drafts:', e);
+        const saved = localStorage.getItem('moi_drafts');
+        if (saved) {
+          try {
+            setDraftsHistory(JSON.parse(saved));
+          } catch (err) {}
+        }
+      });
   }, []);
 
   // Handle prefill if passed from AI Scan
@@ -123,18 +135,15 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
     } else if (type === 'obj') {
       text = `<p style="text-indent:3em;"><strong>๒. วัตถุประสงค์</strong></p><ol style="padding-left:3em;line-height:2;"><li>เพื่อส่งเสริมคุณภาพชีวิตของประชาชน</li><li>เพื่อเพิ่มประสิทธิภาพการบริหารจัดการ</li></ol>`;
     } else if (type === 'closing') {
-      text = `<p style="text-indent:3em;">จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ/โปรดทราบ และดำเนินการต่อไป</p>`;
+      text = `<p style="text-indent:3em;">จึงเรียนมาเพื่อโปรดพิจารณา</p>`;
     }
-    document.execCommand('insertHTML', false, text);
+    execCommand('insertHTML', text);
   };
 
-  const handleInsertGaruda = () => {
-    const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
-    const src = localStorage.getItem('moi_garudaCustom') || localStorage.getItem('moi_garuda15') || localStorage.getItem('moi_garuda30') || settings.garuda15Url || settings.garuda30Url;
-    if (!src) {
-      alert('ยังไม่ได้อัปโหลดภาพตราครุฑในระบบ\nกรุณาอัปโหลดที่ ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน (ตราครุฑ) ก่อนใช้งาน');
-      return;
-    }
+
+
+  const insertGaruda = () => {
+    const src = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
     const alignStyle = garudaAlign === 'left' ? 'text-align:left;' : garudaAlign === 'right' ? 'text-align:right;' : 'text-align:center;';
     const html = `<div style="${alignStyle}margin:8px 0;"><img src="${src}" width="${garudaSize}" height="${garudaSize}" style="width:${garudaSize}px;height:${garudaSize}px;object-fit:contain;display:inline-block;" alt="ตราครุฑ" /></div>`;
     if (editorRef.current) {
@@ -167,7 +176,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
     setPreviewHtml(html);
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     if (!subject) {
       alert('กรุณากรอกเรื่องก่อนบันทึก');
       return;
@@ -190,9 +199,39 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
       createdAt: new Date().toISOString()
     };
 
-    const updated = [newItem, ...draftsHistory];
-    setDraftsHistory(updated);
-    localStorage.setItem('moi_drafts', JSON.stringify(updated));
+    const payload = {
+      docType: 'draft_letter',
+      title: subject,
+      docNumber: docNum,
+      date: date,
+      urgency: urgency,
+      secrecy: secrecy,
+      toDept: to,
+      subject: subject,
+      content: editorRef.current?.innerHTML || '',
+      signatory: signer,
+      signatoryPosition: signerPos,
+      createdBy: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน',
+      extraData: newItem
+    };
+
+    try {
+      const res = await fetch('/api/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      const savedItem = { ...newItem, dbId: data.id };
+      const updated = [savedItem, ...draftsHistory];
+      setDraftsHistory(updated);
+      localStorage.setItem('moi_drafts', JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+      const updated = [newItem, ...draftsHistory];
+      setDraftsHistory(updated);
+      localStorage.setItem('moi_drafts', JSON.stringify(updated));
+    }
 
     if (onSendToSignQueue) {
       onSendToSignQueue({
@@ -208,8 +247,18 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
     alert('บันทึกร่างหนังสือเรียบร้อยแล้ว');
   };
 
-  const handleDeleteDraft = (id: number) => {
+  const handleDeleteDraft = async (id: number) => {
     if (!confirm('ต้องการลบร่างหนังสือฉบับนี้ใช่หรือไม่?')) return;
+    
+    const itemToDelete = draftsHistory.find(d => d.id === id);
+    if (itemToDelete && (itemToDelete as any).dbId) {
+      try {
+        await fetch(`/api/drafts/${(itemToDelete as any).dbId}`, { method: 'DELETE' });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
     const updated = draftsHistory.filter(d => d.id !== id);
     setDraftsHistory(updated);
     localStorage.setItem('moi_drafts', JSON.stringify(updated));
@@ -535,7 +584,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                             </div>
                           </div>
                           <button
-                            onClick={handleInsertGaruda}
+                            onClick={insertGaruda}
                             className="w-full bg-amber-500 text-slate-950 text-xs font-bold py-1.5 rounded-lg hover:bg-amber-400 transition-colors cursor-pointer"
                           >
                             แทรกลงในเนื้อหา

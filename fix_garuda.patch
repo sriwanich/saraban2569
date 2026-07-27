@@ -1,0 +1,10 @@
+--- src/components/views/drafts/DraftLettersView.tsx
++++ src/components/views/drafts/DraftLettersView.tsx
+@@ -244,3 +244,4 @@
+   };
+-arudaAlign === 'left' ? 'text-align:left;' : garudaAlign === 'right' ? 'text-align:right;' : 'text-align:center;';
++
++  const insertGaruda = () => {
++    const src = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
++    const alignStyle = garudaAlign === 'left' ? 'text-align:left;' : garudaAlign === 'right' ? 'text-align:right;' : 'text-align:center;';
+     const html = `<div style="${alignStyle}margin:8px 0;"><img src="${src}" width="${garudaSize}" height="${garudaSize}" style="width:${garudaSize}px;height:${garudaSize}px;object-fit:contain;display:inline-block;" alt="ตราครุฑ" /></div>`;
