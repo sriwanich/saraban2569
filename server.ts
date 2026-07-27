@@ -1194,6 +1194,186 @@ app.post('/api/login', async (req, res) => {
 });
 
 // 4. Departments API Endpoints
+// Function to generate beautiful OTP Email HTML Template
+function generateOtpEmailTemplate({
+  otp,
+  orgName,
+  logoUrl,
+  footerText,
+}: {
+  otp: string;
+  orgName?: string;
+  logoUrl?: string;
+  footerText?: string;
+}) {
+  const displayOrgName = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+  const displayLogo = logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
+  const displayFooter = footerText || 'ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)';
+
+  return `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>รหัสผ่านใหม่ (OTP)</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f8fafc; font-family:'Sarabun', 'Prompt', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; -webkit-font-smoothing:antialiased; color:#1e293b;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc; padding: 40px 12px;">
+    <tr>
+      <td align="center">
+        <!-- Main Card Container -->
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:580px; background-color:#ffffff; border-radius:20px; overflow:hidden; border:1px solid #e2e8f0; box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08);">
+          
+          <!-- Top Accent Bar -->
+          <tr>
+            <td style="background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 50%, #f59e0b 100%); height: 6px;"></td>
+          </tr>
+
+          <!-- Header Section -->
+          <tr>
+            <td style="background-color:#0f172a; padding: 36px 28px; text-align: center;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center">
+                    <div style="background-color:#ffffff; width:72px; height:72px; border-radius:18px; padding:6px; display:inline-block; box-shadow:0 4px 12px rgba(0,0,0,0.2); margin-bottom:16px;">
+                      <img src="${displayLogo}" alt="Logo" width="60" height="60" style="display:block; width:100%; height:100%; object-fit:contain; border-radius:12px;" />
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <h1 style="margin:0; color:#ffffff; font-size:20px; font-weight:700; line-height:1.4; letter-spacing: -0.2px;">${displayOrgName}</h1>
+                    <p style="margin:6px 0 0 0; color:#94a3b8; font-size:13px; font-weight: 500;">ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body Content -->
+          <tr>
+            <td style="padding: 40px 32px 32px 32px; background-color:#ffffff;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center">
+                    <!-- Badge -->
+                    <div style="display:inline-block; background-color:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:6px 16px; border-radius:20px; font-size:13px; font-weight:600; margin-bottom:20px;">
+                      🔑 รหัสยืนยันตัวตน / OTP Verification
+                    </div>
+                    
+                    <h2 style="margin:0 0 10px 0; color:#0f172a; font-size:20px; font-weight:700;">คำร้องขอตั้งรหัสผ่านใหม่</h2>
+                    <p style="margin:0 0 28px 0; color:#475569; font-size:14px; line-height:1.6; max-width:440px;">
+                      ท่านได้ทำการขอรหัสผ่านชั่วคราว (OTP) เพื่อเข้าใช้งานระบบ โปรดนำรหัสผ่านด้านล่างนี้ไปกรอกในหน้ายืนยันตัวตน
+                    </p>
+
+                    <!-- OTP Code Box -->
+                    <div style="background: linear-gradient(180deg, #f8fafc 0%, #eff6ff 100%); border:2px dashed #3b82f6; border-radius:16px; padding:28px 20px; margin-bottom:28px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
+                      <div style="font-size:12px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">รหัส OTP ของคุณคือ</div>
+                      <div style="font-family:'Courier New', Consolas, Monaco, monospace; font-size:42px; font-weight:800; color:#1e40af; letter-spacing:12px; margin:0; line-height:1; text-shadow: 1px 1px 0px #ffffff;">
+                        ${otp}
+                      </div>
+                    </div>
+
+                    <!-- Notice Card -->
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#fffbeb; border:1px solid #fde68a; border-radius:12px; margin-bottom:24px;">
+                      <tr>
+                        <td style="padding:16px; text-align:left;">
+                          <p style="margin:0 0 6px 0; color:#92400e; font-size:13px; font-weight:700;">
+                            ⏰ ระยะเวลาการใช้งาน & ข้อควรระวัง
+                          </p>
+                          <ul style="margin:0; padding-left:18px; color:#b45309; font-size:12.5px; line-height:1.6;">
+                            <li>รหัส OTP นี้มีอายุการใช้งาน <strong>15 นาที</strong> เท่านั้น</li>
+                            <li>หากท่านไม่ได้เป็นผู้ทำรายการนี้ โปรดละเว้นอีเมลฉบับนี้และแจ้งผู้ดูแลระบบ</li>
+                          </ul>
+                        </td>
+                      </tr>
+                    </table>
+
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc; border-top:1px solid #e2e8f0; padding:28px 32px; text-align:center;">
+              <p style="margin:0 0 6px 0; color:#334155; font-size:13px; font-weight:700;">${displayOrgName}</p>
+              <p style="margin:0 0 12px 0; color:#64748b; font-size:12px; line-height:1.5;">${displayFooter}</p>
+              <div style="border-top:1px solid #cbd5e1; margin:16px auto; width:80%; height:1px;"></div>
+              <p style="margin:0; color:#94a3b8; font-size:11px; line-height:1.4;">
+                ข้อความนี้เป็นอีเมลอัตโนมัติจากระบบสารบรรณอิเล็กทรอนิกส์ กรุณาอย่าตอบกลับอีเมลนี้
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// Endpoint to send test email with theme
+app.post('/api/settings/test-email', async (req, res) => {
+  const { targetEmail } = req.body;
+  if (!targetEmail) return res.status(400).json({ success: false, message: 'กรุณาระบุอีเมลผู้รับทดสอบ' });
+
+  try {
+    const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName, logoUrl, footerText FROM settings LIMIT 1');
+    const settings = settingsRows[0] || {};
+
+    if (!settings.smtpHost || !settings.smtpUser) {
+      return res.status(400).json({ success: false, message: 'ระบบยังไม่ได้ตั้งค่า SMTP Host หรือ User' });
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: settings.smtpHost,
+      port: settings.smtpPort || 587,
+      secure: settings.smtpPort === 465,
+      auth: {
+        user: settings.smtpUser,
+        pass: settings.smtpPassword,
+      },
+    });
+
+    const testOtp = '849201';
+    const emailHtml = generateOtpEmailTemplate({
+      otp: testOtp,
+      orgName: settings.orgName,
+      logoUrl: settings.logoUrl,
+      footerText: settings.footerText
+    });
+
+    await new Promise((resolve, reject) => {
+      transporter.sendMail({
+        from: settings.smtpFrom || '"ระบบสารบรรณ" <no-reply@example.com>',
+        to: targetEmail,
+        subject: `[ทดสอบระบบ] รหัสผ่านใหม่ (OTP) - ${settings.orgName || 'ระบบงานสารบรรณ'}`,
+        text: `นี่คืออีเมลทดสอบระบบสารบรรณ รหัส OTP สมมติของคุณคือ: ${testOtp}`,
+        html: emailHtml,
+      }, (err, info) => {
+        if (err) {
+          console.error('SMTP Test Send Error:', err);
+          reject(err);
+        } else {
+          resolve(info);
+        }
+      });
+    });
+
+    transporter.close();
+    return res.json({ success: true, message: `ส่งอีเมลทดสอบรูปแบบ OTP ไปยัง ${targetEmail} สำเร็จแล้ว` });
+  } catch (err: any) {
+    console.error('Test Email Error:', err);
+    return res.status(500).json({ success: false, message: `ล้มเหลวในการส่งอีเมลทดสอบ: ${err.message}` });
+  }
+});
+
 // Forgot Password Flow
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
@@ -1211,7 +1391,7 @@ app.post('/api/forgot-password', async (req, res) => {
 
     await pool.query('UPDATE users SET resetOtp = ?, resetOtpExpiry = ? WHERE id = ?', [otp, expiry, user.id]);
 
-    const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom FROM settings LIMIT 1');
+    const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName, logoUrl, footerText FROM settings LIMIT 1');
     const settings = settingsRows[0] || {};
     
     if (!settings.smtpHost || !settings.smtpUser) {
@@ -1229,13 +1409,20 @@ app.post('/api/forgot-password', async (req, res) => {
       },
     });
 
+    const emailHtml = generateOtpEmailTemplate({
+      otp,
+      orgName: settings.orgName,
+      logoUrl: settings.logoUrl,
+      footerText: settings.footerText
+    });
+
     await new Promise((resolve, reject) => {
       transporter.sendMail({
         from: settings.smtpFrom || '"ระบบสารบรรณ" <no-reply@example.com>',
         to: email,
-        subject: 'รหัสผ่านใหม่ (OTP) - ระบบงานสารบรรณ',
+        subject: `รหัสผ่านใหม่ (OTP) - ${settings.orgName || 'ระบบงานสารบรรณ'}`,
         text: `รหัส OTP ของคุณคือ: ${otp} (รหัสผ่านนี้มีอายุการใช้งาน 15 นาที)`,
-        html: `<b>รหัส OTP ของคุณคือ:</b> <span style="font-size: 24px; font-weight: bold;">${otp}</span><br>รหัสผ่านนี้มีอายุการใช้งาน 15 นาที`,
+        html: emailHtml,
       }, (err, info) => {
         if (err) {
           console.error("SMTP Send Error:", err);

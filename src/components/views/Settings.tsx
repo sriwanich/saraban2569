@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send } from 'lucide-react';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
@@ -27,6 +27,35 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
   const [smtpUser, setSmtpUser] = useState<string>('');
   const [smtpPassword, setSmtpPassword] = useState<string>('');
   const [smtpFrom, setSmtpFrom] = useState<string>('');
+
+  const [showOtpPreviewModal, setShowOtpPreviewModal] = useState<boolean>(false);
+  const [testEmailAddress, setTestEmailAddress] = useState<string>('');
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState<boolean>(false);
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailAddress.trim()) {
+      alert('กรุณากรอกอีเมลผู้รับทดสอบ');
+      return;
+    }
+    setIsSendingTestEmail(true);
+    try {
+      const res = await fetch('/api/settings/test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetEmail: testEmailAddress.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(data.message || 'ส่งอีเมลทดสอบเรียบร้อยแล้ว');
+      } else {
+        alert(data.message || 'เกิดข้อผิดพลาดในการส่งอีเมลทดสอบ: ' + (data.message || ''));
+      }
+    } catch (err: any) {
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์: ' + err.message);
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  };
 
   const [isSavingSystem, setIsSavingSystem] = useState(false);
 
@@ -1039,6 +1068,48 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                     placeholder='"ระบบสารบรรณ" <no-reply@example.com>'
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* Test Email & Preview Box */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-sm text-[var(--text-primary)] flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-blue-500" /> รูปแบบและทดสอบส่งอีเมล OTP
+                  </h4>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">
+                    อีเมล OTP จะใช้ตราโลโก้, ชื่อหน่วยงาน และ Footer ตามที่ตั้งค่าไว้ในหน้าระบบ
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowOtpPreviewModal(true)}
+                  className="px-3.5 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border border-blue-500/20 cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5" /> ดูตัวอย่างรูปแบบอีเมล
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-[var(--border-lighter)] flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="email"
+                  value={testEmailAddress}
+                  onChange={(e) => setTestEmailAddress(e.target.value)}
+                  placeholder="ระบุอีเมลผู้รับทดสอบ (เช่น test@example.com)"
+                  className="flex-1 px-3 py-2 border border-[var(--border-medium)] rounded-lg bg-[var(--bg-overlay)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]"
+                />
+                <button
+                  onClick={handleSendTestEmail}
+                  disabled={isSendingTestEmail}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+                >
+                  {isSendingTestEmail ? (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  ส่งอีเมลทดสอบ
+                </button>
               </div>
             </div>
             
@@ -2307,6 +2378,111 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* OTP Email Theme Preview Modal */}
+      {showOtpPreviewModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border-medium)] rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-[var(--border-lighter)] flex items-center justify-between bg-[var(--bg-canvas)]">
+              <div className="flex items-center gap-2">
+                <Mail className="w-5 h-5 text-blue-500" />
+                <h3 className="font-semibold text-base text-[var(--text-primary)]">
+                  ตัวอย่างรูปแบบอีเมล OTP (OTP Email Theme Preview)
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowOtpPreviewModal(false)}
+                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-1.5 rounded-lg hover:bg-[var(--border-lighter)] transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto bg-slate-100 dark:bg-slate-900 flex-1">
+              {/* Fake Email Envelope Header */}
+              <div className="mb-4 bg-white dark:bg-slate-800 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 space-y-1 shadow-sm">
+                <div className="flex gap-2">
+                  <span className="font-semibold text-slate-400 w-16">ผู้ส่ง:</span>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">{smtpFrom || '"ระบบสารบรรณ" <no-reply@example.com>'}</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="font-semibold text-slate-400 w-16">หัวข้อ:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">รหัสผ่านใหม่ (OTP) - {orgName || 'ระบบงานสารบรรณ'}</span>
+                </div>
+              </div>
+
+              {/* Rendered HTML Email Preview */}
+              <div className="max-w-xl mx-auto bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-md">
+                {/* Top Accent Line */}
+                <div className="h-1.5 bg-gradient-to-r from-blue-700 via-blue-500 to-amber-500"></div>
+
+                {/* Header */}
+                <div className="bg-[#0f172a] p-8 text-center text-white">
+                  <div className="w-16 h-16 bg-white rounded-2xl p-1.5 inline-flex items-center justify-center shadow-lg mb-3">
+                    <img
+                      src={logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg'}
+                      alt="Logo"
+                      className="w-full h-full object-contain rounded-xl"
+                    />
+                  </div>
+                  <h1 className="text-lg font-bold text-white leading-snug">{orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}</h1>
+                  <p className="text-xs text-slate-400 font-medium mt-1">ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)</p>
+                </div>
+
+                {/* Body */}
+                <div className="p-8 text-center bg-white">
+                  <div className="inline-block bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded-full text-xs font-semibold mb-5">
+                    🔑 รหัสยืนยันตัวตน / OTP Verification
+                  </div>
+
+                  <h2 className="text-lg font-bold text-slate-900 mb-2">คำร้องขอตั้งรหัสผ่านใหม่</h2>
+                  <p className="text-sm text-slate-600 leading-relaxed mb-6 max-w-md mx-auto">
+                    ท่านได้ทำการขอรหัสผ่านชั่วคราว (OTP) เพื่อเข้าใช้งานระบบ โปรดนำรหัสผ่านด้านล่างนี้ไปกรอกในหน้ายืนยันตัวตน
+                  </p>
+
+                  {/* OTP Code Box */}
+                  <div className="bg-gradient-to-b from-slate-50 to-blue-50 border-2 border-dashed border-blue-500 rounded-2xl p-6 mb-6">
+                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">รหัส OTP ของคุณคือ</div>
+                    <div className="font-mono text-4xl font-extrabold text-blue-800 tracking-[10px] leading-none">
+                      849201
+                    </div>
+                  </div>
+
+                  {/* Notice Box */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-left">
+                    <p className="text-xs font-bold text-amber-900 mb-1 flex items-center gap-1">
+                      ⏰ ระยะเวลาการใช้งาน & ข้อควรระวัง
+                    </p>
+                    <ul className="text-xs text-amber-800 space-y-1 list-disc list-inside">
+                      <li>รหัส OTP นี้มีอายุการใช้งาน <strong>15 นาที</strong> เท่านั้น</li>
+                      <li>หากท่านไม่ได้เป็นผู้ทำรายการนี้ โปรดละเว้นอีเมลฉบับนี้และแจ้งผู้ดูแลระบบ</li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="bg-slate-50 border-t border-slate-200 p-6 text-center text-slate-600">
+                  <p className="text-xs font-bold text-slate-700 mb-1">{orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}</p>
+                  <p className="text-[11px] text-slate-500 mb-3">{footerText || 'ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)'}</p>
+                  <div className="w-4/5 h-px bg-slate-200 mx-auto mb-3"></div>
+                  <p className="text-[10px] text-slate-400">
+                    ข้อความนี้เป็นอีเมลอัตโนมัติจากระบบสารบรรณอิเล็กทรอนิกส์ กรุณาอย่าตอบกลับอีเมลนี้
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-[var(--border-lighter)] flex justify-end bg-[var(--bg-canvas)]">
+              <button
+                onClick={() => setShowOtpPreviewModal(false)}
+                className="px-5 py-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              >
+                ปิดหน้าต่าง
+              </button>
+            </div>
           </div>
         </div>
       )}
