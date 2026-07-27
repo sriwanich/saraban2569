@@ -436,12 +436,52 @@ export default function DocumentDetailModal({ doc, onClose, user, onStatusUpdate
                                     href={`/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
+                                    onClick={async (e) => {
+                                      e.preventDefault();
+                                      const url = `/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`;
+                                      try {
+                                        const res = await fetch(url);
+                                        if (!res.ok) throw new Error('Network error');
+                                        const blob = await res.blob();
+                                        const blobUrl = window.URL.createObjectURL(blob);
+                                        window.open(blobUrl, '_blank');
+                                        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+                                      } catch(err) {
+                                        window.open(url, '_blank');
+                                      }
+                                    }}
                                     className="px-2.5 py-1 rounded bg-[var(--primary-color)]/10 text-[var(--primary-color)] hover:bg-[var(--primary-color)] hover:text-white transition-colors flex items-center gap-1 font-medium text-[11px]"
                                   >
                                     <ExternalLink className="w-3 h-3" /> เปิดดูไฟล์
                                   </a>
                                   <a
                                     href={`/api/files/download?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={async (e) => {
+                                      e.preventDefault();
+                                      const url = `/api/files/download?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`;
+                                      try {
+                                        const res = await fetch(url);
+                                        if (!res.ok) throw new Error('Network error');
+                                        const blob = await res.blob();
+                                        const blobUrl = window.URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = blobUrl;
+                                        a.download = fileName;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        window.URL.revokeObjectURL(blobUrl);
+                                      } catch(err) {
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = fileName;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                      }
+                                    }}
                                     className="px-2.5 py-1 rounded bg-[var(--border-lighter)] text-[var(--text-secondary)] hover:bg-[var(--border-medium)] transition-colors flex items-center gap-1 font-medium text-[11px]"
                                   >
                                     <Download className="w-3 h-3" /> ดาวน์โหลด

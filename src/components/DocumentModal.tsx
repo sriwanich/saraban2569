@@ -835,6 +835,20 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                             href={`/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`} 
                             target="_blank" 
                             rel="noopener noreferrer" 
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              const url = `/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`;
+                              try {
+                                const res = await fetch(url);
+                                if (!res.ok) throw new Error('Network error');
+                                const blob = await res.blob();
+                                const blobUrl = window.URL.createObjectURL(blob);
+                                window.open(blobUrl, '_blank');
+                                setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+                              } catch(err) {
+                                window.open(url, '_blank');
+                              }
+                            }}
                             className="flex items-center gap-2 text-[var(--text-primary)] hover:text-[var(--primary-color)] truncate max-w-[85%]"
                             title="คลิกเพื่อเปิดดูไฟล์"
                           >

@@ -274,7 +274,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
     try {
       const queryParams = new URLSearchParams({
         role: currentUser?.role || 'user',
-        department: currentUser?.department || ''
+        department: currentUser?.department || '',
+        isCentral: String(currentUser?.isCentral ?? 1)
       }).toString();
       const res = await fetch(`/api/documents?${queryParams}`);
       if (res.ok) {

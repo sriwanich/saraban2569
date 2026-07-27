@@ -1568,7 +1568,7 @@ app.delete('/api/folders/:id', async (req, res) => {
 // 6. Documents API Endpoints (หนังสือราชการ + คำสั่ง/ประกาศ - ดึงแบบแยกตาราง)
 app.get('/api/documents', async (req, res) => {
   try {
-      const { role, department } = req.query;
+      const { role, department, isCentral } = req.query;
       const query = `
         SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
         UNION ALL
@@ -1606,10 +1606,16 @@ app.get('/api/documents', async (req, res) => {
         return item;
       });
 
-      // Filter by department if user is non-admin
-      if (role && role !== 'admin' && department && typeof department === 'string' && department.trim() !== '') {
+      // Filter by department if user is not central
+      if (isCentral !== '1' && department && typeof department === 'string' && department.trim() !== '') {
         const userDept = department.trim();
+
         processedRows = processedRows.filter((doc: any) => {
+          if (doc.type === 'inbox') {
+            // For department users (isCentral=0), they only see inbox docs if it is explicitly forwarded to their department
+            return doc.forwardedTo && doc.forwardedTo.includes(userDept);
+          }
+
           const matchesDept = doc.department === userDept ||
             doc.from === userDept ||
             doc.to === userDept ||

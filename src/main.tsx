@@ -6,9 +6,8 @@ import { registerSW } from 'virtual:pwa-register'
 
 const updateSW = registerSW({
   onNeedRefresh() {
-    if (confirm('มีเวอร์ชั่นใหม่ อัปเดตทันทีหรือไม่?')) {
-      updateSW(true)
-    }
+    // Force update immediately
+    updateSW(true);
   },
 })
 

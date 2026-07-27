@@ -8,6 +8,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico'],
+      workbox: {
+        navigateFallbackDenylist: [/^\/api/]
+      },
       manifest: {
         name: 'ระบบงานสารบรรณอิเล็กทรอนิกส์',
         short_name: 'EDMS',
