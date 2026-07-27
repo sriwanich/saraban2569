@@ -175,6 +175,17 @@ ${committeeHTML}
 
   const handleSave = () => {
     const html = buildOrderHTML();
+    const userNameToPass = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' : 'ผู้ใช้งาน';
+    fetch('/api/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'CREATE_DRAFT',
+        details: `สร้าง${selectedTemplateType === 'announce' ? 'ประกาศ' : 'คำสั่ง'}จากเทมเพลต: ${subject}`,
+        username: userNameToPass
+      })
+    }).catch(console.error);
+
     if (onSendToSignQueue) {
       onSendToSignQueue({
         id: Date.now(),

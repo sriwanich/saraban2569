@@ -328,6 +328,7 @@ const initialSeedData = {
       currentYear: 2569,
       startSequence: 1,
       orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+      headerOrgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
       logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg',
       garuda15Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
       garuda30Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
@@ -848,6 +849,7 @@ async function setupDatabase() {
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpPassword VARCHAR(255)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN smtpFrom VARCHAR(255)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN geminiApiKey TEXT', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN headerOrgName VARCHAR(255)', []); } catch (e) {}
       
       try { await pool.query('ALTER TABLE users ADD COLUMN email VARCHAR(255)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE users ADD COLUMN resetOtp VARCHAR(10)', []); } catch (e) {}
@@ -1026,6 +1028,7 @@ app.get('/api/settings', async (req, res) => {
           currentYear: 2569,
           startSequence: 1,
           orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+          headerOrgName: '',
           logoUrl: '',
           garuda15Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
           garuda30Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
@@ -1052,13 +1055,13 @@ app.put("/api/settings", async (req, res) => {
       const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
       if (rows.length > 0) {
         await pool.query(
-          "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=? WHERE id=?",
-          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey, rows[0].id]
+          "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=? WHERE id=?",
+          [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey, rows[0].id]
         );
       } else {
         await pool.query(
-          "INSERT INTO settings (currentYear, startSequence, orgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, geminiApiKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [data.currentYear, data.startSequence, data.orgName, data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey]
+          "INSERT INTO settings (currentYear, startSequence, orgName, headerOrgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, geminiApiKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey]
         );
       }
       await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
@@ -2560,19 +2563,55 @@ app.put('/api/drafts/:id', async (req, res) => {
 
 app.delete('/api/drafts/:id', async (req, res) => {
   const { id } = req.params;
-  const username = (req.query.username || 'ผู้ใช้งาน').toString();
+  let username = (req.query.username || req.body?.username || '').toString().trim();
   const ip = getClientIp(req);
 
   try {
+    let draftSubject = '';
+    let createdBy = '';
+    try {
+      const [rows]: any = await pool.query('SELECT title, subject, createdBy FROM draft_documents WHERE id=?', [id]);
+      if (rows && rows.length > 0) {
+        draftSubject = rows[0].subject || rows[0].title || '';
+        createdBy = rows[0].createdBy || '';
+      }
+    } catch (e) {
+      if (localDb.draft_documents) {
+        const found = localDb.draft_documents.find((d: any) => String(d.id) === String(id));
+        if (found) {
+          draftSubject = found.subject || found.title || '';
+          createdBy = found.createdBy || '';
+        }
+      }
+    }
+
+    if (!username) {
+      username = createdBy || 'ผู้ใช้งาน';
+    }
+
+    const detailsStr = draftSubject ? `ลบร่างเอกสาร: ${draftSubject}` : `ลบร่างเอกสาร ID: ${id}`;
+
     await pool.query('DELETE FROM draft_documents WHERE id=?', [id]);
-    await addSystemLog('DELETE_DRAFT', `ลบร่างเอกสาร ID: ${id}`, username, ip);
+    await addSystemLog('DELETE_DRAFT', detailsStr, username, ip);
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting draft:', error.message);
+    let draftSubject = '';
+    let createdBy = '';
     if (localDb.draft_documents) {
+      const found = localDb.draft_documents.find((d: any) => String(d.id) === String(id));
+      if (found) {
+        draftSubject = found.subject || found.title || '';
+        createdBy = found.createdBy || '';
+      }
       localDb.draft_documents = localDb.draft_documents.filter((d: any) => String(d.id) !== String(id));
       saveLocalDb();
     }
+    if (!username) {
+      username = createdBy || 'ผู้ใช้งาน';
+    }
+    const detailsStr = draftSubject ? `ลบร่างเอกสาร: ${draftSubject}` : `ลบร่างเอกสาร ID: ${id}`;
+    await addSystemLog('DELETE_DRAFT', detailsStr, username, ip);
     return res.json({ success: true });
   }
 });

@@ -209,9 +209,19 @@ ${agendas.map(ag => `<div style="margin-[12pt 0 6pt];">
   const handleDelete = (id: number) => {
     const item = meetingsHistory.find(m => m.id === id);
     if (!confirm('ต้องการลบรายงานการประชุมฉบับนี้ใช่หรือไม่?')) return;
+    const userNameToPass = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' : 'ผู้ใช้งาน';
     const updated = meetingsHistory.filter(m => m.id !== id);
     setMeetingsHistory(updated);
     localStorage.setItem('moi_meetings', JSON.stringify(updated));
+    fetch('/api/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'DELETE_DRAFT',
+        details: `ลบร่างรายงานการประชุม: ${item?.title || id}`,
+        username: userNameToPass
+      })
+    }).catch(console.error);
   };
 
   return (

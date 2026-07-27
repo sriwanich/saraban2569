@@ -13,6 +13,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
   const [currentYear, setCurrentYear] = useState<number>(2569);
   const [startSequence, setStartSequence] = useState<number>(1);
   const [orgName, setOrgName] = useState<string>('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
+  const [headerOrgName, setHeaderOrgName] = useState<string>('');
   const [logoUrl, setLogoUrl] = useState<string>('');
   const [garuda15Url, setGaruda15Url] = useState<string>('');
   const [garuda30Url, setGaruda30Url] = useState<string>('');
@@ -199,6 +200,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         if (data.currentYear) setCurrentYear(data.currentYear);
         if (data.startSequence) setStartSequence(data.startSequence);
         if (data.orgName) setOrgName(data.orgName || '');
+        if (data.headerOrgName !== undefined) setHeaderOrgName(data.headerOrgName || '');
         if (data.logoUrl !== undefined) {
           setLogoUrl(data.logoUrl || '');
           if (data.logoUrl) {
@@ -246,6 +248,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
           currentYear,
           startSequence,
           orgName,
+          headerOrgName,
           logoUrl,
           garuda15Url,
           garuda30Url,
@@ -282,7 +285,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         localStorage.removeItem('moi_garudaCustom');
       }
       localStorage.setItem('moi_settings', JSON.stringify({
-        currentYear, startSequence, orgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, geminiApiKey, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom
+        currentYear, startSequence, orgName, headerOrgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, geminiApiKey, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom
       }));
       alert('บันทึกการตั้งค่าระบบ, ตราครุฑ/โลโก้ และ Gemini API Key เรียบร้อยแล้ว');
       if (onSettingsUpdated) onSettingsUpdated();
@@ -709,14 +712,27 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
               <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-[var(--primary-color)]" /> ชื่อหน่วยงาน
               </h3>
-              <div className="space-y-2">
-                <label className="text-sm text-[var(--text-secondary)]">ชื่อหน่วยงานที่จะแสดงในระบบ</label>
-                <input 
-                  type="text" 
-                  value={orgName}
-                  onChange={e => setOrgName(e.target.value)}
-                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-4 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors"
-                />
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm text-[var(--text-secondary)]">ชื่อหน่วยงานที่จะแสดงในระบบ</label>
+                  <input 
+                    type="text" 
+                    value={orgName}
+                    onChange={e => setOrgName(e.target.value)}
+                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-4 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-[var(--text-secondary)]">ชื่อหน่วยงานบน Header / แถบเมนูด้านข้าง (Navigation Bar)</label>
+                  <input 
+                    type="text" 
+                    value={headerOrgName}
+                    onChange={e => setHeaderOrgName(e.target.value)}
+                    placeholder="ปล่อยว่างหากต้องการใช้ชื่อเดียวกับหน่วยงานในระบบ"
+                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-4 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors"
+                  />
+                  <p className="text-xs text-[var(--text-muted)]">ใช้สำหรับแสดงผลตรงส่วนหัวของ Navigation Bar ด้านข้าง สามารถตั้งค่าแยกต่างหากได้</p>
+                </div>
               </div>
             </div>
 

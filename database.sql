@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS settings (
   currentYear INT DEFAULT 2569,
   startSequence INT DEFAULT 1,
   orgName VARCHAR(255),
+  headerOrgName VARCHAR(255),
   logoUrl TEXT,
   garuda15Url TEXT,
   garuda30Url TEXT,

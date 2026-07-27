@@ -251,9 +251,25 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
     if (!confirm('ต้องการลบร่างหนังสือฉบับนี้ใช่หรือไม่?')) return;
     
     const itemToDelete = draftsHistory.find(d => d.id === id);
+    const userNameToPass = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' : 'ผู้ใช้งาน';
+
     if (itemToDelete && (itemToDelete as any).dbId) {
       try {
-        await fetch(`/api/drafts/${(itemToDelete as any).dbId}`, { method: 'DELETE' });
+        await fetch(`/api/drafts/${(itemToDelete as any).dbId}?username=${encodeURIComponent(userNameToPass)}`, { method: 'DELETE' });
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      try {
+        await fetch('/api/logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'DELETE_DRAFT',
+            details: `ลบร่างหนังสือ: ${itemToDelete?.subject || id}`,
+            username: userNameToPass
+          })
+        });
       } catch (e) {
         console.error(e);
       }

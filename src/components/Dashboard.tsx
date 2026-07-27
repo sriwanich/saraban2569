@@ -267,6 +267,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
   };
 
   const [orgName, setOrgName] = useState('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
+  const [headerOrgName, setHeaderOrgName] = useState('');
   const [logoUrl, setLogoUrl] = useState('https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg');
   const [currentYear, setCurrentYear] = useState<number>(2569);
 
@@ -303,6 +304,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
       if (res.ok) {
         const data = await res.json();
         if (data.orgName) setOrgName(data.orgName);
+        if (data.headerOrgName !== undefined) setHeaderOrgName(data.headerOrgName || '');
         if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl);
         if (data.currentYear) setCurrentYear(data.currentYear);
       }
@@ -520,8 +522,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
                <div className="w-8 h-8 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-elevated)] flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                  <img src={logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg'} className="w-[80%] h-[80%] object-contain" alt="Logo" />
                </div>
-               <span className="font-noto-serif-thai font-bold tracking-wide text-[var(--text-primary)] text-[0.95rem] truncate flex-1">
-                 {orgName}
+               <span className="font-noto-serif-thai font-bold tracking-wide text-[var(--text-primary)] text-[0.95rem] truncate flex-1" title={headerOrgName || orgName}>
+                 {headerOrgName || orgName}
                </span>
             </div>
             <button className="lg:hidden text-[var(--text-secondary)] p-1.5 hover:bg-[var(--border-lighter)] rounded-lg transition-colors ml-2" onClick={() => setIsMobileMenuOpen(false)}>
