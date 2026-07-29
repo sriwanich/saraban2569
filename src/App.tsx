@@ -13,7 +13,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('edms_user_data');
+    const savedUser = localStorage.getItem('edms_user_data') || sessionStorage.getItem('edms_user_data');
     if (savedUser) {
       setUser(JSON.parse(savedUser));
       setIsLoggedIn(true);
@@ -59,44 +59,54 @@ export default function App() {
     fetchGlobalSettings();
   }, []);
 
+  const [isSystemDark, setIsSystemDark] = useState(() => {
+    try {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch (_) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleChange = (e: MediaQueryListEvent | MediaQueryList) => {
+        setIsSystemDark(e.matches);
+      };
+      
+      if (mediaQuery.addEventListener) {
+        mediaQuery.addEventListener('change', handleChange);
+        return () => mediaQuery.removeEventListener('change', handleChange);
+      } else if (mediaQuery.addListener) {
+        mediaQuery.addListener(handleChange);
+        return () => mediaQuery.removeListener(handleChange);
+      }
+    } catch (err) {
+      console.error('Failed to bind media query listener:', err);
+    }
+  }, []);
+
   const handleSetTheme = async (newTheme: ThemeMode) => {
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
   };
 
+  const isActualDark = theme === 'dark' || (theme === 'auto' && isSystemDark);
+
   useEffect(() => {
     const root = window.document.documentElement;
-    const isDarkOS = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
     root.classList.remove('light', 'dark');
-    if (theme === 'dark' || (theme === 'auto' && isDarkOS)) {
+    if (isActualDark) {
       root.classList.add('dark');
     } else {
       root.classList.add('light');
     }
     localStorage.setItem('theme', theme);
-  }, [theme]);
-
-  // Listener for OS theme changes if in auto mode
-  useEffect(() => {
-    if (theme !== 'auto') return;
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => {
-      const root = window.document.documentElement;
-      if (mediaQuery.matches) {
-        root.classList.add('dark');
-        root.classList.remove('light');
-      } else {
-        root.classList.remove('dark');
-        root.classList.add('light');
-      }
-    };
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [theme]);
+  }, [theme, isActualDark]);
 
   const handleLogout = async () => {
     localStorage.removeItem('edms_user_data');
+    sessionStorage.removeItem('edms_user_data');
     setUser(null);
     setIsLoggedIn(false);
   };
@@ -106,8 +116,16 @@ export default function App() {
   }
 
   if (isLoggedIn) {
-    return <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} />;
+    return <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />;
   }
 
-  return <Login onLogin={(u) => { setUser(u); setIsLoggedIn(true); localStorage.setItem('edms_user_data', JSON.stringify(u)); }} />;
+  return <Login onLogin={(u, rememberMe) => {
+    setUser(u);
+    setIsLoggedIn(true);
+    if (rememberMe) {
+      localStorage.setItem('edms_user_data', JSON.stringify(u));
+    } else {
+      sessionStorage.setItem('edms_user_data', JSON.stringify(u));
+    }
+  }} />;
 }

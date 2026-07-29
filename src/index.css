@@ -53,6 +53,25 @@
   body {
     @apply font-sarabun text-[var(--text-primary)] bg-[var(--bg-base)] min-h-screen relative overflow-x-hidden transition-colors duration-300;
   }
+
+  /* Override Webkit Autofill styling to prevent low contrast in light and dark mode */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover, 
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+    -webkit-text-fill-color: #0F172A !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  .dark input:-webkit-autofill,
+  .dark input:-webkit-autofill:hover, 
+  .dark input:-webkit-autofill:focus,
+  .dark input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px #1E293B inset !important;
+    -webkit-text-fill-color: #F8FAFC !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
 }
 
 @layer utilities {

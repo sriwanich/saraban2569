@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, ShieldAlert, CheckCircle, User, KeyRound, Eye, EyeOff, Lock, Clock, ShieldCheck, Server, HelpCircle, FolderOpen, Home, RefreshCw, LogIn } from 'lucide-react';
 
-export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
+export default function Login({ onLogin }: { onLogin: (user: any, remember: boolean) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
@@ -129,7 +129,7 @@ export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
           message: 'กำลังนำท่านเข้าสู่ระบบ...'
         });
         setTimeout(() => {
-          onLogin(data.user);
+          onLogin(data.user, remember);
         }, 1000);
       } else {
         setAlert({
@@ -317,7 +317,7 @@ export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
                           id="forgotEmail"
                           value={forgotEmail}
                           onChange={(e) => setForgotEmail(e.target.value)}
-                          className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-overlay)]/50 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
+                          className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
                           placeholder="กรอกอีเมลของคุณ"
                           required
                         />
@@ -339,7 +339,7 @@ export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
                             value={forgotOtp}
                             onChange={(e) => setForgotOtp(e.target.value)}
                             maxLength={6}
-                            className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-overlay)]/50 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all tracking-widest"
+                            className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all tracking-widest"
                             placeholder="123456"
                             required
                           />
@@ -358,7 +358,7 @@ export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
                             id="forgotNewPassword"
                             value={forgotNewPassword}
                             onChange={(e) => setForgotNewPassword(e.target.value)}
-                            className="block w-full pl-10 pr-10 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-overlay)]/50 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
+                            className="block w-full pl-10 pr-10 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
                             placeholder="รหัสผ่านใหม่ของคุณ"
                             required
                           />
@@ -414,7 +414,7 @@ export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
                         id="username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-overlay)]/50 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
+                        className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
                         placeholder="กรอกชื่อผู้ใช้งาน"
                         autoComplete="username"
                         required
@@ -435,7 +435,7 @@ export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
                         id="password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="block w-full pl-10 pr-10 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-overlay)]/50 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
+                        className="block w-full pl-10 pr-10 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
                         placeholder="กรอกรหัสผ่าน"
                         autoComplete="current-password"
                         required
@@ -498,9 +498,44 @@ export default function Login({ onLogin }: { onLogin: (user: any) => void }) {
                   <Clock className="w-3.5 h-3.5" />
                   <span>{time}</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-green-500/70" />
-                  <span>SECURE</span>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-green-500/70" />
+                    <span>SECURE</span>
+                  </div>
+                  <span className="text-[var(--border-light)] text-[10px]">|</span>
+                  <div className="flex items-center gap-2" title="Powered by Vite, React & Node.js">
+                    {/* Vite logo */}
+                    <svg className="h-3.5 w-3.5 opacity-60 hover:opacity-100 transition-opacity" viewBox="0 0 256 257" fill="none">
+                      <path d="M128 0L11 202.5h234L128 0z" fill="url(#vite-g1)"/>
+                      <path d="M128 0L64 110h128L128 0z" fill="url(#vite-g2)"/>
+                      <defs>
+                        <linearGradient id="vite-g1" x1="128" y1="0" x2="128" y2="257" gradientUnits="userSpaceOnUse">
+                          <stop stopColor="#BD34FE"/>
+                          <stop offset="1" stopColor="#41B883"/>
+                        </linearGradient>
+                        <linearGradient id="vite-g2" x1="128" y1="0" x2="128" y2="110" gradientUnits="userSpaceOnUse">
+                          <stop stopColor="#FFC517"/>
+                          <stop offset="1" stopColor="#FFE15D"/>
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                    {/* React logo */}
+                    <svg className="h-3.5 w-3.5 opacity-60 hover:opacity-100 transition-opacity animate-[spin_20s_linear_infinite]" viewBox="-11.5 -10.23174 23 20.46348">
+                      <circle cx="0" cy="0" r="2.05" fill="#61dafb"/>
+                      <g stroke="#61dafb" strokeWidth="1" fill="none">
+                        <ellipse rx="11" ry="4.2"/>
+                        <ellipse rx="11" ry="4.2" transform="rotate(60)"/>
+                        <ellipse rx="11" ry="4.2" transform="rotate(120)"/>
+                      </g>
+                    </svg>
+                    {/* Node.js logo */}
+                    <svg className="h-3.5 w-3.5 opacity-60 hover:opacity-100 transition-opacity" viewBox="0 0 256 256" fill="none">
+                      <path d="M128 10L230 69v118l-102 59-102-59V69z" fill="#339933"/>
+                      <path d="M128 10v216l102-59V69z" fill="#66CC33"/>
+                      <path d="M128 128l51-30V69l-51 29V51l34-20H94l34 20v47l-51-29v29l51 30v47l-34 20h68l-34-20z" fill="#FFF"/>
+                    </svg>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-1.5">

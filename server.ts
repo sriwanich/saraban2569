@@ -1264,14 +1264,23 @@ function generateOtpEmailTemplate({
   orgName,
   logoUrl,
   footerText,
+  baseUrl,
 }: {
   otp: string;
   orgName?: string;
   logoUrl?: string;
   footerText?: string;
+  baseUrl?: string;
 }) {
   const displayOrgName = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
-  const displayLogo = logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
+  let displayLogo = logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
+  
+  if (displayLogo && !displayLogo.startsWith('http://') && !displayLogo.startsWith('https://')) {
+    if (baseUrl) {
+      displayLogo = `${baseUrl}${displayLogo.startsWith('/') ? '' : '/'}${displayLogo}`;
+    }
+  }
+
   const displayFooter = footerText || 'ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)';
 
   return `<!DOCTYPE html>
@@ -1405,12 +1414,17 @@ app.post('/api/settings/test-email', async (req, res) => {
       },
     });
 
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+
     const testOtp = '849201';
     const emailHtml = generateOtpEmailTemplate({
       otp: testOtp,
       orgName: settings.orgName,
       logoUrl: settings.logoUrl,
-      footerText: settings.footerText
+      footerText: settings.footerText,
+      baseUrl
     });
 
     await new Promise((resolve, reject) => {
@@ -1473,11 +1487,16 @@ app.post('/api/forgot-password', async (req, res) => {
       },
     });
 
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+
     const emailHtml = generateOtpEmailTemplate({
       otp,
       orgName: settings.orgName,
       logoUrl: settings.logoUrl,
-      footerText: settings.footerText
+      footerText: settings.footerText,
+      baseUrl
     });
 
     await new Promise((resolve, reject) => {

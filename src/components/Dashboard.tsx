@@ -14,8 +14,17 @@ import FoldersView from './views/FoldersView';
 import DraftDocsView from './views/DraftDocsView';
 import { ThemeMode } from '../App';
 
-export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogout: () => void, theme: ThemeMode, setTheme: (mode: ThemeMode) => void, user: any }) {
+export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDark }: { onLogout: () => void, theme: ThemeMode, setTheme: (mode: ThemeMode) => void, user: any, isSystemDark?: boolean }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    return localStorage.getItem('edms_sidebar_collapsed') === 'true';
+  });
+
+  const toggleSidebar = () => {
+    const nextState = !isSidebarCollapsed;
+    setIsSidebarCollapsed(nextState);
+    localStorage.setItem('edms_sidebar_collapsed', String(nextState));
+  };
 
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -511,27 +520,28 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
 
       {/* Sidebar */}
       <aside className={`
-        fixed top-0 left-0 bottom-0 w-[280px] lg:w-[260px] bg-[var(--bg-surface)] border-r border-[var(--border-light)] z-50
-        transform transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none
+        fixed top-0 left-0 bottom-0 bg-[var(--bg-surface)] border-r border-[var(--border-light)] z-50
+        transform transition-all duration-300 ease-in-out shadow-2xl lg:shadow-none
         lg:translate-x-0 lg:static lg:flex-shrink-0 flex flex-col
-        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+        ${isSidebarCollapsed ? 'lg:w-[72px]' : 'w-[280px] lg:w-[260px]'}
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
          {/* Logo / Header */}
-         <div className="h-16 flex items-center justify-between px-5 border-b border-[var(--border-light)] shrink-0">
-            <div className="flex items-center gap-3 w-full">
+         <div className={`h-16 flex items-center justify-between border-b border-[var(--border-light)] shrink-0 transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-0 lg:justify-center' : 'px-5'}`}>
+            <div className={`flex items-center gap-3 w-full ${isSidebarCollapsed ? 'lg:justify-center' : ''}`}>
                <div className="w-8 h-8 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-elevated)] flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                  <img src={logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg'} className="w-[80%] h-[80%] object-contain" alt="Logo" />
                </div>
-               <span className="font-noto-serif-thai font-bold tracking-wide text-[var(--text-primary)] text-[0.95rem] truncate flex-1" title={headerOrgName || orgName}>
+               <span className={`font-noto-serif-thai font-bold tracking-wide text-[var(--text-primary)] text-[0.95rem] truncate flex-1 transition-all duration-200 ${isSidebarCollapsed ? 'lg:hidden' : ''}`} title={headerOrgName || orgName}>
                  {headerOrgName || orgName}
                </span>
             </div>
-            <button className="lg:hidden text-[var(--text-secondary)] p-1.5 hover:bg-[var(--border-lighter)] rounded-lg transition-colors ml-2" onClick={() => setIsMobileMenuOpen(false)}>
+            <button className={`lg:hidden text-[var(--text-secondary)] p-1.5 hover:bg-[var(--border-lighter)] rounded-lg transition-colors ml-2 ${isSidebarCollapsed ? 'lg:hidden' : ''}`} onClick={() => setIsMobileMenuOpen(false)}>
               <X className="w-5 h-5" />
             </button>
          </div>
          {/* Nav Links */}
-         <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
+         <nav className={`flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-2' : ''}`}>
            {navItems.map((item) => {
              const isActive = activeTab === item.id;
              return (
@@ -543,10 +553,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
                    setActiveTab(item.id);
                    setIsMobileMenuOpen(false); 
                  }} 
-                 className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-200 ${isActive ? 'bg-[var(--primary-color)] text-white font-medium shadow-sm shadow-[var(--primary-color)]/20' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] font-medium'}`}
+                 className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-200 ${isActive ? 'bg-[var(--primary-color)] text-white font-medium shadow-sm shadow-[var(--primary-color)]/20' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] font-medium'} ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 lg:w-10 lg:h-10 lg:mx-auto' : ''}`}
+                 title={item.label}
                >
                  <item.icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-[var(--text-muted)]'}`} />
-                 <span className="truncate">{item.label}</span>
+                 <span className={`truncate transition-all duration-200 ${isSidebarCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
                </a>
              );
            })}
@@ -559,19 +570,28 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
         <header className="h-16 shrink-0 bg-[var(--bg-surface)]/80 backdrop-blur-md border-b border-[var(--border-light)] flex items-center justify-between px-4 lg:px-6 z-30 sticky top-0">
            <div className="flex items-center gap-3 min-w-0 flex-1 mr-4">
              <button className="lg:hidden text-[var(--text-primary)] p-1.5 hover:bg-[var(--border-lighter)] rounded-lg transition-colors shrink-0 -ml-1.5" onClick={() => setIsMobileMenuOpen(true)}>
-               <Menu className="w-5 h-5" />
+                <Menu className="w-5 h-5" />
+              </button>
+
+              {/* Desktop Sidebar Collapse Button */}
+              <button 
+                onClick={toggleSidebar}
+                className="hidden lg:flex text-[var(--text-primary)] p-1.5 hover:bg-[var(--border-lighter)] rounded-lg transition-colors shrink-0 -ml-1.5"
+                title={isSidebarCollapsed ? "ขยายเมนู" : "ย่อเมนู"}
+              >
+                <Menu className="w-5 h-5" />
              </button>
              
              {/* Header Title Badge */}
-             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-light)] min-w-0 max-w-full transition-colors">
-               <Building2 className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
-               <span className="text-xs sm:text-sm font-medium text-[var(--text-primary)] font-sarabun truncate">
-                 {currentUser?.role === 'admin' 
-                   ? `สารบรรณอิเล็กทรอนิกส์ ${orgName || 'ส่วนกลาง'}`
-                   : `สารบรรณอิเล็กทรอนิกส์ ${currentUser?.department || 'ฝ่ายงาน'}`
-                 }
-               </span>
-             </div>
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-light)] min-w-0 max-w-[200px] sm:max-w-full transition-colors">
+                <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[var(--primary-color)] shrink-0" />
+                <span className="text-xs sm:text-sm font-medium text-[var(--text-primary)] font-sarabun truncate">
+                  {currentUser?.role === 'admin'
+                    ? `EDMS: ${headerOrgName || orgName || 'ส่วนกลาง'}`
+                    : `EDMS: ${currentUser?.department || 'ฝ่ายงาน'}`
+                  }
+                </span>
+              </div>
            </div>
 
            <div className="flex items-center gap-3 lg:gap-5 relative shrink-0">
@@ -579,21 +599,21 @@ export default function Dashboard({ onLogout, theme, setTheme, user }: { onLogou
                <button
                  onClick={() => setTheme('light')}
                  className={`p-1.5 sm:p-2 rounded-full transition-colors ${theme === 'light' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                 title="Light Mode"
+                 title="โหมดสว่าง (Light Mode)"
                >
                  <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                </button>
                <button
                  onClick={() => setTheme('dark')}
                  className={`p-1.5 sm:p-2 rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                 title="Dark Mode"
+                 title="โหมดมืด (Dark Mode)"
                >
                  <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                </button>
                <button
                  onClick={() => setTheme('auto')}
                  className={`p-1.5 sm:p-2 rounded-full transition-colors ${theme === 'auto' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                 title="Auto Mode"
+                 title={`โหมดอัตโนมัติ (ปัจจุบัน: ${isSystemDark ? 'โหมดมืด' : 'โหมดสว่าง'})`}
                >
                  <Monitor className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                </button>
