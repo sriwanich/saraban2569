@@ -234,6 +234,36 @@ CREATE TABLE IF NOT EXISTS system_logs (
   createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS project_summaries (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(500) NOT NULL,
+  year VARCHAR(50),
+  type VARCHAR(100),
+  owner VARCHAR(255),
+  dateStart VARCHAR(100),
+  dateEnd VARCHAR(100),
+  venue VARCHAR(255),
+  budget DECIMAL(15,2) DEFAULT 0,
+  budgetPlan DECIMAL(15,2) DEFAULT 0,
+  target VARCHAR(255),
+  participants INT DEFAULT 0,
+  grade VARCHAR(255),
+  speaker VARCHAR(255),
+  objectives TEXT,
+  activities TEXT,
+  resultQty TEXT,
+  resultQl TEXT,
+  problems TEXT,
+  suggestions TEXT,
+  success VARCHAR(100),
+  satisfaction VARCHAR(100),
+  policy VARCHAR(255),
+  html LONGTEXT,
+  createdBy VARCHAR(255),
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Insert seed users
 INSERT INTO users (id, username, password, firstName, lastName, position, department, role) VALUES
 (1, 'admin', 'admin', 'ผู้ดูแลระบบ', 'ระบบงาน', 'นักวิเคราะห์นโยบายและแผนชำนาญการพิเศษ', 'ฝ่ายบริหารงานทั่วไป', 'admin'),

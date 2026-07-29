@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DocumentItem, User, formatThaiDateShort, formatThaiDateMedium, formatThaiDateTime } from '../../types';
+import { DocumentItem, User, formatThaiDate, formatThaiDateShort, formatThaiDateMedium, formatThaiDateTime } from '../../types';
 import { Search, Eye, Edit2, Trash2, FileText, Plus, Printer, Paperclip, X } from 'lucide-react';
 
 interface Props {
@@ -85,34 +85,109 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
     
-    const isInbox = title.includes('รับ');
+    const isInbox = title.includes('รับ') || (sortedFilteredDocs.length > 0 && sortedFilteredDocs[0].type === 'inbox');
     const headerTitle = isInbox ? 'ทะเบียนหนังสือรับ' : 'ทะเบียนหนังสือส่ง';
-    const numHeader = isInbox ? 'ทะเบียนรับ' : 'ทะเบียนส่ง';
+    const numLabel = isInbox ? 'เลขทะเบียนรับ' : 'เลขทะเบียนส่ง';
 
-    const logoToDisplay = logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
     const currentOrg = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
-    const currentDept = user?.department ? user.department : '';
+
+    // Group documents by date
+    const groups: Record<string, DocumentItem[]> = {};
+    sortedFilteredDocs.forEach(l => {
+      const d = l.date || '-';
+      if (!groups[d]) groups[d] = [];
+      groups[d].push(l);
+    });
+
+    const dates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+
+    const escH = (str: string | undefined | null) => {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    };
+
+    let tablesContent = '';
+    if (dates.length === 0) {
+      tablesContent = '<p style="text-align:center; margin-top:20px;">— ไม่มีรายการ —</p>';
+    } else {
+      dates.forEach(d => {
+        const dateStr = d !== '-' ? `วันที่ ${formatThaiDate(d)}` : 'ไม่ระบุวันที่';
+        tablesContent += `
+          <div style="font-size:15pt;font-weight:700;margin:8pt 0 3pt;">${dateStr}</div>
+          <table style="width:100%;border-collapse:collapse;">
+            <colgroup>
+              <col style="width:9%" />
+              <col style="width:12%" />
+              <col style="width:10%" />
+              <col style="width:14%" />
+              <col style="width:13%" />
+              <col style="width:24%" />
+              <col style="width:10%" />
+              <col style="width:8%" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>${numLabel}</th>
+                <th>ที่</th>
+                <th>ลงวันที่</th>
+                <th>จาก</th>
+                <th>ถึง</th>
+                <th>เรื่อง</th>
+                <th>การปฏิบัติ</th>
+                <th>หมายเหตุ</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${groups[d].map(l => `
+                <tr>
+                  <td style="text-align:center;">${escH(isInbox ? (l.receiveNumber || '-') : (l.receiveNumber || l.docNumber || '-'))}</td>
+                  <td style="text-align:center;">${escH(l.docNumber || '-')}</td>
+                  <td style="text-align:center;">${escH(formatThaiDateShort(l.date))}</td>
+                  <td>${escH(l.from || (isInbox ? '-' : currentOrg))}</td>
+                  <td>${escH(l.to || '-')}</td>
+                  <td>${escH(l.title || '-')}</td>
+                  <td style="text-align:center;">${escH(l.assignee || l.department || l.status || '-')}</td>
+                  <td style="text-align:center;">${escH(l.note || (l.registerDate ? 'รับเวลา ' + formatThaiDateTime(l.registerDate).split(' ')[1] : '-'))}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      });
+    }
 
     const html = `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>พิมพ์${headerTitle}</title>
+          <title>${headerTitle}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
             
-            @page {
-              size: A4 landscape;
-              margin: 12mm 12mm 12mm 12mm;
+            @font-face {
+              font-family: 'TH SarabunPSK';
+              src: local('TH SarabunPSK'), local('TH Sarabun New'), local('Sarabun New');
             }
 
-            * { box-sizing: border-box; }
+            @page {
+              size: A4 landscape;
+              margin: 15mm;
+            }
 
-            body {
-              font-family: 'TH Sarabun PSK', 'Sarabun', sans-serif;
+            * {
+              font-family: 'TH SarabunPSK', 'TH Sarabun New', 'Sarabun New', 'Sarabun', sans-serif !important;
+              box-sizing: border-box;
+            }
+
+            html, body {
+              font-family: 'TH SarabunPSK', 'TH Sarabun New', 'Sarabun New', 'Sarabun', sans-serif;
               font-size: 16pt;
-              line-height: 1.35;
+              line-height: 1.5;
               color: #000;
               background: #fff;
               margin: 0;
@@ -121,110 +196,48 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
               print-color-adjust: exact;
             }
 
-            .header-container {
-              text-align: center;
-              margin-bottom: 14px;
-            }
-
-            .logo-img {
-              height: 60px;
-              width: auto;
-              max-width: 120px;
-              object-fit: contain;
-              display: block;
-              margin: 0 auto 6px auto;
-            }
-
-            .header-title {
-              font-size: 20pt;
-              font-weight: bold;
-              color: #000;
-              margin-bottom: 2px;
-            }
-
-            .header-subtitle {
+            p {
+              font-family: 'TH SarabunPSK';
               font-size: 16pt;
-              font-weight: 600;
-              color: #111;
-            }
-
-            .dept-text {
-              font-size: 15pt;
-              font-weight: 500;
-              color: #222;
-              margin-top: 1px;
+              line-height: 1.5;
+              margin: 0 0 3pt;
             }
 
             table {
-              width: 100%;
               border-collapse: collapse;
-              font-size: 15pt;
-              margin-top: 8px;
+              width: 100%;
+              table-layout: fixed;
+              margin: 5pt 0;
             }
 
             tr { page-break-inside: avoid; }
             thead { display: table-header-group; }
 
-            th, td {
-              border: 1px solid #000;
-              padding: 5px 7px;
-              vertical-align: top;
+            td, th {
+              border: 1pt solid #555;
+              padding: 4pt 7pt;
+              font-size: 14pt;
+              line-height: 1.5;
+              vertical-align: middle;
               word-wrap: break-word;
             }
 
             th {
-              background-color: #f2f4f7;
+              background: #d9d9d9;
+              font-weight: 700;
               text-align: center;
-              font-weight: bold;
             }
-
-            .text-center { text-align: center; }
           </style>
         </head>
         <body>
-          <div class="header-container">
-            ${logoToDisplay ? `<img src="${logoToDisplay}" class="logo-img" alt="โลโก้" />` : ''}
-            <div class="header-title">${headerTitle}</div>
-            <div class="header-subtitle">${currentOrg}</div>
-            ${currentDept ? `<div class="dept-text">${currentDept}</div>` : ''}
-          </div>
+          <div style="text-align:center;font-size:18pt;font-weight:700;">${headerTitle}</div>
+          <div style="text-align:center;font-size:15pt;margin-bottom:6pt;">${escH(currentOrg)}</div>
 
-          <table>
-            <thead>
-              <tr>
-                <th width="8%">${numHeader}</th>
-                <th width="14%">ที่</th>
-                <th width="12%">ลงวันที่</th>
-                <th width="16%">จาก</th>
-                <th width="16%">ถึง</th>
-                <th width="24%">เรื่อง</th>
-                <th width="10%">การปฏิบัติ</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${sortedFilteredDocs.map(doc => `
-                <tr>
-                  <td class="text-center">${doc.receiveNumber || '-'}</td>
-                  <td>${doc.docNumber || '-'}</td>
-                  <td class="text-center">${formatThaiDateShort(doc.date)}</td>
-                  <td>${doc.from || '-'}</td>
-                  <td>${doc.to || '-'}</td>
-                  <td>${doc.title || '-'}</td>
-                  <td>${doc.assignee || doc.department || '-'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+          ${tablesContent}
 
           <script>
             window.onload = () => {
-              const img = document.querySelector('.logo-img');
-              if (img && !img.complete) {
-                img.onload = () => { setTimeout(() => window.print(), 150); };
-                img.onerror = () => { window.print(); };
-              } else {
-                setTimeout(() => window.print(), 150);
-              }
+              setTimeout(() => { window.print(); }, 150);
             };
           </script>
         </body>

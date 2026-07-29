@@ -30,7 +30,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
   const [refText, setRefText] = useState<string>('');
   const [attText, setAttText] = useState<string>('');
   const [signer, setSigner] = useState<string>('');
-  const [signerPos, setSignerPos] = useState<string>('ปลัดองค์กรปกครองส่วนท้องถิ่น');
+  const [signerPos, setSignerPos] = useState<string>('หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด');
 
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -171,7 +171,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
       signerPos,
       urgency,
       secrecy,
-      orgName: user?.department || 'สำนักงานองค์กรปกครองส่วนท้องถิ่น'
+      orgName: user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'
     });
     setPreviewHtml(html);
   };

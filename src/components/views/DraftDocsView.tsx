@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  FileText, Sparkles, Award, FileEdit, Volume2, Users 
+  FileText, Sparkles, Award, FileEdit, Volume2, Users, BarChart3
 } from 'lucide-react';
 
 import DraftLettersView from './drafts/DraftLettersView';
@@ -9,6 +9,7 @@ import OrderTemplatesView from './drafts/OrderTemplatesView';
 import CustomOrderView from './drafts/CustomOrderView';
 import SpeechTemplatesView from './drafts/SpeechTemplatesView';
 import MeetingMinutesView from './drafts/MeetingMinutesView';
+import ProjectSummaryView from './drafts/ProjectSummaryView';
 
 interface Props {
   user: any;
@@ -39,6 +40,7 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
     { id: 'customorder', label: 'สร้างคำสั่ง/ประกาศเอง', icon: FileEdit },
     { id: 'speech', label: 'คำกล่าว / รายงาน', icon: Volume2, badge: '100+ แบบ' },
     { id: 'meeting', label: 'บันทึกการประชุม', icon: Users },
+    { id: 'summary', label: 'สรุปโครงการอัตโนมัติ', icon: BarChart3, badge: 'AI' },
   ];
 
   return (
@@ -114,6 +116,12 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
 
         {activeSubTab === 'meeting' && (
           <MeetingMinutesView
+            user={user}
+          />
+        )}
+
+        {activeSubTab === 'summary' && (
+          <ProjectSummaryView
             user={user}
           />
         )}

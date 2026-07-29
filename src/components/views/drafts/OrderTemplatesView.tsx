@@ -14,18 +14,18 @@ interface Props {
 }
 
 export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
-  const [selectedCategory, setSelectedCategory] = useState<string>('🏛️ บริหารงานองค์กร');
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('appoint_committee');
-  const [selectedTemplateTitle, setSelectedTemplateTitle] = useState<string>('คำสั่งแต่งตั้งคณะกรรมการบริหาร อปท.');
+  const [selectedCategory, setSelectedCategory] = useState<string>('🚨 งานป้องกันและบรรเทาสาธารณภัย');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('appoint_disaster_center');
+  const [selectedTemplateTitle, setSelectedTemplateTitle] = useState<string>('คำสั่งจัดตั้งศูนย์บัญชาการเหตุการณ์อุทกภัย วาตภัย และดินโคลนถล่ม');
   const [selectedTemplateType, setSelectedTemplateType] = useState<string>('order');
 
   // Form State
   const [docNum, setDocNum] = useState<string>('๑๒๓/๒๕๖๙');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [subject, setSubject] = useState<string>('แต่งตั้งคณะกรรมการบริหารและพัฒนาองค์กรปกครองส่วนท้องถิ่น');
-  const [authority, setAuthority] = useState<string>(ORDER_AUTHORITY['appoint_committee'] || '');
+  const [subject, setSubject] = useState<string>('จัดตั้งศูนย์บัญชาการเหตุการณ์ป้องกันและแก้ไขปัญหาอุทกภัย วาตภัย และดินโคลนถล่มจังหวัด');
+  const [authority, setAuthority] = useState<string>(ORDER_AUTHORITY['appoint_disaster_center'] || '');
   const [background, setBackground] = useState<string>('');
-  const [duties, setDuties] = useState<string>('ให้คณะกรรมการที่ได้รับการแต่งตั้ง มีหน้าที่อำนวยความสะดวก ควบคุม กำกับดูแล และจัดทำรายงานผลการดำเนินงานเสนอต่อผู้บริหารท้องถิ่นเพื่อทราบ');
+  const [duties, setDuties] = useState<string>('ให้ศูนย์บัญชาการเหตุการณ์มีอำนาจหน้าที่ในการประสานงาน สั่งการ บริหารจัดการ และสนับสนุนทรัพยากรเครื่องมือกู้ภัยเพื่อช่วยเหลือผู้ประสบภัยตลอด ๒๔ ชั่วโมง');
 
   // Seal Mode
   const [sealMode, setSealMode] = useState<'garuda' | 'logo' | 'none'>('garuda');
@@ -35,8 +35,8 @@ export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
   const [selectedPersonnel, setSelectedPersonnel] = useState<{ id: number; name: string; position: string; committeePos: string }[]>([]);
 
   // Signer
-  const [signer, setSigner] = useState<string>('นายสมชาย ใจดี');
-  const [signerPos, setSignerPos] = useState<string>('นายกองค์กรปกครองส่วนท้องถิ่น');
+  const [signer, setSigner] = useState<string>('นายสมชาย ป้องกันดี');
+  const [signerPos, setSignerPos] = useState<string>('หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด');
 
   // Preview Modal
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -73,7 +73,7 @@ export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
 
     setSubject(foundItem.title);
     setAuthority(ORDER_AUTHORITY[tplId] || `อาศัยอำนาจตามระเบียบกฎหมายที่เกี่ยวข้อง`);
-    const org = user?.department || 'องค์กรปกครองส่วนท้องถิ่น';
+    const org = user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด';
     setBackground(getOrderBackground(tplId, org, foundItem.title));
   };
 
@@ -96,7 +96,7 @@ export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
   };
 
   const buildOrderHTML = () => {
-    const org = user?.department || 'องค์กรปกครองส่วนท้องถิ่น';
+    const org = user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด';
     const dateThai = thDateFull(date);
     const numThai = toThaiNumeral(docNum);
 

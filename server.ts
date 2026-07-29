@@ -971,6 +971,70 @@ async function setupDatabase() {
         console.warn('Note checking/creating organizations table:', e);
       }
 
+      // Ensure project_summaries table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS project_summaries (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(500) NOT NULL,
+            year VARCHAR(50),
+            type VARCHAR(100),
+            owner VARCHAR(255),
+            principal VARCHAR(255) DEFAULT 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+            dateStart VARCHAR(100),
+            dateEnd VARCHAR(100),
+            venue VARCHAR(255),
+            budget DECIMAL(15,2) DEFAULT 0,
+            budgetPlan DECIMAL(15,2) DEFAULT 0,
+            target VARCHAR(255),
+            participants INT DEFAULT 0,
+            grade VARCHAR(255),
+            speaker VARCHAR(255),
+            objectives TEXT,
+            activities TEXT,
+            resultQty TEXT,
+            resultQl TEXT,
+            problems TEXT,
+            suggestions TEXT,
+            success VARCHAR(100),
+            satisfaction VARCHAR(100),
+            policy VARCHAR(255),
+            html LONGTEXT,
+            createdBy VARCHAR(255),
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_project_year (year),
+            INDEX idx_project_type (type),
+            INDEX idx_project_owner (owner),
+            INDEX idx_project_updatedAt (updatedAt DESC)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+
+        // Safe index additions for existing database instances
+        const addIndexSafe = async (idxName: string, sql: string) => {
+          try {
+            await pool.query(sql, []);
+          } catch (e: any) {
+            // Index might already exist, which is fine
+          }
+        };
+
+        await addIndexSafe('idx_project_year', `ALTER TABLE project_summaries ADD INDEX idx_project_year (year)`);
+        await addIndexSafe('idx_project_type', `ALTER TABLE project_summaries ADD INDEX idx_project_type (type)`);
+        await addIndexSafe('idx_project_owner', `ALTER TABLE project_summaries ADD INDEX idx_project_owner (owner)`);
+        await addIndexSafe('idx_project_updatedAt', `ALTER TABLE project_summaries ADD INDEX idx_project_updatedAt (updatedAt DESC)`);
+
+        try {
+          await pool.query(`ALTER TABLE project_summaries ADD COLUMN IF NOT EXISTS principal VARCHAR(255) DEFAULT 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'`, []);
+        } catch (e) {
+          try {
+            await pool.query(`ALTER TABLE project_summaries ADD COLUMN principal VARCHAR(255) DEFAULT 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'`, []);
+          } catch (innerErr) {}
+        }
+      } catch (e) {
+        console.warn('Note checking/creating project_summaries table:', e);
+      }
+
       console.log('✅ Database schema verified and initialized successfully!');
     }
   } catch (err: any) {
@@ -2800,6 +2864,239 @@ app.delete('/api/drafts/:id', async (req, res) => {
     const detailsStr = draftSubject ? `ลบร่างเอกสาร: ${draftSubject}` : `ลบร่างเอกสาร ID: ${id}`;
     await addSystemLog('DELETE_DRAFT', detailsStr, username, ip);
     return res.json({ success: true });
+  }
+});
+
+// Project Summaries CRUD & AI Endpoints
+app.get('/api/project-summaries', async (req, res) => {
+  try {
+    const [rows]: any = await pool.query('SELECT * FROM project_summaries ORDER BY updatedAt DESC');
+    return res.json(rows || []);
+  } catch (error: any) {
+    console.error('Error fetching project_summaries:', error.message);
+    const list = localDb.project_summaries || [];
+    return res.json(list);
+  }
+});
+
+app.get('/api/project-summaries/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows]: any = await pool.query('SELECT * FROM project_summaries WHERE id=?', [id]);
+    if (rows && rows.length > 0) return res.json(rows[0]);
+    return res.status(404).json({ error: 'Not found' });
+  } catch (error: any) {
+    const found = (localDb.project_summaries || []).find((s: any) => String(s.id) === String(id));
+    if (found) return res.json(found);
+    return res.status(404).json({ error: 'Not found' });
+  }
+});
+
+app.post('/api/project-summaries', async (req, res) => {
+  const {
+    name, year, type, owner, principal, dateStart, dateEnd, venue, budget, budgetPlan,
+    target, participants, grade, speaker, objectives, activities, resultQty,
+    resultQl, problems, suggestions, success, satisfaction, policy, html, createdBy
+  } = req.body;
+  const ip = getClientIp(req);
+
+  const parsedBudget = parseFloat(String(budget || 0).replace(/,/g, '')) || 0;
+  const parsedBudgetPlan = parseFloat(String(budgetPlan || 0).replace(/,/g, '')) || 0;
+  const parsedParticipants = parseInt(String(participants || 0).replace(/,/g, ''), 10) || 0;
+
+  try {
+    const [result]: any = await pool.query(
+      `INSERT INTO project_summaries 
+      (name, year, type, owner, principal, dateStart, dateEnd, venue, budget, budgetPlan, target, participants, grade, speaker, objectives, activities, resultQty, resultQl, problems, suggestions, success, satisfaction, policy, html, createdBy)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        name || 'โครงการไม่มีชื่อ', year || '', type || '', owner || '', principal || '', dateStart || '', dateEnd || '',
+        venue || '', parsedBudget, parsedBudgetPlan, target || '',
+        parsedParticipants, grade || '', speaker || '', objectives || '', activities || '',
+        resultQty || '', resultQl || '', problems || '', suggestions || '', success || '',
+        satisfaction || '', policy || '', html || '', createdBy || 'ผู้ใช้งาน'
+      ]
+    );
+    await addSystemLog('CREATE_PROJECT_SUMMARY', `บันทึกสรุปโครงการ: ${name}`, createdBy || 'ผู้ใช้งาน', ip);
+    return res.json({ success: true, id: result.insertId });
+  } catch (error: any) {
+    console.error('Error saving project summary:', error.message);
+    if (!localDb.project_summaries) localDb.project_summaries = [];
+    const newSummary = {
+      id: Date.now(),
+      name, year, type, owner, principal, dateStart, dateEnd, venue, budget: parsedBudget, budgetPlan: parsedBudgetPlan,
+      target, participants: parsedParticipants, grade, speaker, objectives, activities, resultQty,
+      resultQl, problems, suggestions, success, satisfaction, policy, html, createdBy,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    localDb.project_summaries.push(newSummary);
+    saveLocalDb();
+    return res.json({ success: true, id: newSummary.id });
+  }
+});
+
+app.put('/api/project-summaries/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    name, year, type, owner, principal, dateStart, dateEnd, venue, budget, budgetPlan,
+    target, participants, grade, speaker, objectives, activities, resultQty,
+    resultQl, problems, suggestions, success, satisfaction, policy, html, createdBy
+  } = req.body;
+  const ip = getClientIp(req);
+
+  const parsedBudget = parseFloat(String(budget || 0).replace(/,/g, '')) || 0;
+  const parsedBudgetPlan = parseFloat(String(budgetPlan || 0).replace(/,/g, '')) || 0;
+  const parsedParticipants = parseInt(String(participants || 0).replace(/,/g, ''), 10) || 0;
+
+  try {
+    await pool.query(
+      `UPDATE project_summaries SET
+        name=?, year=?, type=?, owner=?, principal=?, dateStart=?, dateEnd=?, venue=?, budget=?, budgetPlan=?,
+        target=?, participants=?, grade=?, speaker=?, objectives=?, activities=?, resultQty=?,
+        resultQl=?, problems=?, suggestions=?, success=?, satisfaction=?, policy=?, html=?, createdBy=?
+       WHERE id=?`,
+      [
+        name, year, type, owner, principal, dateStart, dateEnd, venue, parsedBudget, parsedBudgetPlan,
+        target, parsedParticipants, grade, speaker, objectives, activities, resultQty,
+        resultQl, problems, suggestions, success, satisfaction, policy, html, createdBy,
+        id
+      ]
+    );
+    await addSystemLog('UPDATE_PROJECT_SUMMARY', `อัปเดตสรุปโครงการ ID: ${id}`, createdBy || 'ผู้ใช้งาน', ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error updating project summary:', error.message);
+    if (localDb.project_summaries) {
+      const idx = localDb.project_summaries.findIndex((s: any) => String(s.id) === String(id));
+      if (idx !== -1) {
+        localDb.project_summaries[idx] = {
+          ...localDb.project_summaries[idx],
+          name, year, type, owner, principal, dateStart, dateEnd, venue, budget: parsedBudget, budgetPlan: parsedBudgetPlan,
+          target, participants: parsedParticipants, grade, speaker, objectives, activities, resultQty,
+          resultQl, problems, suggestions, success, satisfaction, policy, html, createdBy,
+          updatedAt: new Date().toISOString()
+        };
+        saveLocalDb();
+      }
+    }
+    return res.json({ success: true });
+  }
+});
+
+app.delete('/api/project-summaries/:id', async (req, res) => {
+  const { id } = req.params;
+  const ip = getClientIp(req);
+
+  try {
+    await pool.query('DELETE FROM project_summaries WHERE id=?', [id]);
+    await addSystemLog('DELETE_PROJECT_SUMMARY', `ลบสรุปโครงการ ID: ${id}`, 'ผู้ใช้งาน', ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting project summary:', error.message);
+    if (localDb.project_summaries) {
+      localDb.project_summaries = localDb.project_summaries.filter((s: any) => String(s.id) !== String(id));
+      saveLocalDb();
+    }
+    return res.json({ success: true });
+  }
+});
+
+app.post('/api/ai/summarize-project', async (req, res) => {
+  try {
+    const d = req.body;
+    let apiKey = (req.body.apiKey || '').trim();
+
+    if (!apiKey) {
+      try {
+        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+
+    if (!apiKey) {
+      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'ยังไม่ได้กำหนด GEMINI_API_KEY กรุณากำหนด API Key ในการตั้งค่าระบบ' 
+      });
+    }
+
+    const prompt = `คุณคือผู้เชี่ยวชาญด้านการจัดทำรายงานสรุปโครงการของ "สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง" หรือจังหวัดที่เกี่ยวข้อง กรมป้องกันและบรรเทาสาธารณภัย กระทรวงมหาดไทย
+
+จงสร้างรายงานสรุปผลการดำเนินงานโครงการที่สมบูรณ์ เป็นทางการ ถูกต้องตามแบบฟอร์มหนังสือราชการไทยและระเบียบ ปภ. โดยใช้ข้อมูลต่อไปนี้:
+
+หน่วยงานผู้รับผิดชอบ: ${d.school || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'}
+ชื่อโครงการ: ${d.name}
+ปีงบประมาณ: พ.ศ. ${d.year}
+ประเภทโครงการ/งาน: ${d.type}
+ผู้รับผิดชอบโครงการ: ${d.owner || 'ณัฐพันธุ์ ศรีวนิช'}
+ผู้รับทราบ/ผู้บังคับบัญชา: ${d.principal || 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}
+ระยะเวลาดำเนินการ: ${d.dateStart} ถึง ${d.dateEnd}
+สถานที่ดำเนินการ: ${d.venue || d.school || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'}
+กลุ่มเป้าหมาย/ผู้เข้าร่วม: ${d.target} จำนวน ${d.participants} คน ${d.grade ? '(' + d.grade + ')' : ''}
+วิทยากร/ชุดวิทยากร/หน่วยงานร่วม: ${d.speaker || 'วิทยากรผู้เชี่ยวชาญ ปภ.จ.'}
+งบประมาณที่ได้รับจัดสรร: ${d.budgetPlan} บาท / เบิกจ่ายจริง: ${d.budget} บาท
+ความสอดคล้องกับแผน/ยุทธศาสตร์: ${d.policy || 'แผนป้องกันและบรรเทาสาธารณภัยแห่งชาติ / จังหวัด'}
+
+วัตถุประสงค์ของโครงการ:
+${d.objectives}
+
+สาระสำคัญของกิจกรรม/การฝึกอบรม/การดำเนินงาน:
+${d.activities}
+
+ผลการดำเนินงานเชิงปริมาณ:
+${d.resultQty}
+
+ผลการดำเนินงานเชิงคุณภาพ:
+${d.resultQl}
+
+ปัญหา อุปสรรค และแนวทางแก้ไข: ${d.problems}
+ข้อเสนอแนะในการปรับปรุงโครงการครั้งต่อไป: ${d.suggestions}
+ระดับความสำเร็จของโครงการ: ${d.success}
+คะแนนความพึงพอใจเฉลี่ย: ${d.satisfaction}
+
+กรุณาสร้างรายงานสรุปโครงการเป็น HTML ที่สมบูรณ์ สวยงาม เหมาะสำหรับการพิมพ์ (Print Friendly Layout)
+- ใช้ฟอนต์ TH SarabunPSK / Sarabun 
+- ออกแบบตารางสรุปงบประมาณและผลการประเมินให้เรียบร้อย มีเส้นตารางชัดเจน
+- จัดเรียงลำดับหัวข้อ ๑. ข้อมูลทั่วไป ๒. วัตถุประสงค์ ๓. ผลการดำเนินงาน ๔. สรุปงบประมาณ ๕. ปัญหาอุปสรรคและข้อเสนอแนะ ๖. สรุปภาพรวมความพึงพอใจ
+- ในส่วนท้ายของรายงาน ให้จัดรูปแบบตารางสำหรับลงลายมือชื่อที่ชัดเจนและสมมาตร โดยผู้จัดทำรายงานด้านซ้ายคือ (ลงชื่อ) .................................... (${d.owner || 'ณัฐพันธุ์ ศรีวนิช'}) ผู้จัดทำ/เสนอรายงาน และผู้รับทราบด้านขวาคือ (ลงชื่อ) .................................... (${d.principal || 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}) ผู้บังคับบัญชา / ผู้รับทราบ
+- ตอบเฉพาะโค้ด HTML เท่านั้น โดยไม่ต้องมีคำอธิบาย หรือ Markdown code fence (\`\`\`html) หุ้ม`;
+
+    const client = new GoogleGenAI({ apiKey });
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+    let responseText = '';
+
+    for (const modelName of modelsToTry) {
+      try {
+        const resp = await client.models.generateContent({
+          model: modelName,
+          contents: prompt
+        });
+        if (resp && resp.text) {
+          responseText = resp.text;
+          break;
+        }
+      } catch (err: any) {
+        console.warn(`Model ${modelName} failed:`, err.message);
+      }
+    }
+
+    if (!responseText) {
+      throw new Error('ไม่สามารถสร้างสรุปโครงการผ่าน Gemini API ได้');
+    }
+
+    // Clean html if wrapped in markdown ```html ... ```
+    let cleanHtml = responseText.replace(/```html/gi, '').replace(/```/g, '').trim();
+
+    return res.json({ success: true, html: cleanHtml });
+  } catch (err: any) {
+    console.error('Error in AI summarize project:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างสรุปโครงการด้วย AI' });
   }
 });
 
