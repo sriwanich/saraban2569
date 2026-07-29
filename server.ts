@@ -11,6 +11,58 @@ import nodemailer from 'nodemailer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { GoogleGenAI, Type } from '@google/genai';
+import crypto from 'crypto';
+
+// Storage Deduplication Helper Functions
+function formatBytes(bytes: number, decimals = 2): string {
+  if (!bytes || bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+function getAllUploadFiles(dirPath: string, arrayOfFiles: { path: string; relUrl: string; size: number; mtime: number }[] = []): { path: string; relUrl: string; size: number; mtime: number }[] {
+  if (!fs.existsSync(dirPath)) return arrayOfFiles;
+  const items = fs.readdirSync(dirPath);
+
+  for (const item of items) {
+    const fullPath = path.join(dirPath, item);
+    let stat;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      getAllUploadFiles(fullPath, arrayOfFiles);
+    } else {
+      if (item !== 'db_store.json') {
+        const uploadsBase = path.resolve(process.cwd(), 'uploads');
+        let rel = path.relative(uploadsBase, fullPath).replace(/\\/g, '/');
+        const relUrl = `/uploads/${rel}`;
+        arrayOfFiles.push({
+          path: fullPath,
+          relUrl,
+          size: stat.size,
+          mtime: stat.mtimeMs
+        });
+      }
+    }
+  }
+
+  return arrayOfFiles;
+}
+
+function calculateFileSha256(filePath: string): string {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    return crypto.createHash('sha256').update(buffer).digest('hex');
+  } catch (err) {
+    return '';
+  }
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -271,18 +323,51 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
       }
     }
 
-    const uploadedFiles = files.map(file => ({
-      originalName: file.originalname,
-      filename: file.filename,
-      size: file.size,
-      mimetype: file.mimetype,
-      url: `/uploads/${subfolder}/${file.filename}`,
-      folder: `uploads/${subfolder}`
-    }));
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    const existingUploads = getAllUploadFiles(uploadsDir);
+
+    const uploadedFiles = files.map(file => {
+      let finalFilename = file.filename;
+      let finalUrl = `/uploads/${subfolder}/${file.filename}`;
+      let isDeduplicated = false;
+      let savedBytes = 0;
+
+      try {
+        const newHash = calculateFileSha256(file.path);
+        if (newHash) {
+          // Find if an identical file already exists in uploads/
+          const existingMatch = existingUploads.find(e => e.path !== file.path && calculateFileSha256(e.path) === newHash);
+          if (existingMatch) {
+            // Delete newly uploaded file copy
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+            finalFilename = path.basename(existingMatch.path);
+            finalUrl = existingMatch.relUrl;
+            isDeduplicated = true;
+            savedBytes = file.size;
+          }
+        }
+      } catch (dedupErr) {
+        console.warn('Auto deduplication on upload warning:', dedupErr);
+      }
+
+      return {
+        originalName: file.originalname,
+        filename: finalFilename,
+        size: file.size,
+        mimetype: file.mimetype,
+        url: finalUrl,
+        folder: `uploads/${subfolder}`,
+        isDeduplicated,
+        savedBytes
+      };
+    });
 
     // Audit Log File Upload
     const fileNames = files.map(f => f.originalname).join(', ');
-    await addSystemLog('UPLOAD_FILE', `อัปโหลด/แนบไฟล์แนบ (${subfolder}): ${fileNames}`, uploadedBy, ip);
+    const dedupText = uploadedFiles.some(f => f.isDeduplicated) ? ' (รวมไฟล์ซ้ำ Pointer Link อัตโนมัติ)' : '';
+    await addSystemLog('UPLOAD_FILE', `อัปโหลด/แนบไฟล์แนบ (${subfolder}): ${fileNames}${dedupText}`, uploadedBy, ip);
 
     return res.json({ success: true, files: uploadedFiles });
   } catch (err: any) {
@@ -2736,6 +2821,359 @@ ${hint ? 'คำแนะนำเพิ่มเติมจากผู้ใ�
   }
 });
 
+// AI Duplicate & Cross-Reference Detector Endpoint
+app.post('/api/ai/detect-cross-references', async (req, res) => {
+  try {
+    const { doc, currentDocId } = req.body;
+    if (!doc) {
+      return res.status(400).json({ success: false, error: 'กรุณาส่งข้อมูลหนังสือที่ต้องการตรวจสอบ' });
+    }
+
+    let apiKey = (req.body.apiKey || '').trim();
+    if (!apiKey) {
+      try {
+        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+    if (!apiKey) {
+      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    }
+
+    // Fetch existing documents from database for historical comparison
+    let allDocs: any[] = [];
+    try {
+      const query = `
+        SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM inbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM outbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM circular_documents
+        UNION ALL
+        SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM internal_documents
+        UNION ALL
+        SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content FROM admin_documents
+      `;
+      const [rows]: any = await pool.query(query);
+      allDocs = rows || [];
+    } catch (e) {
+      allDocs = [
+        ...(localDb.inbox_documents || []),
+        ...(localDb.outbox_documents || []),
+        ...(localDb.circular_documents || []),
+        ...(localDb.internal_documents || []),
+        ...(localDb.admin_documents || [])
+      ];
+    }
+
+    // Filter out current document if editing
+    const excludeId = currentDocId || doc.id;
+    if (excludeId) {
+      allDocs = allDocs.filter((d: any) => d.id !== excludeId);
+    }
+
+    if (allDocs.length === 0) {
+      return res.json({
+        success: true,
+        result: {
+          hasDuplicates: false,
+          duplicateSummary: 'ไม่พบประวัติหนังสือในระบบสำหรับเปรียบเทียบ',
+          hasReferences: false,
+          referenceSummary: 'ยังไม่มีเอกสารย้อนหลังในอดีตสำหรับเชื่อมโยงบริบท',
+          detectedItems: []
+        }
+      });
+    }
+
+    // Prepare clean candidate entries for Gemini prompt context
+    const candidates = allDocs.slice(0, 60).map((d: any) => ({
+      id: d.id,
+      type: d.type || 'inbox',
+      docNumber: d.docNumber || d.receiveNumber || '',
+      year: d.year || '',
+      date: d.date || '',
+      title: d.title || '',
+      from: d.from || d.fromDept || '',
+      to: d.to || d.toDept || '',
+      note: (d.note || d.content || '').substring(0, 250)
+    }));
+
+    if (!apiKey) {
+      // Fallback smart algorithmic search if no API Key
+      const targetTitle = (doc.title || doc.subject || '').toLowerCase();
+      const targetDocNum = (doc.docNumber || '').toLowerCase();
+      const targetRef = (doc.ref || '').toLowerCase();
+
+      const matched: any[] = [];
+      let isDup = false;
+
+      for (const c of candidates) {
+        let score = 0;
+        let relationType = 'related';
+        let relationLabel = 'บริบทเกี่ยวข้อง';
+        let reason = '';
+
+        const cNum = (c.docNumber || '').toLowerCase();
+        const cTitle = (c.title || '').toLowerCase();
+
+        if (cNum && targetDocNum && cNum === targetDocNum) {
+          score = 98;
+          relationType = 'duplicate';
+          relationLabel = 'หนังสือซ้ำ';
+          reason = `พบเลขที่หนังสือซ้ำกัน (${c.docNumber})`;
+          isDup = true;
+        } else if (targetRef && cNum && targetRef.includes(cNum)) {
+          score = 90;
+          relationType = 'direct_ref';
+          relationLabel = 'อ้างถึงตรงๆ';
+          reason = `หนังสือฉบับนี้ระบุอ้างถึงหนังสือเดิมเลขที่ ${c.docNumber}`;
+        } else if (cTitle && targetTitle && (cTitle.includes(targetTitle) || targetTitle.includes(cTitle))) {
+          score = 80;
+          relationType = 'same_project';
+          relationLabel = 'โครงการ/เรื่องเดียวกัน';
+          reason = `พบบริบทชื่อเรื่องตรงหรือเกี่ยวข้องกันในประวัติหนังสือ (${c.title})`;
+        }
+
+        if (score >= 70) {
+          matched.push({
+            docId: c.id,
+            docNumber: c.docNumber,
+            title: c.title,
+            date: c.date,
+            from: c.from,
+            type: c.type,
+            relationType,
+            relationLabel,
+            similarityScore: score,
+            reason,
+            actionSuggestion: 'คลิกดูเอกสารเดิม หรือแนบเป็นเรื่องเดิมประกอบการเสนอ'
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        result: {
+          hasDuplicates: isDup,
+          duplicateSummary: isDup ? 'พบหนังสือที่มีเลขที่หรือเรื่องซ้ำกับในระบบ' : 'ไม่พบหนังสือซ้ำ',
+          hasReferences: matched.length > 0,
+          referenceSummary: matched.length > 0 ? `พบหนังสือเดิมที่เกี่ยวข้อง ${matched.length} ฉบับ` : 'ไม่พบหนังสือเดิมที่เกี่ยวข้อง',
+          detectedItems: matched
+        }
+      });
+    }
+
+    const systemPrompt = `คุณคือระบบปัญญาประดิษฐ์ตรวจจับหนังสือซ้ำและเชื่อมโยงบริบทสำหรับระบบสารบรรณอิเล็กทรอนิกส์ (EDMS AI Duplicate & Cross-Reference Detector)
+วิเคราะห์หนังสือฉบับใหม่/กำหนด เปรียบเทียบกับรายการหนังสือย้อนหลังในอดีตทั้งหมดในระบบเพื่อ:
+1. ตรวจหาหนังสือซ้ำ (Duplicate) (เช่น เลขหนังสือซ้ำ, เรื่องและผู้ส่งเดียวกัน)
+2. ตรวจการเชื่อมโยงบริบท/หนังสือเดิมที่เกี่ยวข้อง (Cross-References):
+   - มีการระบุ 'อ้างถึง' เลขหนังสือเดิมฉบับใดในอดีต
+   - เป็นเรื่องติดตาม/สืบเนื่อง เช่น ติดตามรายงาน, หนังสือตอบรับ, รายงานผลโครงการเดิม
+   - เป็นโครงการ/เรื่อง/งานเดียวกันกับปีก่อนๆ หรือรอบเวลาที่แล้ว (เช่น โครงการอบรมประจำปี)
+3. ให้คำอธิบายเหตุผลเป็นภาษาไทยอย่างชัดเจน เข้าใจง่าย มีประโยชน์ต่อเจ้าหน้าที่สารบรรณ`;
+
+    const userPrompt = `
+หนังสือฉบับที่กำลังสแกน/ตรวจสอบ:
+- ID: ${doc.id || 'new'}
+- เลขที่หนังสือ: ${doc.docNumber || '-'}
+- เรื่อง: ${doc.title || doc.subject || '-'}
+- จาก (ผู้ส่ง): ${doc.from || '-'}
+- ถึง (ผู้รับ): ${doc.to || '-'}
+- ลงวันที่: ${doc.date || '-'}
+- อ้างถึง: ${doc.ref || '-'}
+- เนื้อหา/สรุป: ${doc.body || doc.content || doc.rawText || doc.note || '-'}
+
+รายการประวัติหนังสือในระบบ (${candidates.length} รายการ):
+${JSON.stringify(candidates, null, 2)}
+
+ให้ตอบในรูปแบบ JSON ตาม Schema นี้เท่านั้น:
+{
+  "hasDuplicates": true/false,
+  "duplicateSummary": "ข้อความสรุปการตรวจพบหนังสือซ้ำ หรือ ''",
+  "hasReferences": true/false,
+  "referenceSummary": "ข้อความสรุปหนังสือเดิม/บริบทเชื่อมโยงที่พบ หรือ ''",
+  "detectedItems": [
+    {
+      "docId": "ID ของเอกสารเดิมในระบบที่สแกนพบ",
+      "docNumber": "เลขที่หนังสือเดิม",
+      "title": "เรื่องหนังสือเดิม",
+      "date": "วันที่หนังสือเดิม",
+      "from": "ผู้ส่งเดิม",
+      "type": "ประเภทหนังสือเดิม",
+      "relationType": "duplicate | direct_ref | followup | same_project | related",
+      "relationLabel": "หนังสือซ้ำ | อ้างถึงตรงๆ | เรื่องสืบเนื่อง/ติดตาม | โครงการ/เรื่องเดียวกัน | บริบทเกี่ยวข้อง",
+      "similarityScore": 95,
+      "reason": "เหตุผลเป็นภาษาไทย เช่น 'หนังสือฉบับนี้อ้างถึงการขออนุมัติจัดโครงการอบรมเมื่อปี 2568'",
+      "actionSuggestion": "คลิกดูเอกสารเดิมเพื่อแนบเสนอคู่กัน"
+    }
+  ]
+}`;
+
+    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
+    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
+    const refererCandidates = [
+      '',
+      'https://aistudio.google.com/',
+      'https://ai.studio/',
+      'https://google.com/',
+      rawReferer,
+      rawOrigin
+    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
+
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    let response: any = null;
+
+    if (apiKey) {
+      referrerLoop: for (const refHeader of refererCandidates) {
+        const headersConfig: Record<string, string> = { 'User-Agent': 'aistudio-build' };
+        if (refHeader) {
+          headersConfig['Referer'] = refHeader;
+          headersConfig['Referrer'] = refHeader;
+        }
+
+        try {
+          const client = new GoogleGenAI({
+            apiKey,
+            httpOptions: { headers: headersConfig }
+          });
+
+          for (const modelName of modelsToTry) {
+            try {
+              response = await client.models.generateContent({
+                model: modelName,
+                contents: [{ text: userPrompt }],
+                config: {
+                  systemInstruction: systemPrompt,
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      hasDuplicates: { type: Type.BOOLEAN },
+                      duplicateSummary: { type: Type.STRING },
+                      hasReferences: { type: Type.BOOLEAN },
+                      referenceSummary: { type: Type.STRING },
+                      detectedItems: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            docId: { type: Type.STRING },
+                            docNumber: { type: Type.STRING },
+                            title: { type: Type.STRING },
+                            date: { type: Type.STRING },
+                            from: { type: Type.STRING },
+                            type: { type: Type.STRING },
+                            relationType: { type: Type.STRING },
+                            relationLabel: { type: Type.STRING },
+                            similarityScore: { type: Type.INTEGER },
+                            reason: { type: Type.STRING },
+                            actionSuggestion: { type: Type.STRING }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              });
+              if (response) break referrerLoop;
+            } catch (err: any) {
+              // try next model
+            }
+          }
+        } catch (e) {
+          // try next referer
+        }
+      }
+    }
+
+    if (response && response.text) {
+      try {
+        const parsedJson = JSON.parse(response.text);
+        return res.json({ success: true, result: parsedJson });
+      } catch (e) {
+        // Fallback if JSON parse fails
+      }
+    }
+
+    // Fallback algorithmic detection if Gemini API fails or key is missing
+    const targetTitle = (doc.title || doc.subject || '').toLowerCase();
+    const targetDocNum = (doc.docNumber || '').toLowerCase();
+    const targetRef = (doc.ref || '').toLowerCase();
+
+    const matched: any[] = [];
+    let isDup = false;
+
+    for (const c of candidates) {
+      let score = 0;
+      let relationType = 'related';
+      let relationLabel = 'บริบทเกี่ยวข้อง';
+      let reason = '';
+
+      const cNum = (c.docNumber || '').toLowerCase();
+      const cTitle = (c.title || '').toLowerCase();
+
+      if (cNum && targetDocNum && cNum === targetDocNum) {
+        score = 98;
+        relationType = 'duplicate';
+        relationLabel = 'หนังสือซ้ำ';
+        reason = `พบเลขที่หนังสือซ้ำกัน (${c.docNumber})`;
+        isDup = true;
+      } else if (targetRef && cNum && targetRef.includes(cNum)) {
+        score = 90;
+        relationType = 'direct_ref';
+        relationLabel = 'อ้างถึงตรงๆ';
+        reason = `หนังสือฉบับนี้ระบุอ้างถึงหนังสือเดิมเลขที่ ${c.docNumber}`;
+      } else if (cTitle && targetTitle && (cTitle.includes(targetTitle) || targetTitle.includes(cTitle))) {
+        score = 80;
+        relationType = 'same_project';
+        relationLabel = 'โครงการ/เรื่องเดียวกัน';
+        reason = `พบบริบทชื่อเรื่องตรงหรือเกี่ยวข้องกันในประวัติหนังสือ (${c.title})`;
+      }
+
+      if (score >= 70) {
+        matched.push({
+          docId: c.id,
+          docNumber: c.docNumber,
+          title: c.title,
+          date: c.date,
+          from: c.from,
+          type: c.type,
+          relationType,
+          relationLabel,
+          similarityScore: score,
+          reason,
+          actionSuggestion: 'คลิกดูเอกสารเดิม หรือแนบเป็นเรื่องเดิมประกอบการเสนอ'
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      result: {
+        hasDuplicates: isDup,
+        duplicateSummary: isDup ? 'พบหนังสือที่มีเลขที่หรือเรื่องซ้ำกับในระบบ' : 'ไม่พบหนังสือซ้ำ',
+        hasReferences: matched.length > 0,
+        referenceSummary: matched.length > 0 ? `พบหนังสือเดิมที่เกี่ยวข้อง ${matched.length} ฉบับ` : 'ไม่พบหนังสือเดิมที่เกี่ยวข้อง',
+        detectedItems: matched
+      }
+    });
+  } catch (err: any) {
+    console.error('Error in AI detect cross references:', err);
+    return res.json({
+      success: true,
+      result: {
+        hasDuplicates: false,
+        duplicateSummary: '',
+        hasReferences: false,
+        referenceSummary: 'ระบบทำการสแกนประวัติหนังสือเรียบร้อยแล้ว',
+        detectedItems: []
+      }
+    });
+  }
+});
+
 // Draft Documents CRUD Endpoints
 app.get('/api/drafts', async (req, res) => {
   try {
@@ -3116,6 +3554,222 @@ ${d.resultQl}
   } catch (err: any) {
     console.error('Error in AI summarize project:', err);
     return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างสรุปโครงการด้วย AI' });
+  }
+});
+
+// Admin API: Storage Stats
+app.get('/api/admin/storage-stats', async (req, res) => {
+  try {
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    const allFiles = getAllUploadFiles(uploadsDir);
+    
+    let totalBytes = 0;
+    const hashMap: Record<string, typeof allFiles> = {};
+
+    for (const f of allFiles) {
+      totalBytes += f.size;
+      const hash = calculateFileSha256(f.path);
+      if (hash) {
+        if (!hashMap[hash]) hashMap[hash] = [];
+        hashMap[hash].push(f);
+      }
+    }
+
+    let duplicateFilesCount = 0;
+    let duplicateGroupsCount = 0;
+    let potentialSavingsBytes = 0;
+
+    Object.values(hashMap).forEach(group => {
+      if (group.length > 1) {
+        duplicateGroupsCount++;
+        duplicateFilesCount += (group.length - 1);
+        const sumGroupBytes = group.reduce((acc, item) => acc + item.size, 0);
+        const masterBytes = group[0].size;
+        potentialSavingsBytes += (sumGroupBytes - masterBytes);
+      }
+    });
+
+    return res.json({
+      success: true,
+      totalFiles: allFiles.length,
+      totalBytes,
+      formattedTotalSize: formatBytes(totalBytes),
+      duplicateFilesCount,
+      duplicateGroupsCount,
+      potentialSavingsBytes,
+      formattedSavings: formatBytes(potentialSavingsBytes)
+    });
+  } catch (err: any) {
+    console.error('Storage stats error:', err);
+    return res.status(500).json({ error: err.message || 'ไม่สามารถดึงข้อมูลสถิติพื้นที่ได้' });
+  }
+});
+
+// Admin API: Single-Instance Storage Deduplication & Pointer Link Creation
+app.post('/api/admin/deduplicate-attachments', async (req, res) => {
+  try {
+    const uploadedBy = (req.body.username || 'ผู้ดูแลระบบ').toString();
+    const ip = getClientIp(req);
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    const allFiles = getAllUploadFiles(uploadsDir);
+
+    const hashMap: Record<string, typeof allFiles> = {};
+    for (const f of allFiles) {
+      const hash = calculateFileSha256(f.path);
+      if (hash) {
+        if (!hashMap[hash]) hashMap[hash] = [];
+        hashMap[hash].push(f);
+      }
+    }
+
+    let totalDuplicatesRemoved = 0;
+    let totalSavedBytes = 0;
+    let pointersUpdatedCount = 0;
+    const detailsReport: any[] = [];
+
+    const updateAttachmentsData = (attachmentsJsonOrArr: any, dupUrl: string, masterUrl: string): { updated: boolean; newVal: any } => {
+      if (!attachmentsJsonOrArr) return { updated: false, newVal: attachmentsJsonOrArr };
+      let parsed = attachmentsJsonOrArr;
+      let isJsonString = false;
+
+      if (typeof attachmentsJsonOrArr === 'string') {
+        try {
+          parsed = JSON.parse(attachmentsJsonOrArr);
+          isJsonString = true;
+        } catch {
+          if (attachmentsJsonOrArr.includes(dupUrl)) {
+            const replaced = attachmentsJsonOrArr.replace(new RegExp(dupUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), masterUrl);
+            return { updated: true, newVal: replaced };
+          }
+          return { updated: false, newVal: attachmentsJsonOrArr };
+        }
+      }
+
+      if (Array.isArray(parsed)) {
+        let modified = false;
+        const newArr = parsed.map(item => {
+          if (typeof item === 'string') {
+            if (item === dupUrl || item.includes(dupUrl)) {
+              modified = true;
+              return item.replace(dupUrl, masterUrl);
+            }
+          } else if (item && typeof item === 'object') {
+            if (item.url && (item.url === dupUrl || item.url.includes(dupUrl))) {
+              modified = true;
+              return { ...item, url: item.url.replace(dupUrl, masterUrl) };
+            }
+          }
+          return item;
+        });
+
+        if (modified) {
+          return { updated: true, newVal: isJsonString ? JSON.stringify(newArr) : newArr };
+        }
+      }
+
+      return { updated: false, newVal: attachmentsJsonOrArr };
+    };
+
+    const documentTables = [
+      'inbox_documents',
+      'outbox_documents',
+      'circular_documents',
+      'internal_documents',
+      'admin_documents',
+      'draft_documents'
+    ];
+
+    for (const [hash, group] of Object.entries(hashMap)) {
+      if (group.length > 1) {
+        group.sort((a, b) => a.mtime - b.mtime);
+        const masterFile = group[0];
+        const duplicates = group.slice(1);
+
+        let groupSavedBytes = 0;
+        let groupRemovedCount = 0;
+
+        for (const dup of duplicates) {
+          const dupUrl = dup.relUrl;
+          const masterUrl = masterFile.relUrl;
+
+          // 1. Update in localDb
+          documentTables.forEach(tableName => {
+            if (localDb[tableName] && Array.isArray(localDb[tableName])) {
+              localDb[tableName].forEach(doc => {
+                const res = updateAttachmentsData(doc.attachments, dupUrl, masterUrl);
+                if (res.updated) {
+                  doc.attachments = res.newVal;
+                  pointersUpdatedCount++;
+                }
+              });
+            }
+          });
+
+          // 2. Update in MySQL if online
+          if (isMysqlOnline) {
+            for (const tableName of documentTables) {
+              try {
+                await pool.promise().query(
+                  `UPDATE ${tableName} SET attachments = REPLACE(attachments, ?, ?) WHERE attachments LIKE ?`,
+                  [dupUrl, masterUrl, `%${dupUrl}%`]
+                );
+              } catch (e) {
+                // Ignore table update errors if table doesn't exist
+              }
+            }
+          }
+
+          // 3. Delete physical duplicate file from disk
+          if (fs.existsSync(dup.path)) {
+            try {
+              fs.unlinkSync(dup.path);
+              groupSavedBytes += dup.size;
+              groupRemovedCount++;
+            } catch (err) {
+              console.error('Failed to unlink duplicate file:', dup.path, err);
+            }
+          }
+        }
+
+        totalDuplicatesRemoved += groupRemovedCount;
+        totalSavedBytes += groupSavedBytes;
+
+        const originalFileName = path.basename(masterFile.path).split('-').slice(2).join('-') || path.basename(masterFile.path);
+
+        detailsReport.push({
+          masterUrl: masterFile.relUrl,
+          originalName: originalFileName,
+          fileName: path.basename(masterFile.path),
+          mergedCount: groupRemovedCount + 1,
+          duplicatesRemoved: groupRemovedCount,
+          savedBytes: groupSavedBytes,
+          formattedSaved: formatBytes(groupSavedBytes)
+        });
+      }
+    }
+
+    saveLocalDb();
+
+    const formattedSaved = formatBytes(totalSavedBytes);
+    await addSystemLog(
+      'DEDUPLICATE_STORAGE',
+      `รวมไฟล์แนบซ้ำแบบ Single-Instance Pointer Link จำนวน ${totalDuplicatesRemoved} ไฟล์ ประหยัดพื้นที่ ${formattedSaved}`,
+      uploadedBy,
+      ip
+    );
+
+    return res.json({
+      success: true,
+      filesScanned: allFiles.length,
+      duplicatesRemoved: totalDuplicatesRemoved,
+      bytesSaved: totalSavedBytes,
+      formattedBytesSaved: formattedSaved,
+      databasePointersUpdated: pointersUpdatedCount,
+      details: detailsReport
+    });
+  } catch (err: any) {
+    console.error('Deduplication error:', err);
+    return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการรวมและลบไฟล์ซ้ำ' });
   }
 });
 

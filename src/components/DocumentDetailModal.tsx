@@ -1,24 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, TrackingLog, Folder, formatThaiDate, formatThaiDateFull, formatThaiDateTime } from '../types';
-import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText } from 'lucide-react';
+import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
+import AiCrossReferencePanel, { DetectionResult } from './AiCrossReferencePanel';
 
 interface Props {
   doc: DocumentItem;
+  allDocuments?: DocumentItem[];
   onClose: () => void;
   user?: any;
   onStatusUpdated?: () => void;
   onEdit?: (doc: DocumentItem) => void;
+  onSelectDoc?: (doc: DocumentItem) => void;
 }
 
-export default function DocumentDetailModal({ doc, onClose, user, onStatusUpdated, onEdit }: Props) {
+export default function DocumentDetailModal({ doc, allDocuments, onClose, user, onStatusUpdated, onEdit, onSelectDoc }: Props) {
   const [activeTab, setActiveTab] = useState<'details' | 'tracking'>('details');
   const [trackingLogs, setTrackingLogs] = useState<TrackingLog[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [newStatus, setNewStatus] = useState(doc.status || 'ลงทะเบียน');
   const [comments, setComments] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // AI Cross-Reference State
+  const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
+  const [isDetecting, setIsDetecting] = useState<boolean>(false);
 
   // Forwarding state
   const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
@@ -70,7 +77,115 @@ export default function DocumentDetailModal({ doc, onClose, user, onStatusUpdate
     fetchFolders();
     fetchDepts();
     fetchTracking();
+    handleRunAiCrossRef();
   }, [doc.id]);
+
+  const handleRunAiCrossRef = async () => {
+    setIsDetecting(true);
+    try {
+      const res = await fetch('/api/ai/detect-cross-references', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          doc: {
+            id: doc.id,
+            docNumber: doc.docNumber,
+            title: doc.title,
+            from: doc.from,
+            to: doc.to,
+            date: doc.date,
+            note: doc.note,
+            content: doc.content
+          },
+          currentDocId: doc.id
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.result) {
+          setDetectionResult(data.result);
+          setIsDetecting(false);
+          return;
+        }
+      }
+    } catch (err) {
+      // Ignore network fetch error and fallback to local check below
+    }
+
+    // Local fallback check if API call fails
+    if (allDocuments && allDocuments.length > 0) {
+      const targetTitle = (doc.title || '').toLowerCase();
+      const targetDocNum = (doc.docNumber || '').toLowerCase();
+      const matched: any[] = [];
+      let isDup = false;
+
+      for (const c of allDocuments) {
+        if (c.id === doc.id) continue;
+        const cNum = (c.docNumber || '').toLowerCase();
+        const cTitle = (c.title || '').toLowerCase();
+
+        if (cNum && targetDocNum && cNum === targetDocNum) {
+          isDup = true;
+          matched.push({
+            docId: c.id,
+            docNumber: c.docNumber,
+            title: c.title,
+            date: c.date,
+            from: c.from,
+            type: c.type,
+            relationType: 'duplicate',
+            relationLabel: 'หนังสือซ้ำ',
+            similarityScore: 98,
+            reason: `พบเลขที่หนังสือซ้ำกัน (${c.docNumber})`,
+            actionSuggestion: 'คลิกเพื่อดูเอกสารเดิม'
+          });
+        } else if (cTitle && targetTitle && (cTitle.includes(targetTitle) || targetTitle.includes(cTitle))) {
+          matched.push({
+            docId: c.id,
+            docNumber: c.docNumber,
+            title: c.title,
+            date: c.date,
+            from: c.from,
+            type: c.type,
+            relationType: 'same_project',
+            relationLabel: 'เรื่องที่เกี่ยวข้องกัน',
+            similarityScore: 80,
+            reason: `พบบริบทเรื่องที่เกี่ยวข้องกัน (${c.title})`,
+            actionSuggestion: 'คลิกเพื่อดูเอกสารเดิม'
+          });
+        }
+      }
+
+      setDetectionResult({
+        hasDuplicates: isDup,
+        duplicateSummary: isDup ? 'พบหนังสือที่มีเลขที่ซ้ำในระบบ' : 'ไม่พบหนังสือซ้ำ',
+        hasReferences: matched.length > 0,
+        referenceSummary: matched.length > 0 ? `พบหนังสือเดิมที่เกี่ยวข้อง ${matched.length} ฉบับ` : 'ไม่พบหนังสือเดิมที่เกี่ยวข้อง',
+        detectedItems: matched
+      });
+    } else {
+      setDetectionResult({
+        hasDuplicates: false,
+        duplicateSummary: 'ไม่พบหนังสือซ้ำ',
+        hasReferences: false,
+        referenceSummary: 'ไม่พบหนังสือเดิมที่เกี่ยวข้อง',
+        detectedItems: []
+      });
+    }
+    setIsDetecting(false);
+  };
+
+  const handleViewDocById = (targetDocId: string) => {
+    if (onSelectDoc && allDocuments) {
+      const target = allDocuments.find(d => d.id === targetDocId);
+      if (target) {
+        onSelectDoc(target);
+        return;
+      }
+    }
+    // Fallback alert
+    alert(`กำลังนำท่านไปยังเอกสาร ID: ${targetDocId}`);
+  };
 
   const handleForwardToDepartments = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -500,6 +615,16 @@ export default function DocumentDetailModal({ doc, onClose, user, onStatusUpdate
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* AI Duplicate & Cross-Reference Detector Section */}
+            <div className="mt-5">
+              <AiCrossReferencePanel
+                result={detectionResult}
+                isLoading={isDetecting}
+                onRunDetection={handleRunAiCrossRef}
+                onViewDoc={handleViewDocById}
+              />
             </div>
           </div>
 

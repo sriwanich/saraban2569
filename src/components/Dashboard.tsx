@@ -787,8 +787,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       {selectedDoc && (
         <DocumentDetailModal 
           doc={selectedDoc} 
+          allDocuments={documents}
           user={currentUser}
           onStatusUpdated={refreshData}
+          onSelectDoc={(docToSelect) => setSelectedDoc(docToSelect)}
           onEdit={(docToEdit) => {
             setSelectedDoc(null);
             setDocToEdit(docToEdit);

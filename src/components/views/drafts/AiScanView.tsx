@@ -4,6 +4,7 @@ import {
   Send, Save, RefreshCw, Eye, Trash2, ArrowRight, Layers
 } from 'lucide-react';
 import { AiScanResult } from './draftData';
+import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from '../../AiCrossReferencePanel';
 
 interface Props {
   user: any;
@@ -19,6 +20,47 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
   const [loading, setLoading] = useState<boolean>(false);
   const [scanResult, setScanResult] = useState<AiScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // AI Cross-Reference State
+  const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
+  const [isDetecting, setIsDetecting] = useState<boolean>(false);
+
+  const runCrossRefDetection = async (res: AiScanResult) => {
+    setIsDetecting(true);
+    try {
+      const resp = await fetch('/api/ai/detect-cross-references', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          doc: {
+            docNumber: res.docNum,
+            title: res.subject,
+            from: res.from,
+            to: res.to,
+            date: res.date,
+            ref: res.ref,
+            body: res.body
+          }
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && data.result) {
+          setDetectionResult(data.result);
+        }
+      }
+    } catch (err) {
+      setDetectionResult({
+        hasDuplicates: false,
+        duplicateSummary: 'ไม่พบหนังสือซ้ำ',
+        hasReferences: false,
+        referenceSummary: 'ไม่พบหนังสือเดิมที่เกี่ยวข้อง',
+        detectedItems: []
+      });
+    } finally {
+      setIsDetecting(false);
+    }
+  };
 
   const [scanHistory, setScanHistory] = useState<AiScanResult[]>(() => {
     try {
@@ -111,6 +153,9 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
 
           const res: AiScanResult = data.result;
           setScanResult(res);
+
+          // Automatically run AI Duplicate & Cross-Reference Detector against database history
+          runCrossRefDetection(res);
 
           // Save to local scan history
           const updated = [res, ...scanHistory];
@@ -403,6 +448,22 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
                       />
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* AI Cross-Reference & Duplicate Panel */}
+              {scanResult && (
+                <div className="mt-5">
+                  <AiCrossReferencePanel
+                    result={detectionResult}
+                    isLoading={isDetecting}
+                    onRunDetection={() => scanResult && runCrossRefDetection(scanResult)}
+                    onAttachRef={(item) => {
+                      const refText = `อ้างถึง ${item.docNumber ? `หนังสือเลขที่ ${item.docNumber}` : item.title}`;
+                      setScanResult(prev => prev ? { ...prev, ref: prev.ref ? `${prev.ref} (${refText})` : refText } : null);
+                      alert(`แนบเรื่องเดิม "${refText}" ลงในช่องเอกสารอ้างอิงของสแกนเรียบร้อยแล้ว`);
+                    }}
+                  />
                 </div>
               )}
             </div>

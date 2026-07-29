@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DocumentItem, DocType, DocPriority, DocCategory, Folder as FolderType, User, formatThaiDate } from '../types';
-import { X, Save, Paperclip, Upload, Trash2, FileText, Loader2, Folder, CheckCircle2, Calendar, Lock } from 'lucide-react';
+import { X, Save, Paperclip, Upload, Trash2, FileText, Loader2, Folder, CheckCircle2, Calendar, Lock, Sparkles } from 'lucide-react';
+import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from './AiCrossReferencePanel';
 
 interface Props {
   initialData?: DocumentItem;
@@ -42,6 +43,58 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // AI Cross-Reference Detector State
+  const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
+  const [isDetecting, setIsDetecting] = useState<boolean>(false);
+
+  const handleRunAiCrossRef = async () => {
+    setIsDetecting(true);
+    try {
+      const res = await fetch('/api/ai/detect-cross-references', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          doc: {
+            id: formData.id,
+            docNumber: formData.docNumber,
+            title: formData.title,
+            from: formData.from,
+            to: formData.to,
+            date: formData.date,
+            note: formData.note,
+            content: formData.content
+          },
+          currentDocId: formData.id || initialData?.id
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.result) {
+          setDetectionResult(data.result);
+        }
+      }
+    } catch (err) {
+      setDetectionResult({
+        hasDuplicates: false,
+        duplicateSummary: 'ไม่พบหนังสือซ้ำ',
+        hasReferences: false,
+        referenceSummary: 'ไม่พบหนังสือเดิมที่เกี่ยวข้อง',
+        detectedItems: []
+      });
+    } finally {
+      setIsDetecting(false);
+    }
+  };
+
+  const handleAttachRef = (item: CrossReferenceItem) => {
+    const refText = `อ้างถึง ${item.docNumber ? `หนังสือเลขที่ ${item.docNumber}` : item.title}`;
+    setFormData(prev => ({
+      ...prev,
+      note: prev.note ? `${prev.note} (${refText})` : refText
+    }));
+    alert(`แนบข้อมูลเรื่องเดิม "${refText}" เข้าในช่องหมายเหตุของหนังสือเรียบร้อยแล้ว`);
+  };
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -764,6 +817,14 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-4 py-3 text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors placeholder-[var(--text-muted)] resize-y"
               />
             </div>
+
+            {/* AI Duplicate & Cross-Reference Detector Section */}
+            <AiCrossReferencePanel
+              result={detectionResult}
+              isLoading={isDetecting}
+              onRunDetection={handleRunAiCrossRef}
+              onAttachRef={handleAttachRef}
+            />
 
             {/* File Attachment Section */}
             <div className="space-y-2 pt-2 border-t border-[var(--border-light)]">
