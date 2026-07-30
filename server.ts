@@ -2074,8 +2074,9 @@ app.post('/api/organizations', async (req, res) => {
 app.get('/api/folders', async (req, res) => {
   const departmentName = req.query.department ? String(req.query.department) : '';
   const role = req.query.role ? String(req.query.role) : '';
+  const all = req.query.all ? String(req.query.all) : '';
   try {
-    if (role === 'admin') {
+    if (role === 'admin' || all === '1' || (!departmentName && !role)) {
       const [rows]: any = await pool.query('SELECT * FROM folders ORDER BY id ASC');
       return res.json(rows);
     } else {
@@ -2190,6 +2191,13 @@ app.get('/api/documents', async (req, res) => {
       `;
       const [rows]: any = await pool.query(query);
       const [deptReceives]: any = await pool.query('SELECT * FROM department_receives');
+      let folderMap = new Map<number, string>();
+      try {
+        const [folderRows]: any = await pool.query('SELECT id, name FROM folders');
+        folderRows.forEach((f: any) => folderMap.set(Number(f.id), f.name));
+      } catch (fErr) {
+        // Table might not exist or empty
+      }
       
       let processedRows = rows.map((d: any) => {
         let attachments: string[] = [];
@@ -2203,8 +2211,9 @@ app.get('/api/documents', async (req, res) => {
         
         // Map department receives
         const deptRecs = deptReceives.filter((r: any) => r.docId === d.id);
+        const folderName = d.folderId ? (folderMap.get(Number(d.folderId)) || null) : null;
         
-        let item = { ...d, attachments, isCircular: Boolean(d.isCircular), departmentReceives: deptRecs };
+        let item = { ...d, attachments, isCircular: Boolean(d.isCircular), departmentReceives: deptRecs, folderName };
         if (d.type === 'outbox' && d.note && d.note.startsWith('[CATEGORY:')) {
           const match = d.note.match(/^\[CATEGORY:(.*?)\] (.*)/);
           if (match) {

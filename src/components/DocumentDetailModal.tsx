@@ -54,7 +54,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   useEffect(() => {
     const fetchFolders = async () => {
       try {
-        const res = await fetch('/api/folders');
+        const res = await fetch('/api/folders?all=1');
         if (res.ok) {
           const data = await res.json();
           setFolders(data);
@@ -305,6 +305,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   };
 
   const getFolderLabel = () => {
+    if (doc.folderName) return doc.folderName;
     if (!doc.folderId) return 'สารบรรณทั่วไป';
     const folderObj = folders.find(f => Number(f.id) === Number(doc.folderId));
     return folderObj ? folderObj.name : 'สารบรรณทั่วไป';

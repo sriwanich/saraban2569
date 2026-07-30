@@ -21,7 +21,7 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
   useEffect(() => {
     const fetchFolders = async () => {
       try {
-        const res = await fetch('/api/folders');
+        const res = await fetch('/api/folders?all=1');
         if (res.ok) {
           const data = await res.json();
           setFolders(data);
@@ -71,9 +71,15 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
     }
   };
 
-  const getFolderName = (folderId?: number | null) => {
-    if (!folderId) return 'สารบรรณทั่วไป';
-    const folder = folders.find(f => Number(f.id) === Number(folderId));
+  const getFolderName = (docOrFolderId?: any) => {
+    if (typeof docOrFolderId === 'object' && docOrFolderId !== null) {
+      if (docOrFolderId.folderName) return docOrFolderId.folderName;
+      if (!docOrFolderId.folderId) return 'สารบรรณทั่วไป';
+      const folder = folders.find(f => Number(f.id) === Number(docOrFolderId.folderId));
+      return folder ? folder.name : 'สารบรรณทั่วไป';
+    }
+    if (!docOrFolderId) return 'สารบรรณทั่วไป';
+    const folder = folders.find(f => Number(f.id) === Number(docOrFolderId));
     return folder ? folder.name : 'สารบรรณทั่วไป';
   };
 
@@ -238,7 +244,7 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
                   <div className="flex flex-wrap items-center gap-1.5 mt-1">
                     {getCategoryBadge(row.category)}
                     <span className="text-[11px] px-2 py-0.5 rounded border border-amber-500/20 bg-amber-500/10 text-amber-400 font-medium">
-                      📁 {getFolderName(row.folderId)}
+                      📁 {getFolderName(row)}
                     </span>
                   </div>
                 </div>
@@ -321,7 +327,7 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
                     </td>
                     <td className="p-3.5 align-top">
                       <span className="text-xs px-2.5 py-1 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 font-medium inline-block max-w-[180px] truncate">
-                        📁 {getFolderName(row.folderId)}
+                        📁 {getFolderName(row)}
                       </span>
                     </td>
                     <td className="p-3.5 text-xs text-[var(--text-secondary)] align-top">
