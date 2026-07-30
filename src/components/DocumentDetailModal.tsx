@@ -433,7 +433,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           </div>
 
           {/* Column 1: Document Sheet Details */}
-          <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
+          <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pb-12 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
 
             <div className="bg-[var(--bg-overlay)] rounded-xl border border-[var(--border-light)] p-4 sm:p-6 shadow-inner space-y-4">
               <div className="border-b border-[var(--border-lighter)] pb-3 flex justify-between items-center">
@@ -629,7 +629,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           </div>
 
           {/* Column 2: Status Tracking timeline & Update action */}
-          <div className={`w-full md:w-[380px] shrink-0 min-h-0 h-full max-h-full bg-[var(--bg-elevated)]/30 overflow-y-auto p-4 sm:p-6 flex flex-col justify-between border-t md:border-t-0 custom-scrollbar ${activeTab === 'details' ? 'hidden md:block' : ''}`}>
+          <div className={`w-full md:w-[380px] shrink-0 min-h-0 h-full max-h-full bg-[var(--bg-elevated)]/30 overflow-y-auto p-4 sm:p-6 pb-12 flex flex-col justify-between border-t md:border-t-0 custom-scrollbar ${activeTab === 'details' ? 'hidden md:block' : ''}`}>
             <div className="space-y-6 shrink-0">
               <div>
                 <h3 className="text-sm font-semibold text-[var(--text-primary)] font-noto-serif-thai border-b border-[var(--border-light)] pb-2 mb-3">
@@ -671,7 +671,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             </div>
 
             {/* Status Update Form */}
-            <form onSubmit={handleUpdateStatus} className="border-t border-[var(--border-light)] pt-4 mt-6 space-y-3.5 shrink-0">
+            <form onSubmit={handleUpdateStatus} className="border-t border-[var(--border-light)] pt-4 mt-6 space-y-3.5 shrink-0 pb-6">
               <h4 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-[var(--primary-color)]" /> ดำเนินการ/สั่งการเดินหนังสือ
               </h4>
