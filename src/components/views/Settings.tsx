@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Layers, Zap, Sparkles, CheckCircle, FileText, Link as LinkIcon, Server } from 'lucide-react';
+import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap } from 'lucide-react';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
@@ -9,27 +9,12 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup'>('system');
   const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'departments' | 'positions'>('docSettings');
   
-  // Storage Deduplication state
-  const [storageStats, setStorageStats] = useState<{
-    totalFiles: number;
-    totalBytes: number;
-    formattedTotalSize: string;
-    duplicateFilesCount: number;
-    duplicateGroupsCount: number;
-    potentialSavingsBytes: number;
-    formattedSavings: string;
-  } | null>(null);
-  const [isLoadingStorageStats, setIsLoadingStorageStats] = useState<boolean>(false);
-  const [isDeduplicating, setIsDeduplicating] = useState<boolean>(false);
-  const [dedupReport, setDedupReport] = useState<{
-    success: boolean;
-    filesScanned: number;
-    duplicatesRemoved: number;
-    bytesSaved: number;
-    formattedBytesSaved: string;
-    databasePointersUpdated: number;
-    details: any[];
-  } | null>(null);
+  // Deduplication state
+  const [dedupStats, setDedupStats] = useState<any>(null);
+  const [isScanningDedup, setIsScanningDedup] = useState<boolean>(false);
+  const [isExecutingDedup, setIsExecutingDedup] = useState<boolean>(false);
+  const [dedupMsg, setDedupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [autoDedupOnUpload, setAutoDedupOnUpload] = useState<boolean>(true);
   
   // System Settings state
   const [currentYear, setCurrentYear] = useState<number>(2569);
@@ -234,6 +219,72 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
     }
   };
 
+  const fetchDedupStats = async () => {
+    setIsScanningDedup(true);
+    try {
+      const res = await fetch('/api/deduplication/scan');
+      const data = await res.json();
+      if (data.success && data.stats) {
+        setDedupStats(data.stats);
+        if (typeof data.stats.autoDedupOnUpload === 'boolean') {
+          setAutoDedupOnUpload(data.stats.autoDedupOnUpload);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error fetching dedup stats:', err);
+    } finally {
+      setIsScanningDedup(false);
+    }
+  };
+
+  const handleExecuteDedup = async () => {
+    if (!confirm('ยืนยันการรวมไฟล์ซ้ำทั้งหมดในเซิร์ฟเวอร์? ระบบจะรวมไฟล์ซ้ำ และสร้าง Pointer เชื่อมโยงไปยังไฟล์ต้นฉบับเพื่อประหยัดพื้นที่คลาวด์')) {
+      return;
+    }
+    setIsExecutingDedup(true);
+    setDedupMsg(null);
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      const res = await fetch('/api/deduplication/deduplicate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentUser.username || 'admin' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDedupMsg({
+          type: 'success',
+          text: `รวมไฟล์ซ้ำเรียบร้อยแล้ว! รวมไฟล์แล้ว ${data.filesMerged} ไฟล์ ประหยัดพื้นที่ได้ ${data.bytesReclaimedFormatted}`
+        });
+        if (data.updatedStats) {
+          setDedupStats(data.updatedStats);
+        } else {
+          fetchDedupStats();
+        }
+      } else {
+        setDedupMsg({ type: 'error', text: data.error || 'การรวมไฟล์ซ้ำล้มเหลว' });
+      }
+    } catch (err: any) {
+      setDedupMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการรวมไฟล์ซ้ำ' });
+    } finally {
+      setIsExecutingDedup(false);
+    }
+  };
+
+  const handleToggleAutoDedup = async () => {
+    const nextVal = !autoDedupOnUpload;
+    setAutoDedupOnUpload(nextVal);
+    try {
+      await fetch('/api/deduplication/toggle-auto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextVal })
+      });
+    } catch (e) {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     fetchSystemSettings();
     fetchDepartments();
@@ -242,56 +293,9 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
       fetchUsers();
     }
     if (activeTab === 'dedup') {
-      fetchStorageStats();
+      fetchDedupStats();
     }
   }, [activeTab]);
-
-  const fetchStorageStats = async () => {
-    setIsLoadingStorageStats(true);
-    try {
-      const res = await fetch('/api/admin/storage-stats');
-      if (res.ok) {
-        const data = await res.json();
-        setStorageStats(data);
-      }
-    } catch (err) {
-      console.error('Error fetching storage stats:', err);
-    } finally {
-      setIsLoadingStorageStats(false);
-    }
-  };
-
-  const handleRunDeduplication = async () => {
-    if (!confirm('คุณแน่ใจหรือว่าต้องการเริ่มต้นสแกนและรวมไฟล์แนบซ้ำ?\n\nระบบจะทำการลบไฟล์ส่วนเกินออกจากดิสก์ และสร้าง Pointer Links เชื่อมโยงทุกหนังสือราชการในระบบให้อัตโนมัติ โดยไม่สูญเสียเอกสารแนบแม้แต่ไฟล์เดียว')) {
-      return;
-    }
-    setIsDeduplicating(true);
-    setDedupReport(null);
-    try {
-      const userStr = localStorage.getItem('moi_user');
-      const parsedUser = userStr ? JSON.parse(userStr) : null;
-      const username = parsedUser?.username || 'admin';
-
-      const res = await fetch('/api/admin/deduplicate-attachments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDedupReport(data);
-        fetchStorageStats();
-      } else {
-        const errData = await res.json();
-        alert(errData.error || 'เกิดข้อผิดพลาดในการรวมไฟล์ซ้ำ');
-      }
-    } catch (err) {
-      console.error('Deduplication error:', err);
-      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
-    } finally {
-      setIsDeduplicating(false);
-    }
-  };
 
   const fetchSystemSettings = async () => {
     try {
@@ -802,7 +806,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
             activeTab === 'dedup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
           }`}
         >
-          <Layers className="w-4 h-4 text-emerald-400" /> จัดการพื้นที่ & ลดไฟล์แนบซ้ำ
+          <HardDrive className="w-4 h-4" /> จัดการไฟล์ซ้ำ (Data Deduplication)
         </button>
       </div>
 
@@ -2093,171 +2097,272 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
 
         {activeTab === 'dedup' && (
           <div className="space-y-6 animate-fade-in">
-            {/* Header Banner */}
-            <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-500/20 rounded-xl p-6">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-xl shrink-0">
-                  <Layers className="w-6 h-6" />
-                </div>
-                <div className="space-y-1">
-                  <h3 className="text-lg font-noto-serif-thai font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                    จัดการพื้นที่ & การลดไฟล์แนบซ้ำซ้อน (Single-Instance Storage Deduplication)
-                  </h3>
-                  <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-                    ค้นหาและลบไฟล์แนบที่ซ้ำซ้อนกันในเซิร์ฟเวอร์ (เช่น ไฟล์ระเบียบ/คู่มือแนบขนาด 50MB ที่ถูกส่งเวียน 100 ครั้ง) ระบบจะทำการรวมให้เหลือไฟล์ต้นฉบับเพียงไฟล์เดียวในดิสก์ แล้วสร้าง Pointer Links ชี้ไปยังไฟล์ต้นฉบับในทุกหนังสือราชการ ช่วยประหยัดพื้นที่คลาวด์และดิสก์เซิร์ฟเวอร์ได้อย่างมหาศาลโดยไม่เสียข้อมูล
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Dashboard Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-5 shadow-xs">
-                <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-2">
-                  <span>พื้นที่ไฟล์แนบทั้งหมด</span>
-                  <HardDrive className="w-4 h-4 text-indigo-400" />
-                </div>
-                <div className="text-2xl font-bold font-mono text-[var(--text-primary)]">
-                  {isLoadingStorageStats ? '...' : (storageStats?.formattedTotalSize || '0 Bytes')}
-                </div>
-                <div className="text-xs text-[var(--text-muted)] mt-1">
-                  รวม {storageStats?.totalFiles || 0} ไฟล์ ในโฟลเดอร์ uploads/
-                </div>
-              </div>
-
-              <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-5 shadow-xs">
-                <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-2">
-                  <span>ไฟล์แนบซ้ำซ้อนที่ตรวจพบ</span>
-                  <Layers className="w-4 h-4 text-amber-400" />
-                </div>
-                <div className="text-2xl font-bold font-mono text-amber-400">
-                  {isLoadingStorageStats ? '...' : `${storageStats?.duplicateFilesCount || 0} ไฟล์`}
-                </div>
-                <div className="text-xs text-[var(--text-muted)] mt-1">
-                  กระจายอยู่ใน {storageStats?.duplicateGroupsCount || 0} กลุ่มเอกสารที่มีเนื้อหาตรงกัน
-                </div>
-              </div>
-
-              <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-5 shadow-xs">
-                <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-2">
-                  <span>พื้นที่ที่ประหยัดได้ทันที</span>
-                  <Zap className="w-4 h-4 text-emerald-400" />
-                </div>
-                <div className="text-2xl font-bold font-mono text-emerald-400">
-                  {isLoadingStorageStats ? '...' : (storageStats?.formattedSavings || '0 Bytes')}
-                </div>
-                <div className="text-xs text-[var(--text-muted)] mt-1">
-                  คำนวณจาก SHA-256 Content Hash บนดิสก์
-                </div>
-              </div>
-            </div>
-
-            {/* Action Box */}
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 space-y-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div>
-                  <h4 className="font-medium text-sm text-[var(--text-primary)] flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-emerald-400" /> เริ่มต้นรันกระบวนการ Deduplication & Pointer Linking
-                  </h4>
-                  <p className="text-xs text-[var(--text-secondary)] mt-1">
-                    ระบบจะทำการเปรียบเทียบ SHA-256 Hash ของไฟล์ทั้งหมด รวมไฟล์แนบซ้ำ อัปเดตตารางฐานข้อมูลหนังสือ และลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์
-                  </p>
+            {/* Header section */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-indigo-500/10 text-indigo-500 rounded-xl">
+                    <HardDrive className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-noto-serif-thai font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                      ระบบบริหารจัดการและลดความซ้ำซ้อนของไฟล์ (Single-Instance Storage & Pointer Links)
+                      <span className="px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-500 font-sans border border-emerald-500/20">
+                        ประหยัดพื้นที่คลาวด์มหาศาล
+                      </span>
+                    </h3>
+                    <p className="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed max-w-4xl">
+                      ตรวจจับและรวมไฟล์เอกสารแนบที่มีเนื้อหาตรงกัน 100% (SHA-256 Checksum) เช่น ไฟล์ระเบียบหรือคู่มือขนาดใหญ่ที่ถูกส่งแนบมาหลายๆ ครั้ง ให้เหลือไฟล์ต้นฉบับเพียงไฟล์เดียวในดิสก์ แล้วสร้าง Pointer Link เชื่อมโยง โดยไม่กระทบต่อลิงก์เดิมของหนังสือแต่ละฉบับ
+                    </p>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
                   <button
-                    type="button"
-                    onClick={fetchStorageStats}
-                    disabled={isLoadingStorageStats || isDeduplicating}
-                    className="px-3.5 py-2 border border-[var(--border-medium)] rounded-lg text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] transition-colors flex items-center gap-1.5 cursor-pointer"
+                    onClick={fetchDedupStats}
+                    disabled={isScanningDedup}
+                    className="py-2.5 px-4 bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-sm font-medium transition-all flex items-center gap-2 cursor-pointer"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingStorageStats ? 'animate-spin' : ''}`} />
-                    <span>รีเฟรชสถิติ</span>
+                    <RefreshCw className={`w-4 h-4 ${isScanningDedup ? 'animate-spin' : ''}`} />
+                    <span>สแกนค้นหาไฟล์ซ้ำ</span>
                   </button>
 
                   <button
-                    type="button"
-                    onClick={handleRunDeduplication}
-                    disabled={isDeduplicating || !storageStats || storageStats.duplicateFilesCount === 0}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 shadow-sm cursor-pointer"
+                    onClick={handleExecuteDedup}
+                    disabled={isExecutingDedup || !dedupStats || (dedupStats.duplicateCount === 0 && dedupStats.potentialSavedSpaceBytes === 0)}
+                    className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center gap-2 cursor-pointer"
                   >
-                    {isDeduplicating ? (
+                    {isExecutingDedup ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>กำลังประมวลผล Pointer Links...</span>
+                        <span>กำลังรวมไฟล์ซ้ำและสร้าง Pointer...</span>
                       </>
                     ) : (
                       <>
-                        <Zap className="w-4 h-4" />
-                        <span>รวมไฟล์ซ้ำและคืนพื้นที่เซิร์ฟเวอร์</span>
+                        <Layers className="w-4 h-4" />
+                        <span>รวมไฟล์ซ้ำ และสร้าง Pointer ลิงก์</span>
                       </>
                     )}
                   </button>
                 </div>
               </div>
-
-              {/* Status Note */}
-              <div className="p-3 bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-light)] text-xs text-[var(--text-secondary)] flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  <strong>⚡ Auto-Deduplication 24/7:</strong> เมื่อผู้ใช้ทำการแนบหรือส่งเวียนไฟล์ในอนาคต ระบบจะสแกน SHA-256 Hash และทำ Pointer Link ให้อัตโนมัติทันที
-                </span>
-              </div>
             </div>
 
-            {/* Deduplication Report Panel */}
-            {dedupReport && (
-              <div className="bg-[var(--bg-surface)] border border-emerald-500/30 rounded-xl p-6 space-y-4 animate-fade-in">
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 text-xs font-medium flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 shrink-0" />
-                    <span>
-                      ดำเนินการรวมไฟล์ซ้ำสำเร็จเรียบร้อยแล้ว! คืนพื้นที่เซิร์ฟเวอร์ได้ <strong>{dedupReport.formattedBytesSaved}</strong> (รวมไฟล์ซ้ำ {dedupReport.duplicatesRemoved} ไฟล์, อัปเดต Pointer Link ในหนังสือราชการ {dedupReport.databasePointersUpdated} รายการ)
-                    </span>
+            {/* Notification message */}
+            {dedupMsg && (
+              <div className={`p-4 rounded-xl text-sm flex items-center gap-3 ${
+                dedupMsg.type === 'success' 
+                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' 
+                  : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+              }`}>
+                {dedupMsg.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
+                <span className="font-medium">{dedupMsg.text}</span>
+              </div>
+            )}
+
+            {/* Metrics cards */}
+            {dedupStats && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
+                    <span>พื้นที่ดิสก์ที่ประหยัดได้/ประหยัดแล้ว</span>
+                    <Zap className="w-4 h-4 text-emerald-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-emerald-500 font-mono">
+                    {dedupStats.potentialSavedSpaceFormatted || '0 B'}
+                  </div>
+                  <div className="text-xs text-[var(--text-muted)] mt-1">
+                    จากไฟล์ซ้ำ {dedupStats.duplicateCount || 0} รายการ
                   </div>
                 </div>
 
-                {dedupReport.details && dedupReport.details.length > 0 && (
-                  <div className="space-y-3">
-                    <h5 className="text-xs font-semibold text-[var(--text-primary)]">รายการไฟล์แนบที่ทำการรวมเป็น Pointer Links</h5>
-                    <div className="overflow-x-auto border border-[var(--border-light)] rounded-lg">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-[var(--bg-canvas)] text-[var(--text-secondary)] border-b border-[var(--border-light)]">
-                          <tr>
-                            <th className="p-3">ชื่อไฟล์ต้นฉบับ</th>
-                            <th className="p-3">Master Pointer Link</th>
-                            <th className="p-3 text-center">ส่งเวียนรวม (ครั้ง)</th>
-                            <th className="p-3 text-right">ประหยัดพื้นที่</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[var(--border-light)] font-mono text-[var(--text-primary)]">
-                          {dedupReport.details.map((item, idx) => (
-                            <tr key={idx} className="hover:bg-[var(--bg-canvas)]">
-                              <td className="p-3 font-noto-sans-thai font-medium flex items-center gap-2">
-                                <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
-                                <span className="truncate max-w-xs" title={item.originalName}>{item.originalName}</span>
-                              </td>
-                              <td className="p-3 text-[var(--text-secondary)] text-[11px]">
-                                <span className="inline-flex items-center gap-1 bg-[var(--bg-canvas)] px-2 py-0.5 rounded border border-[var(--border-light)]">
-                                  <LinkIcon className="w-3 h-3 text-emerald-400" />
-                                  {item.masterUrl}
-                                </span>
-                              </td>
-                              <td className="p-3 text-center font-bold text-amber-400">
-                                {item.mergedCount}
-                              </td>
-                              <td className="p-3 text-right font-bold text-emerald-400">
-                                {item.formattedSaved}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
+                    <span>จำนวนไฟล์แนบทั้งหมดในระบบ</span>
+                    <Files className="w-4 h-4 text-sky-500" />
                   </div>
-                )}
+                  <div className="text-2xl font-bold text-[var(--text-primary)] font-mono">
+                    {dedupStats.totalFiles || 0} ไฟล์
+                  </div>
+                  <div className="text-xs text-[var(--text-muted)] mt-1">
+                    ขนาดรวม {dedupStats.totalSizeFormatted || '0 B'}
+                  </div>
+                </div>
+
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
+                    <span>ไฟล์ต้นฉบับจริง (Unique Masters)</span>
+                    <CheckCircle2 className="w-4 h-4 text-indigo-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-indigo-400 font-mono">
+                    {dedupStats.uniqueMasterFiles || 0} ไฟล์
+                  </div>
+                  <div className="text-xs text-[var(--text-muted)] mt-1">
+                    ขนาดจริงบนดิสก์ {dedupStats.uniqueSizeFormatted || '0 B'}
+                  </div>
+                </div>
+
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
+                    <span>Pointer Links ที่สร้างแล้ว</span>
+                    <Copy className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-amber-400 font-mono">
+                    {dedupStats.pointerCount || 0} พอยน์เตอร์
+                  </div>
+                  <div className="text-xs text-[var(--text-muted)] mt-1">
+                    เชื่อมโยงไปยังไฟล์ต้นฉบับ
+                  </div>
+                </div>
               </div>
             )}
+
+            {/* Auto Deduplication Toggle Option */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/10 text-indigo-500 rounded-lg">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-medium text-sm text-[var(--text-primary)]">
+                    รวมไฟล์ซ้ำอัตโนมัติเมื่อมีการอัปโหลด (Real-time Upload Deduplication)
+                  </h4>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    เมื่อผู้ใช้งานอัปโหลดไฟล์แนบ ระบบจะตรวจสอบ SHA-256 Checksum หากพบว่ามีไฟล์ตรงกันในระบบ จะทำ Pointer ลิงก์ไปยังไฟล์ต้นฉบับทันที
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={autoDedupOnUpload}
+                  onChange={handleToggleAutoDedup}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+
+            {/* Duplicate File Groups List */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-[var(--border-light)] flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
+                    <Copy className="w-5 h-5 text-indigo-500" />
+                    กลุ่มไฟล์แนบที่ซ้ำซ้อนกันในเซิร์ฟเวอร์ ({dedupStats?.groups?.length || 0} กลุ่ม)
+                  </h4>
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                    รายการไฟล์ซ้ำที่ตรวจพบ โดยไฟล์ต้นฉบับจะถูกเก็บไว้ และไฟล์สำเนาอื่นๆ จะถูกเปลี่ยนเป็น Pointer ลิงก์
+                  </p>
+                </div>
+              </div>
+
+              {isScanningDedup ? (
+                <div className="p-12 text-center text-[var(--text-secondary)]">
+                  <RefreshCw className="w-8 h-8 animate-spin mx-auto text-indigo-500 mb-3" />
+                  <p className="text-sm">กำลังสแกนคำนวณไฟล์แนบและ SHA-256 Checksum ในเซิร์ฟเวอร์...</p>
+                </div>
+              ) : !dedupStats || !dedupStats.groups || dedupStats.groups.length === 0 ? (
+                <div className="p-12 text-center text-[var(--text-secondary)] space-y-2">
+                  <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500 opacity-80" />
+                  <p className="font-medium text-base text-[var(--text-primary)]">ไม่พบไฟล์ซ้ำซ้อนในเซิร์ฟเวอร์</p>
+                  <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
+                    ระบบจัดเก็บไฟล์ในเซิร์ฟเวอร์มีความเป็นระเบียบเรียบร้อย หรือไฟล์ซ้ำซ้อนทั้งหมดได้รับการรวมเป็น Pointer ลิงก์เรียบร้อยแล้ว
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-[var(--border-light)]">
+                  {dedupStats.groups.map((group: any, idx: number) => (
+                    <div key={group.hash || idx} className="p-5 hover:bg-[var(--bg-canvas)]/50 transition-colors space-y-4">
+                      {/* Group Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[var(--bg-canvas)] p-3 rounded-lg border border-[var(--border-lighter)]">
+                        <div className="flex items-center gap-3">
+                          <span className="w-7 h-7 rounded-full bg-indigo-500/10 text-indigo-400 font-mono text-xs font-bold flex items-center justify-center shrink-0">
+                            #{idx + 1}
+                          </span>
+                          <div>
+                            <div className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                              <span>ขนาดไฟล์: {group.fileSizeFormatted}</span>
+                              <span className="text-xs font-normal text-[var(--text-muted)] font-mono">
+                                (SHA-256: {group.hash.substring(0, 12)}...)
+                              </span>
+                            </div>
+                            <div className="text-xs text-[var(--text-secondary)]">
+                              พบคู่ซ้ำ {group.duplicatesCount} สำเนา • ประหยัดพื้นที่กลุ่มนี้ได้ <strong className="text-emerald-400">{group.savedSpaceFormatted}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <a
+                          href={`/api/files/view?url=${encodeURIComponent(group.masterFile.url)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 self-start sm:self-auto"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>เปิดดูไฟล์ต้นฉบับ</span>
+                        </a>
+                      </div>
+
+                      {/* Master file item */}
+                      <div className="pl-4 border-l-2 border-indigo-500 space-y-1">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>ไฟล์ต้นฉบับหลัก (Master Original File):</span>
+                        </div>
+                        <div className="text-xs text-[var(--text-primary)] font-mono break-all bg-[var(--bg-surface)] p-2 rounded border border-[var(--border-lighter)] flex items-center justify-between">
+                          <span>{group.masterFile.url}</span>
+                          <span className="text-[10px] text-[var(--text-muted)] shrink-0 pl-2">
+                            {group.masterFile.referencedDocs?.length > 0 ? `แนบกับ ${group.masterFile.referencedDocs.length} เอกสาร` : 'ไฟล์ระบบ'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Duplicates list */}
+                      <div className="pl-4 border-l-2 border-[var(--border-medium)] space-y-2">
+                        <div className="text-xs font-medium text-[var(--text-secondary)] flex items-center gap-1.5">
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>สำเนาไฟล์ซ้ำในระบบ ({group.duplicates.length} ไฟล์):</span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {group.duplicates.map((dup: any, dIdx: number) => (
+                            <div key={dup.url || dIdx} className="text-xs bg-[var(--bg-surface)] p-2.5 rounded border border-[var(--border-lighter)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div className="font-mono text-[var(--text-secondary)] break-all flex items-center gap-2">
+                                <span className="text-[10px] text-[var(--text-muted)]">[{dIdx + 1}]</span>
+                                <span>{dup.url}</span>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                {dup.isHardLinked ? (
+                                  <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    <span>ทำ Pointer แล้ว (0 B)</span>
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans">
+                                    รอทำ Pointer ({group.fileSizeFormatted})
+                                  </span>
+                                )}
+
+                                <a
+                                  href={`/api/files/download?url=${encodeURIComponent(dup.url)}`}
+                                  className="p-1 hover:bg-[var(--border-lighter)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                  title="ทดสอบดาวน์โหลดผ่านลิงก์สำเนา"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

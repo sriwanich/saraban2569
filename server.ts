@@ -10,59 +10,8 @@ import { createServer as createViteServer } from 'vite';
 import nodemailer from 'nodemailer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { GoogleGenAI, Type } from '@google/genai';
 import crypto from 'crypto';
-
-// Storage Deduplication Helper Functions
-function formatBytes(bytes: number, decimals = 2): string {
-  if (!bytes || bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
-
-function getAllUploadFiles(dirPath: string, arrayOfFiles: { path: string; relUrl: string; size: number; mtime: number }[] = []): { path: string; relUrl: string; size: number; mtime: number }[] {
-  if (!fs.existsSync(dirPath)) return arrayOfFiles;
-  const items = fs.readdirSync(dirPath);
-
-  for (const item of items) {
-    const fullPath = path.join(dirPath, item);
-    let stat;
-    try {
-      stat = fs.statSync(fullPath);
-    } catch {
-      continue;
-    }
-    if (stat.isDirectory()) {
-      getAllUploadFiles(fullPath, arrayOfFiles);
-    } else {
-      if (item !== 'db_store.json') {
-        const uploadsBase = path.resolve(process.cwd(), 'uploads');
-        let rel = path.relative(uploadsBase, fullPath).replace(/\\/g, '/');
-        const relUrl = `/uploads/${rel}`;
-        arrayOfFiles.push({
-          path: fullPath,
-          relUrl,
-          size: stat.size,
-          mtime: stat.mtimeMs
-        });
-      }
-    }
-  }
-
-  return arrayOfFiles;
-}
-
-function calculateFileSha256(filePath: string): string {
-  try {
-    const buffer = fs.readFileSync(filePath);
-    return crypto.createHash('sha256').update(buffer).digest('hex');
-  } catch (err) {
-    return '';
-  }
-}
+import { GoogleGenAI, Type } from '@google/genai';
 
 const execFileAsync = promisify(execFile);
 
@@ -323,50 +272,59 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
       }
     }
 
-    const uploadsDir = path.join(process.cwd(), 'uploads');
-    const existingUploads = getAllUploadFiles(uploadsDir);
-
-    const uploadedFiles = files.map(file => {
-      let finalFilename = file.filename;
-      let finalUrl = `/uploads/${subfolder}/${file.filename}`;
+    // Auto deduplication check for uploaded files
+    const uploadedFiles: any[] = [];
+    for (const file of files) {
       let isDeduplicated = false;
-      let savedBytes = 0;
+      let masterUrl = '';
+      let savedSpaceFormatted = '';
 
-      try {
-        const newHash = calculateFileSha256(file.path);
-        if (newHash) {
-          // Find if an identical file already exists in uploads/
-          const existingMatch = existingUploads.find(e => e.path !== file.path && calculateFileSha256(e.path) === newHash);
-          if (existingMatch) {
-            // Delete newly uploaded file copy
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
+      if (autoDedupOnUpload) {
+        try {
+          const newFilePath = file.path;
+          if (fs.existsSync(newFilePath)) {
+            const newHash = await calculateFileSha256(newFilePath);
+            const uploadsBase = path.resolve(process.cwd(), 'uploads');
+            const existingFiles = getAllUploadedFilesRecursive(uploadsBase);
+
+            for (const existingPath of existingFiles) {
+              if (path.resolve(existingPath) === path.resolve(newFilePath)) continue;
+              const existStat = fs.statSync(existingPath);
+              if (existStat.size === file.size && existStat.size > 0) {
+                const existHash = await calculateFileSha256(existingPath);
+                if (existHash === newHash) {
+                  // Duplicate content detected! Replace new file with Pointer hard link to master
+                  fs.unlinkSync(newFilePath);
+                  fs.linkSync(existingPath, newFilePath);
+                  isDeduplicated = true;
+                  masterUrl = `/uploads/${path.relative(uploadsBase, existingPath).replace(/\\/g, '/')}`;
+                  savedSpaceFormatted = formatBytes(file.size);
+                  break;
+                }
+              }
             }
-            finalFilename = path.basename(existingMatch.path);
-            finalUrl = existingMatch.relUrl;
-            isDeduplicated = true;
-            savedBytes = file.size;
           }
+        } catch (e: any) {
+          console.warn('Auto deduplication failed on upload:', e.message);
         }
-      } catch (dedupErr) {
-        console.warn('Auto deduplication on upload warning:', dedupErr);
       }
 
-      return {
+      uploadedFiles.push({
         originalName: file.originalname,
-        filename: finalFilename,
+        filename: file.filename,
         size: file.size,
         mimetype: file.mimetype,
-        url: finalUrl,
+        url: `/uploads/${subfolder}/${file.filename}`,
         folder: `uploads/${subfolder}`,
         isDeduplicated,
-        savedBytes
-      };
-    });
+        masterUrl,
+        savedSpaceFormatted
+      });
+    }
 
     // Audit Log File Upload
     const fileNames = files.map(f => f.originalname).join(', ');
-    const dedupText = uploadedFiles.some(f => f.isDeduplicated) ? ' (รวมไฟล์ซ้ำ Pointer Link อัตโนมัติ)' : '';
+    const dedupText = uploadedFiles.some(f => f.isDeduplicated) ? ' (ทำการสร้าง Pointer รวมไฟล์ซ้ำอัตโนมัติสำเร็จ)' : '';
     await addSystemLog('UPLOAD_FILE', `อัปโหลด/แนบไฟล์แนบ (${subfolder}): ${fileNames}${dedupText}`, uploadedBy, ip);
 
     return res.json({ success: true, files: uploadedFiles });
@@ -374,6 +332,294 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
     console.error('File Upload Error:', err);
     return res.status(500).json({ error: err.message || 'การอัปโหลดไฟล์ล้มเหลว' });
   }
+});
+
+// ==========================================
+// File Deduplication Engine (Single-Instance Storage & Pointer Links)
+// ==========================================
+
+const dedupIndexPath = path.join(process.cwd(), 'uploads', 'dedup_index.json');
+let autoDedupOnUpload = true;
+
+async function calculateFileSha256(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hashStream = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', chunk => hashStream.update(chunk));
+    stream.on('end', () => resolve(hashStream.digest('hex')));
+    stream.on('error', err => reject(err));
+  });
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function getAllUploadedFilesRecursive(dir: string, fileList: string[] = []): string[] {
+  if (!fs.existsSync(dir)) return fileList;
+  try {
+    const items = fs.readdirSync(dir);
+    for (const item of items) {
+      if (['db_store.json', 'dedup_index.json', 'temp_uploads'].includes(item) || item.startsWith('temp_') || item.startsWith('.')) {
+        continue;
+      }
+      const fullPath = path.join(dir, item);
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        getAllUploadedFilesRecursive(fullPath, fileList);
+      } else if (stat.isFile()) {
+        fileList.push(fullPath);
+      }
+    }
+  } catch (e) {
+    // Ignore read errors
+  }
+  return fileList;
+}
+
+function findDocReferencesForFile(filename: string, fileUrl: string) {
+  const referencedDocs: Array<{ id: string; docNumber: string; title: string; type: string }> = [];
+  const cleanBase = path.basename(filename);
+  const docTables = ['inbox_documents', 'outbox_documents', 'circular_documents', 'internal_documents', 'admin_documents'];
+  
+  for (const tbl of docTables) {
+    const list = localDb[tbl] || [];
+    for (const d of list) {
+      const atts = typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []);
+      if (atts.includes(cleanBase) || atts.includes(fileUrl)) {
+        referencedDocs.push({
+          id: d.id,
+          docNumber: d.docNumber || d.receiveNumber || 'N/A',
+          title: d.title || 'ไม่มีชื่อเรื่อง',
+          type: tbl.replace('_documents', '')
+        });
+      }
+    }
+  }
+  return referencedDocs;
+}
+
+async function scanUploadsDeduplication() {
+  const uploadsBase = path.resolve(process.cwd(), 'uploads');
+  const filePaths = getAllUploadedFilesRecursive(uploadsBase);
+
+  const fileMapByHash: Record<string, Array<{
+    filePath: string;
+    url: string;
+    filename: string;
+    size: number;
+    mtime: Date;
+    ino: number;
+    docs: any[];
+  }>> = {};
+
+  let totalFiles = 0;
+  let totalSizeBytes = 0;
+
+  for (const fp of filePaths) {
+    try {
+      const stat = fs.statSync(fp);
+      if (stat.size === 0) continue;
+      const hashVal = await calculateFileSha256(fp);
+      const relPath = path.relative(uploadsBase, fp).replace(/\\/g, '/');
+      const url = `/uploads/${relPath}`;
+      const filename = path.basename(fp);
+      const docs = findDocReferencesForFile(filename, url);
+
+      totalFiles++;
+      totalSizeBytes += stat.size;
+
+      if (!fileMapByHash[hashVal]) {
+        fileMapByHash[hashVal] = [];
+      }
+
+      fileMapByHash[hashVal].push({
+        filePath: fp,
+        url,
+        filename,
+        size: stat.size,
+        mtime: stat.mtime,
+        ino: stat.ino,
+        docs
+      });
+    } catch (e) {
+      console.warn('Error reading file for dedup scan:', fp, e);
+    }
+  }
+
+  const groups: any[] = [];
+  let uniqueMasterFiles = 0;
+  let uniqueSizeBytes = 0;
+  let duplicateCount = 0;
+  let potentialSavedSpaceBytes = 0;
+  let pointerCount = 0;
+
+  for (const [hashVal, fileList] of Object.entries(fileMapByHash)) {
+    uniqueMasterFiles++;
+    const fileSize = fileList[0].size;
+    uniqueSizeBytes += fileSize;
+
+    fileList.sort((a, b) => a.mtime.getTime() - b.mtime.getTime());
+    const master = fileList[0];
+
+    if (fileList.length > 1) {
+      const duplicates = fileList.slice(1);
+      duplicateCount += duplicates.length;
+      
+      const groupSaved = duplicates.length * fileSize;
+      potentialSavedSpaceBytes += groupSaved;
+
+      const dupItems = duplicates.map(d => {
+        const isHardLinked = d.ino === master.ino;
+        if (isHardLinked) pointerCount++;
+        return {
+          url: d.url,
+          filename: d.filename,
+          path: d.filePath,
+          ino: d.ino,
+          isHardLinked,
+          referencedDocs: d.docs
+        };
+      });
+
+      groups.push({
+        hash: hashVal,
+        fileSize,
+        fileSizeFormatted: formatBytes(fileSize),
+        masterFile: {
+          url: master.url,
+          filename: master.filename,
+          path: master.filePath,
+          ino: master.ino,
+          referencedDocs: master.docs
+        },
+        duplicatesCount: duplicates.length,
+        duplicates: dupItems,
+        savedSpaceBytes: groupSaved,
+        savedSpaceFormatted: formatBytes(groupSaved)
+      });
+    }
+  }
+
+  const resultStats = {
+    lastScanned: new Date().toISOString(),
+    totalFiles,
+    totalSizeBytes,
+    totalSizeFormatted: formatBytes(totalSizeBytes),
+    uniqueMasterFiles,
+    uniqueSizeBytes,
+    uniqueSizeFormatted: formatBytes(uniqueSizeBytes),
+    duplicateCount,
+    potentialSavedSpaceBytes,
+    potentialSavedSpaceFormatted: formatBytes(potentialSavedSpaceBytes),
+    pointerCount,
+    autoDedupOnUpload,
+    groups
+  };
+
+  try {
+    fs.writeFileSync(dedupIndexPath, JSON.stringify(resultStats, null, 2), 'utf-8');
+  } catch (e) {
+    // ignore
+  }
+
+  return resultStats;
+}
+
+async function executeUploadsDeduplication() {
+  const scanResult = await scanUploadsDeduplication();
+  let filesMerged = 0;
+  let bytesReclaimed = 0;
+
+  for (const grp of scanResult.groups) {
+    const masterPath = grp.masterFile.path;
+    if (!fs.existsSync(masterPath)) continue;
+
+    const masterIno = fs.statSync(masterPath).ino;
+
+    for (const dup of grp.duplicates) {
+      if (!fs.existsSync(dup.path)) continue;
+      
+      const dupStat = fs.statSync(dup.path);
+      if (dupStat.ino !== masterIno) {
+        try {
+          fs.unlinkSync(dup.path);
+          fs.linkSync(masterPath, dup.path);
+          filesMerged++;
+          bytesReclaimed += grp.fileSize;
+        } catch (err: any) {
+          console.error(`Error linking duplicate ${dup.path} to master ${masterPath}:`, err.message);
+        }
+      }
+    }
+  }
+
+  const updatedStats = await scanUploadsDeduplication();
+  return {
+    success: true,
+    filesMerged,
+    bytesReclaimed,
+    bytesReclaimedFormatted: formatBytes(bytesReclaimed),
+    updatedStats
+  };
+}
+
+// Deduplication API Routes
+app.get('/api/deduplication/scan', async (req, res) => {
+  try {
+    const stats = await scanUploadsDeduplication();
+    return res.json({ success: true, stats });
+  } catch (err: any) {
+    console.error('Error scanning deduplication:', err);
+    return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการสแกนไฟล์ซ้ำ' });
+  }
+});
+
+app.post('/api/deduplication/deduplicate', async (req, res) => {
+  try {
+    const username = (req.body.username || req.query.username || 'ผู้ดูแลระบบ').toString();
+    const ip = getClientIp(req);
+    const result = await executeUploadsDeduplication();
+    
+    await addSystemLog(
+      'DEDUPLICATE_FILES',
+      `ดำเนินการรวมไฟล์ซ้ำในเซิร์ฟเวอร์: รวมแล้ว ${result.filesMerged} ไฟล์ ประหยัดพื้นที่ได้ ${result.bytesReclaimedFormatted}`,
+      username,
+      ip
+    );
+
+    return res.json(result);
+  } catch (err: any) {
+    console.error('Error executing deduplication:', err);
+    return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการรวมไฟล์ซ้ำ' });
+  }
+});
+
+app.get('/api/deduplication/stats', async (req, res) => {
+  try {
+    if (fs.existsSync(dedupIndexPath)) {
+      const data = JSON.parse(fs.readFileSync(dedupIndexPath, 'utf-8'));
+      data.autoDedupOnUpload = autoDedupOnUpload;
+      return res.json({ success: true, stats: data });
+    }
+    const stats = await scanUploadsDeduplication();
+    return res.json({ success: true, stats });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'ไม่สามารถดึงข้อมูลสถิติไฟล์ซ้ำได้' });
+  }
+});
+
+app.post('/api/deduplication/toggle-auto', (req, res) => {
+  if (typeof req.body.enabled === 'boolean') {
+    autoDedupOnUpload = req.body.enabled;
+  } else {
+    autoDedupOnUpload = !autoDedupOnUpload;
+  }
+  return res.json({ success: true, autoDedupOnUpload });
 });
 
 // MySQL Environment Variables Resolution with fallback support
@@ -3554,222 +3800,6 @@ ${d.resultQl}
   } catch (err: any) {
     console.error('Error in AI summarize project:', err);
     return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างสรุปโครงการด้วย AI' });
-  }
-});
-
-// Admin API: Storage Stats
-app.get('/api/admin/storage-stats', async (req, res) => {
-  try {
-    const uploadsDir = path.join(process.cwd(), 'uploads');
-    const allFiles = getAllUploadFiles(uploadsDir);
-    
-    let totalBytes = 0;
-    const hashMap: Record<string, typeof allFiles> = {};
-
-    for (const f of allFiles) {
-      totalBytes += f.size;
-      const hash = calculateFileSha256(f.path);
-      if (hash) {
-        if (!hashMap[hash]) hashMap[hash] = [];
-        hashMap[hash].push(f);
-      }
-    }
-
-    let duplicateFilesCount = 0;
-    let duplicateGroupsCount = 0;
-    let potentialSavingsBytes = 0;
-
-    Object.values(hashMap).forEach(group => {
-      if (group.length > 1) {
-        duplicateGroupsCount++;
-        duplicateFilesCount += (group.length - 1);
-        const sumGroupBytes = group.reduce((acc, item) => acc + item.size, 0);
-        const masterBytes = group[0].size;
-        potentialSavingsBytes += (sumGroupBytes - masterBytes);
-      }
-    });
-
-    return res.json({
-      success: true,
-      totalFiles: allFiles.length,
-      totalBytes,
-      formattedTotalSize: formatBytes(totalBytes),
-      duplicateFilesCount,
-      duplicateGroupsCount,
-      potentialSavingsBytes,
-      formattedSavings: formatBytes(potentialSavingsBytes)
-    });
-  } catch (err: any) {
-    console.error('Storage stats error:', err);
-    return res.status(500).json({ error: err.message || 'ไม่สามารถดึงข้อมูลสถิติพื้นที่ได้' });
-  }
-});
-
-// Admin API: Single-Instance Storage Deduplication & Pointer Link Creation
-app.post('/api/admin/deduplicate-attachments', async (req, res) => {
-  try {
-    const uploadedBy = (req.body.username || 'ผู้ดูแลระบบ').toString();
-    const ip = getClientIp(req);
-    const uploadsDir = path.join(process.cwd(), 'uploads');
-    const allFiles = getAllUploadFiles(uploadsDir);
-
-    const hashMap: Record<string, typeof allFiles> = {};
-    for (const f of allFiles) {
-      const hash = calculateFileSha256(f.path);
-      if (hash) {
-        if (!hashMap[hash]) hashMap[hash] = [];
-        hashMap[hash].push(f);
-      }
-    }
-
-    let totalDuplicatesRemoved = 0;
-    let totalSavedBytes = 0;
-    let pointersUpdatedCount = 0;
-    const detailsReport: any[] = [];
-
-    const updateAttachmentsData = (attachmentsJsonOrArr: any, dupUrl: string, masterUrl: string): { updated: boolean; newVal: any } => {
-      if (!attachmentsJsonOrArr) return { updated: false, newVal: attachmentsJsonOrArr };
-      let parsed = attachmentsJsonOrArr;
-      let isJsonString = false;
-
-      if (typeof attachmentsJsonOrArr === 'string') {
-        try {
-          parsed = JSON.parse(attachmentsJsonOrArr);
-          isJsonString = true;
-        } catch {
-          if (attachmentsJsonOrArr.includes(dupUrl)) {
-            const replaced = attachmentsJsonOrArr.replace(new RegExp(dupUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), masterUrl);
-            return { updated: true, newVal: replaced };
-          }
-          return { updated: false, newVal: attachmentsJsonOrArr };
-        }
-      }
-
-      if (Array.isArray(parsed)) {
-        let modified = false;
-        const newArr = parsed.map(item => {
-          if (typeof item === 'string') {
-            if (item === dupUrl || item.includes(dupUrl)) {
-              modified = true;
-              return item.replace(dupUrl, masterUrl);
-            }
-          } else if (item && typeof item === 'object') {
-            if (item.url && (item.url === dupUrl || item.url.includes(dupUrl))) {
-              modified = true;
-              return { ...item, url: item.url.replace(dupUrl, masterUrl) };
-            }
-          }
-          return item;
-        });
-
-        if (modified) {
-          return { updated: true, newVal: isJsonString ? JSON.stringify(newArr) : newArr };
-        }
-      }
-
-      return { updated: false, newVal: attachmentsJsonOrArr };
-    };
-
-    const documentTables = [
-      'inbox_documents',
-      'outbox_documents',
-      'circular_documents',
-      'internal_documents',
-      'admin_documents',
-      'draft_documents'
-    ];
-
-    for (const [hash, group] of Object.entries(hashMap)) {
-      if (group.length > 1) {
-        group.sort((a, b) => a.mtime - b.mtime);
-        const masterFile = group[0];
-        const duplicates = group.slice(1);
-
-        let groupSavedBytes = 0;
-        let groupRemovedCount = 0;
-
-        for (const dup of duplicates) {
-          const dupUrl = dup.relUrl;
-          const masterUrl = masterFile.relUrl;
-
-          // 1. Update in localDb
-          documentTables.forEach(tableName => {
-            if (localDb[tableName] && Array.isArray(localDb[tableName])) {
-              localDb[tableName].forEach(doc => {
-                const res = updateAttachmentsData(doc.attachments, dupUrl, masterUrl);
-                if (res.updated) {
-                  doc.attachments = res.newVal;
-                  pointersUpdatedCount++;
-                }
-              });
-            }
-          });
-
-          // 2. Update in MySQL if online
-          if (isMysqlOnline) {
-            for (const tableName of documentTables) {
-              try {
-                await pool.promise().query(
-                  `UPDATE ${tableName} SET attachments = REPLACE(attachments, ?, ?) WHERE attachments LIKE ?`,
-                  [dupUrl, masterUrl, `%${dupUrl}%`]
-                );
-              } catch (e) {
-                // Ignore table update errors if table doesn't exist
-              }
-            }
-          }
-
-          // 3. Delete physical duplicate file from disk
-          if (fs.existsSync(dup.path)) {
-            try {
-              fs.unlinkSync(dup.path);
-              groupSavedBytes += dup.size;
-              groupRemovedCount++;
-            } catch (err) {
-              console.error('Failed to unlink duplicate file:', dup.path, err);
-            }
-          }
-        }
-
-        totalDuplicatesRemoved += groupRemovedCount;
-        totalSavedBytes += groupSavedBytes;
-
-        const originalFileName = path.basename(masterFile.path).split('-').slice(2).join('-') || path.basename(masterFile.path);
-
-        detailsReport.push({
-          masterUrl: masterFile.relUrl,
-          originalName: originalFileName,
-          fileName: path.basename(masterFile.path),
-          mergedCount: groupRemovedCount + 1,
-          duplicatesRemoved: groupRemovedCount,
-          savedBytes: groupSavedBytes,
-          formattedSaved: formatBytes(groupSavedBytes)
-        });
-      }
-    }
-
-    saveLocalDb();
-
-    const formattedSaved = formatBytes(totalSavedBytes);
-    await addSystemLog(
-      'DEDUPLICATE_STORAGE',
-      `รวมไฟล์แนบซ้ำแบบ Single-Instance Pointer Link จำนวน ${totalDuplicatesRemoved} ไฟล์ ประหยัดพื้นที่ ${formattedSaved}`,
-      uploadedBy,
-      ip
-    );
-
-    return res.json({
-      success: true,
-      filesScanned: allFiles.length,
-      duplicatesRemoved: totalDuplicatesRemoved,
-      bytesSaved: totalSavedBytes,
-      formattedBytesSaved: formattedSaved,
-      databasePointersUpdated: pointersUpdatedCount,
-      details: detailsReport
-    });
-  } catch (err: any) {
-    console.error('Deduplication error:', err);
-    return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการรวมและลบไฟล์ซ้ำ' });
   }
 });
 

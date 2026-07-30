@@ -350,7 +350,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-slide-up">
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-5xl h-[92vh] max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-slide-up">
         
         {/* Header Actions */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--border-light)] bg-gradient-to-b from-white/[0.02] to-transparent shrink-0">
@@ -404,7 +404,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
         </div>
 
         {/* Two Column Layout: Details on Left, Status Tracking Flow on Right */}
-        <div id="printable-area" className="flex-1 overflow-hidden flex flex-col md:flex-row">
+        <div id="printable-area" className="flex-1 min-h-0 overflow-hidden flex flex-col md:flex-row">
           <style>{`
             @media print {
               body * { visibility: hidden; }
@@ -417,7 +417,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           `}</style>
           
           {/* Mobile Tabs */}
-          <div className="md:hidden flex bg-[var(--bg-surface)] border-b border-[var(--border-light)]">
+          <div className="md:hidden flex bg-[var(--bg-surface)] border-b border-[var(--border-light)] shrink-0">
             <button 
               onClick={() => setActiveTab('details')} 
               className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'details' ? 'text-[var(--primary-color)] border-b-2 border-[var(--primary-color)]' : 'text-[var(--text-secondary)]'}`}
@@ -433,7 +433,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           </div>
 
           {/* Column 1: Document Sheet Details */}
-          <div className={`flex-1 overflow-y-auto p-4 sm:p-6 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
+          <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
 
             <div className="bg-[var(--bg-overlay)] rounded-xl border border-[var(--border-light)] p-4 sm:p-6 shadow-inner space-y-4">
               <div className="border-b border-[var(--border-lighter)] pb-3 flex justify-between items-center">
@@ -629,8 +629,8 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           </div>
 
           {/* Column 2: Status Tracking timeline & Update action */}
-          <div className={`w-full md:w-[380px] shrink-0 bg-[var(--bg-elevated)]/30 overflow-y-auto p-4 sm:p-6 flex flex-col justify-between border-t md:border-t-0 custom-scrollbar ${activeTab === 'details' ? 'hidden md:block' : ''}`}>
-            <div className="space-y-6">
+          <div className={`w-full md:w-[380px] shrink-0 min-h-0 h-full max-h-full bg-[var(--bg-elevated)]/30 overflow-y-auto p-4 sm:p-6 flex flex-col justify-between border-t md:border-t-0 custom-scrollbar ${activeTab === 'details' ? 'hidden md:block' : ''}`}>
+            <div className="space-y-6 shrink-0">
               <div>
                 <h3 className="text-sm font-semibold text-[var(--text-primary)] font-noto-serif-thai border-b border-[var(--border-light)] pb-2 mb-3">
                   เส้นทางเดินหนังสือและการติดตามสถานะ
@@ -671,7 +671,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             </div>
 
             {/* Status Update Form */}
-            <form onSubmit={handleUpdateStatus} className="border-t border-[var(--border-light)] pt-4 mt-6 space-y-3.5">
+            <form onSubmit={handleUpdateStatus} className="border-t border-[var(--border-light)] pt-4 mt-6 space-y-3.5 shrink-0">
               <h4 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-[var(--primary-color)]" /> ดำเนินการ/สั่งการเดินหนังสือ
               </h4>
