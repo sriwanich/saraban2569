@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DocumentItem, DocType, DocPriority, DocCategory, Folder as FolderType, User, formatThaiDate } from '../types';
 import { X, Save, Paperclip, Upload, Trash2, FileText, Loader2, Folder, CheckCircle2, Calendar, Lock, Sparkles } from 'lucide-react';
-import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from './AiCrossReferencePanel';
+import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from './ai-cross-reference-panel';
 
 interface Props {
   initialData?: DocumentItem;

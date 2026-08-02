@@ -4,7 +4,7 @@ import {
   Send, Save, RefreshCw, Eye, Trash2, ArrowRight, Layers
 } from 'lucide-react';
 import { AiScanResult } from './draftData';
-import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from '../../AiCrossReferencePanel';
+import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from '../../ai-cross-reference-panel';
 
 interface Props {
   user: any;

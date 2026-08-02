@@ -3,7 +3,7 @@ import { DocumentItem, TrackingLog, Folder, formatThaiDate, formatThaiDateFull, 
 import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
-import AiCrossReferencePanel, { DetectionResult } from './AiCrossReferencePanel';
+import AiCrossReferencePanel, { DetectionResult } from './ai-cross-reference-panel';
 
 interface Props {
   doc: DocumentItem;
