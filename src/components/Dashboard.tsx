@@ -28,6 +28,65 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
 
   const [activeTab, setActiveTab] = useState('overview');
 
+  // Feature flags control from settings
+  const [enabledFeatures, setEnabledFeatures] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('moi_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.enabledFeatures) {
+          const parsedFeatures = JSON.parse(parsed.enabledFeatures);
+          return {
+            overview: true,
+            inbox: true,
+            outbox: true,
+            admin_docs: true,
+            draft_docs: true,
+            folders: true,
+            logs: true,
+            draft: true,
+            aiscan: true,
+            order: true,
+            customorder: true,
+            speech: true,
+            meeting: true,
+            summary: true,
+            ...parsedFeatures
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Error loading initial enabledFeatures:', e);
+    }
+    return {
+      overview: true,
+      inbox: true,
+      outbox: true,
+      admin_docs: true,
+      draft_docs: true,
+      folders: true,
+      logs: true,
+      draft: true,
+      aiscan: true,
+      order: true,
+      customorder: true,
+      speech: true,
+      meeting: true,
+      summary: true,
+    };
+  });
+
+  // Redirect to first enabled tab if active tab gets disabled
+  useEffect(() => {
+    const isCurrentTabEnabled = enabledFeatures[activeTab] !== false || activeTab === 'settings' || activeTab === 'notifications';
+    if (!isCurrentTabEnabled) {
+      const firstEnabledItem = navItems.find(item => enabledFeatures[item.id] !== false);
+      if (firstEnabledItem) {
+        setActiveTab(firstEnabledItem.id);
+      }
+    }
+  }, [enabledFeatures, activeTab]);
+
   // PWA Install State & Handler
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallModal, setShowInstallModal] = useState(false);
@@ -312,10 +371,19 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       const res = await fetch('/api/settings');
       if (res.ok) {
         const data = await res.json();
+        localStorage.setItem('moi_settings', JSON.stringify(data));
         if (data.orgName) setOrgName(data.orgName);
         if (data.headerOrgName !== undefined) setHeaderOrgName(data.headerOrgName || '');
         if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl);
         if (data.currentYear) setCurrentYear(data.currentYear);
+        if (data.enabledFeatures) {
+          try {
+            const parsed = JSON.parse(data.enabledFeatures);
+            setEnabledFeatures(prev => ({ ...prev, ...parsed }));
+          } catch (e) {
+            console.error('Error parsing enabledFeatures:', e);
+          }
+        }
       }
     } catch (err: any) {
       console.error('Error fetching settings', err);
@@ -324,7 +392,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(fetchNotifications, 30000);
+    fetchSettings();
+    const interval = setInterval(() => {
+      fetchNotifications();
+      fetchSettings();
+    }, 30000);
     return () => clearInterval(interval);
   }, [currentUser]);
 
@@ -391,7 +463,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
-  const navItems = [
+  const baseNavItems = [
     { id: 'overview', icon: Home, label: 'ภาพรวมระบบ' },
     { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
     { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
@@ -400,15 +472,19 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล' },
   ];
 
+  const navItems = baseNavItems.filter(item => enabledFeatures[item.id] !== false);
+
   if (currentUser?.role === 'admin') {
-    navItems.push({ id: 'logs', icon: ShieldCheck, label: 'บันทึกประวัติระบบ' });
+    if (enabledFeatures['logs'] !== false) {
+      navItems.push({ id: 'logs', icon: ShieldCheck, label: 'บันทึกประวัติระบบ' });
+    }
     navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' });
   }
 
   const renderContent = () => {
     switch(activeTab) {
       case 'overview':
-        return <Overview documents={documents} user={currentUser} onCreateDoc={() => { setCreateDocType('inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} />;
+        return <Overview documents={documents} user={currentUser} onCreateDoc={(type) => { setCreateDocType(type || 'inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} enabledFeatures={enabledFeatures} />;
       case 'inbox':
         return <DocumentList 
           title="ทะเบียนหนังสือรับ" 
@@ -441,6 +517,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'draft_docs':
         return <DraftDocsView 
           user={currentUser} 
+          enabledFeatures={enabledFeatures}
           onSaveToRegistry={() => {
             setCreateDocType('outbox');
             setIsCreateModalOpen(true);
@@ -455,7 +532,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         />;
       case 'logs':
         if (currentUser?.role !== 'admin') {
-          return <Overview documents={documents} user={currentUser} onCreateDoc={() => { setCreateDocType('inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} />;
+          return <Overview documents={documents} user={currentUser} onCreateDoc={(type) => { setCreateDocType(type || 'inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} enabledFeatures={enabledFeatures} />;
         }
         return <LogsView user={currentUser} />;
       case 'settings':

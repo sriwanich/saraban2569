@@ -1145,6 +1145,7 @@ async function setupDatabase() {
       }
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda15Url TEXT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda30Url TEXT', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN enabledFeatures TEXT', []); } catch (e) {}
 
       // Ensure draft_documents table exists
       try {
@@ -1449,14 +1450,31 @@ app.put("/api/settings", async (req, res) => {
   try {
       const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
       if (rows.length > 0) {
-        await pool.query(
-          "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=? WHERE id=?",
-          [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey, rows[0].id]
-        );
+        let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
+        const params = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+        
+        if (data.enabledFeatures !== undefined) {
+          query += ", enabledFeatures=?";
+          params.push(data.enabledFeatures);
+        }
+        
+        query += " WHERE id=?";
+        params.push(rows[0].id);
+        
+        await pool.query(query, params);
       } else {
+        const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
+        const values = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+        
+        if (data.enabledFeatures !== undefined) {
+          fields.push("enabledFeatures");
+          values.push(data.enabledFeatures);
+        }
+        
+        const placeholders = fields.map(() => "?").join(", ");
         await pool.query(
-          "INSERT INTO settings (currentYear, startSequence, orgName, headerOrgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, geminiApiKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey]
+          `INSERT INTO settings (${fields.join(", ")}) VALUES (${placeholders})`,
+          values
         );
       }
       await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);

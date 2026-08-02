@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap } from 'lucide-react';
+import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles } from 'lucide-react';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
 }
 
 export default function Settings({ onSettingsUpdated }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
   const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'departments' | 'positions'>('docSettings');
   
   // Deduplication state
@@ -15,6 +15,25 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
   const [isExecutingDedup, setIsExecutingDedup] = useState<boolean>(false);
   const [dedupMsg, setDedupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [autoDedupOnUpload, setAutoDedupOnUpload] = useState<boolean>(true);
+  
+  // Feature flags control
+  const [enabledFeatures, setEnabledFeatures] = useState<Record<string, boolean>>({
+    overview: true,
+    inbox: true,
+    outbox: true,
+    admin_docs: true,
+    draft_docs: true,
+    folders: true,
+    logs: true,
+    draft: true,
+    aiscan: true,
+    order: true,
+    customorder: true,
+    speech: true,
+    meeting: true,
+    summary: true,
+  });
+  const [isSavingFeatures, setIsSavingFeatures] = useState(false);
   
   // System Settings state
   const [currentYear, setCurrentYear] = useState<number>(2569);
@@ -335,6 +354,14 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         if (data.smtpUser !== undefined) setSmtpUser(data.smtpUser || '');
         if (data.smtpPassword !== undefined) setSmtpPassword(data.smtpPassword || '');
         if (data.smtpFrom !== undefined) setSmtpFrom(data.smtpFrom || '');
+        if (data.enabledFeatures) {
+          try {
+            const parsed = JSON.parse(data.enabledFeatures);
+            setEnabledFeatures(prev => ({ ...prev, ...parsed }));
+          } catch (e) {
+            console.error('Error parsing enabledFeatures:', e);
+          }
+        }
         
         localStorage.setItem('moi_settings', JSON.stringify(data));
       }
@@ -364,7 +391,8 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
           smtpPort,
           smtpUser,
           smtpPassword,
-          smtpFrom
+          smtpFrom,
+          enabledFeatures: JSON.stringify(enabledFeatures)
         })
       });
       if (logoUrl) {
@@ -390,15 +418,72 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         localStorage.removeItem('moi_garudaCustom');
       }
       localStorage.setItem('moi_settings', JSON.stringify({
-        currentYear, startSequence, orgName, headerOrgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, geminiApiKey, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom
+        currentYear, startSequence, orgName, headerOrgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, geminiApiKey, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, enabledFeatures: JSON.stringify(enabledFeatures)
       }));
-      alert('บันทึกการตั้งค่าระบบ, ตราครุฑ/โลโก้ และ Gemini API Key เรียบร้อยแล้ว');
+      alert('บันทึกการตั้งค่าระบบ, ตราครุฑ/โลโก้, Gemini API Key และค่าเปิด-ปิดฟังก์ชันเรียบร้อยแล้ว');
       if (onSettingsUpdated) onSettingsUpdated();
     } catch (error) {
       console.error('Error saving settings:', error);
       alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     } finally {
       setIsSavingSystem(false);
+    }
+  };
+
+  const handleToggleFeature = (featureKey: string) => {
+    setEnabledFeatures(prev => ({
+      ...prev,
+      [featureKey]: !prev[featureKey]
+    }));
+  };
+
+  const handleToggleAllFeatures = (enable: boolean) => {
+    setEnabledFeatures(prev => {
+      const updated = { ...prev };
+      Object.keys(updated).forEach(key => {
+        updated[key] = enable;
+      });
+      return updated;
+    });
+  };
+
+  const saveFeaturesSettings = async (featuresToSave?: Record<string, boolean>) => {
+    setIsSavingFeatures(true);
+    const targetFeatures = featuresToSave || enabledFeatures;
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentYear,
+          startSequence,
+          orgName,
+          headerOrgName,
+          logoUrl,
+          garuda15Url,
+          garuda30Url,
+          faviconUrl,
+          footerText,
+          geminiApiKey,
+          smtpHost,
+          smtpPort,
+          smtpUser,
+          smtpPassword,
+          smtpFrom,
+          enabledFeatures: JSON.stringify(targetFeatures)
+        })
+      });
+      if (res.ok) {
+        alert('บันทึกการตั้งค่าระบบเปิด-ปิดฟังก์ชันเรียบร้อยแล้ว');
+        if (onSettingsUpdated) onSettingsUpdated();
+      } else {
+        alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      }
+    } catch (error) {
+      console.error('Error saving features:', error);
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    } finally {
+      setIsSavingFeatures(false);
     }
   };
 
@@ -806,7 +891,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
             activeTab === 'dedup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
           }`}
         >
-          <HardDrive className="w-4 h-4" /> จัดการไฟล์ซ้ำ (Data Deduplication)
+          <HardDrive className="w-4 h-4" /> จัดการไฟล์ซ้ำ
         </button>
       </div>
 
@@ -820,7 +905,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
       {/* Content */}
       <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl p-6 shadow-lg">
         {activeTab === 'system' && (
-          <div className="max-w-xl space-y-6 animate-fade-in">
+          <div className="max-w-4xl space-y-6 animate-fade-in">
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
               <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-[var(--primary-color)]" /> ชื่อหน่วยงาน
@@ -1067,6 +1152,357 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                     <AlertTriangle className="w-4 h-4 text-amber-500" /> ยังไม่ได้กำหนด API Key ในฐานข้อมูล (ระบบจะลองใช้จาก Settings &gt; Secrets เป็นลำดับถัดไป)
                   </p>
                 )}
+              </div>
+            </div>
+
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 space-y-6">
+              <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-1 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-[var(--primary-color)]" /> การเปิด-ปิดฟังก์ชันการใช้งานระบบ (System Feature Control)
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] mb-4 font-sans">
+                เลือกเปิดหรือปิดระบบงานต่างๆ ฟังก์ชันที่ถูกปิดใช้งานจะไม่ปรากฏบนแถบเมนูด้านข้างและหน้ากระดานทำงานของเจ้าหน้าที่ทั่วไป
+              </p>
+              
+              {/* Master Control Panel */}
+              <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-transparent border border-blue-500/20 p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blue-500/25 flex items-center justify-center font-bold text-blue-500">
+                    🎮
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm text-[var(--text-primary)] font-noto-serif-thai">
+                      สวิตช์ควบคุมหลัก (Master Controller)
+                    </h4>
+                    <p className="text-xs text-[var(--text-secondary)] mt-0.5 font-sans">
+                      เปิดหรือปิดการทำงานของฟังก์ชันเสริมและระบบงานหลักทั้งหมดพร้อมกันในครั้งเดียว
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0 w-full sm:w-auto justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleToggleAllFeatures(true);
+                    }}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 rounded-lg text-xs font-semibold transition-all cursor-pointer font-sans"
+                  >
+                    เปิดทั้งหมด
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleToggleAllFeatures(false);
+                    }}
+                    className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 rounded-lg text-xs font-semibold transition-all cursor-pointer font-sans"
+                  >
+                    ปิดทั้งหมด
+                  </button>
+                </div>
+              </div>
+
+              {/* Toggles Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 font-sans">
+                {/* Left Column: Main Navigation Features */}
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl overflow-hidden shadow-xs">
+                  <div className="p-4 border-b border-[var(--border-lighter)] bg-[var(--bg-canvas)]/30">
+                    <h4 className="font-bold text-sm text-[var(--text-primary)] flex items-center gap-2 font-noto-serif-thai">
+                      <Layers className="w-4.5 h-4.5 text-[var(--primary-color)]" />
+                      เมนูการทำงานหลัก (Main Application Tabs)
+                    </h4>
+                  </div>
+                  <div className="p-4 divide-y divide-[var(--border-lighter)]">
+                    {/* Overview */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">📊</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">หน้าภาพรวมระบบ (System Overview)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">แสดงสถิติความเคลื่อนไหว กราฟ และสรุปงาน</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.overview !== false}
+                          onChange={() => handleToggleFeature('overview')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Inbox */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">📥</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">ทะเบียนหนังสือรับ (Receipt Registry)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">จัดการ ลงทะเบียน และจัดเก็บเอกสารเข้า</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.inbox !== false}
+                          onChange={() => handleToggleFeature('inbox')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Outbox */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">📤</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">ทะเบียนหนังสือส่ง (Dispatch Registry)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">ออกเลข ออกรหัส และติดตามหนังสือออก</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.outbox !== false}
+                          onChange={() => handleToggleFeature('outbox')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Admin Docs */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">📋</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">ระบบงานธุรการ (Administrative Docs)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">คำสั่ง ประกาศ หนังสือเวียน งานส่วนกลาง</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.admin_docs !== false}
+                          onChange={() => handleToggleFeature('admin_docs')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Draft Docs */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">✍️</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">ระบบร่างเอกสาร (Drafting System)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">เครื่องมือช่วยเขียน ร่าง และประมวลผลอัจฉริยะ</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.draft_docs !== false}
+                          onChange={() => handleToggleFeature('draft_docs')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Folders */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">📂</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">แฟ้มเอกสารดิจิทัล (Digital Folders)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">สิทธิ์แยกตามแผนก/บุคคล แฟ้มส่วนตัวและส่วนกลาง</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.folders !== false}
+                          onChange={() => handleToggleFeature('folders')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* System History Logs */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">🛡️</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">บันทึกประวัติระบบ (Audit History Logs)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">บันทึกการกระทำ การดาวน์โหลด และอัปโหลดไฟล์</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.logs !== false}
+                          onChange={() => handleToggleFeature('logs')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Drafting & Smart Features */}
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl overflow-hidden shadow-xs">
+                  <div className="p-4 border-b border-[var(--border-lighter)] bg-[var(--bg-canvas)]/30">
+                    <h4 className="font-bold text-sm text-[var(--text-primary)] flex items-center gap-2 font-noto-serif-thai">
+                      <Sparkles className="w-4.5 h-4.5 text-[var(--primary-color)] animate-pulse" />
+                      ฟังก์ชันงานร่างและระบบอัจฉริยะ (Drafting & AI Options)
+                    </h4>
+                  </div>
+                  <div className="p-4 divide-y divide-[var(--border-lighter)]">
+                    {/* Draft */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">📄</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">ร่างหนังสือราชการ (Letter Drafting)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">แบบฟอร์มร่างจดหมายภายใน/ภายนอกแบบมาตรฐาน</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.draft !== false}
+                          onChange={() => handleToggleFeature('draft')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Ai Scan */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">✨</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">AI สแกนเอกสาร (AI Document Scanner)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">แปลงไฟล์สแกน PDF/รูปภาพ เป็นฟิลด์แบบฟอร์มอัตโนมัติ</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.aiscan !== false}
+                          onChange={() => handleToggleFeature('aiscan')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Orders / Announcement */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">🏆</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">สืบค้นคำสั่ง / ประกาศมาตรฐาน (Orders Template)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">เทมเพลตมาตรฐานกว่า 40 รูปแบบตามระเบียบงานสารบรรณ</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.order !== false}
+                          onChange={() => handleToggleFeature('order')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Custom Order */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">✒️</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">สร้างคำสั่ง/ประกาศเอง (Custom Order Creator)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">ร่างจัดพิมพ์ประกาศและคำสั่งของหน่วยงานแบบฟอร์มกำหนดเอง</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.customorder !== false}
+                          onChange={() => handleToggleFeature('customorder')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Speeches / Reports */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">🎤</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">คำกล่าว / รายงานเปิดงาน (Speeches Template)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">เทมเพลตคำกล่าวรายงานในพิธี คำกล่าวเปิดงานกว่า 100+ แบบ</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.speech !== false}
+                          onChange={() => handleToggleFeature('speech')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Meeting Minutes */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">👥</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">บันทึกรายงานการประชุม (Meeting Minutes)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">จดบันทึกระเบียบวาระการประชุม และพิมพ์รายงานได้ทันที</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.meeting !== false}
+                          onChange={() => handleToggleFeature('meeting')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+
+                    {/* Project Summary */}
+                    <div className="py-3 flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">📈</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">สรุปโครงการด้วย AI (AI Project Summarizer)</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">คำนวณงบประมาณ ตัวชี้วัด และสรุปรูปโครงการอัตโนมัติ</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.summary !== false}
+                          onChange={() => handleToggleFeature('summary')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1904,19 +2340,20 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
 
                 <div className="pt-6 mt-6 border-t border-[var(--border-light)]">
                   <button
+                    type="button"
                     onClick={handleDownloadBackup}
                     disabled={isBackingUp}
-                    className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer animate-pulse-subtle"
                   >
                     {isBackingUp ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>กำลังรวบรวมข้อมูลและสร้างไฟล์ .tar...</span>
+                        <span>กำลังรวบรวมข้อมูล...</span>
                       </>
                     ) : (
                       <>
                         <Download className="w-4 h-4" />
-                        <span>สำรองและดาวน์โหลดไฟล์ข้อมูล (.tar)</span>
+                        <span>ดาวน์โหลดข้อมูลสำรอง (.tar)</span>
                       </>
                     )}
                   </button>
@@ -1928,94 +2365,74 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                 <div className="space-y-4">
                   <div className="flex items-center gap-3 border-b border-[var(--border-light)] pb-4">
                     <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-lg">
-                      <RefreshCw className="w-5 h-5" />
+                      <Upload className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="font-noto-serif-thai font-medium text-base text-[var(--text-primary)]">
                         2. คืนค่าข้อมูลระบบ (Import Restore)
                       </h4>
                       <p className="text-xs text-[var(--text-muted)]">
-                        อัปโหลดไฟล์ .tar เพื่อคืนค่าข้อมูลระบบและไฟล์แนบทั้งหมด
+                        อัปโหลดไฟล์สำรองข้อมูล (.tar) เพื่อกู้คืนสารบรรณและไฟล์แนบ
                       </p>
                     </div>
                   </div>
 
-                  {/* Warning Notice */}
-                  <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200/90 rounded-lg p-3.5 text-xs space-y-1">
-                    <div className="font-semibold flex items-center gap-1.5 text-amber-400">
-                      <AlertTriangle className="w-4 h-4 shrink-0" /> คำเตือนสำคัญสำหรับการคืนค่าข้อมูล:
-                    </div>
-                    <p className="leading-relaxed">
-                      การคืนค่าจะทำการเขียนทับตารางข้อมูลเดิมทั้งหมดและคัดลอกไฟล์เอกสารแนบจากไฟล์ .tar กลับเข้าสู่ระบบ โปรดตรวจสอบให้แน่ใจว่าได้ใช้ไฟล์สำรองข้อมูลที่ถูกต้อง
-                    </p>
-                  </div>
+                  <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+                    เลือกไฟล์สำรองข้อมูล <strong className="text-[var(--text-primary)] font-mono">.tar</strong> ที่คุณเคยดาวน์โหลดไว้ เพื่อคืนค่าระบบทั้งหมดให้กลับไปยังช่วงเวลานั้น ข้อมูลหนังสือ บัญชี และไฟล์ต่างๆ จะถูกรีเซ็ตและอัปเดตตามไฟล์กู้คืน
+                  </p>
 
-                  {/* File Upload Dropzone */}
-                  <div className="space-y-2">
-                    <label className="block text-xs font-medium text-[var(--text-secondary)]">
-                      เลือกหรือลากไฟล์สำรองข้อมูล (.tar)
-                    </label>
-                    <div className="relative border-2 border-dashed border-[var(--border-medium)] hover:border-[var(--primary-color)] rounded-xl p-5 text-center bg-[var(--bg-canvas)] transition-colors">
-                      <input 
-                        type="file" 
+                  <div className="space-y-3">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)]">เลือกไฟล์สำรองข้อมูล (.tar)</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="file"
                         accept=".tar"
+                        id="restore-file-input"
+                        className="hidden"
                         onChange={(e) => {
                           if (e.target.files && e.target.files[0]) {
                             setRestoreFile(e.target.files[0]);
-                            setRestoreStatusMsg(null);
                           }
                         }}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                       />
-                      {restoreFile ? (
-                        <div className="flex items-center justify-between bg-[var(--bg-surface)] border border-[var(--primary-color)]/50 p-3 rounded-lg relative z-20">
-                          <div className="flex items-center gap-3 min-w-0 text-left">
-                            <div className="p-2 bg-[var(--primary-color)]/10 text-[var(--primary-color)] rounded-lg">
-                              <Database className="w-5 h-5 shrink-0" />
-                            </div>
-                            <div className="truncate">
-                              <p className="text-sm font-medium text-[var(--text-primary)] truncate">{restoreFile.name}</p>
-                              <p className="text-xs text-[var(--text-muted)]">{(restoreFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                            </div>
-                          </div>
-                          <button 
-                            type="button" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRestoreFile(null);
-                            }}
-                            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)] rounded-lg"
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('restore-file-input')?.click()}
+                        className="py-2 px-4 bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-2"
+                      >
+                        <Files className="w-4 h-4 text-[var(--text-muted)]" />
+                        <span>เลือกไฟล์ .tar...</span>
+                      </button>
+
+                      {restoreFile && (
+                        <div className="flex items-center gap-2 text-xs text-[var(--text-primary)] bg-[var(--bg-canvas)] px-3 py-1.5 rounded-lg border border-[var(--border-light)] font-mono">
+                          <span className="truncate max-w-[150px] sm:max-w-xs">{restoreFile.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setRestoreFile(null)}
+                            className="text-rose-400 hover:text-rose-500 font-semibold p-0.5"
                           >
                             <X className="w-4 h-4" />
                           </button>
-                        </div>
-                      ) : (
-                        <div className="py-2 space-y-2">
-                          <Upload className="w-8 h-8 text-[var(--text-muted)] mx-auto" />
-                          <div>
-                            <p className="text-xs font-medium text-[var(--text-primary)]">คลิกเพื่อเลือกไฟล์ หรือ ลากไฟล์ .tar มาวางที่นี่</p>
-                            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">รองรับเฉพาะไฟล์อาร์ไคฟ์ .tar เท่านั้น (ขนาดไม่เกิน 500MB)</p>
-                          </div>
                         </div>
                       )}
                     </div>
                   </div>
 
                   {restoreStatusMsg && (
-                    <div className={`p-3.5 rounded-lg text-xs space-y-1.5 ${
+                    <div className={`p-3.5 rounded-lg text-xs flex flex-col gap-1.5 border ${
                       restoreStatusMsg.type === 'success' 
-                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' 
-                        : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
                     }`}>
-                      <div className="flex items-center gap-2 font-medium">
+                      <div className="flex items-center gap-2">
                         {restoreStatusMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-                        <span>{restoreStatusMsg.text}</span>
+                        <span className="font-semibold">{restoreStatusMsg.text}</span>
                       </div>
                       {restoreStatusMsg.details && (
-                        <div className="mt-2 pt-2 border-t border-emerald-500/20 text-[11px] text-emerald-300/80 grid grid-cols-2 gap-1 font-mono">
-                          {Object.entries(restoreStatusMsg.details).map(([tbl, cnt]) => (
-                            <div key={tbl}>• {tbl}: {String(cnt)} รายการ</div>
-                          ))}
+                        <div className="pl-6 space-y-0.5 text-[10px] opacity-90 font-mono">
+                          <div>• นำเข้าเอกสาร: {restoreStatusMsg.details.documentsCount || 0} รายการ</div>
+                          <div>• คืนค่าไฟล์แนบ: {restoreStatusMsg.details.filesCount || 0} ไฟล์</div>
                         </div>
                       )}
                     </div>
@@ -2024,14 +2441,15 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
 
                 <div className="pt-6 mt-6 border-t border-[var(--border-light)]">
                   <button
+                    type="button"
                     onClick={() => setShowRestoreConfirmModal(true)}
                     disabled={!restoreFile || isRestoring}
-                    className="w-full py-3 px-4 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full py-3 px-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isRestoring ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>กำลังคืนค่าข้อมูลระบบ... โปรดรอสักครู่</span>
+                        <span>กำลังคืนค่าระบบ... โปรดรอสักครู่</span>
                       </>
                     ) : (
                       <>
@@ -2054,6 +2472,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                       <AlertTriangle className="w-5 h-5 text-amber-400" /> ยืนยันการคืนค่าข้อมูลระบบ
                     </h3>
                     <button 
+                      type="button"
                       onClick={() => setShowRestoreConfirmModal(false)}
                       className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-1 rounded-lg"
                     >
@@ -2096,51 +2515,55 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         )}
 
         {activeTab === 'dedup' && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-6 animate-fade-in text-[var(--text-primary)]">
             {/* Header section */}
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 shadow-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-5 sm:p-6 shadow-xs">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                 <div className="flex items-start gap-4">
-                  <div className="p-3 bg-indigo-500/10 text-indigo-500 rounded-xl">
-                    <HardDrive className="w-7 h-7" />
+                  <div className="p-3 bg-indigo-500/10 text-indigo-500 rounded-xl shrink-0">
+                    <HardDrive className="w-6 h-6 sm:w-7 sm:h-7" />
                   </div>
-                  <div>
-                    <h3 className="text-xl font-noto-serif-thai font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                      ระบบบริหารจัดการและลดความซ้ำซ้อนของไฟล์ (Single-Instance Storage & Pointer Links)
-                      <span className="px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-500 font-sans border border-emerald-500/20">
-                        ประหยัดพื้นที่คลาวด์มหาศาล
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg sm:text-xl font-noto-serif-thai font-semibold text-[var(--text-primary)]">
+                        ระบบบริหารจัดการและลดความซ้ำซ้อนของไฟล์
+                      </h3>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-500 font-sans border border-emerald-500/20 font-medium">
+                        ประหยัดพื้นที่เซิร์ฟเวอร์
                       </span>
-                    </h3>
-                    <p className="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed max-w-4xl">
-                      ตรวจจับและรวมไฟล์เอกสารแนบที่มีเนื้อหาตรงกัน 100% (SHA-256 Checksum) เช่น ไฟล์ระเบียบหรือคู่มือขนาดใหญ่ที่ถูกส่งแนบมาหลายๆ ครั้ง ให้เหลือไฟล์ต้นฉบับเพียงไฟล์เดียวในดิสก์ แล้วสร้าง Pointer Link เชื่อมโยง โดยไม่กระทบต่อลิงก์เดิมของหนังสือแต่ละฉบับ
+                    </div>
+                    <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed max-w-4xl">
+                      สแกนและตรวจจับไฟล์เอกสารแนบที่มีเนื้อหาตรงกันแบบ 100% (SHA-256 Checksum) เพื่อรวมให้เหลือไฟล์ต้นฉบับจริงเพียงหนึ่งไฟล์ในระบบจัดเก็บ และสร้าง Pointer Link ชี้ลิงก์เดิมทั้งหมดไปยังไฟล์จริง ช่วยประหยัดเนื้อที่เซิร์ฟเวอร์ได้อย่างมหาศาลโดยไม่ทำให้โครงสร้างลิงก์เดิมเสียหาย
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
                   <button
+                    type="button"
                     onClick={fetchDedupStats}
                     disabled={isScanningDedup}
-                    className="py-2.5 px-4 bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-sm font-medium transition-all flex items-center gap-2 cursor-pointer"
+                    className="py-2.5 px-4 bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-60"
                   >
                     <RefreshCw className={`w-4 h-4 ${isScanningDedup ? 'animate-spin' : ''}`} />
-                    <span>สแกนค้นหาไฟล์ซ้ำ</span>
+                    <span>สแกนหาไฟล์ซ้ำ</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={handleExecuteDedup}
                     disabled={isExecutingDedup || !dedupStats || (dedupStats.duplicateCount === 0 && dedupStats.potentialSavedSpaceBytes === 0)}
-                    className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                    className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-95"
                   >
                     {isExecutingDedup ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>กำลังรวมไฟล์ซ้ำและสร้าง Pointer...</span>
+                        <span>กำลังดำเนินการรวมไฟล์...</span>
                       </>
                     ) : (
                       <>
                         <Layers className="w-4 h-4" />
-                        <span>รวมไฟล์ซ้ำ และสร้าง Pointer ลิงก์</span>
+                        <span>เริ่มเคลียร์ไฟล์ซ้ำ (สร้าง Pointer)</span>
                       </>
                     )}
                   </button>
@@ -2150,110 +2573,112 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
 
             {/* Notification message */}
             {dedupMsg && (
-              <div className={`p-4 rounded-xl text-sm flex items-center gap-3 ${
+              <div className={`p-4 rounded-xl text-sm flex items-start sm:items-center gap-3 ${
                 dedupMsg.type === 'success' 
                   ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' 
                   : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
               }`}>
-                {dedupMsg.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
-                <span className="font-medium">{dedupMsg.text}</span>
+                {dedupMsg.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5 sm:mt-0" /> : <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 sm:mt-0" />}
+                <span className="font-medium leading-relaxed">{dedupMsg.text}</span>
               </div>
             )}
 
             {/* Metrics cards */}
             {dedupStats && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
-                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
-                    <span>พื้นที่ดิสก์ที่ประหยัดได้/ประหยัดแล้ว</span>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-xs hover:border-emerald-500/30 transition-all">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1.5">
+                    <span className="font-medium">พื้นที่ดิสก์ที่ประหยัดได้/ประหยัดแล้ว</span>
                     <Zap className="w-4 h-4 text-emerald-500" />
                   </div>
-                  <div className="text-2xl font-bold text-emerald-500 font-mono">
+                  <div className="text-2xl sm:text-3xl font-bold text-emerald-500 font-mono tracking-tight">
                     {dedupStats.potentialSavedSpaceFormatted || '0 B'}
                   </div>
-                  <div className="text-xs text-[var(--text-muted)] mt-1">
-                    จากไฟล์ซ้ำ {dedupStats.duplicateCount || 0} รายการ
+                  <div className="text-xs text-[var(--text-secondary)] mt-1.5">
+                    จากคู่ซ้ำซ้อนทั้งหมด <strong className="text-emerald-500 font-semibold">{dedupStats.duplicateCount || 0}</strong> ไฟล์
                   </div>
                 </div>
 
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
-                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
-                    <span>จำนวนไฟล์แนบทั้งหมดในระบบ</span>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-xs hover:border-sky-500/30 transition-all">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1.5">
+                    <span className="font-medium">จำนวนไฟล์แนบทั้งหมดในระบบ</span>
                     <Files className="w-4 h-4 text-sky-500" />
                   </div>
-                  <div className="text-2xl font-bold text-[var(--text-primary)] font-mono">
-                    {dedupStats.totalFiles || 0} ไฟล์
+                  <div className="text-2xl sm:text-3xl font-bold text-[var(--text-primary)] font-mono tracking-tight">
+                    {dedupStats.totalFiles || 0} <span className="text-sm font-normal text-[var(--text-secondary)]">ไฟล์</span>
                   </div>
-                  <div className="text-xs text-[var(--text-muted)] mt-1">
-                    ขนาดรวม {dedupStats.totalSizeFormatted || '0 B'}
+                  <div className="text-xs text-[var(--text-secondary)] mt-1.5">
+                    ขนาดทั้งหมดในดิสก์ {dedupStats.totalSizeFormatted || '0 B'}
                   </div>
                 </div>
 
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
-                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
-                    <span>ไฟล์ต้นฉบับจริง (Unique Masters)</span>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-xs hover:border-indigo-500/30 transition-all">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1.5">
+                    <span className="font-medium">ไฟล์ต้นฉบับจริง (Unique Masters)</span>
                     <CheckCircle2 className="w-4 h-4 text-indigo-500" />
                   </div>
-                  <div className="text-2xl font-bold text-indigo-400 font-mono">
-                    {dedupStats.uniqueMasterFiles || 0} ไฟล์
+                  <div className="text-2xl sm:text-3xl font-bold text-indigo-400 font-mono tracking-tight">
+                    {dedupStats.uniqueMasterFiles || 0} <span className="text-sm font-normal text-[var(--text-secondary)]">ไฟล์</span>
                   </div>
-                  <div className="text-xs text-[var(--text-muted)] mt-1">
-                    ขนาดจริงบนดิสก์ {dedupStats.uniqueSizeFormatted || '0 B'}
+                  <div className="text-xs text-[var(--text-secondary)] mt-1.5">
+                    ขนาดพื้นที่ข้อมูลจริง {dedupStats.uniqueSizeFormatted || '0 B'}
                   </div>
                 </div>
 
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm">
-                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1">
-                    <span>Pointer Links ที่สร้างแล้ว</span>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-xs hover:border-amber-500/30 transition-all">
+                  <div className="flex items-center justify-between text-[var(--text-muted)] text-xs mb-1.5">
+                    <span className="font-medium">Pointer Links ที่ทำงานอยู่</span>
                     <Copy className="w-4 h-4 text-amber-500" />
                   </div>
-                  <div className="text-2xl font-bold text-amber-400 font-mono">
-                    {dedupStats.pointerCount || 0} พอยน์เตอร์
+                  <div className="text-2xl sm:text-3xl font-bold text-amber-400 font-mono tracking-tight">
+                    {dedupStats.pointerCount || 0} <span className="text-xs font-normal text-[var(--text-secondary)]">พอยน์เตอร์</span>
                   </div>
-                  <div className="text-xs text-[var(--text-muted)] mt-1">
-                    เชื่อมโยงไปยังไฟล์ต้นฉบับ
+                  <div className="text-xs text-[var(--text-secondary)] mt-1.5">
+                    ชี้เชื่อมโยงไปยังมาสเตอร์ไฟล์เพื่อลดการเก็บซ้ำ
                   </div>
                 </div>
               </div>
             )}
 
             {/* Auto Deduplication Toggle Option */}
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-sm flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-500/10 text-indigo-500 rounded-lg">
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-5 rounded-xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-indigo-500/10 text-indigo-500 rounded-lg shrink-0">
                   <Zap className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="font-medium text-sm text-[var(--text-primary)]">
-                    รวมไฟล์ซ้ำอัตโนมัติเมื่อมีการอัปโหลด (Real-time Upload Deduplication)
+                  <h4 className="font-semibold text-sm text-[var(--text-primary)]">
+                    รวมไฟล์ซ้ำอัตโนมัติทันทีที่อัปโหลด
                   </h4>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    เมื่อผู้ใช้งานอัปโหลดไฟล์แนบ ระบบจะตรวจสอบ SHA-256 Checksum หากพบว่ามีไฟล์ตรงกันในระบบ จะทำ Pointer ลิงก์ไปยังไฟล์ต้นฉบับทันที
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+                    เมื่อเจ้าหน้าที่อัปโหลดไฟล์แนบ ระบบจะสแกนหาไฟล์ที่ตรงกันทันที หากพบไฟล์ที่ซ้ำกันอยู่แล้ว จะทำการแปลงให้เป็น Pointer Link โดยอัตโนมัติ โดยไม่ต้องรอกดสั่งสแกนรายสัปดาห์
                   </p>
                 </div>
               </div>
 
-              <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                <input
-                  type="checkbox"
-                  checked={autoDedupOnUpload}
-                  onChange={handleToggleAutoDedup}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-              </label>
+              <div className="flex items-center sm:self-center shrink-0 pl-11 sm:pl-0">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoDedupOnUpload}
+                    onChange={handleToggleAutoDedup}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
             </div>
 
             {/* Duplicate File Groups List */}
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-[var(--border-light)] flex items-center justify-between">
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-xs overflow-hidden">
+              <div className="p-5 border-b border-[var(--border-light)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--bg-canvas)]/35">
                 <div>
-                  <h4 className="font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
+                  <h4 className="font-semibold text-base text-[var(--text-primary)] flex items-center gap-2 font-noto-serif-thai">
                     <Copy className="w-5 h-5 text-indigo-500" />
-                    กลุ่มไฟล์แนบที่ซ้ำซ้อนกันในเซิร์ฟเวอร์ ({dedupStats?.groups?.length || 0} กลุ่ม)
+                    กลุ่มไฟล์แนบที่ตรวจพบความซ้ำซ้อน ({dedupStats?.groups?.length || 0} กลุ่ม)
                   </h4>
                   <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                    รายการไฟล์ซ้ำที่ตรวจพบ โดยไฟล์ต้นฉบับจะถูกเก็บไว้ และไฟล์สำเนาอื่นๆ จะถูกเปลี่ยนเป็น Pointer ลิงก์
+                    ไฟล์ซ้ำที่มี Hash ตรงกัน จะเหลือเพียงไฟล์มาสเตอร์ไฟล์เดียวบนระบบดิสก์ ส่วนไฟล์อื่นจะถูกแปลงเป็น Pointer
                   </p>
                 </div>
               </div>
@@ -2261,35 +2686,35 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
               {isScanningDedup ? (
                 <div className="p-12 text-center text-[var(--text-secondary)]">
                   <RefreshCw className="w-8 h-8 animate-spin mx-auto text-indigo-500 mb-3" />
-                  <p className="text-sm">กำลังสแกนคำนวณไฟล์แนบและ SHA-256 Checksum ในเซิร์ฟเวอร์...</p>
+                  <p className="text-sm font-medium">กำลังคำนวณ Checksum และสแกนหาไฟล์ที่ซ้ำในระบบ...</p>
                 </div>
               ) : !dedupStats || !dedupStats.groups || dedupStats.groups.length === 0 ? (
-                <div className="p-12 text-center text-[var(--text-secondary)] space-y-2">
+                <div className="p-12 text-center text-[var(--text-secondary)] space-y-3">
                   <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500 opacity-80" />
-                  <p className="font-medium text-base text-[var(--text-primary)]">ไม่พบไฟล์ซ้ำซ้อนในเซิร์ฟเวอร์</p>
-                  <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
-                    ระบบจัดเก็บไฟล์ในเซิร์ฟเวอร์มีความเป็นระเบียบเรียบร้อย หรือไฟล์ซ้ำซ้อนทั้งหมดได้รับการรวมเป็น Pointer ลิงก์เรียบร้อยแล้ว
+                  <p className="font-medium text-base text-[var(--text-primary)]">ไม่พบไฟล์ซ้ำในระบบ</p>
+                  <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto leading-relaxed">
+                    ระบบจัดเก็บไฟล์ทั้งหมดของคุณสะอาด มีความเป็นระเบียบเรียบร้อย หรือไฟล์ซ้ำได้รับการบีบอัดเรียบร้อยหมดแล้ว
                   </p>
                 </div>
               ) : (
                 <div className="divide-y divide-[var(--border-light)]">
                   {dedupStats.groups.map((group: any, idx: number) => (
-                    <div key={group.hash || idx} className="p-5 hover:bg-[var(--bg-canvas)]/50 transition-colors space-y-4">
-                      {/* Group Header */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[var(--bg-canvas)] p-3 rounded-lg border border-[var(--border-lighter)]">
-                        <div className="flex items-center gap-3">
-                          <span className="w-7 h-7 rounded-full bg-indigo-500/10 text-indigo-400 font-mono text-xs font-bold flex items-center justify-center shrink-0">
+                    <div key={group.hash || idx} className="p-4 sm:p-5 hover:bg-[var(--bg-canvas)]/20 transition-colors space-y-4">
+                      {/* Group Header Info */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[var(--bg-canvas)]/50 p-3 sm:p-4 rounded-xl border border-[var(--border-lighter)] shadow-inner">
+                        <div className="flex items-start sm:items-center gap-3">
+                          <span className="w-7 h-7 rounded-full bg-indigo-500/15 text-indigo-400 font-mono text-xs font-bold flex items-center justify-center shrink-0">
                             #{idx + 1}
                           </span>
                           <div>
-                            <div className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                              <span>ขนาดไฟล์: {group.fileSizeFormatted}</span>
-                              <span className="text-xs font-normal text-[var(--text-muted)] font-mono">
-                                (SHA-256: {group.hash.substring(0, 12)}...)
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-semibold text-[var(--text-primary)]">ขนาดกลุ่ม: {group.fileSizeFormatted}</span>
+                              <span className="text-[11px] px-2 py-0.5 rounded-md bg-[var(--bg-surface)] text-[var(--text-muted)] font-mono border border-[var(--border-lighter)]">
+                                SHA-256: {group.hash.substring(0, 12)}
                               </span>
                             </div>
-                            <div className="text-xs text-[var(--text-secondary)]">
-                              พบคู่ซ้ำ {group.duplicatesCount} สำเนา • ประหยัดพื้นที่กลุ่มนี้ได้ <strong className="text-emerald-400">{group.savedSpaceFormatted}</strong>
+                            <div className="text-xs text-[var(--text-secondary)] mt-0.5">
+                              พบคู่ซ้ำทั้งหมด <strong className="text-indigo-400 font-medium">{group.duplicatesCount}</strong> สำเนา • ประหยัดเนื้อที่กลุ่มนี้ได้ <strong className="text-emerald-500 font-medium">{group.savedSpaceFormatted}</strong>
                             </div>
                           </div>
                         </div>
@@ -2298,60 +2723,60 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                           href={`/api/files/view?url=${encodeURIComponent(group.masterFile.url)}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 self-start sm:self-auto"
+                          className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 self-start md:self-auto cursor-pointer border border-indigo-500/20 shadow-xs h-[36px] min-w-[120px]"
                         >
                           <Eye className="w-3.5 h-3.5" />
-                          <span>เปิดดูไฟล์ต้นฉบับ</span>
+                          <span>เปิดไฟล์หลัก</span>
                         </a>
                       </div>
 
-                      {/* Master file item */}
-                      <div className="pl-4 border-l-2 border-indigo-500 space-y-1">
+                      {/* Master file Section */}
+                      <div className="pl-3 sm:pl-4 border-l-2 border-indigo-500 space-y-1.5">
                         <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>ไฟล์ต้นฉบับหลัก (Master Original File):</span>
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>ไฟล์หลัก (Master File):</span>
                         </div>
-                        <div className="text-xs text-[var(--text-primary)] font-mono break-all bg-[var(--bg-surface)] p-2 rounded border border-[var(--border-lighter)] flex items-center justify-between">
-                          <span>{group.masterFile.url}</span>
-                          <span className="text-[10px] text-[var(--text-muted)] shrink-0 pl-2">
-                            {group.masterFile.referencedDocs?.length > 0 ? `แนบกับ ${group.masterFile.referencedDocs.length} เอกสาร` : 'ไฟล์ระบบ'}
+                        <div className="text-xs text-[var(--text-primary)] font-mono bg-[var(--bg-surface)] p-3 rounded-lg border border-[var(--border-lighter)] flex flex-col md:flex-row md:items-center justify-between gap-2 shadow-xs">
+                          <span className="break-all leading-relaxed select-all pr-2">{group.masterFile.url}</span>
+                          <span className="text-[10px] text-indigo-400 font-sans font-medium px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/10 shrink-0 self-start md:self-auto mt-1 md:mt-0">
+                            {group.masterFile.referencedDocs?.length > 0 ? `เชื่อมกับ ${group.masterFile.referencedDocs.length} เอกสาร` : 'ไฟล์ของระบบ'}
                           </span>
                         </div>
                       </div>
 
-                      {/* Duplicates list */}
-                      <div className="pl-4 border-l-2 border-[var(--border-medium)] space-y-2">
-                        <div className="text-xs font-medium text-[var(--text-secondary)] flex items-center gap-1.5">
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>สำเนาไฟล์ซ้ำในระบบ ({group.duplicates.length} ไฟล์):</span>
+                      {/* Duplicates Section */}
+                      <div className="pl-3 sm:pl-4 border-l-2 border-[var(--border-medium)] space-y-2.5">
+                        <div className="text-xs font-semibold text-[var(--text-secondary)] flex items-center gap-1.5">
+                          <Copy className="w-3.5 h-3.5 shrink-0 text-[var(--text-muted)]" />
+                          <span>รายการสำเนาไฟล์ที่ซ้ำและสร้าง Pointer ลิงก์ ({group.duplicates.length} ไฟล์):</span>
                         </div>
 
-                        <div className="space-y-1.5">
+                        <div className="space-y-2">
                           {group.duplicates.map((dup: any, dIdx: number) => (
-                            <div key={dup.url || dIdx} className="text-xs bg-[var(--bg-surface)] p-2.5 rounded border border-[var(--border-lighter)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <div className="font-mono text-[var(--text-secondary)] break-all flex items-center gap-2">
-                                <span className="text-[10px] text-[var(--text-muted)]">[{dIdx + 1}]</span>
-                                <span>{dup.url}</span>
+                            <div key={dup.url || dIdx} className="text-xs bg-[var(--bg-surface)] p-3 rounded-lg border border-[var(--border-lighter)] flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+                              <div className="font-mono text-[var(--text-secondary)] break-all flex items-start gap-2 leading-relaxed">
+                                <span className="text-[10px] text-[var(--text-muted)] font-sans mt-0.5">[{dIdx + 1}]</span>
+                                <span className="select-all">{dup.url}</span>
                               </div>
 
-                              <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 border-t md:border-t-0 pt-2 md:pt-0 border-[var(--border-lighter)] mt-1 md:mt-0">
                                 {dup.isHardLinked ? (
-                                  <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3" />
-                                    <span>ทำ Pointer แล้ว (0 B)</span>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans font-medium">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                    <span>ย้ายไป Pointer แล้ว (0 B)</span>
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans">
-                                    รอทำ Pointer ({group.fileSizeFormatted})
+                                  <span className="px-2.5 py-1 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans font-medium">
+                                    รอเคลียร์เป็น Pointer ({group.fileSizeFormatted})
                                   </span>
                                 )}
 
                                 <a
                                   href={`/api/files/download?url=${encodeURIComponent(dup.url)}`}
-                                  className="p-1 hover:bg-[var(--border-lighter)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                  className="w-[34px] h-[34px] flex items-center justify-center bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] border border-[var(--border-medium)] rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all cursor-pointer shadow-xs"
                                   title="ทดสอบดาวน์โหลดผ่านลิงก์สำเนา"
                                 >
-                                  <Download className="w-3.5 h-3.5" />
+                                  <Download className="w-4 h-4" />
                                 </a>
                               </div>
                             </div>
@@ -2365,6 +2790,8 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
             </div>
           </div>
         )}
+
+
 
       </div>
       {/* Add User Modal */}

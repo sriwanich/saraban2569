@@ -9,14 +9,19 @@ import {
 interface Props {
   documents: DocumentItem[];
   user?: User;
-  onCreateDoc: () => void;
+  onCreateDoc: (type?: 'inbox' | 'outbox' | 'admin') => void;
   onViewDoc: (doc: DocumentItem) => void;
+  enabledFeatures?: Record<string, boolean>;
 }
 
-export default function Overview({ documents, user, onCreateDoc, onViewDoc }: Props) {
+export default function Overview({ documents, user, onCreateDoc, onViewDoc, enabledFeatures }: Props) {
   const [selectedYear, setSelectedYear] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'recent' | 'urgent'>('recent');
+
+  const showInbox = !enabledFeatures || enabledFeatures.inbox !== false;
+  const showOutbox = !enabledFeatures || enabledFeatures.outbox !== false;
+  const showAdmin = !enabledFeatures || enabledFeatures.admin_docs !== false;
 
   // Available Years
   const availableYears = useMemo(() => {
@@ -28,11 +33,16 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc }: Pr
   // Filtered Documents
   const filteredDocs = useMemo(() => {
     return documents.filter(doc => {
+      // Filter out disabled feature types
+      if (doc.type === 'inbox' && !showInbox) return false;
+      if (doc.type === 'outbox' && !showOutbox) return false;
+      if (doc.type === 'admin' && !showAdmin) return false;
+
       const matchYear = selectedYear === 'all' || doc.year === selectedYear;
       const matchType = selectedType === 'all' || doc.type === selectedType;
       return matchYear && matchType;
     });
-  }, [documents, selectedYear, selectedType]);
+  }, [documents, selectedYear, selectedType, showInbox, showOutbox, showAdmin]);
 
   // Core Counts
   const totalCount = filteredDocs.length;
@@ -176,27 +186,41 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc }: Pr
                 className="bg-transparent text-[var(--text-primary)] font-semibold focus:outline-none cursor-pointer"
               >
                 <option value="all">ระบบงานทั้งหมด</option>
-                <option value="inbox">หนังสือรับ</option>
-                <option value="outbox">หนังสือส่ง</option>
-                <option value="admin">งานธุรการ</option>
+                {showInbox && <option value="inbox">หนังสือรับ</option>}
+                {showOutbox && <option value="outbox">หนังสือส่ง</option>}
+                {showAdmin && <option value="admin">งานธุรการ</option>}
               </select>
             </div>
 
-            <button 
-              onClick={onCreateDoc}
-              className="flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/20 border border-[var(--primary-dark)]/10"
-            >
-              <FileText className="w-4 h-4 shrink-0" />
-              <span>+ ลงทะเบียนหนังสือ</span>
-            </button>
+            {(showInbox || showOutbox || showAdmin) && (
+              <button 
+                onClick={() => {
+                  if (showInbox) onCreateDoc('inbox');
+                  else if (showOutbox) onCreateDoc('outbox');
+                  else if (showAdmin) onCreateDoc('admin');
+                }}
+                className="flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/20 border border-[var(--primary-dark)]/10"
+              >
+                <FileText className="w-4 h-4 shrink-0" />
+                <span>+ ลงทะเบียนหนังสือ</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* KPI Highlight Cards (5 Metrics) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {/* Metric 1: Total Docs */}
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-[var(--primary-color)]/40 transition-all group">
+      {(() => {
+        const activeCardsCount = 2 + (showInbox ? 1 : 0) + (showOutbox ? 1 : 0) + (showAdmin ? 1 : 0);
+        const gridColsClass = 
+          activeCardsCount === 5 ? 'lg:grid-cols-5' :
+          activeCardsCount === 4 ? 'lg:grid-cols-4' :
+          activeCardsCount === 3 ? 'lg:grid-cols-3' :
+          'lg:grid-cols-2';
+        return (
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${gridColsClass} gap-4`}>
+            {/* Metric 1: Total Docs */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-[var(--primary-color)]/40 transition-all group">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-semibold text-[var(--text-secondary)]">เอกสารรวมทั้งหมด</span>
             <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
@@ -216,64 +240,70 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc }: Pr
         </div>
 
         {/* Metric 2: Inbox Docs */}
-        <div className="bg-[var(--bg-surface)] border border-blue-500/15 rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-blue-500/40 transition-all group">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">หนังสือรับ (Inbox)</span>
-            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
-              <Inbox className="w-4 h-4" />
+        {showInbox && (
+          <div className="bg-[var(--bg-surface)] border border-blue-500/15 rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-blue-500/40 transition-all group">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-semibold text-[var(--text-secondary)]">หนังสือรับ (Inbox)</span>
+              <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
+                <Inbox className="w-4 h-4" />
+              </div>
+            </div>
+            <div>
+              <div className="text-3xl font-extrabold font-mono text-blue-500 flex items-baseline gap-1.5">
+                {inboxDocs.length}
+                <span className="text-xs font-sarabun font-normal text-[var(--text-muted)]">ฉบับ</span>
+              </div>
+              <div className="mt-2 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-medium">
+                <span>คิดเป็น {totalCount > 0 ? Math.round((inboxDocs.length / totalCount) * 100) : 0}%</span>
+                <span className="text-blue-500 font-semibold">{inboxDocs.filter(d => d.status === 'เสนอผู้บริหาร').length} เสนอผู้บริหาร</span>
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-3xl font-extrabold font-mono text-blue-500 flex items-baseline gap-1.5">
-              {inboxDocs.length}
-              <span className="text-xs font-sarabun font-normal text-[var(--text-muted)]">ฉบับ</span>
-            </div>
-            <div className="mt-2 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-medium">
-              <span>คิดเป็น {totalCount > 0 ? Math.round((inboxDocs.length / totalCount) * 100) : 0}%</span>
-              <span className="text-blue-500 font-semibold">{inboxDocs.filter(d => d.status === 'เสนอผู้บริหาร').length} เสนอผู้บริหาร</span>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Metric 3: Outbox Docs */}
-        <div className="bg-[var(--bg-surface)] border border-emerald-500/15 rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-emerald-500/40 transition-all group">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">หนังสือส่ง (Outbox)</span>
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
-              <Send className="w-4 h-4" />
+        {showOutbox && (
+          <div className="bg-[var(--bg-surface)] border border-emerald-500/15 rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-emerald-500/40 transition-all group">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-semibold text-[var(--text-secondary)]">หนังสือส่ง (Outbox)</span>
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
+                <Send className="w-4 h-4" />
+              </div>
+            </div>
+            <div>
+              <div className="text-3xl font-extrabold font-mono text-emerald-500 flex items-baseline gap-1.5">
+                {outboxDocs.length}
+                <span className="text-xs font-sarabun font-normal text-[var(--text-muted)]">ฉบับ</span>
+              </div>
+              <div className="mt-2 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-medium">
+                <span>คิดเป็น {totalCount > 0 ? Math.round((outboxDocs.length / totalCount) * 100) : 0}%</span>
+                <span className="text-emerald-500 font-semibold">{circularCount} หนังสือเวียน</span>
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-3xl font-extrabold font-mono text-emerald-500 flex items-baseline gap-1.5">
-              {outboxDocs.length}
-              <span className="text-xs font-sarabun font-normal text-[var(--text-muted)]">ฉบับ</span>
-            </div>
-            <div className="mt-2 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-medium">
-              <span>คิดเป็น {totalCount > 0 ? Math.round((outboxDocs.length / totalCount) * 100) : 0}%</span>
-              <span className="text-emerald-500 font-semibold">{circularCount} หนังสือเวียน</span>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Metric 4: Admin Docs */}
-        <div className="bg-[var(--bg-surface)] border border-violet-500/15 rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-violet-500/40 transition-all group">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">งานธุรการ / คำสั่ง</span>
-            <div className="p-2 rounded-xl bg-violet-500/10 text-violet-500">
-              <FileCheck className="w-4 h-4" />
+        {showAdmin && (
+          <div className="bg-[var(--bg-surface)] border border-violet-500/15 rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-violet-500/40 transition-all group">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-semibold text-[var(--text-secondary)]">งานธุรการ / คำสั่ง</span>
+              <div className="p-2 rounded-xl bg-violet-500/10 text-violet-500">
+                <FileCheck className="w-4 h-4" />
+              </div>
+            </div>
+            <div>
+              <div className="text-3xl font-extrabold font-mono text-violet-500 flex items-baseline gap-1.5">
+                {adminDocs.length}
+                <span className="text-xs font-sarabun font-normal text-[var(--text-muted)]">ฉบับ</span>
+              </div>
+              <div className="mt-2 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-medium">
+                <span>คำสั่ง {ordersCount} | ประกาศ {announcementsCount}</span>
+                <span className="text-violet-500 font-semibold">{certificatesCount} ใบรับรอง</span>
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-3xl font-extrabold font-mono text-violet-500 flex items-baseline gap-1.5">
-              {adminDocs.length}
-              <span className="text-xs font-sarabun font-normal text-[var(--text-muted)]">ฉบับ</span>
-            </div>
-            <div className="mt-2 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-medium">
-              <span>คำสั่ง {ordersCount} | ประกาศ {announcementsCount}</span>
-              <span className="text-violet-500 font-semibold">{certificatesCount} ใบรับรอง</span>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Metric 5: Urgent & Confidential Alert */}
         <div className="bg-[var(--bg-surface)] border border-red-500/20 rounded-2xl p-4 lg:p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:border-red-500/40 transition-all group bg-red-500/[0.02]">
@@ -298,6 +328,8 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc }: Pr
           </div>
         </div>
       </div>
+        );
+      })()}
 
       {/* Analytics Visual Grid: 3 Main Statistics Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -314,66 +346,85 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc }: Pr
             </div>
 
             {/* Custom SVG Stacked Meter Bar */}
-            <div className="space-y-4">
-              <div className="h-4 w-full bg-[var(--bg-elevated)] rounded-full overflow-hidden flex p-0.5 border border-[var(--border-light)] shadow-inner">
-                <div 
-                  style={{ width: `${totalCount > 0 ? (inboxDocs.length / totalCount) * 100 : 33}%` }} 
-                  className="bg-blue-500 h-full rounded-l-full transition-all duration-500" 
-                  title={`หนังสือรับ ${inboxDocs.length} ฉบับ`}
-                />
-                <div 
-                  style={{ width: `${totalCount > 0 ? (outboxDocs.length / totalCount) * 100 : 33}%` }} 
-                  className="bg-emerald-500 h-full transition-all duration-500" 
-                  title={`หนังสือส่ง ${outboxDocs.length} ฉบับ`}
-                />
-                <div 
-                  style={{ width: `${totalCount > 0 ? (adminDocs.length / totalCount) * 100 : 34}%` }} 
-                  className="bg-violet-500 h-full rounded-r-full transition-all duration-500" 
-                  title={`งานธุรการ ${adminDocs.length} ฉบับ`}
-                />
-              </div>
-
-              {/* Legends with Details */}
-              <div className="space-y-2.5 pt-2">
-                <div className="flex items-center justify-between text-xs p-2 rounded-xl bg-blue-500/5 border border-blue-500/10">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-md bg-blue-500 inline-block shrink-0" />
-                    <span className="font-medium text-[var(--text-primary)]">หนังสือรับ (Inbox)</span>
+            {(() => {
+              const activeTotalCount = (showInbox ? inboxDocs.length : 0) + (showOutbox ? outboxDocs.length : 0) + (showAdmin ? adminDocs.length : 0);
+              return (
+                <div className="space-y-4">
+                  <div className="h-4 w-full bg-[var(--bg-elevated)] rounded-full overflow-hidden flex p-0.5 border border-[var(--border-light)] shadow-inner">
+                    {showInbox && inboxDocs.length > 0 && (
+                      <div 
+                        style={{ width: `${activeTotalCount > 0 ? (inboxDocs.length / activeTotalCount) * 100 : 33}%` }} 
+                        className="bg-blue-500 h-full rounded-l-full transition-all duration-500" 
+                        title={`หนังสือรับ ${inboxDocs.length} ฉบับ`}
+                      />
+                    )}
+                    {showOutbox && outboxDocs.length > 0 && (
+                      <div 
+                        style={{ width: `${activeTotalCount > 0 ? (outboxDocs.length / activeTotalCount) * 100 : 33}%` }} 
+                        className={`bg-emerald-500 h-full transition-all duration-500 ${!showInbox ? 'rounded-l-full' : ''} ${!showAdmin ? 'rounded-r-full' : ''}`} 
+                        title={`หนังสือส่ง ${outboxDocs.length} ฉบับ`}
+                      />
+                    )}
+                    {showAdmin && adminDocs.length > 0 && (
+                      <div 
+                        style={{ width: `${activeTotalCount > 0 ? (adminDocs.length / activeTotalCount) * 100 : 34}%` }} 
+                        className={`bg-violet-500 h-full rounded-r-full transition-all duration-500 ${(!showInbox && !showOutbox) ? 'rounded-l-full' : ''}`} 
+                        title={`งานธุรการ ${adminDocs.length} ฉบับ`}
+                      />
+                    )}
                   </div>
-                  <div className="font-mono font-semibold text-blue-500">
-                    {inboxDocs.length} <span className="text-[var(--text-muted)] font-normal text-[0.7rem]">({totalCount > 0 ? Math.round((inboxDocs.length / totalCount) * 100) : 0}%)</span>
+
+                  {/* Legends with Details */}
+                  <div className="space-y-2.5 pt-2">
+                    {showInbox && (
+                      <div className="flex items-center justify-between text-xs p-2 rounded-xl bg-blue-500/5 border border-blue-500/10">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-md bg-blue-500 inline-block shrink-0" />
+                          <span className="font-medium text-[var(--text-primary)]">หนังสือรับ (Inbox)</span>
+                        </div>
+                        <div className="font-mono font-semibold text-blue-500">
+                          {inboxDocs.length} <span className="text-[var(--text-muted)] font-normal text-[0.7rem]">({activeTotalCount > 0 ? Math.round((inboxDocs.length / activeTotalCount) * 100) : 0}%)</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {showOutbox && (
+                      <div className="flex items-center justify-between text-xs p-2 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-md bg-emerald-500 inline-block shrink-0" />
+                          <span className="font-medium text-[var(--text-primary)]">หนังสือส่ง (Outbox)</span>
+                        </div>
+                        <div className="font-mono font-semibold text-emerald-500">
+                          {outboxDocs.length} <span className="text-[var(--text-muted)] font-normal text-[0.7rem]">({activeTotalCount > 0 ? Math.round((outboxDocs.length / activeTotalCount) * 100) : 0}%)</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {showAdmin && (
+                      <div className="flex items-center justify-between text-xs p-2 rounded-xl bg-violet-500/5 border border-violet-500/10">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-md bg-violet-500 inline-block shrink-0" />
+                          <span className="font-medium text-[var(--text-primary)]">งานธุรการ / คำสั่ง / ประกาศ</span>
+                        </div>
+                        <div className="font-mono font-semibold text-violet-500">
+                          {adminDocs.length} <span className="text-[var(--text-muted)] font-normal text-[0.7rem]">({activeTotalCount > 0 ? Math.round((adminDocs.length / activeTotalCount) * 100) : 0}%)</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
+              );
+            })()}
+          </div>
 
-                <div className="flex items-center justify-between text-xs p-2 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-md bg-emerald-500 inline-block shrink-0" />
-                    <span className="font-medium text-[var(--text-primary)]">หนังสือส่ง (Outbox)</span>
-                  </div>
-                  <div className="font-mono font-semibold text-emerald-500">
-                    {outboxDocs.length} <span className="text-[var(--text-muted)] font-normal text-[0.7rem]">({totalCount > 0 ? Math.round((outboxDocs.length / totalCount) * 100) : 0}%)</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs p-2 rounded-xl bg-violet-500/5 border border-violet-500/10">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-md bg-violet-500 inline-block shrink-0" />
-                    <span className="font-medium text-[var(--text-primary)]">งานธุรการ / คำสั่ง / ประกาศ</span>
-                  </div>
-                  <div className="font-mono font-semibold text-violet-500">
-                    {adminDocs.length} <span className="text-[var(--text-muted)] font-normal text-[0.7rem]">({totalCount > 0 ? Math.round((adminDocs.length / totalCount) * 100) : 0}%)</span>
-                  </div>
-                </div>
-              </div>
+          {showAdmin && (
+            <div className="mt-4 pt-3 border-t border-[var(--border-lighter)] text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between">
+              <span>หมวดหมู่ย่อยระบบธุรการ</span>
+              <span className="font-mono text-[var(--text-primary)] font-semibold">
+                คำสั่ง {ordersCount} | ประกาศ {announcementsCount}
+              </span>
             </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-[var(--border-lighter)] text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between">
-            <span>หมวดหมู่ย่อยระบบธุรการ</span>
-            <span className="font-mono text-[var(--text-primary)] font-semibold">
-              คำสั่ง {ordersCount} | ประกาศ {announcementsCount}
-            </span>
-          </div>
+          )}
         </div>
 
         {/* Visual Analytics 2: Priority & Secrecy Metrics */}

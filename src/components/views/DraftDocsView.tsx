@@ -16,9 +16,10 @@ interface Props {
   initialSubTab?: string;
   onSendToSignQueue?: (item: any) => void;
   onSaveToRegistry?: (item: any) => void;
+  enabledFeatures?: Record<string, boolean>;
 }
 
-export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToSignQueue, onSaveToRegistry }: Props) {
+export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToSignQueue, onSaveToRegistry, enabledFeatures }: Props) {
   const [activeSubTab, setActiveSubTab] = useState<string>(initialSubTab);
   const [aiPrefillData, setAiPrefillData] = useState<any>(null);
 
@@ -43,12 +44,23 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
     { id: 'summary', label: 'สรุปโครงการอัตโนมัติ', icon: BarChart3, badge: 'AI' },
   ];
 
+  const filteredTabs = tabs.filter(tab => !enabledFeatures || enabledFeatures[tab.id] !== false);
+
+  useEffect(() => {
+    if (enabledFeatures && enabledFeatures[activeSubTab] === false) {
+      const firstEnabled = filteredTabs[0];
+      if (firstEnabled) {
+        setActiveSubTab(firstEnabled.id);
+      }
+    }
+  }, [enabledFeatures, activeSubTab, filteredTabs]);
+
   return (
     <div className="space-y-6">
       {/* Navigation Sub-Pills */}
       <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-2 shadow-sm">
         <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar p-1">
-          {tabs.map(tab => {
+          {filteredTabs.map(tab => {
             const Icon = tab.icon;
             const isActive = activeSubTab === tab.id;
             return (
