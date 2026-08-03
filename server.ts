@@ -2067,7 +2067,7 @@ app.post('/api/numbering-rules', async (req, res) => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    const newRule = {
+    const newRule: any = {
       ruleName: req.body.ruleName || 'กฎออกเลขใหม่',
       department: req.body.department || 'ทุกฝ่ายงาน',
       divisionCode: req.body.divisionCode || '',
@@ -2167,7 +2167,7 @@ app.post('/api/file-codes', async (req, res) => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    const newCode = {
+    const newCode: any = {
       code: req.body.code || '0021',
       name: req.body.name || 'หมวดงานใหม่',
       department: req.body.department || 'ฝ่ายบริหารงานทั่วไป',
@@ -2910,7 +2910,6 @@ app.post('/api/settings/test-email', async (req, res) => {
       });
     });
 
-    transporter.close();
     return res.json({ success: true, message: `ส่งอีเมลทดสอบรูปแบบ OTP ไปยัง ${targetEmail} สำเร็จแล้ว` });
   } catch (err: any) {
     console.error('Test Email Error:', err);
@@ -2982,7 +2981,6 @@ app.post('/api/forgot-password', async (req, res) => {
       });
     });
 
-    transporter.close();
 
     return res.json({ success: true, message: 'ส่งรหัส OTP ไปยังอีเมลของท่านแล้ว' });
   } catch (error: any) {
@@ -3004,7 +3002,6 @@ app.post('/api/verify-otp', async (req, res) => {
       return res.status(400).json({ success: false, message: 'รหัส OTP หมดอายุแล้ว' });
     }
 
-    transporter.close();
 
     return res.json({ success: true, message: 'รหัส OTP ถูกต้อง' });
   } catch (error: any) {
@@ -3028,7 +3025,6 @@ app.post('/api/reset-password', async (req, res) => {
     const hashed = await hashPasswordArgon2(newPassword);
     await pool.query('UPDATE users SET password = ?, resetOtp = NULL, resetOtpExpiry = NULL WHERE id = ?', [hashed, user.id]);
 
-    transporter.close();
 
     return res.json({ success: true, message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว' });
   } catch (error: any) {
@@ -3423,20 +3419,8 @@ app.post('/api/documents/forward', async (req, res) => {
       [docId, docType, 'ส่งต่อกลุ่มงาน', trackingComment, forwardedBy || 'สารบรรณกลาง']
     );
 
-    // Insert notifications for users in target departments
-    for (const dept of targetDepartments) {
-      const [deptUsers]: any = await pool.query('SELECT id FROM users WHERE department = ?', [dept]);
-      for (const u of deptUsers) {
-        await pool.query(
-          'INSERT INTO notifications (userId, title, message, type, isRead) VALUES (?, ?, ?, ?, 0)',
-          [u.id, 'หนังสือส่งต่อถึงฝ่าย', `หนังสือเลขที่/ที่ได้รับการส่งต่อให้ฝ่าย ${dept}: ${trackingComment}`, 'document']
-        );
-      }
-    }
-
     await addSystemLog('FORWARD_DOCUMENT', `ส่งต่อหนังสือ ID ${docId} ไปยัง ${deptsString}`, forwardedBy || 'สารบรรณกลาง', ip);
 
-    transporter.close();
 
     return res.json({ success: true, message: `ส่งต่อหนังสือให้ฝ่าย ${deptsString} เรียบร้อยแล้ว` });
   } catch (error: any) {
@@ -3968,7 +3952,7 @@ app.get('/api/notifications', async (req, res) => {
   try {
       const [trackings]: any = await pool.query('SELECT * FROM document_tracking ORDER BY updatedAt DESC, id DESC LIMIT 500');
       
-      const docIds = [...new Set(trackings.map((t: any) => t.docId))];
+      const docIds = Array.from(new Set(trackings.map((t: any) => t.docId)));
       let docs: any[] = [];
       if (docIds.length > 0) {
         const placeholders = docIds.map(() => '?').join(',');
@@ -4328,7 +4312,6 @@ app.post('/api/restore', backupUpload.single('file'), async (req, res) => {
 });
 
 // AI Document Scanner Endpoint via Gemini API
-import { GoogleGenAI } from '@google/genai';
 
 app.post('/api/ai-scan', async (req, res) => {
   try {
