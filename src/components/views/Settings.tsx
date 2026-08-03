@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles } from 'lucide-react';
+import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../../utils/featureFlags';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
+  enabledFeatures?: Record<string, boolean>;
+  setEnabledFeatures?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  user?: any;
 }
 
-export default function Settings({ onSettingsUpdated }: SettingsProps) {
+export default function Settings(props: SettingsProps) {
+  const { onSettingsUpdated } = props;
   const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
   const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'departments' | 'positions'>('docSettings');
   
@@ -17,7 +22,7 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
   const [autoDedupOnUpload, setAutoDedupOnUpload] = useState<boolean>(true);
   
   // Feature flags control
-  const [enabledFeatures, setEnabledFeatures] = useState<Record<string, boolean>>({
+  const [localEnabledFeatures, setLocalEnabledFeatures] = useState<Record<string, boolean>>({
     overview: true,
     inbox: true,
     outbox: true,
@@ -33,6 +38,24 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
     meeting: true,
     summary: true,
   });
+
+  const enabledFeatures = props.enabledFeatures || localEnabledFeatures;
+  const setEnabledFeatures = (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
+    if (props.setEnabledFeatures) {
+      if (typeof val === 'function') {
+        props.setEnabledFeatures((prev) => (val as Function)(prev));
+      } else {
+        props.setEnabledFeatures(val);
+      }
+    } else {
+      if (typeof val === 'function') {
+        setLocalEnabledFeatures((prev) => (val as Function)(prev));
+      } else {
+        setLocalEnabledFeatures(val);
+      }
+    }
+  };
+
   const [isSavingFeatures, setIsSavingFeatures] = useState(false);
   
   // System Settings state
@@ -354,13 +377,9 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
         if (data.smtpUser !== undefined) setSmtpUser(data.smtpUser || '');
         if (data.smtpPassword !== undefined) setSmtpPassword(data.smtpPassword || '');
         if (data.smtpFrom !== undefined) setSmtpFrom(data.smtpFrom || '');
-        if (data.enabledFeatures) {
-          try {
-            const parsed = JSON.parse(data.enabledFeatures);
-            setEnabledFeatures(prev => ({ ...prev, ...parsed }));
-          } catch (e) {
-            console.error('Error parsing enabledFeatures:', e);
-          }
+        if (data.enabledFeatures !== undefined) {
+          const parsed = parseEnabledFeatures(data.enabledFeatures);
+          setEnabledFeatures(parsed);
         }
         
         localStorage.setItem('moi_settings', JSON.stringify(data));
@@ -430,58 +449,112 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
     }
   };
 
-  const handleToggleFeature = (featureKey: string) => {
-    setEnabledFeatures(prev => ({
-      ...prev,
-      [featureKey]: !prev[featureKey]
-    }));
+  const featureNameMap: Record<string, string> = {
+    overview: 'หน้าภาพรวม',
+    inbox: 'กล่องข้อความเข้า',
+    outbox: 'กล่องข้อความออก',
+    admin_docs: 'สารบรรณกลาง',
+    draft_docs: 'ร่างหนังสือ',
+    folders: 'แฟ้มเอกสาร',
+    logs: 'ประวัติการใช้งาน',
+    draft: 'ร่างเอกสาร (เมนูย่อย)',
+    aiscan: 'AI สแกนเอกสาร',
+    order: 'ร่างคำสั่ง',
+    customorder: 'ร่างคำสั่งสถิติ',
+    speech: 'ร่างคำกล่าว',
+    meeting: 'ร่างระเบียบวาระการประชุม',
+    summary: 'ร่างสรุปโครงการ',
   };
 
-  const handleToggleAllFeatures = (enable: boolean) => {
-    setEnabledFeatures(prev => {
-      const updated = { ...prev };
-      Object.keys(updated).forEach(key => {
-        updated[key] = enable;
-      });
-      return updated;
+  const handleToggleFeature = async (featureKey: string) => {
+    const currentValue = enabledFeatures[featureKey] !== false;
+    const newValue = !currentValue;
+    const updated = {
+      ...enabledFeatures,
+      [featureKey]: newValue
+    };
+    setEnabledFeatures(updated);
+    const label = featureNameMap[featureKey] || featureKey;
+    const actionText = newValue ? 'เปิดใช้งาน' : 'ปิดใช้งาน';
+    const detail = `${actionText}ฟังก์ชันระบบ: ${label}`;
+    await saveFeaturesSettings(updated, true, detail);
+  };
+
+  const handleToggleAllFeatures = async (enable: boolean) => {
+    const updated = { ...enabledFeatures };
+    const featureKeys = [
+      'overview', 'inbox', 'outbox', 'admin_docs', 'draft_docs', 
+      'folders', 'logs', 'draft', 'aiscan', 'order', 'customorder', 
+      'speech', 'meeting', 'summary'
+    ];
+    featureKeys.forEach(key => {
+      updated[key] = enable;
     });
+    setEnabledFeatures(updated);
+    const detail = enable ? 'เปิดใช้งานฟังก์ชันระบบทั้งหมด' : 'ปิดใช้งานฟังก์ชันระบบทั้งหมด';
+    await saveFeaturesSettings(updated, true, detail);
   };
 
-  const saveFeaturesSettings = async (featuresToSave?: Record<string, boolean>) => {
+  const saveFeaturesSettings = async (featuresToSave?: Record<string, boolean>, quiet = false, customDetail?: string) => {
     setIsSavingFeatures(true);
     const targetFeatures = featuresToSave || enabledFeatures;
+    
+    // Attempt to get user from props or local storage
+    let username = 'ผู้ดูแลระบบ';
+    if (props.user) {
+      if (props.user.firstName) {
+        username = `${props.user.firstName} ${props.user.lastName || ''}`.trim();
+      } else if (props.user.username) {
+        username = props.user.username;
+      }
+    } else {
+      try {
+        const stored = localStorage.getItem('edms_user_data');
+        if (stored) {
+          const u = JSON.parse(stored);
+          if (u && (u.firstName || u.username)) {
+            username = u.firstName ? `${u.firstName} ${u.lastName || ''}`.trim() : u.username;
+          }
+        }
+      } catch (e) {}
+    }
+
     try {
-      const res = await fetch('/api/settings', {
+      const res = await fetch('/api/settings/features', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          currentYear,
-          startSequence,
-          orgName,
-          headerOrgName,
-          logoUrl,
-          garuda15Url,
-          garuda30Url,
-          faviconUrl,
-          footerText,
-          geminiApiKey,
-          smtpHost,
-          smtpPort,
-          smtpUser,
-          smtpPassword,
-          smtpFrom,
-          enabledFeatures: JSON.stringify(targetFeatures)
+          enabledFeatures: JSON.stringify(targetFeatures),
+          updatedBy: username,
+          details: customDetail || 'อัปเดตการตั้งค่าเปิด-ปิดฟังก์ชันระบบ'
         })
       });
       if (res.ok) {
-        alert('บันทึกการตั้งค่าระบบเปิด-ปิดฟังก์ชันเรียบร้อยแล้ว');
+        if (!quiet) {
+          alert('บันทึกการตั้งค่าระบบเปิด-ปิดฟังก์ชันเรียบร้อยแล้ว');
+        }
+        // Update local storage representation so the current app session is updated immediately
+        try {
+          const currentSettings = localStorage.getItem('moi_settings');
+          if (currentSettings) {
+            const parsed = JSON.parse(currentSettings);
+            parsed.enabledFeatures = JSON.stringify(targetFeatures);
+            localStorage.setItem('moi_settings', JSON.stringify(parsed));
+          } else {
+            localStorage.setItem('moi_settings', JSON.stringify({ enabledFeatures: JSON.stringify(targetFeatures) }));
+          }
+        } catch (e) {}
         if (onSettingsUpdated) onSettingsUpdated();
       } else {
-        alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+        if (!quiet) {
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+        }
       }
     } catch (error) {
       console.error('Error saving features:', error);
-      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      if (!quiet) {
+        alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      }
     } finally {
       setIsSavingFeatures(false);
     }
@@ -1504,6 +1577,8 @@ export default function Settings({ onSettingsUpdated }: SettingsProps) {
                   </div>
                 </div>
               </div>
+
+
             </div>
 
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">

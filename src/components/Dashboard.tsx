@@ -13,6 +13,7 @@ import AdminDocsView from './views/AdminDocsView';
 import FoldersView from './views/FoldersView';
 import DraftDocsView from './views/DraftDocsView';
 import { ThemeMode } from '../App';
+import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 
 export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDark }: { onLogout: () => void, theme: ThemeMode, setTheme: (mode: ThemeMode) => void, user: any, isSystemDark?: boolean }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -35,45 +36,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.enabledFeatures) {
-          const parsedFeatures = JSON.parse(parsed.enabledFeatures);
-          return {
-            overview: true,
-            inbox: true,
-            outbox: true,
-            admin_docs: true,
-            draft_docs: true,
-            folders: true,
-            logs: true,
-            draft: true,
-            aiscan: true,
-            order: true,
-            customorder: true,
-            speech: true,
-            meeting: true,
-            summary: true,
-            ...parsedFeatures
-          };
+          return parseEnabledFeatures(parsed.enabledFeatures);
         }
       }
     } catch (e) {
       console.error('Error loading initial enabledFeatures:', e);
     }
-    return {
-      overview: true,
-      inbox: true,
-      outbox: true,
-      admin_docs: true,
-      draft_docs: true,
-      folders: true,
-      logs: true,
-      draft: true,
-      aiscan: true,
-      order: true,
-      customorder: true,
-      speech: true,
-      meeting: true,
-      summary: true,
-    };
+    return { ...DEFAULT_ENABLED_FEATURES };
   });
 
   // Redirect to first enabled tab if active tab gets disabled
@@ -376,13 +345,9 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         if (data.headerOrgName !== undefined) setHeaderOrgName(data.headerOrgName || '');
         if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl);
         if (data.currentYear) setCurrentYear(data.currentYear);
-        if (data.enabledFeatures) {
-          try {
-            const parsed = JSON.parse(data.enabledFeatures);
-            setEnabledFeatures(prev => ({ ...prev, ...parsed }));
-          } catch (e) {
-            console.error('Error parsing enabledFeatures:', e);
-          }
+        if (data.enabledFeatures !== undefined) {
+          const parsed = parseEnabledFeatures(data.enabledFeatures);
+          setEnabledFeatures(parsed);
         }
       }
     } catch (err: any) {
@@ -536,7 +501,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         }
         return <LogsView user={currentUser} />;
       case 'settings':
-        return <Settings onSettingsUpdated={fetchSettings} />;
+        return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} />;
       case 'notifications':
         return (
           <div className="space-y-6">

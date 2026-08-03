@@ -669,7 +669,23 @@ const initialSeedData = {
       smtpPort: 587,
       smtpUser: '',
       smtpPassword: '',
-      smtpFrom: ''
+      smtpFrom: '',
+      enabledFeatures: JSON.stringify({
+        overview: true,
+        inbox: true,
+        outbox: true,
+        admin_docs: true,
+        draft_docs: true,
+        folders: true,
+        logs: true,
+        draft: true,
+        aiscan: true,
+        order: true,
+        customorder: true,
+        speech: true,
+        meeting: true,
+        summary: true,
+      })
     }
   ],
   users: [
@@ -778,6 +794,13 @@ function loadLocalDb() {
       localDb = JSON.parse(fileData);
     } else {
       localDb = JSON.parse(JSON.stringify(initialSeedData));
+      saveLocalDb();
+    }
+    if (!localDb.settings || !Array.isArray(localDb.settings) || localDb.settings.length === 0) {
+      localDb.settings = JSON.parse(JSON.stringify(initialSeedData.settings));
+      saveLocalDb();
+    } else if (localDb.settings[0] && !localDb.settings[0].enabledFeatures) {
+      localDb.settings[0].enabledFeatures = initialSeedData.settings[0].enabledFeatures;
       saveLocalDb();
     }
   } catch (err) {
@@ -1435,7 +1458,23 @@ app.get('/api/settings', async (req, res) => {
           smtpPort: 587,
           smtpUser: "",
           smtpPassword: "",
-          smtpFrom: ""
+          smtpFrom: "",
+          enabledFeatures: JSON.stringify({
+            overview: true,
+            inbox: true,
+            outbox: true,
+            admin_docs: true,
+            draft_docs: true,
+            folders: true,
+            logs: true,
+            draft: true,
+            aiscan: true,
+            order: true,
+            customorder: true,
+            speech: true,
+            meeting: true,
+            summary: true,
+          })
         });
       }
     } catch (error: any) {
@@ -1448,14 +1487,19 @@ app.put("/api/settings", async (req, res) => {
   const data = req.body;
   const ip = getClientIp(req);
   try {
+      let formattedFeatures = data.enabledFeatures;
+      if (formattedFeatures !== undefined && typeof formattedFeatures === 'object' && formattedFeatures !== null) {
+        formattedFeatures = JSON.stringify(formattedFeatures);
+      }
+
       const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
       if (rows.length > 0) {
         let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
-        const params = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+        const params: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
         
-        if (data.enabledFeatures !== undefined) {
+        if (formattedFeatures !== undefined) {
           query += ", enabledFeatures=?";
-          params.push(data.enabledFeatures);
+          params.push(formattedFeatures);
         }
         
         query += " WHERE id=?";
@@ -1464,11 +1508,11 @@ app.put("/api/settings", async (req, res) => {
         await pool.query(query, params);
       } else {
         const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
-        const values = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+        const values: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
         
-        if (data.enabledFeatures !== undefined) {
+        if (formattedFeatures !== undefined) {
           fields.push("enabledFeatures");
-          values.push(data.enabledFeatures);
+          values.push(formattedFeatures);
         }
         
         const placeholders = fields.map(() => "?").join(", ");
@@ -1477,12 +1521,55 @@ app.put("/api/settings", async (req, res) => {
           values
         );
       }
+
+      if (localDb.settings && localDb.settings.length > 0) {
+        if (formattedFeatures !== undefined) {
+          localDb.settings[0].enabledFeatures = formattedFeatures;
+        }
+        saveLocalDb();
+      }
+
       await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
       return res.json({ success: true });
     } catch (error: any) {
       console.error("Database error:", error.message);
       return res.status(500).json({ error: "Database error" });
     }
+});
+
+app.put("/api/settings/features", async (req, res) => {
+  const { enabledFeatures, updatedBy, details } = req.body;
+  const ip = getClientIp(req);
+  try {
+    let formattedFeatures = enabledFeatures;
+    if (formattedFeatures !== undefined && typeof formattedFeatures === 'object' && formattedFeatures !== null) {
+      formattedFeatures = JSON.stringify(formattedFeatures);
+    }
+
+    const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
+    if (rows.length > 0) {
+      await pool.query(
+        "UPDATE settings SET enabledFeatures = ? WHERE id = ?",
+        [formattedFeatures, rows[0].id]
+      );
+    } else {
+      await pool.query(
+        "INSERT INTO settings (enabledFeatures) VALUES (?)",
+        [formattedFeatures]
+      );
+    }
+
+    if (localDb.settings && localDb.settings.length > 0) {
+      localDb.settings[0].enabledFeatures = formattedFeatures;
+      saveLocalDb();
+    }
+
+    await addSystemLog("UPDATE_SETTINGS", details || `อัปเดตการตั้งค่าเปิด-ปิดฟังก์ชันระบบ`, updatedBy || "ผู้ดูแลระบบ", ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error("Database error in features update:", error.message);
+    return res.status(500).json({ error: "Database error" });
+  }
 });
 
 // 2. Users API Endpoints
