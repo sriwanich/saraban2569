@@ -1,5 +1,6 @@
 export const DEFAULT_ENABLED_FEATURES: Record<string, boolean> = {
   overview: true,
+  ai_assistant: true,
   inbox: true,
   outbox: true,
   admin_docs: true,
@@ -13,6 +14,8 @@ export const DEFAULT_ENABLED_FEATURES: Record<string, boolean> = {
   speech: true,
   meeting: true,
   summary: true,
+  workflow: true,
+  version_control: true,
 };
 
 export function parseEnabledFeatures(data: any): Record<string, boolean> {

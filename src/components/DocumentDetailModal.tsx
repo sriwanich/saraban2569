@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, TrackingLog, Folder, formatThaiDate, formatThaiDateFull, formatThaiDateTime } from '../types';
-import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles } from 'lucide-react';
+import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import AiCrossReferencePanel, { DetectionResult } from './ai-cross-reference-panel';
+import VersionControlPanel from './VersionControlPanel';
 
 interface Props {
   doc: DocumentItem;
@@ -16,7 +17,7 @@ interface Props {
 }
 
 export default function DocumentDetailModal({ doc, allDocuments, onClose, user, onStatusUpdated, onEdit, onSelectDoc }: Props) {
-  const [activeTab, setActiveTab] = useState<'details' | 'tracking'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'tracking' | 'versions'>('details');
   const [trackingLogs, setTrackingLogs] = useState<TrackingLog[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [newStatus, setNewStatus] = useState(doc.status || 'ลงทะเบียน');
@@ -405,7 +406,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
         </div>
 
         {/* Two Column Layout: Details on Left, Status Tracking Flow on Right */}
-        <div id="printable-area" className="flex-1 min-h-0 overflow-hidden flex flex-col md:flex-row">
+        <div id="printable-area" className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <style>{`
             @media print {
               body * { visibility: hidden; }
@@ -417,24 +418,48 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             }
           `}</style>
           
-          {/* Mobile Tabs */}
-          <div className="md:hidden flex bg-[var(--bg-surface)] border-b border-[var(--border-light)] shrink-0">
+          {/* Tabs Bar */}
+          <div className="flex bg-[var(--bg-surface)] border-b border-[var(--border-light)] shrink-0 px-2 sm:px-4 pt-1">
             <button 
               onClick={() => setActiveTab('details')} 
-              className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'details' ? 'text-[var(--primary-color)] border-b-2 border-[var(--primary-color)]' : 'text-[var(--text-secondary)]'}`}
+              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'details' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
             >
-              รายละเอียด
+              <FileText className="w-4 h-4" />
+              <span>รายละเอียดเอกสาร</span>
             </button>
             <button 
               onClick={() => setActiveTab('tracking')} 
-              className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'tracking' ? 'text-[var(--primary-color)] border-b-2 border-[var(--primary-color)]' : 'text-[var(--text-secondary)]'}`}
+              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'tracking' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
             >
-              ติดตามสถานะ
+              <Clock className="w-4 h-4" />
+              <span>ติดตามสถานะ</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('versions')} 
+              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'versions' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
+            >
+              <GitBranch className="w-4 h-4 text-blue-500" />
+              <span>ประวัติเวอร์ชัน (Version Control)</span>
             </button>
           </div>
 
-          {/* Column 1: Document Sheet Details */}
-          <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pb-12 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
+          {activeTab === 'versions' && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-slate-50 dark:bg-slate-900/40">
+              <VersionControlPanel
+                doc={doc}
+                user={user}
+                isEmbedded={true}
+                onDocumentRestored={(updatedDoc) => {
+                  Object.assign(doc, updatedDoc);
+                  if (onStatusUpdated) onStatusUpdated();
+                }}
+              />
+            </div>
+          )}
+
+          <div className={`flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden ${activeTab === 'versions' ? 'hidden' : ''}`}>
+              {/* Column 1: Document Sheet Details */}
+              <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pb-12 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
 
             <div className="bg-[var(--bg-overlay)] rounded-xl border border-[var(--border-light)] p-4 sm:p-6 shadow-inner space-y-4">
               <div className="border-b border-[var(--border-lighter)] pb-3 flex justify-between items-center">
@@ -714,8 +739,8 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
               </button>
             </form>
           </div>
-
         </div>
+      </div>
 
         {/* Footer Meta */}
         <div className="p-3 sm:p-4 border-t border-[var(--border-light)] bg-[var(--bg-surface)] flex items-center justify-between text-xs text-[var(--text-secondary)] shrink-0">

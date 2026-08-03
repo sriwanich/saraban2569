@@ -184,3 +184,84 @@ export const formatThaiDateFull = (dateString: string | undefined | null) => {
   return `${parts.day} ${THAI_MONTHS_FULL[parts.month]} ${parts.year} เวลา ${hh}:${mm} น.`;
 };
 
+export interface WorkflowStep {
+  id?: string;
+  stepNumber: number;
+  title: string;
+  assignedRole: string;
+  department?: string;
+  actionType: 'review' | 'approve' | 'sign' | 'action' | 'archive';
+  slaHours: number;
+}
+
+export interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  defaultPriority?: DocPriority;
+  steps: WorkflowStep[];
+  createdAt?: string;
+}
+
+export interface WorkflowStepInstance {
+  stepNumber: number;
+  title: string;
+  assignedRole: string;
+  department: string;
+  assignee: string;
+  slaHours: number;
+  dueAt: string;
+  status: 'pending' | 'in_progress' | 'approved' | 'rejected' | 'skipped';
+  actionNote?: string;
+  actionBy?: string;
+  actionAt?: string;
+}
+
+export type SLAStatus = 'NORMAL' | 'WARNING' | 'OVERDUE' | 'COMPLETED_ON_TIME' | 'COMPLETED_LATE';
+
+export interface WorkflowInstance {
+  id: string;
+  docId: string;
+  docTitle: string;
+  docNumber: string;
+  docType: DocType;
+  templateId?: string;
+  templateName?: string;
+  currentStepIndex: number;
+  status: 'active' | 'completed' | 'rejected' | 'escalated';
+  startedAt: string;
+  dueAt: string;
+  completedAt?: string;
+  department: string;
+  assignee: string;
+  priority: DocPriority;
+  steps: WorkflowStepInstance[];
+  slaStatus: SLAStatus;
+  lastEscalatedAt?: string;
+  escalationsCount?: number;
+}
+
+export interface DocumentVersion {
+  id: string;
+  docId: string;
+  docType?: DocType;
+  versionNumber: number;
+  title: string;
+  docNumber: string;
+  from?: string;
+  to?: string;
+  department?: string;
+  assignee?: string;
+  priority?: DocPriority;
+  secrecy?: DocSecrecy;
+  content?: string;
+  note?: string;
+  attachments?: string[];
+  changeSummary: string;
+  modifiedBy: string;
+  modifiedAt: string;
+  isCurrent?: boolean;
+}
+
+

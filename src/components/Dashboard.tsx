@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone, FileEdit } from 'lucide-react';
+import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone, FileEdit, GitMerge, Sparkles } from 'lucide-react';
 
 import { db } from '../firebase';
 import { DocumentItem, DocType } from '../types';
@@ -12,6 +12,9 @@ import DocumentDetailModal from './DocumentDetailModal';
 import AdminDocsView from './views/AdminDocsView';
 import FoldersView from './views/FoldersView';
 import DraftDocsView from './views/DraftDocsView';
+import WorkflowSlaView from './views/WorkflowSlaView';
+import SmartAiAssistantView from './views/SmartAiAssistantView';
+import SmartAiFloatingWidget from './SmartAiFloatingWidget';
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 
@@ -430,10 +433,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
 
   const baseNavItems = [
     { id: 'overview', icon: Home, label: 'ภาพรวมระบบ' },
+    { id: 'ai_assistant', icon: Sparkles, label: 'ผู้ช่วย AI Smart e-Saraban' },
     { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
     { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
     { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ' },
     { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร' },
+    { id: 'workflow', icon: GitMerge, label: 'Workflow & SLA' },
     { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล' },
   ];
 
@@ -446,10 +451,28 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' });
   }
 
+  const handleViewDoc = (docOrId: DocumentItem | string) => {
+    if (typeof docOrId === 'string') {
+      const found = documents.find(d => d.id === docOrId || d.docNumber === docOrId || d.receiveNumber === docOrId);
+      if (found) {
+        setSelectedDoc(found);
+      }
+    } else {
+      setSelectedDoc(docOrId);
+    }
+  };
+
   const renderContent = () => {
     switch(activeTab) {
       case 'overview':
         return <Overview documents={documents} user={currentUser} onCreateDoc={(type) => { setCreateDocType(type || 'inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} enabledFeatures={enabledFeatures} />;
+      case 'ai_assistant':
+        return <SmartAiAssistantView 
+          user={currentUser} 
+          documents={documents} 
+          onViewDoc={handleViewDoc} 
+          onNavigateToDrafts={() => setActiveTab('draft_docs')}
+        />;
       case 'inbox':
         return <DocumentList 
           title="ทะเบียนหนังสือรับ" 
@@ -487,6 +510,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             setCreateDocType('outbox');
             setIsCreateModalOpen(true);
           }}
+        />;
+      case 'workflow':
+        return <WorkflowSlaView 
+          documents={documents} 
+          user={currentUser} 
+          onViewDoc={setSelectedDoc} 
         />;
       case 'folders':
         return <FoldersView 
@@ -1102,6 +1131,15 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           </div>
         </div>
       )}
+
+      {/* Global Smart AI Floating Widget */}
+      <SmartAiFloatingWidget
+        user={currentUser}
+        documents={documents}
+        onViewDoc={handleViewDoc}
+        onNavigateToDrafts={() => setActiveTab('draft_docs')}
+        onOpenFullAiTab={() => setActiveTab('ai_assistant')}
+      />
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {

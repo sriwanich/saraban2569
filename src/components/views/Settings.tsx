@@ -1574,6 +1574,26 @@ export default function Settings(props: SettingsProps) {
                         <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
                       </label>
                     </div>
+
+                    {/* Workflow & SLA Tracking */}
+                    <div className="py-3 flex items-center justify-between gap-4 border-t border-[var(--border-lighter)] pt-3">
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">⏱️</span>
+                        <div>
+                          <div className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">ระบบ Workflow และ SLA ติดตามงาน</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">กำหนดเส้นทางเสนออนุมัติหลายขั้น กำหนดระยะเวลา SLA และ Dashboard งานค้างรายบุคคล/ฝ่าย</div>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0 select-none">
+                        <input
+                          type="checkbox"
+                          checked={enabledFeatures.workflow !== false}
+                          onChange={() => handleToggleFeature('workflow')}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                      </label>
+                    </div>
                   </div>
                 </div>
               </div>
