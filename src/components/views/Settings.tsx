@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles } from 'lucide-react';
+import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark } from 'lucide-react';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../../utils/featureFlags';
+import CustomNumberingSettings from '../CustomNumberingSettings';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
@@ -12,7 +13,7 @@ interface SettingsProps {
 export default function Settings(props: SettingsProps) {
   const { onSettingsUpdated } = props;
   const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
-  const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'departments' | 'positions'>('docSettings');
+  const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'customNumbering' | 'departments' | 'positions'>('docSettings');
   
   // Deduplication state
   const [dedupStats, setDedupStats] = useState<any>(null);
@@ -1757,6 +1758,14 @@ export default function Settings(props: SettingsProps) {
                 <SettingsIcon className="w-4 h-4" /> ตั้งค่าระบบสารบรรณ
               </button>
               <button 
+                onClick={() => setActiveSystemDocTab('customNumbering')}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
+                  activeSystemDocTab === 'customNumbering' ? 'bg-[var(--bg-surface)] border border-[var(--border-medium)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Hash className="w-4 h-4" /> รูปแบบเลขหนังสือและรหัสแฟ้ม
+              </button>
+              <button 
                 onClick={() => setActiveSystemDocTab('departments')}
                 className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
                   activeSystemDocTab === 'departments' ? 'bg-[var(--bg-surface)] border border-[var(--border-medium)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
@@ -1773,6 +1782,10 @@ export default function Settings(props: SettingsProps) {
                 <Briefcase className="w-4 h-4" /> จัดการตำแหน่ง
               </button>
             </div>
+
+            {activeSystemDocTab === 'customNumbering' && (
+              <CustomNumberingSettings />
+            )}
 
             {activeSystemDocTab === 'docSettings' && (
               <div className="max-w-xl space-y-6">
@@ -1795,15 +1808,7 @@ export default function Settings(props: SettingsProps) {
                   <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                     <Activity className="w-5 h-5 text-[var(--primary-color)]" /> เลขที่เริ่มต้นของระบบ
                   </h3>
-                  <div className="space-y-2">
-                    <label className="text-sm text-[var(--text-secondary)]">เลขที่รับ/ส่งหนังสือเริ่มต้น (สำหรับปีใหม่)</label>
-                    <input 
-                      type="number" 
-                      value={startSequence}
-                      onChange={e => setStartSequence(Number(e.target.value))}
-                      className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-4 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors"
-                    />
-                  </div>
+                  
                 </div>
 
                 <div className="pt-4 border-t border-[var(--border-light)] flex justify-end">

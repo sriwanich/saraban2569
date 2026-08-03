@@ -14,6 +14,11 @@ interface Props {
 }
 
 export default function DocumentFormModal({ initialData, defaultType, documents, currentYear, user, onClose, onSave }: Props) {
+  const [numberingRules, setNumberingRules] = useState<any[]>([]);
+  const [reservedNumbers, setReservedNumbers] = useState<any[]>([]);
+  const [showReservedModal, setShowReservedModal] = useState<boolean>(false);
+  const [selectedReservedId, setSelectedReservedId] = useState<number | null>(null);
+
   const [formData, setFormData] = useState<Partial<DocumentItem>>({
     receiveNumber: '',
     year: currentYear ? String(currentYear) : '2569',
@@ -34,6 +39,29 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     status: 'ลงทะเบียน',
     attachments: []
   });
+
+  // Fetch custom numbering rules & reserved numbers on mount
+  useEffect(() => {
+    const fetchNumberingAndReserved = async () => {
+      try {
+        const [rulesRes, reservedRes] = await Promise.all([
+          fetch('/api/numbering-rules'),
+          fetch('/api/reserved-numbers')
+        ]);
+        if (rulesRes.ok) {
+          const rulesData = await rulesRes.json();
+          setNumberingRules(rulesData);
+        }
+        if (reservedRes.ok) {
+          const reservedData = await reservedRes.json();
+          setReservedNumbers(reservedData);
+        }
+      } catch (err) {
+        console.error('Error fetching numbering rules / reserved numbers:', err);
+      }
+    };
+    fetchNumberingAndReserved();
+  }, []);
 
   const [departments, setDepartments] = useState<{id: string, name: string}[]>([]);
   const [folders, setFolders] = useState<FolderType[]>([]);
@@ -126,51 +154,66 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     fetchOrgs();
   }, []);
 
-  const getNextSeq = (docType?: DocType, isCirc?: boolean) => {
+  const generateNumberInfo = (docType?: DocType, isCirc?: boolean, cat?: string, yr?: string) => {
     const targetType = docType || formData?.type || defaultType || 'inbox';
     const targetIsCircular = isCirc !== undefined ? isCirc : (formData?.isCircular || false);
+    const targetCategory = cat || formData?.category || 'order';
+    const targetYear = yr || formData?.year || (currentYear ? String(currentYear) : '2569');
+    const targetDept = formData?.department || user?.department || 'ฝ่ายบริหารงานทั่วไป';
 
-    const filteredDocs = documents.filter(d => {
-      const targetYear = formData?.year || (currentYear ? String(currentYear) : '2569');
-      if (d.year && d.year !== targetYear) return false;
+    let actualType = 'หนังสือภายนอก';
+    if (targetType === 'admin') {
+      actualType = targetCategory === 'order' ? 'คำสั่ง' : (targetCategory === 'announcement' ? 'ประกาศ' : 'หนังสือรับรอง');
+    } else if (targetType === 'inbox') {
+      actualType = 'หนังสือรับ';
+    } else if (targetType === 'internal') {
+      actualType = 'หนังสือภายใน';
+    }
 
-      if (targetType === 'outbox') {
-        if (targetIsCircular) {
-          return d.type === 'outbox' && (d.isCircular === true || d.docNumber?.includes('/ว'));
-        } else {
-          return d.type === 'outbox' && (!d.isCircular && !d.docNumber?.includes('/ว'));
-        }
-      }
-      return d.type === targetType;
-    });
+    let rule = numberingRules.find((r: any) => r.isActive && r.docType === actualType && r.department === targetDept);
+    if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === actualType && r.department === 'ทุกฝ่ายงาน');
+    if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === actualType);
 
-    const existingNums = filteredDocs
-      .map(d => parseInt(d.receiveNumber || '0', 10))
-      .filter(n => !isNaN(n));
-    const maxNum = existingNums.length > 0 ? Math.max(...existingNums) : 0;
-    const startNum = Math.max(startSequence || 1, maxNum + 1);
-    return String(startNum);
-  };
-
-  const getNextAdminDocNumber = (cat: string, yr: string) => {
-    const existing = documents.filter(d => d.type === 'admin' && d.category === cat);
-    const nums = existing.map(d => {
-      const match = (d.docNumber || '').match(/(\d+)\s*\/\s*(\d+)/);
-      if (match) {
-        if (match[2] === yr) {
-          return parseInt(match[1], 10);
-        }
-      } else {
+    let existingMax = 0;
+    if (targetType === 'admin') {
+      const existing = documents.filter(d => d.type === 'admin' && d.category === targetCategory);
+      existingMax = existing.reduce((max, d) => {
+        const match = (d.docNumber || '').match(/(\d+)\s*\/\s*(\d+)/);
+        if (match && match[2] === targetYear) return Math.max(max, parseInt(match[1], 10));
         const parts = (d.docNumber || '').split('/');
         const n = parseInt(parts[0], 10);
-        if (!isNaN(n)) return n;
-      }
-      return 0;
-    }).filter(n => !isNaN(n) && n > 0);
+        return !isNaN(n) ? Math.max(max, n) : max;
+      }, 0);
+    } else {
+      const filteredDocs = documents.filter(d => {
+        if (d.year && d.year !== targetYear) return false;
+        if (targetType === 'outbox') {
+          return d.type === 'outbox' && !!d.isCircular === targetIsCircular;
+        }
+        return d.type === targetType;
+      });
+      existingMax = filteredDocs.reduce((max, d) => {
+        const n = parseInt(d.receiveNumber || '0', 10);
+        return !isNaN(n) ? Math.max(max, n) : max;
+      }, 0);
+    }
 
-    const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
-    const startNum = Math.max(startSequence || 1, maxNum + 1);
-    return `${startNum}/${yr || '2569'}`;
+    const ruleStartSeq = rule ? Number(rule.currentSeq || 1) : 1;
+    const finalSeq = Math.max(existingMax + 1, ruleStartSeq);
+
+    let formattedNumber = '';
+    if (targetType === 'admin') {
+      const prefix = rule ? (rule.prefixPattern || actualType) : actualType;
+      formattedNumber = `${prefix} ${finalSeq}/${targetYear}`;
+    } else if (targetType === 'outbox') {
+      const prefix = rule ? (rule.prefixPattern || 'รย 0021') : 'รย 0021';
+      const circStr = targetIsCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
+      formattedNumber = `${prefix}/${circStr}${finalSeq}`;
+    } else {
+      formattedNumber = String(finalSeq);
+    }
+
+    return { seq: String(finalSeq), docNumber: formattedNumber };
   };
 
   // Fetch folders list
@@ -213,8 +256,13 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   // Sync outbox numbering logic
   useEffect(() => {
     if (formData.type === 'outbox') {
-      const prefix = formData.isCircular ? 'รย 0021/ว' : 'รย 0021/';
-      const expectedDocNumber = `${prefix}${formData.receiveNumber || ''}`;
+      const targetDept = formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป';
+      let rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && r.department === targetDept);
+      if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && r.department === 'ทุกฝ่ายงาน');
+      if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก');
+      const prefix = rule ? (rule.prefixPattern || 'รย 0021') : 'รย 0021';
+      const circStr = formData.isCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
+      const expectedDocNumber = `${prefix}/${circStr}${formData.receiveNumber || ''}`;
       if (formData.docNumber !== expectedDocNumber && !initialData) {
         setFormData(prev => ({
           ...prev,
@@ -225,9 +273,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   }, [formData.type, formData.receiveNumber, formData.isCircular, formData.docNumber, initialData]);
 
   const handleIsCircularChange = (checked: boolean) => {
-    const seq = getNextSeq('outbox', checked);
-    const prefix = checked ? 'รย 0021/ว' : 'รย 0021/';
-    const newDocNumber = `${prefix}${seq}`;
+    const { seq, docNumber: newDocNumber } = generateNumberInfo('outbox', checked);
     setFormData(prev => ({
       ...prev,
       isCircular: checked,
@@ -247,12 +293,9 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     } else {
       const activeType = defaultType || 'inbox';
       const isCirc = activeType === 'outbox' ? (formData.isCircular || false) : false;
-      const seq = getNextSeq(activeType, isCirc);
       const initCat = 'order';
       const initYear = currentYear ? String(currentYear) : '2569';
-      const initDocNum = activeType === 'admin' 
-        ? getNextAdminDocNumber(initCat, initYear) 
-        : (activeType === 'outbox' ? `${isCirc ? 'รย 0021/ว' : 'รย 0021/'}${seq}` : '');
+      const { seq, docNumber: initDocNum } = generateNumberInfo(activeType, isCirc, initCat, initYear);
       setFormData(prev => ({
         ...prev,
         type: activeType,
@@ -266,17 +309,14 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         from: activeType === 'outbox' ? 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' : prev.from
       }));
     }
-  }, [initialData, defaultType, documents, currentYear, startSequence]);
+  }, [initialData, defaultType, documents, currentYear, numberingRules]);
 
   const handleTypeChange = (newType: DocType) => {
     if (!initialData) {
       const isCirc = newType === 'outbox' ? (formData.isCircular || false) : false;
-      const seq = getNextSeq(newType, isCirc);
       const initCat = formData.category || 'order';
       const initYear = formData.year || currentYear || '2569';
-      const newDocNum = newType === 'admin' 
-        ? getNextAdminDocNumber(initCat, String(initYear)) 
-        : (newType === 'outbox' ? `${isCirc ? 'รย 0021/ว' : 'รย 0021/'}${seq}` : formData.docNumber);
+      const { seq, docNumber: newDocNum } = generateNumberInfo(newType, isCirc, initCat, String(initYear));
       setFormData(prev => ({
         ...prev,
         type: newType,
@@ -313,7 +353,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     if (!initialData && formData.type === 'admin' && (field === 'category' || field === 'year')) {
       const cat = field === 'category' ? value : (formData.category || 'order');
       const yr = field === 'year' ? value : (formData.year || '2569');
-      const nextDocNum = getNextAdminDocNumber(cat, yr);
+      const { docNumber: nextDocNum } = generateNumberInfo('admin', false, cat, yr);
       setFormData(prev => ({ ...prev, [field]: value, docNumber: nextDocNum }));
       return;
     }
@@ -445,6 +485,19 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       id: initialData?.id || `DOC-${Math.floor(Math.random() * 100000)}`,
       registerDate: initialData?.registerDate || new Date().toISOString(),
     };
+
+    if (selectedReservedId) {
+      try {
+        await fetch('/api/reserved-numbers/use', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: selectedReservedId, docId: newDoc.id })
+        });
+      } catch (err) {
+        console.error('Failed to mark reserved number as used:', err);
+      }
+    }
+
     onSave(newDoc);
   };
 
@@ -581,27 +634,46 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                   <label className="text-sm font-medium text-[var(--text-secondary)]">
                     {formData.type === 'admin' ? 'เลขที่ประกาศ/คำสั่ง' : 'ที่หนังสือ'} <span className="text-red-400">*</span>
                   </label>
-                  {(formData.type === 'outbox' || formData.type === 'admin') && (
-                    <span className="text-[11px] font-normal text-[var(--text-muted)] bg-[var(--bg-canvas)] px-2 py-0.5 rounded border border-[var(--border-light)] flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5 text-[var(--text-muted)]" />
-                      อัตโนมัติ
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowReservedModal(true)}
+                      className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1 transition-colors"
+                      title="เลือกเลขจากคลังจองล่วงหน้า หรือเลขที่คืนเข้าคลัง"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-600" />
+                      เลือกจากเลขจอง/เลขคืน
+                    </button>
+                    {(formData.type === 'outbox' || formData.type === 'admin') && !selectedReservedId && (
+                      <span className="text-[11px] font-normal text-[var(--text-muted)] bg-[var(--bg-canvas)] px-2 py-0.5 rounded border border-[var(--border-light)] flex items-center gap-1">
+                        <Lock className="w-2.5 h-2.5 text-[var(--text-muted)]" />
+                        อัตโนมัติ
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <input 
                   required
-                  readOnly={formData.type === 'outbox' || formData.type === 'admin'}
                   type="text" 
                   value={formData.docNumber || ''}
                   onChange={(e) => handleChange('docNumber', e.target.value)}
                   placeholder={formData.type === 'admin' ? 'เช่น คำสั่งที่ 12/2569' : 'เช่น รย 0021/1'}
-                  title={formData.type === 'outbox' || formData.type === 'admin' ? 'ที่หนังสือถูกกำหนดให้อัตโนมัติ ไม่สามารถแก้ไขได้' : undefined}
-                  className={`w-full border border-[var(--border-light)] rounded-lg px-4 py-2.5 outline-none transition-colors placeholder-[var(--text-muted)] ${
-                    formData.type === 'outbox' || formData.type === 'admin'
-                      ? 'bg-[var(--bg-canvas)] text-[var(--text-muted)] cursor-not-allowed font-mono opacity-85 select-none focus:outline-none'
-                      : 'bg-[var(--bg-overlay)] text-[var(--text-primary)] focus:border-[var(--primary-color)]'
-                  }`}
+                  className="w-full border border-[var(--border-light)] rounded-lg px-4 py-2.5 outline-none transition-colors placeholder-[var(--text-muted)] bg-[var(--bg-overlay)] text-[var(--text-primary)] focus:border-[var(--primary-color)] font-mono"
                 />
+                {selectedReservedId && (
+                  <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-[11px] text-amber-800 dark:text-amber-300">
+                    <span>ใช้เลขจองล่วงหน้า #{selectedReservedId}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedReservedId(null);
+                      }}
+                      className="text-rose-600 font-semibold hover:underline"
+                    >
+                      ยกเลิกและรันปกติ
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-[var(--text-secondary)]">ลงวันที่ <span className="text-red-400">*</span></label>

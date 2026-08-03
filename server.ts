@@ -861,6 +861,175 @@ const initialSeedData = {
     { id: 3, name: 'แฟ้มเอกสารงานสารบรรณทั่วไป', description: 'เอกสารรับ-ส่งทั่วไปที่ลงทะเบียนไว้ในระบบ' },
     { id: 4, name: 'แฟ้มโครงการอบรมและวิชาการ', description: 'เอกสารเกี่ยวกับการขอสนับสนุนวิทยากรและจัดอบรมบุคลากร/ประชาชน' }
   ],
+  numbering_rules: [
+    {
+      id: 1,
+      ruleName: 'หนังสือภายนอก-ฝ่ายบริหารงานทั่วไป (รย 0021)',
+      department: 'ฝ่ายบริหารงานทั่วไป',
+      divisionCode: '0021',
+      docType: 'หนังสือภายนอก',
+      prefixPattern: 'รย 0021',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
+      runningScope: 'department',
+      currentSeq: 123,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'รหัสหนังสือส่งออกของฝ่ายบริหารงานทั่วไป เช่น รย 0021/123 หรือ รย 0021/ว 123'
+    },
+    {
+      id: 2,
+      ruleName: 'หนังสือภายนอก-ฝ่ายยุทธศาสตร์และการจัดการ (รย 0021.1)',
+      department: 'ฝ่ายยุทธศาสตร์และการจัดการ',
+      divisionCode: '0021.1',
+      docType: 'หนังสือภายนอก',
+      prefixPattern: 'รย 0021.1',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
+      runningScope: 'department',
+      currentSeq: 45,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'รหัสหนังสือส่งของฝ่ายยุทธศาสตร์ เช่น รย 0021.1/123 หรือ รย 0021.1/ว 123'
+    },
+    {
+      id: 3,
+      ruleName: 'หนังสือภายนอก-ฝ่ายสงเคราะห์ผู้ประสบภัย (รย 0021.2)',
+      department: 'ฝ่ายสงเคราะห์ผู้ประสบภัย',
+      divisionCode: '0021.2',
+      docType: 'หนังสือภายนอก',
+      prefixPattern: 'รย 0021.2',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
+      runningScope: 'department',
+      currentSeq: 30,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'รหัสหนังสือส่งของฝ่ายสงเคราะห์ เช่น รย 0021.2/123 หรือ รย 0021.2/ว 123'
+    },
+    {
+      id: 4,
+      ruleName: 'หนังสือภายนอก-ฝ่ายป้องกันและปฏิบัติการ (รย 0021.3)',
+      department: 'ฝ่ายป้องกันและปฏิบัติการ',
+      divisionCode: '0021.3',
+      docType: 'หนังสือภายนอก',
+      prefixPattern: 'รย 0021.3',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
+      runningScope: 'department',
+      currentSeq: 58,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'รหัสหนังสือส่งของฝ่ายป้องกัน เช่น รย 0021.3/123 หรือ รย 0021.3/ว 123'
+    },
+    {
+      id: 5,
+      ruleName: 'คำสั่งสำนักงาน/จังหวัด',
+      department: 'ทุกฝ่ายงาน',
+      divisionCode: '',
+      docType: 'คำสั่ง',
+      prefixPattern: 'คำสั่ง',
+      suffixPattern: '/{year}',
+      numberFormat: '{prefix} {seq}/{year}',
+      runningScope: 'doc_type',
+      currentSeq: 44,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'หนังสือประเภทคำสั่งปภ./จังหวัด เช่น คำสั่ง 45/2569'
+    },
+    {
+      id: 6,
+      ruleName: 'ประกาศสำนักงาน/จังหวัด',
+      department: 'ทุกฝ่ายงาน',
+      divisionCode: '',
+      docType: 'ประกาศ',
+      prefixPattern: 'ประกาศ',
+      suffixPattern: '/{year}',
+      numberFormat: '{prefix} {seq}/{year}',
+      runningScope: 'doc_type',
+      currentSeq: 44,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'หนังสือประเภทประกาศ เช่น ประกาศ 45/2569'
+    },
+    {
+      id: 7,
+      ruleName: 'หนังสือรับรอง',
+      department: 'ทุกฝ่ายงาน',
+      divisionCode: '',
+      docType: 'หนังสือรับรอง',
+      prefixPattern: 'หนังสือรับรอง',
+      suffixPattern: '/{year}',
+      numberFormat: '{prefix} {seq}/{year}',
+      runningScope: 'doc_type',
+      currentSeq: 44,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'หนังสือประเภทรับรองความประพฤติ/เงินเดือน เช่น หนังสือรับรอง 45/2569'
+    }
+  ],
+  file_codes: [
+    { id: 1, code: '0021', name: 'งานบริหารทั่วไปและสารบรรณกลาง', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานบริหารทั่วไป งานสารบรรณกลาง สารบรรณจังหวัด' },
+    { id: 2, code: '0021.1', name: 'งานยุทธศาสตร์และแผนงาน', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'แผนป้องกันและบรรเทาสาธารณภัย โครงการยุทธศาสตร์' },
+    { id: 3, code: '0021.2', name: 'งานสงเคราะห์และช่วยเหลือผู้ประสบภัย', department: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'การให้ความช่วยเหลือ เงินชดเชย ผู้ประสบภัยพิบัติ' },
+    { id: 4, code: '0021.3', name: 'งานป้องกัน ปฏิบัติการ และกู้ภัย', department: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'งานบรรเทาสาธารณภัย เครื่องจักรกล อุปกรณ์กู้ภัย' },
+    { id: 5, code: '0022', name: 'งานการเงิน บัญชี และงบประมาณ', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานเบิกจ่าย งบประมาณ บัญชี และการเงิน' },
+    { id: 6, code: '0023', name: 'งานพัสดุและอาคารสถานที่', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานจัดซื้อจัดจ้าง พัสดุ คุรุภัณฑ์ และอาคารสถานที่' }
+  ],
+  reserved_numbers: [
+    {
+      id: 1,
+      ruleId: 1,
+      docType: 'หนังสือภายนอก',
+      department: 'ฝ่ายบริหารงานทั่วไป',
+      numberString: 'รย 0021/ว 124',
+      seqNumber: 124,
+      year: '2569',
+      type: 'reserved',
+      status: 'available',
+      reservedBy: 'สมศรี รักษ์ดี',
+      reservedFor: 'จองเลขหนังสือเวียนโครงการฝึกอบรมกู้ภัยทางน้ำช่วงเทศกาล',
+      createdAt: '2026-08-01 09:30:00',
+      expiresAt: '2026-08-15'
+    },
+    {
+      id: 2,
+      ruleId: 5,
+      docType: 'คำสั่ง',
+      department: 'ฝ่ายบริหารงานทั่วไป',
+      numberString: 'คำสั่ง 45/2569',
+      seqNumber: 45,
+      year: '2569',
+      type: 'reserved',
+      status: 'available',
+      reservedBy: 'สมชาย ใจดี',
+      reservedFor: 'จองเลขคำสั่งแต่งตั้งคณะทำงานเตรียมพร้อมรับมือฤดูฝน',
+      createdAt: '2026-08-02 11:00:00',
+      expiresAt: '2026-08-20'
+    },
+    {
+      id: 3,
+      ruleId: 2,
+      docType: 'หนังสือภายนอก',
+      department: 'ฝ่ายยุทธศาสตร์และการจัดการ',
+      numberString: 'รย 0021.1/46',
+      seqNumber: 46,
+      year: '2569',
+      type: 'reclaimed',
+      status: 'available',
+      reservedBy: 'ระบบสารบรรณ (เลขคืนจากเอกสารยกเลิก)',
+      reservedFor: 'คืนเลขเนื่องจากยกเลิกร่างหนังสือประสานงานเดิม',
+      createdAt: '2026-08-02 14:20:00',
+      expiresAt: '2026-12-31'
+    }
+  ],
   inbox_documents: [
     {
       id: 'doc_001', receiveNumber: '1', year: '2569', docNumber: 'มท 0612/ว1234', date: '2026-07-15', priority: 'ด่วนที่สุด', secrecy: 'ปกติ',
@@ -1001,6 +1170,18 @@ function loadLocalDb() {
     }
     if (!localDb.document_versions || !Array.isArray(localDb.document_versions)) {
       localDb.document_versions = JSON.parse(JSON.stringify(initialSeedData.document_versions || []));
+      saveLocalDb();
+    }
+    if (!localDb.numbering_rules || !Array.isArray(localDb.numbering_rules) || localDb.numbering_rules.length === 0) {
+      localDb.numbering_rules = JSON.parse(JSON.stringify(initialSeedData.numbering_rules || []));
+      saveLocalDb();
+    }
+    if (!localDb.file_codes || !Array.isArray(localDb.file_codes) || localDb.file_codes.length === 0) {
+      localDb.file_codes = JSON.parse(JSON.stringify(initialSeedData.file_codes || []));
+      saveLocalDb();
+    }
+    if (!localDb.reserved_numbers || !Array.isArray(localDb.reserved_numbers)) {
+      localDb.reserved_numbers = JSON.parse(JSON.stringify(initialSeedData.reserved_numbers || []));
       saveLocalDb();
     }
   } catch (err) {
@@ -1369,6 +1550,65 @@ async function setupDatabase() {
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda15Url TEXT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda30Url TEXT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN enabledFeatures TEXT', []); } catch (e) {}
+
+      
+      // Ensure numbering_rules table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS numbering_rules (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            ruleName VARCHAR(255) NOT NULL,
+            department VARCHAR(255),
+            divisionCode VARCHAR(50),
+            docType VARCHAR(100),
+            prefixPattern VARCHAR(100),
+            suffixPattern VARCHAR(100),
+            numberFormat VARCHAR(100),
+            runningScope VARCHAR(50),
+            currentSeq INT,
+            year VARCHAR(20),
+            resetFrequency VARCHAR(50),
+            isActive TINYINT(1) DEFAULT 1,
+            description TEXT
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+      } catch (e) { console.warn('Note checking/creating numbering_rules table:', e); }
+
+      // Ensure file_codes table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS file_codes (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            code VARCHAR(50) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            department VARCHAR(255),
+            description TEXT
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+      } catch (e) { console.warn('Note checking/creating file_codes table:', e); }
+
+      // Ensure reserved_numbers table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS reserved_numbers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            ruleId INT,
+            docType VARCHAR(100),
+            department VARCHAR(255),
+            numberString VARCHAR(100),
+            seqNumber INT,
+            year VARCHAR(20),
+            type VARCHAR(50),
+            status VARCHAR(50),
+            reservedBy VARCHAR(255),
+            reservedFor TEXT,
+            expiresAt VARCHAR(50),
+            usedAt VARCHAR(50),
+            usedForDocId VARCHAR(100),
+            createdAt VARCHAR(50)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+      } catch (e) { console.warn('Note checking/creating reserved_numbers table:', e); }
 
       // Ensure draft_documents table exists
       try {
@@ -1769,6 +2009,367 @@ app.put("/api/settings/features", async (req, res) => {
   } catch (error: any) {
     console.error("Database error in features update:", error.message);
     return res.status(500).json({ error: "Database error" });
+  }
+});
+
+// ==================== CUSTOM NUMBERING & FILE CODES APIS ====================
+app.get('/api/numbering-rules', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS numbering_rules (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ruleName VARCHAR(255) NOT NULL,
+        department VARCHAR(255),
+        divisionCode VARCHAR(50),
+        docType VARCHAR(100),
+        prefixPattern VARCHAR(100),
+        suffixPattern VARCHAR(100),
+        numberFormat VARCHAR(100),
+        runningScope VARCHAR(50),
+        currentSeq INT,
+        year VARCHAR(20),
+        resetFrequency VARCHAR(50),
+        isActive TINYINT(1) DEFAULT 1,
+        description TEXT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    const [rows]: any = await pool.query('SELECT * FROM numbering_rules');
+    // Ensure boolean types
+    const formattedRows = rows.map((r: any) => ({
+      ...r,
+      isActive: Boolean(r.isActive)
+    }));
+    return res.json(formattedRows);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch numbering rules' });
+  }
+});
+
+app.post('/api/numbering-rules', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS numbering_rules (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ruleName VARCHAR(255) NOT NULL,
+        department VARCHAR(255),
+        divisionCode VARCHAR(50),
+        docType VARCHAR(100),
+        prefixPattern VARCHAR(100),
+        suffixPattern VARCHAR(100),
+        numberFormat VARCHAR(100),
+        runningScope VARCHAR(50),
+        currentSeq INT,
+        year VARCHAR(20),
+        resetFrequency VARCHAR(50),
+        isActive TINYINT(1) DEFAULT 1,
+        description TEXT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    const newRule = {
+      ruleName: req.body.ruleName || 'กฎออกเลขใหม่',
+      department: req.body.department || 'ทุกฝ่ายงาน',
+      divisionCode: req.body.divisionCode || '',
+      docType: req.body.docType || 'หนังสือภายนอก',
+      prefixPattern: req.body.prefixPattern || 'รย 0021',
+      suffixPattern: req.body.suffixPattern || '/{seq}',
+      numberFormat: req.body.numberFormat || '{prefix}/{isCircular ? "ว " : ""}{seq}',
+      runningScope: req.body.runningScope || 'department',
+      currentSeq: Number(req.body.currentSeq) || 1,
+      year: req.body.year || '2569',
+      resetFrequency: req.body.resetFrequency || 'yearly',
+      isActive: req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : 1,
+      description: req.body.description || ''
+    };
+    const [result]: any = await pool.query(
+      'INSERT INTO numbering_rules (ruleName, department, divisionCode, docType, prefixPattern, suffixPattern, numberFormat, runningScope, currentSeq, year, resetFrequency, isActive, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [newRule.ruleName, newRule.department, newRule.divisionCode, newRule.docType, newRule.prefixPattern, newRule.suffixPattern, newRule.numberFormat, newRule.runningScope, newRule.currentSeq, newRule.year, newRule.resetFrequency, newRule.isActive, newRule.description]
+    );
+    newRule.id = result.insertId;
+    newRule.isActive = Boolean(newRule.isActive);
+    await addSystemLog("CREATE_NUMBERING_RULE", `เพิ่มกฎออกเลขหนังสือ: ${newRule.ruleName}`, req.body.createdBy || "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true, data: newRule });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to create numbering rule' });
+  }
+});
+
+app.put('/api/numbering-rules/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const updates = { ...req.body };
+    delete updates.id;
+    if (updates.isActive !== undefined) {
+      updates.isActive = updates.isActive ? 1 : 0;
+    }
+    
+    const keys = Object.keys(updates);
+    if (keys.length === 0) return res.json({ success: true });
+    
+    const setClause = keys.map(k => `${k} = ?`).join(', ');
+    const values = keys.map(k => updates[k]);
+    values.push(id);
+    
+    await pool.query(`UPDATE numbering_rules SET ${setClause} WHERE id = ?`, values);
+    await addSystemLog("UPDATE_NUMBERING_RULE", `อัปเดตกฎออกเลขหนังสือ ID: ${id}`, req.body.updatedBy || "ผู้ดูแลระบบ", getClientIp(req));
+    
+    const [rows]: any = await pool.query('SELECT * FROM numbering_rules WHERE id = ?', [id]);
+    if (rows.length > 0) {
+      rows[0].isActive = Boolean(rows[0].isActive);
+      return res.json({ success: true, data: rows[0] });
+    }
+    return res.status(404).json({ error: 'Rule not found' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to update numbering rule' });
+  }
+});
+
+app.delete('/api/numbering-rules/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query('DELETE FROM numbering_rules WHERE id = ?', [id]);
+    await addSystemLog("DELETE_NUMBERING_RULE", `ลบกฎออกเลขหนังสือ ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to delete numbering rule' });
+  }
+});
+
+app.get('/api/file-codes', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS file_codes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(50) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        department VARCHAR(255),
+        description TEXT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    const [rows]: any = await pool.query('SELECT * FROM file_codes');
+    return res.json(rows);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch file codes' });
+  }
+});
+
+app.post('/api/file-codes', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS file_codes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(50) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        department VARCHAR(255),
+        description TEXT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    const newCode = {
+      code: req.body.code || '0021',
+      name: req.body.name || 'หมวดงานใหม่',
+      department: req.body.department || 'ฝ่ายบริหารงานทั่วไป',
+      description: req.body.description || ''
+    };
+    const [result]: any = await pool.query(
+      'INSERT INTO file_codes (code, name, department, description) VALUES (?, ?, ?, ?)',
+      [newCode.code, newCode.name, newCode.department, newCode.description]
+    );
+    newCode.id = result.insertId;
+    await addSystemLog("CREATE_FILE_CODE", `เพิ่มรหัสหมวดแฟ้ม: ${newCode.code} (${newCode.name})`, req.body.createdBy || "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true, data: newCode });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to create file code' });
+  }
+});
+
+app.delete('/api/file-codes/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query('DELETE FROM file_codes WHERE id = ?', [id]);
+    await addSystemLog("DELETE_FILE_CODE", `ลบรหัสหมวดแฟ้ม ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to delete file code' });
+  }
+});
+
+app.get('/api/reserved-numbers', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reserved_numbers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ruleId INT,
+        docType VARCHAR(100),
+        department VARCHAR(255),
+        numberString VARCHAR(100),
+        seqNumber INT,
+        year VARCHAR(20),
+        type VARCHAR(50),
+        status VARCHAR(50),
+        reservedBy VARCHAR(255),
+        reservedFor TEXT,
+        expiresAt VARCHAR(50),
+        usedAt VARCHAR(50),
+        usedForDocId VARCHAR(100),
+        createdAt VARCHAR(50)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    const [rows]: any = await pool.query('SELECT * FROM reserved_numbers ORDER BY id DESC LIMIT 500');
+    return res.json(rows);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch reserved numbers' });
+  }
+});
+
+app.post('/api/reserved-numbers/reserve', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reserved_numbers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ruleId INT,
+        docType VARCHAR(100),
+        department VARCHAR(255),
+        numberString VARCHAR(100),
+        seqNumber INT,
+        year VARCHAR(20),
+        type VARCHAR(50),
+        status VARCHAR(50),
+        reservedBy VARCHAR(255),
+        reservedFor TEXT,
+        expiresAt VARCHAR(50),
+        usedAt VARCHAR(50),
+        usedForDocId VARCHAR(100),
+        createdAt VARCHAR(50)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    const { ruleId, docType, department, prefix, startSeq, count, reservedBy, reservedFor } = req.body;
+    const qty = Number(count) || 1;
+    const startNumber = Number(startSeq) || 1;
+    const yearStr = req.body.year || '2569';
+    const createdItems: any[] = [];
+    const nowStr = new Date().toISOString();
+
+    for (let i = 0; i < qty; i++) {
+      const currentSeqNum = startNumber + i;
+      let numberStr = '';
+      if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(docType)) {
+        numberStr = `${prefix || docType} ${currentSeqNum}/${yearStr}`;
+      } else {
+        const isCirc = req.body.isCircular || false;
+        numberStr = `${prefix || 'รย 0021'}${isCirc ? '/ว ' : '/'}${currentSeqNum}`;
+      }
+
+      const [result]: any = await pool.query(
+        'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [ruleId || null, docType || 'หนังสือภายนอก', department || 'ฝ่ายบริหารงานทั่วไป', numberStr, currentSeqNum, yearStr, 'reserved', 'available', reservedBy || 'ผู้ใช้งานระบบ', reservedFor || 'สำรอง/จองเลขล่วงหน้า', nowStr]
+      );
+      
+      createdItems.push({
+        id: result.insertId,
+        numberString: numberStr
+      });
+    }
+
+    if (ruleId) {
+      const endSeq = startNumber + qty - 1;
+      await pool.query('UPDATE numbering_rules SET currentSeq = ? WHERE id = ? AND currentSeq < ?', [endSeq, ruleId, endSeq]);
+    }
+
+    await addSystemLog("RESERVE_NUMBER", `จอง/สำรองเลขหนังสือ ${qty} ฉบับ (${docType})`, reservedBy || "ผู้ใช้งาน", getClientIp(req));
+    return res.json({ success: true, count: qty, items: createdItems });
+  } catch (err: any) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to reserve numbers' });
+  }
+});
+
+app.post('/api/reserved-numbers/reclaim', async (req, res) => {
+  try {
+    const { docId, docType, department, numberString, year, reclaimedBy, reason } = req.body;
+    const nowStr = new Date().toISOString();
+    
+    // We try to extract seq number from numberString
+    let seqNumber = 0;
+    const match = numberString.match(/\/(\d+)/) || numberString.match(/\s(\d+)\//);
+    if (match) {
+        seqNumber = parseInt(match[1], 10);
+    }
+    
+    const [result]: any = await pool.query(
+      'INSERT INTO reserved_numbers (docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, year || '2569', 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr]
+    );
+
+    await addSystemLog("RECLAIM_NUMBER", `ดึงเลขหนังสือ ${numberString} กลับเข้าคลังจอง`, reclaimedBy || "ระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to reclaim number' });
+  }
+});
+
+app.post('/api/reserved-numbers/use', async (req, res) => {
+  try {
+    const { id, docId } = req.body;
+    const nowStr = new Date().toISOString();
+    
+    await pool.query('UPDATE reserved_numbers SET status = ?, usedAt = ?, usedForDocId = ? WHERE id = ?', ['used', nowStr, docId, id]);
+    
+    await addSystemLog("USE_RESERVED_NUMBER", `ใช้งานเลขจอง ID: ${id} สำหรับเอกสาร ${docId}`, "ระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to mark reserved number as used' });
+  }
+});
+
+app.post('/api/numbering/generate-next', async (req, res) => {
+  try {
+    const { department, docType, isCircular, category, year } = req.body;
+    const yr = year || '2569';
+    let actualType = docType || 'หนังสือภายนอก';
+    if (docType === 'admin') {
+      if (category === 'order') actualType = 'คำสั่ง';
+      else if (category === 'announcement') actualType = 'ประกาศ';
+      else if (category === 'certificate') actualType = 'หนังสือรับรอง';
+    }
+
+    const [rules]: any = await pool.query('SELECT * FROM numbering_rules WHERE isActive = 1');
+    
+    let rule = rules.find((r: any) => (r.docType === actualType) && (r.department === department));
+    if (!rule) rule = rules.find((r: any) => (r.docType === actualType) && (r.department === 'ทุกฝ่ายงาน'));
+    if (!rule) rule = rules.find((r: any) => r.docType === actualType);
+
+    if (!rule) {
+      rule = {
+        ruleName: 'กฎทั่วไปแบบตั้งต้น',
+        prefixPattern: actualType === 'คำสั่ง' ? 'คำสั่ง' : (actualType === 'ประกาศ' ? 'ประกาศ' : (actualType === 'หนังสือรับรอง' ? 'หนังสือรับรอง' : 'รย 0021')),
+        currentSeq: 1,
+        docType: actualType
+      };
+    }
+
+    const nextSeq = (rule.currentSeq || 0) + 1;
+    let formattedNumber = '';
+
+    if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(actualType)) {
+      formattedNumber = `${rule.prefixPattern || actualType} ${nextSeq}/${yr}`;
+    } else {
+      const circFlag = isCircular ? (rule.prefixPattern?.includes('ว') ? '' : 'ว ') : '';
+      formattedNumber = `${rule.prefixPattern || 'รย 0021'}/${circFlag}${nextSeq}`;
+    }
+
+    return res.json({
+      success: true,
+      rule,
+      nextSeq,
+      formattedNumber
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to generate next number' });
   }
 });
 
