@@ -16,7 +16,10 @@
       "smtpUser": "",
       "smtpPassword": "",
       "smtpFrom": "",
-      "enabledFeatures": "{\"overview\":true,\"inbox\":true,\"outbox\":true,\"admin_docs\":true,\"draft_docs\":true,\"folders\":true,\"logs\":true,\"draft\":true,\"aiscan\":true,\"order\":true,\"customorder\":true,\"speech\":true,\"meeting\":true,\"summary\":true}"
+      "enabledFeatures": "{\"overview\":true,\"inbox\":true,\"outbox\":true,\"admin_docs\":true,\"draft_docs\":true,\"folders\":true,\"logs\":true,\"draft\":true,\"aiscan\":true,\"order\":true,\"customorder\":true,\"speech\":true,\"meeting\":true,\"summary\":true}",
+      "autoReserveEnabled": 1,
+      "autoReserveTime": "18:00",
+      "autoReserveQty": 5
     }
   ],
   "users": [
@@ -360,6 +363,38 @@
     }
   ],
   "system_logs": [
+    {
+      "id": 1785827534412,
+      "action": "DELETE_RESERVED_NUMBER",
+      "details": "ลบเลขจอง/เลขสำรอง: รย 0021/13 (ID: 14)",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-04T07:12:14.384Z"
+    },
+    {
+      "id": 1785826766916,
+      "action": "DELETE_RESERVED_NUMBER",
+      "details": "ลบเลขจอง/เลขสำรอง: รย 0021/14 (ID: 15)",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-04T06:59:26.886Z"
+    },
+    {
+      "id": 1785821432590,
+      "action": "UPDATE_AUTO_RESERVE_SETTINGS",
+      "details": "อัปเดตการตั้งค่าจองเลขอัตโนมัติ: เปิด (เวลา 18:00 น., จำนวน 5 เลข/กฎ)",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "182.52.90.33",
+      "timestamp": "2026-08-04T05:30:32.561Z"
+    },
+    {
+      "id": 1785821321764,
+      "action": "UPDATE_AUTO_RESERVE_SETTINGS",
+      "details": "อัปเดตการตั้งค่าจองเลขอัตโนมัติ: เปิด (เวลา 18:00 น., จำนวน 5 เลข/กฎ)",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-04T05:28:41.735Z"
+    },
     {
       "id": 1785814833241,
       "action": "LOGIN_SUCCESS",
