@@ -52,7 +52,6 @@ export interface DocumentItem {
   attachments?: string[];
   folderId?: number | null; // แฟ้มเอกสารดิจิทัล
   folderName?: string | null; // ชื่อแฟ้มเอกสารดิจิทัลจริง
-  fileCode?: string | null; // รหัสหมวดแฟ้มเอกสารสารบรรณ
   status?: string; // สถานะหนังสือ เช่น 'ลงทะเบียน', 'เสนอผู้บริหาร', 'ส่งต่อกลุ่มงาน', 'เสร็จสิ้น'
   forwardedTo?: string; // ฝ่ายที่ได้รับส่งต่อหนังสือ
   forwardedBy?: string; // ผู้ส่งต่อหนังสือ
@@ -250,7 +249,6 @@ export interface DocumentVersion {
   versionNumber: number;
   title: string;
   docNumber: string;
-  fileCode?: string | null;
   from?: string;
   to?: string;
   department?: string;

@@ -471,7 +471,6 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
               
               <div className="flex flex-col divide-y divide-[var(--border-lighter)]/40">
                 {detailRow('แฟ้มจัดเก็บดิจิทัล :', <span className="font-medium text-[#cfa851]">{getFolderLabel()}</span>)}
-                {doc.fileCode && detailRow('รหัสหมวดแฟ้ม :', <span className="font-mono bg-[var(--bg-canvas)] border border-[var(--border-light)] px-2 py-0.5 rounded text-[var(--text-primary)]">{doc.fileCode}</span>)}
                 {detailRow('ปีงบประมาณ :', doc.year)}
                 {detailRow('วันลงทะเบียนในระบบ :', formattedRegDate())}
                 {detailRow('เลขที่หนังสือ (ที่) :', <span className="font-mono font-medium text-[var(--text-primary)]">{doc.docNumber}</span>)}

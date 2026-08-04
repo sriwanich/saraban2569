@@ -20,14 +20,14 @@ import {
   Building2,
   Tag,
   AlertCircle,
-  Clock
+  Clock,
+  Zap,
+  Play
 } from 'lucide-react';
 
-export default function CustomNumberingSettings({ currentYear }: { currentYear?: number } = {}) {
-  const [activeSubTab, setActiveSubTab] = useState<'rules' | 'fileCodes' | 'reserved'>('rules');
+export default function CustomNumberingSettings() {
+  const [activeSubTab, setActiveSubTab] = useState<'rules' | 'fileCodes' | 'reserved' | 'scheduled'>('rules');
   
-  const [sysYear, setSysYear] = useState<string>(currentYear ? String(currentYear) : '2569');
-
   // States for Numbering Rules
   const [rules, setRules] = useState<any[]>([]);
   const [loadingRules, setLoadingRules] = useState<boolean>(true);
@@ -46,6 +46,26 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
   const [reservedFilterDept, setReservedFilterDept] = useState<string>('ALL');
   const [reservedFilterStatus, setReservedFilterStatus] = useState<string>('ALL');
 
+  // States for Scheduled Auto-Reservations
+  const [scheduledReservations, setScheduledReservations] = useState<any[]>([]);
+  const [loadingScheduled, setLoadingScheduled] = useState<boolean>(true);
+  const [showScheduleModal, setShowScheduleModal] = useState<boolean>(false);
+  const [editingSchedule, setEditingSchedule] = useState<any>(null);
+  const [runningScheduleId, setRunningScheduleId] = useState<number | null>(null);
+
+  const [scheduleFormData, setScheduleFormData] = useState<any>({
+    name: 'จองเลขหนังสือส่งประจำวัน (รอบ 18.00 น.)',
+    department: 'ฝ่ายบริหารงานทั่วไป',
+    docType: 'หนังสือภายนอก',
+    prefix: 'รย 0021',
+    count: 5,
+    scheduleType: 'daily',
+    scheduledTime: '18:00',
+    reservedFor: 'จองเลขอัตโนมัติทุกวัน เวลา 18:00 น. สำหรับออกหนังสือรับ-ส่งช่วงเย็น',
+    reservedBy: 'ระบบอัตโนมัติ (Schedule 18:00)',
+    isActive: true
+  });
+
   // Preview calculator state
   const [previewDept, setPreviewDept] = useState<string>('ฝ่ายบริหารงานทั่วไป');
   const [previewDocType, setPreviewDocType] = useState<string>('หนังสือภายนอก');
@@ -53,14 +73,6 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
 
   // Notifications
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  // Scheduler Config States
-  const [schedulerConfig, setSchedulerConfig] = useState<any>({
-    autoReserveEnabled: false,
-    autoReserveTime: '18:00',
-    autoReserveQty: 5
-  });
-  const [savingScheduler, setSavingScheduler] = useState<boolean>(false);
 
   // Modal Form States
   const [ruleFormData, setRuleFormData] = useState<any>({
@@ -70,7 +82,7 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
     docType: 'หนังสือภายนอก',
     prefixPattern: 'รย 0021',
     currentSeq: 1,
-    year: currentYear ? String(currentYear) : '2569',
+    year: '2569',
     isActive: true,
     description: ''
   });
@@ -90,7 +102,6 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
     startSeq: 1,
     count: 1,
     isCircular: false,
-    isAuto: true,
     reservedBy: 'ผู้ดูแลระบบสารบรรณ',
     reservedFor: 'จองเลขล่วงหน้าสำหรับโครงการสำคัญ',
     expiresAt: '2026-12-31'
@@ -147,51 +158,18 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
     }
   };
 
-  const fetchSystemYear = async () => {
+  const fetchScheduled = async () => {
+    setLoadingScheduled(true);
     try {
-      const res = await fetch('/api/settings');
+      const res = await fetch('/api/scheduled-reservations');
       if (res.ok) {
         const data = await res.json();
-        if (data.currentYear) {
-          setSysYear(String(data.currentYear));
-        }
+        setScheduledReservations(data);
       }
     } catch (err) {
-      console.error('Failed to fetch system year settings:', err);
-    }
-  };
-
-  const fetchSchedulerConfig = async () => {
-    try {
-      const res = await fetch('/api/settings/auto-reserve');
-      if (res.ok) {
-        const data = await res.json();
-        setSchedulerConfig(data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch scheduler config:', err);
-    }
-  };
-
-  const handleSaveSchedulerConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingScheduler(true);
-    try {
-      const res = await fetch('/api/settings/auto-reserve', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(schedulerConfig)
-      });
-      if (res.ok) {
-        showNotification('success', 'บันทึกการตั้งค่าระบบจองเลขอัตโนมัติเรียบร้อยแล้ว');
-        fetchSchedulerConfig();
-      } else {
-        showNotification('error', 'เกิดข้อผิดพลาดในการบันทึกการตั้งค่า');
-      }
-    } catch (err) {
-      showNotification('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      console.error(err);
     } finally {
-      setSavingScheduler(false);
+      setLoadingScheduled(false);
     }
   };
 
@@ -199,31 +177,79 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
     fetchRules();
     fetchFileCodes();
     fetchReservedNumbers();
-    fetchSystemYear();
-    fetchSchedulerConfig();
+    fetchScheduled();
   }, []);
 
-  // Synchronize with currentYear prop if passed
-  useEffect(() => {
-    if (currentYear) {
-      setSysYear(String(currentYear));
-    }
-  }, [currentYear]);
+  // Save/Update Scheduled Reservation Task
+  const handleSaveSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const method = editingSchedule ? 'PUT' : 'POST';
+      const url = editingSchedule ? `/api/scheduled-reservations/${editingSchedule.id}` : '/api/scheduled-reservations';
+      
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(scheduleFormData)
+      });
 
-  // Sync ruleFormData.year and reserveFormData.expiresAt when sysYear changes
-  useEffect(() => {
-    if (!editingRule) {
-      setRuleFormData(prev => ({
-        ...prev,
-        year: sysYear
-      }));
+      if (res.ok) {
+        showNotification('success', editingSchedule ? 'อัปเดตการตั้งเวลาจองเลขอัตโนมัติเรียบร้อย' : 'เพิ่มการตั้งเวลาจองเลขอัตโนมัติเรียบร้อย');
+        setShowScheduleModal(false);
+        setEditingSchedule(null);
+        fetchScheduled();
+      } else {
+        showNotification('error', 'เกิดข้อผิดพลาดในการบันทึกการตั้งเวลา');
+      }
+    } catch (err) {
+      showNotification('error', 'ไม่สามารถเชื่อมต่อเครื่องแม่ข่ายได้');
     }
-    const ceYear = Number(sysYear) - 543;
-    setReserveFormData(prev => ({
-      ...prev,
-      expiresAt: `${ceYear}-12-31`
-    }));
-  }, [sysYear, editingRule]);
+  };
+
+  const handleToggleSchedule = async (id: number) => {
+    try {
+      const res = await fetch(`/api/scheduled-reservations/${id}/toggle`, { method: 'POST' });
+      if (res.ok) {
+        showNotification('success', 'เปลี่ยนสถานะเปิด/ปิดใช้งานการตั้งเวลาเรียบร้อย');
+        fetchScheduled();
+      }
+    } catch (err) {
+      showNotification('error', 'ไม่สามารถเปลี่ยนสถานะการตั้งเวลาได้');
+    }
+  };
+
+  const handleDeleteSchedule = async (id: number, name: string) => {
+    if (!window.confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบการตั้งเวลาจองอัตโนมัติ "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/scheduled-reservations/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showNotification('success', 'ลบการตั้งเวลาจองเลขอัตโนมัติเรียบร้อย');
+        fetchScheduled();
+      }
+    } catch (err) {
+      showNotification('error', 'ไม่สามารถลบการตั้งเวลาจองเลขอัตโนมัติได้');
+    }
+  };
+
+  const handleRunScheduleNow = async (id: number, name: string) => {
+    setRunningScheduleId(id);
+    try {
+      const res = await fetch(`/api/scheduled-reservations/${id}/run-now`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        const numStrings = data.items ? data.items.map((i: any) => i.numberString).join(', ') : '';
+        showNotification('success', `ทำจองเลขอัตโนมัติสำเร็จ! ได้รับเลข: ${numStrings}`);
+        fetchScheduled();
+        fetchReservedNumbers();
+      } else {
+        showNotification('error', 'ไม่สามารถรันจองเลขอัตโนมัติได้');
+      }
+    } catch (err) {
+      showNotification('error', 'เกิดข้อผิดพลาดในการรันจองเลขอัตโนมัติ');
+    } finally {
+      setRunningScheduleId(null);
+    }
+  };
 
   // Save/Update Rule
   const handleSaveRule = async (e: React.FormEvent) => {
@@ -295,58 +321,20 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
     }
   };
 
-  const handleDeleteReservedNumber = async (id: number) => {
-    if (!window.confirm('คุณต้องการลบเลขจอง/เลขสำรองนี้ใช่หรือไม่?')) return;
-    try {
-      const res = await fetch(`/api/reserved-numbers/${id}`, { method: 'DELETE' });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok || data.success) {
-        showNotification('success', 'ลบเลขจอง/เลขสำรองเรียบร้อยแล้ว');
-        fetchReservedNumbers();
-      } else {
-        showNotification('error', data.error || 'เกิดข้อผิดพลาดในการลบเลขจอง');
-      }
-    } catch (err) {
-      showNotification('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
-    }
-  };
-
-  const getMatchedRuleForReservation = () => {
-    const matched = rules.find(r => r.isActive && r.docType === reserveFormData.docType && (r.department === reserveFormData.department || r.department === 'ทุกฝ่ายงาน'));
-    if (!matched) {
-      return rules.find(r => r.isActive && r.docType === reserveFormData.docType);
-    }
-    return matched;
-  };
-
   // Reserve Numbers
   const handleReserveNumbers = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      let submissionData = { ...reserveFormData };
-      if (reserveFormData.isAuto) {
-        const rule = getMatchedRuleForReservation();
-        if (!rule) {
-          showNotification('error', 'ไม่สามารถใช้ระบบจองอัตโนมัติได้เนื่องจากไม่พบกฎการออกเลขที่ตรงกัน');
-          return;
-        }
-        submissionData.ruleId = rule.id;
-        submissionData.prefix = rule.prefixPattern;
-        submissionData.startSeq = rule.currentSeq + 1;
-      }
-
       const res = await fetch('/api/reserved-numbers/reserve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submissionData)
+        body: JSON.stringify(reserveFormData)
       });
       if (res.ok) {
-        showNotification('success', `สำรอง/จองเลขหนังสือเรียบร้อยแล้วจำนวน ${submissionData.count} เลข`);
+        showNotification('success', `สำรอง/จองเลขหนังสือเรียบร้อยแล้วจำนวน ${reserveFormData.count} เลข`);
         setShowReserveModal(false);
         fetchReservedNumbers();
         fetchRules();
-      } else {
-        showNotification('error', 'เกิดข้อผิดพลาดในการจองเลข');
       }
     } catch (err) {
       showNotification('error', 'เกิดข้อผิดพลาดในการจองเลข');
@@ -362,12 +350,12 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
     ) || rules.find(r => r.isActive && r.docType === previewDocType);
 
     if (!matchedRule) {
-      return ['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType) ? `${previewDocType} 1/${sysYear}` : 'รย 0021/1';
+      return ['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType) ? `${previewDocType} 1/2569` : 'รย 0021/1';
     }
 
     const nextSeq = (matchedRule.currentSeq || 0) + 1;
     if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType)) {
-      return `${matchedRule.prefixPattern || previewDocType} ${nextSeq}/${matchedRule.year || sysYear}`;
+      return `${matchedRule.prefixPattern || previewDocType} ${nextSeq}/${matchedRule.year || '2569'}`;
     } else {
       const circ = previewIsCircular ? 'ว ' : '';
       return `${matchedRule.prefixPattern || 'รย 0021'}/${circ}${nextSeq}`;
@@ -422,7 +410,7 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
                   docType: 'หนังสือภายนอก',
                   prefixPattern: 'รย 0021',
                   currentSeq: 1,
-                  year: sysYear,
+                  year: '2569',
                   isActive: true,
                   description: ''
                 });
@@ -449,6 +437,30 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
               className="px-4 py-2 bg-amber-600 text-white text-xs font-semibold rounded-xl hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-sm"
             >
               <Bookmark className="w-4 h-4" /> สำรอง/จองเลขหนังสือ
+            </button>
+          )}
+
+          {activeSubTab === 'scheduled' && (
+            <button
+              onClick={() => {
+                setEditingSchedule(null);
+                setScheduleFormData({
+                  name: 'จองเลขหนังสือส่งประจำวัน (รอบ 18.00 น.)',
+                  department: 'ฝ่ายบริหารงานทั่วไป',
+                  docType: 'หนังสือภายนอก',
+                  prefix: 'รย 0021',
+                  count: 5,
+                  scheduleType: 'daily',
+                  scheduledTime: '18:00',
+                  reservedFor: 'จองเลขอัตโนมัติทุกวัน เวลา 18:00 น. สำหรับออกหนังสือรับ-ส่งช่วงเย็น',
+                  reservedBy: 'ระบบอัตโนมัติ (Schedule 18:00)',
+                  isActive: true
+                });
+                setShowScheduleModal(true);
+              }}
+              className="px-4 py-2 bg-purple-600 text-white text-xs font-semibold rounded-xl hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-sm"
+            >
+              <Clock className="w-4 h-4" /> ตั้งเวลาจองอัตโนมัติ
             </button>
           )}
         </div>
@@ -498,6 +510,21 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
           คลังเลขสำรอง / เลขจอง / เลขคืน
           <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeSubTab === 'reserved' ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-muted)]'}`}>
             {reservedNumbers.filter(r => r.status === 'available').length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('scheduled')}
+          className={`px-4 py-2.5 rounded-xl font-medium text-xs transition-all flex items-center gap-2 shrink-0 ${
+            activeSubTab === 'scheduled'
+              ? 'bg-purple-600 text-white shadow-sm'
+              : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)]'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          ตั้งเวลาจองเลขอัตโนมัติ
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeSubTab === 'scheduled' ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-muted)]'}`}>
+            {scheduledReservations.filter(s => s.isActive).length}
           </span>
         </button>
       </div>
@@ -569,7 +596,7 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
                 </span>
               </div>
               <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                ปี พ.ศ. {sysYear} | รันต่อตามลำดับ
+                ปี พ.ศ. 2569 | รันต่อตามลำดับ
               </span>
             </div>
           </div>
@@ -807,85 +834,6 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
             </div>
           </div>
 
-          {/* Automatic Reservation Scheduler Settings Card */}
-          <div className="p-5 rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-500/[0.04] to-transparent space-y-4">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
-                <Clock className="w-4 h-4" />
-              </span>
-              <div>
-                <h4 className="text-sm font-bold text-[var(--text-primary)]">
-                  ระบบตั้งเวลาจองเลขอัตโนมัติรายวัน
-                </h4>
-                <p className="text-[11px] text-[var(--text-secondary)]">
-                  ทำการสำรอง/จองเลขหนังสือจากกฎออกเลขที่เปิดใช้งานทั้งหมดโดยอัตโนมัติเมื่อถึงเวลาที่กำหนดในแต่ละวัน
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveSchedulerConfig} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-xs bg-[var(--bg-surface)] p-4 rounded-xl border border-[var(--border-light)] shadow-sm">
-              <div className="space-y-1.5">
-                <label className="font-semibold text-[var(--text-primary)] block">สถานะระบบตั้งเวลา:</label>
-                <div className="flex items-center gap-3 h-9">
-                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
-                    <input
-                      type="radio"
-                      name="autoReserveEnabled"
-                      checked={schedulerConfig.autoReserveEnabled === true}
-                      onChange={() => setSchedulerConfig({ ...schedulerConfig, autoReserveEnabled: true })}
-                      className="accent-amber-600"
-                    />
-                    <span>เปิดใช้งาน (Active)</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
-                    <input
-                      type="radio"
-                      name="autoReserveEnabled"
-                      checked={schedulerConfig.autoReserveEnabled === false}
-                      onChange={() => setSchedulerConfig({ ...schedulerConfig, autoReserveEnabled: false })}
-                      className="accent-amber-600"
-                    />
-                    <span>ปิด (Disabled)</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-semibold text-[var(--text-primary)] block">เวลาจองเลขอัตโนมัติ (เวลาไทย):</label>
-                <input
-                  type="time"
-                  value={schedulerConfig.autoReserveTime}
-                  onChange={(e) => setSchedulerConfig({ ...schedulerConfig, autoReserveTime: e.target.value })}
-                  className="w-full h-9 px-3 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-[var(--text-primary)] outline-none focus:border-amber-500"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-semibold text-[var(--text-primary)] block">จำนวนเลขที่ต้องการจอง (ฉบับ/กฎ):</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={schedulerConfig.autoReserveQty}
-                  onChange={(e) => setSchedulerConfig({ ...schedulerConfig, autoReserveQty: Number(e.target.value) })}
-                  className="w-full h-9 px-3 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-amber-700 outline-none focus:border-amber-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <button
-                  type="submit"
-                  disabled={savingScheduler}
-                  className="w-full h-9 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600/50 text-white rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
-                >
-                  {savingScheduler ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่าเวลา'}
-                </button>
-              </div>
-            </form>
-          </div>
-
           {/* Filter Bar */}
           <div className="p-3 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)] flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-3 flex-wrap">
@@ -947,7 +895,6 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
                       <th className="px-4 py-3">ผู้จอง / วัตถุประสงค์</th>
                       <th className="px-4 py-3">วันหมดอายุ</th>
                       <th className="px-4 py-3 text-center">สถานะ</th>
-                      <th className="px-4 py-3 text-right">จัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border-light)]">
@@ -989,15 +936,6 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() => handleDeleteReservedNumber(item.id)}
-                            className="p-1.5 rounded-lg hover:bg-rose-500/10 text-rose-600 transition-colors"
-                            title="ลบเลขจอง/เลขสำรองนี้"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1005,6 +943,219 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ================= TAB 4: SCHEDULED AUTO-RESERVATIONS ================= */}
+      {activeSubTab === 'scheduled' && (
+        <div className="space-y-6">
+          {/* Top Banner & Info */}
+          <div className="p-4 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-[var(--text-primary)] flex items-center gap-2">
+                  ตั้งเวลาจองเลขอัตโนมัติตามช่วงเวลา (Scheduled Auto-Reserve)
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold">
+                    เบื้องหลังทำงานอัตโนมัติ
+                  </span>
+                </h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  ระบบจะทำการจองเลขหนังสือสารบรรณตามเวลาที่กำหนด (เช่น ทุกวัน เวลา 18:00 น.) และนำเข้าคลังเลขสำรองให้อัตโนมัติ เพื่อให้ผู้ปฏิบัติงานมีเลขพร้อมใช้งานตลอดเวลา
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={fetchScheduled}
+                className="p-2.5 rounded-xl border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] text-xs flex items-center gap-1.5"
+                title="รีเฟรชข้อมูล"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingScheduled ? 'animate-spin' : ''}`} />
+                รีเฟรช
+              </button>
+
+              <button
+                onClick={() => {
+                  setEditingSchedule(null);
+                  setScheduleFormData({
+                    name: 'จองเลขหนังสือส่งประจำวัน (รอบ 18.00 น.)',
+                    department: 'ฝ่ายบริหารงานทั่วไป',
+                    docType: 'หนังสือภายนอก',
+                    prefix: 'รย 0021',
+                    count: 5,
+                    scheduleType: 'daily',
+                    scheduledTime: '18:00',
+                    reservedFor: 'จองเลขอัตโนมัติทุกวัน เวลา 18:00 น. สำหรับออกหนังสือรับ-ส่งช่วงเย็น',
+                    reservedBy: 'ระบบอัตโนมัติ (Schedule 18:00)',
+                    isActive: true
+                  });
+                  setShowScheduleModal(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-purple-600 text-white text-xs font-semibold shadow-sm hover:opacity-90 flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                ตั้งเวลาจองอัตโนมัติใหม่
+              </button>
+            </div>
+          </div>
+
+          {/* Schedule Tasks Cards Grid */}
+          {loadingScheduled ? (
+            <div className="p-8 text-center text-[var(--text-muted)] text-sm flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin text-purple-600" />
+              กำลังโหลดรายการตั้งเวลา...
+            </div>
+          ) : scheduledReservations.length === 0 ? (
+            <div className="p-12 text-center rounded-2xl bg-[var(--bg-canvas)] border border-dashed border-[var(--border-light)] space-y-3">
+              <Clock className="w-10 h-10 text-[var(--text-muted)] mx-auto opacity-50" />
+              <h4 className="font-semibold text-sm text-[var(--text-primary)]">ยังไม่มีรายการตั้งเวลาจองเลขอัตโนมัติ</h4>
+              <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
+                กดปุ่ม "ตั้งเวลาจองอัตโนมัติใหม่" เพื่อกำหนดเวลาจองเลขสารบรรณอัตโนมัติ เช่น ทุกวัน เวลา 18:00 น.
+              </p>
+              <button
+                onClick={() => {
+                  setEditingSchedule(null);
+                  setShowScheduleModal(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-purple-600 text-white text-xs font-medium inline-flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" /> เพิ่มตั้งเวลาแรก
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {scheduledReservations.map((sch) => (
+                <div
+                  key={sch.id}
+                  className={`p-5 rounded-2xl border transition-all space-y-4 ${
+                    sch.isActive
+                      ? 'bg-[var(--bg-canvas)] border-[var(--border-light)] shadow-sm hover:border-purple-500/40'
+                      : 'bg-[var(--bg-overlay)]/50 border-[var(--border-light)] opacity-75'
+                  }`}
+                >
+                  {/* Card Header */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          sch.isActive ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-gray-500/10 text-gray-500'
+                        }`}>
+                          {sch.isActive ? '● เปิดใช้งาน' : '○ ปิดใช้งาน'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                          {sch.docType}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-sm text-[var(--text-primary)]">{sch.name}</h4>
+                    </div>
+
+                    {/* Toggle Button */}
+                    <button
+                      onClick={() => handleToggleSchedule(sch.id)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
+                        sch.isActive ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20' : 'bg-gray-200 dark:bg-gray-800 text-gray-500 hover:bg-gray-300'
+                      }`}
+                      title={sch.isActive ? 'กดเพื่อปิดใช้งาน' : 'กดเพื่อเปิดใช้งาน'}
+                    >
+                      {sch.isActive ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                      <span className="text-[11px] font-semibold">{sch.isActive ? 'เปิดอยู่' : 'ปิดอยู่'}</span>
+                    </button>
+                  </div>
+
+                  {/* Details Box */}
+                  <div className="p-3.5 rounded-xl bg-[var(--bg-overlay)] border border-[var(--border-light)] text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[var(--text-muted)] flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-purple-500" /> ช่วงเวลาการจอง:
+                      </span>
+                      <span className="font-bold text-[var(--text-primary)] bg-purple-500/10 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded text-[11px]">
+                        ⏰ {sch.scheduleType === 'daily' ? 'ทุกวัน' : sch.scheduleType === 'workdays' ? 'วันทำการ (จ-ศ)' : 'ประจำสัปดาห์'} เวลา {sch.scheduledTime} น.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[var(--text-muted)] flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5 text-amber-500" /> จำนวนเลขที่จองต่อรอบ:
+                      </span>
+                      <span className="font-bold text-amber-600 dark:text-amber-400">
+                        📦 ครั้งละ {sch.count} เลข ({sch.prefix})
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[var(--text-muted)] flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-blue-500" /> สังกัดหน่วยงาน:
+                      </span>
+                      <span className="font-medium text-[var(--text-primary)]">
+                        {sch.department}
+                      </span>
+                    </div>
+
+                    {sch.reservedFor && (
+                      <div className="pt-2 border-t border-[var(--border-light)] text-[11px] text-[var(--text-muted)]">
+                        <span className="font-medium text-[var(--text-secondary)]">วัตถุประสงค์:</span> {sch.reservedFor}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer Stats & Action Buttons */}
+                  <div className="flex items-center justify-between pt-1 gap-2">
+                    <div className="text-[10px] text-[var(--text-muted)] space-y-0.5">
+                      <div>รันล่าสุด: {sch.lastRunAt ? new Date(sch.lastRunAt).toLocaleString('th-TH') : 'ยังไม่เคยรัน'}</div>
+                      <div className="text-purple-600 dark:text-purple-400 font-medium">รอบถัดไป: ทุกวัน เวลา {sch.scheduledTime} น.</div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleRunScheduleNow(sch.id, sch.name)}
+                        disabled={runningScheduleId === sch.id}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700 transition-all flex items-center gap-1 shadow-sm disabled:opacity-50"
+                        title="ทดสอบรันจองเลขตามกำหนดเวลานี้ทันที"
+                      >
+                        <Zap className={`w-3.5 h-3.5 ${runningScheduleId === sch.id ? 'animate-bounce' : ''}`} />
+                        {runningScheduleId === sch.id ? 'กำลังรัน...' : 'รันจองเลขทันที'}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setEditingSchedule(sch);
+                          setScheduleFormData({
+                            name: sch.name,
+                            department: sch.department,
+                            docType: sch.docType,
+                            prefix: sch.prefix,
+                            count: sch.count,
+                            scheduleType: sch.scheduleType || 'daily',
+                            scheduledTime: sch.scheduledTime || '18:00',
+                            reservedFor: sch.reservedFor,
+                            reservedBy: sch.reservedBy,
+                            isActive: sch.isActive
+                          });
+                          setShowScheduleModal(true);
+                        }}
+                        className="p-1.5 rounded-lg border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)]"
+                        title="แก้ไขการตั้งเวลา"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteSchedule(sch.id, sch.name)}
+                        className="p-1.5 rounded-lg border border-red-200 dark:border-red-900/50 hover:bg-red-500/10 text-red-600 dark:text-red-400"
+                        title="ลบการตั้งเวลา"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1285,92 +1436,40 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
                 </div>
               </div>
 
-              <div className="space-y-2 p-2.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl">
-                <label className="font-semibold text-[var(--text-primary)] block">โหมดการจองเลข:</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
-                    <input
-                      type="radio"
-                      name="reservationMode"
-                      checked={reserveFormData.isAuto === true}
-                      onChange={() => setReserveFormData({ ...reserveFormData, isAuto: true })}
-                      className="accent-amber-600"
-                    />
-                    <span>อัตโนมัติ (ตามกฎออกเลข)</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
-                    <input
-                      type="radio"
-                      name="reservationMode"
-                      checked={reserveFormData.isAuto === false}
-                      onChange={() => setReserveFormData({ ...reserveFormData, isAuto: false })}
-                      className="accent-amber-600"
-                    />
-                    <span>กำหนดเอง (Manual)</span>
-                  </label>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">คำนำหน้า (Prefix):</label>
+                  <input
+                    type="text"
+                    value={reserveFormData.prefix}
+                    onChange={(e) => setReserveFormData({ ...reserveFormData, prefix: e.target.value })}
+                    placeholder="รย 0021"
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-amber-700 outline-none"
+                  />
                 </div>
-              </div>
 
-              {reserveFormData.isAuto ? (
-                (() => {
-                  const rule = getMatchedRuleForReservation();
-                  if (rule) {
-                    return (
-                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1">
-                        <p className="font-bold text-amber-900 dark:text-amber-200">
-                          กฎการออกเลขที่จะใช้: {rule.ruleName}
-                        </p>
-                        <div className="grid grid-cols-2 gap-2 text-[11px] text-amber-800 dark:text-amber-300">
-                          <p>คำนำหน้า: <span className="font-mono font-bold">{rule.prefixPattern}</span></p>
-                          <p>เลขล่าสุด: <span className="font-mono font-bold">{rule.currentSeq}</span></p>
-                          <p className="col-span-2">ช่วงลำดับที่จะจอง: <span className="font-mono font-bold text-amber-700 dark:text-amber-400">#{rule.currentSeq + 1} ถึง #{rule.currentSeq + reserveFormData.count}</span></p>
-                        </div>
-                      </div>
-                    );
-                  } else {
-                    return (
-                      <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-700 dark:text-rose-400 font-medium">
-                        ไม่พบกฎการออกเลขเปิดใช้งานสำหรับฝ่ายและประเภทที่เลือก กรุณาเปลี่ยนเป็นโหมดแมนนวลหรือเพิ่มกฎก่อน
-                      </div>
-                    );
-                  }
-                })()
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="font-semibold text-[var(--text-primary)] block mb-1">คำนำหน้า (Prefix):</label>
-                    <input
-                      type="text"
-                      value={reserveFormData.prefix || ''}
-                      onChange={(e) => setReserveFormData({ ...reserveFormData, prefix: e.target.value })}
-                      placeholder="รย 0021"
-                      className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-amber-700 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-semibold text-[var(--text-primary)] block mb-1">เลขเริ่มต้น:</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={reserveFormData.startSeq || 1}
-                      onChange={(e) => setReserveFormData({ ...reserveFormData, startSeq: Number(e.target.value) })}
-                      className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono outline-none"
-                    />
-                  </div>
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">เลขเริ่มต้น:</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={reserveFormData.startSeq}
+                    onChange={(e) => setReserveFormData({ ...reserveFormData, startSeq: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono outline-none"
+                  />
                 </div>
-              )}
 
-              <div>
-                <label className="font-semibold text-[var(--text-primary)] block mb-1">จำนวนที่จอง (ฉบับ):</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={reserveFormData.count || 1}
-                  onChange={(e) => setReserveFormData({ ...reserveFormData, count: Number(e.target.value) })}
-                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-[var(--primary-color)] outline-none"
-                />
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">จำนวนที่จอง (ฉบับ):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={reserveFormData.count}
+                    onChange={(e) => setReserveFormData({ ...reserveFormData, count: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-[var(--primary-color)] outline-none"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -1421,6 +1520,184 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
                   className="px-5 py-2 rounded-xl bg-amber-600 text-white font-semibold shadow-sm hover:opacity-90"
                 >
                   ยืนยันการจองเลข
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CREATE / EDIT SCHEDULED RESERVATION */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl animate-scale-up">
+            <div className="flex items-center justify-between border-b border-[var(--border-light)] pb-3">
+              <h3 className="font-bold text-base text-[var(--text-primary)] flex items-center gap-2">
+                <Clock className="w-5 h-5 text-purple-600" />
+                {editingSchedule ? 'แก้ไขการตั้งเวลาจองเลขอัตโนมัติ' : 'เพิ่มการตั้งเวลาจองเลขอัตโนมัติใหม่'}
+              </h3>
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="p-1 rounded-lg hover:bg-[var(--border-lighter)] text-[var(--text-muted)]"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSchedule} className="space-y-4 text-xs">
+              <div>
+                <label className="font-semibold text-[var(--text-primary)] block mb-1">ชื่อรายการตั้งเวลา:</label>
+                <input
+                  type="text"
+                  required
+                  value={scheduleFormData.name}
+                  onChange={(e) => setScheduleFormData({ ...scheduleFormData, name: e.target.value })}
+                  placeholder="เช่น จองเลขหนังสือส่งประจำวัน รอบ 18.00 น."
+                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">ความถี่ในการทำงาน:</label>
+                  <select
+                    value={scheduleFormData.scheduleType}
+                    onChange={(e) => setScheduleFormData({ ...scheduleFormData, scheduleType: e.target.value })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
+                  >
+                    <option value="daily">ทุกวัน (Daily)</option>
+                    <option value="workdays">วันทำการ (จันทร์ - ศุกร์)</option>
+                    <option value="weekly">ทุกสัปดาห์ (Weekly)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">เวลาที่จะจอง (HH:mm):</label>
+                  <input
+                    type="time"
+                    required
+                    value={scheduleFormData.scheduledTime}
+                    onChange={(e) => setScheduleFormData({ ...scheduleFormData, scheduledTime: e.target.value })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-bold text-purple-600 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">ฝ่าย/กองที่รับผิดชอบ:</label>
+                  <select
+                    value={scheduleFormData.department}
+                    onChange={(e) => setScheduleFormData({ ...scheduleFormData, department: e.target.value })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
+                  >
+                    <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
+                    <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ</option>
+                    <option value="ฝ่ายสงเคราะห์ผู้ประสบภัย">ฝ่ายสงเคราะห์ผู้ประสบภัย</option>
+                    <option value="ฝ่ายป้องกันและปฏิบัติการ">ฝ่ายป้องกันและปฏิบัติการ</option>
+                    <option value="ทุกฝ่ายงาน">ทุกฝ่ายงาน (ส่วนกลาง)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">ประเภทหนังสือ:</label>
+                  <select
+                    value={scheduleFormData.docType}
+                    onChange={(e) => {
+                      const dt = e.target.value;
+                      let defaultPrefix = 'รย 0021';
+                      if (dt === 'คำสั่ง') defaultPrefix = 'คำสั่ง';
+                      else if (dt === 'ประกาศ') defaultPrefix = 'ประกาศ';
+                      else if (dt === 'หนังสือรับรอง') defaultPrefix = 'หนังสือรับรอง';
+                      setScheduleFormData({ ...scheduleFormData, docType: dt, prefix: defaultPrefix });
+                    }}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
+                  >
+                    <option value="หนังสือภายนอก">หนังสือภายนอก</option>
+                    <option value="หนังสือภายใน">หนังสือภายใน</option>
+                    <option value="คำสั่ง">คำสั่ง</option>
+                    <option value="ประกาศ">ประกาศ</option>
+                    <option value="หนังสือรับรอง">หนังสือรับรอง</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">คำนำหน้า (Prefix):</label>
+                  <input
+                    type="text"
+                    required
+                    value={scheduleFormData.prefix}
+                    onChange={(e) => setScheduleFormData({ ...scheduleFormData, prefix: e.target.value })}
+                    placeholder="เช่น รย 0021 หรือ คำสั่ง"
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">จำนวนที่จองต่อรอบ (เลข):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    required
+                    value={scheduleFormData.count}
+                    onChange={(e) => setScheduleFormData({ ...scheduleFormData, count: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-bold text-amber-600 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold text-[var(--text-primary)] block mb-1">ชื่อผู้ตั้งจอง / ระบบ:</label>
+                <input
+                  type="text"
+                  value={scheduleFormData.reservedBy}
+                  onChange={(e) => setScheduleFormData({ ...scheduleFormData, reservedBy: e.target.value })}
+                  placeholder="เช่น ระบบอัตโนมัติ (Schedule 18:00)"
+                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-[var(--text-primary)] block mb-1">วัตถุประสงค์ / หมายเหตุการจอง:</label>
+                <textarea
+                  rows={2}
+                  value={scheduleFormData.reservedFor}
+                  onChange={(e) => setScheduleFormData({ ...scheduleFormData, reservedFor: e.target.value })}
+                  placeholder="เช่น จองเลขอัตโนมัติรอบเย็นประจำวัน เวลา 18:00 น."
+                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="schIsActive"
+                  checked={scheduleFormData.isActive}
+                  onChange={(e) => setScheduleFormData({ ...scheduleFormData, isActive: e.target.checked })}
+                  className="w-4 h-4 accent-purple-600 cursor-pointer"
+                />
+                <label htmlFor="schIsActive" className="font-semibold text-[var(--text-primary)] cursor-pointer">
+                  เปิดใช้งานการตั้งเวลานี้ทันที
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-[var(--border-light)]">
+                <button
+                  type="button"
+                  onClick={() => setShowScheduleModal(false)}
+                  className="px-4 py-2 rounded-xl border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)]"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-purple-600 text-white font-semibold shadow-sm hover:opacity-90 flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  บันทึกการตั้งเวลา
                 </button>
               </div>
             </form>
