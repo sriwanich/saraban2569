@@ -299,11 +299,12 @@ export default function CustomNumberingSettings({ currentYear }: { currentYear?:
     if (!window.confirm('คุณต้องการลบเลขจอง/เลขสำรองนี้ใช่หรือไม่?')) return;
     try {
       const res = await fetch(`/api/reserved-numbers/${id}`, { method: 'DELETE' });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok || data.success) {
         showNotification('success', 'ลบเลขจอง/เลขสำรองเรียบร้อยแล้ว');
         fetchReservedNumbers();
       } else {
-        showNotification('error', 'เกิดข้อผิดพลาดในการลบเลขจอง');
+        showNotification('error', data.error || 'เกิดข้อผิดพลาดในการลบเลขจอง');
       }
     } catch (err) {
       showNotification('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');

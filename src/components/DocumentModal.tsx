@@ -220,13 +220,27 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     const finalSeq = Math.max(existingMax + 1, ruleStartSeq);
 
     let formattedNumber = '';
+    const prefix = rule ? (rule.prefixPattern || actualType) : actualType;
     if (targetType === 'admin') {
-      const prefix = rule ? (rule.prefixPattern || actualType) : actualType;
-      formattedNumber = `${prefix} ${finalSeq}/${targetYear}`;
+      if (rule && rule.numberFormat) {
+        formattedNumber = rule.numberFormat
+          .replace('{prefix}', prefix)
+          .replace('{seq}', String(finalSeq))
+          .replace('{year}', targetYear);
+      } else {
+        formattedNumber = `${prefix} ${finalSeq}/${targetYear}`;
+      }
     } else if (targetType === 'outbox') {
-      const prefix = rule ? (rule.prefixPattern || 'รย 0021') : 'รย 0021';
       const circStr = targetIsCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
-      formattedNumber = `${prefix}/${circStr}${finalSeq}`;
+      if (rule && rule.numberFormat) {
+        formattedNumber = rule.numberFormat
+          .replace('{prefix}', prefix)
+          .replace('{isCircular ? "ว " : ""}', circStr)
+          .replace('{seq}', String(finalSeq))
+          .replace('{year}', targetYear);
+      } else {
+        formattedNumber = `${prefix}/${circStr}${finalSeq}`;
+      }
     } else {
       formattedNumber = String(finalSeq);
     }
