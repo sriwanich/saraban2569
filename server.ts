@@ -1341,10 +1341,6 @@ async function handleLocalDbQuery(sql: string, params: any[] = []): Promise<[any
       }
     } else if (tblName === 'system_logs') {
       rows = rows.sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 200);
-    } else if (tblName === 'reserved_numbers') {
-      if (cleanSql.includes('WHERE id = ?') || cleanSql.includes('WHERE id =')) {
-        rows = rows.filter(r => String(r.id) === String(params[0]));
-      }
     }
 
     if (cleanSql.includes('LIMIT 1')) {
@@ -1450,32 +1446,27 @@ async function handleLocalDbQuery(sql: string, params: any[] = []): Promise<[any
       const tblName = match[1];
       const whereClause = match[2] || '';
 
-      if (!localDb[tblName]) {
-        localDb[tblName] = [];
-      }
+      if (localDb[tblName]) {
+        if (!whereClause) {
+          localDb[tblName] = [];
+          saveLocalDb();
+          return [{ affectedRows: 0 }, []];
+        }
 
-      if (!whereClause) {
-        localDb[tblName] = [];
+        const targetVal = params[0];
+        const beforeLen = localDb[tblName].length;
+
+        if (whereClause.includes('id=?') || whereClause.includes('id = ?')) {
+          localDb[tblName] = localDb[tblName].filter(item => String(item.id) !== String(targetVal));
+        } else if (whereClause.includes('docId=?') || whereClause.includes('docId = ?')) {
+          localDb[tblName] = localDb[tblName].filter(item => String(item.docId) !== String(targetVal));
+        } else if (whereClause.includes('folderId=?') || whereClause.includes('folderId = ?')) {
+          localDb[tblName] = localDb[tblName].filter(item => String(item.folderId) !== String(targetVal));
+        }
+
         saveLocalDb();
-        return [{ affectedRows: 0 }, []];
+        return [{ affectedRows: beforeLen - localDb[tblName].length }, []];
       }
-
-      const targetVal = params[0];
-      const beforeLen = localDb[tblName].length;
-      const cleanWhere = whereClause.replace(/\s+/g, '').toLowerCase();
-
-      if (cleanWhere.includes('id=?')) {
-        localDb[tblName] = localDb[tblName].filter(item => String(item.id) !== String(targetVal));
-      } else if (cleanWhere.includes('docid=?')) {
-        localDb[tblName] = localDb[tblName].filter(item => String(item.docId) !== String(targetVal));
-      } else if (cleanWhere.includes('folderid=?')) {
-        localDb[tblName] = localDb[tblName].filter(item => String(item.folderId) !== String(targetVal));
-      } else {
-        localDb[tblName] = localDb[tblName].filter(item => String(item.id) !== String(targetVal));
-      }
-
-      saveLocalDb();
-      return [{ affectedRows: beforeLen - localDb[tblName].length }, []];
     }
   }
 
@@ -1488,26 +1479,12 @@ const originalPoolQuery = pool.query.bind(pool);
     try {
       return await originalPoolQuery(sql, params);
     } catch (err: any) {
-      if (err.code === 'ECONNREFUSED' || err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ETIMEDOUT' || err.message?.includes('ECONNREFUSED') || err.code === 'ER_NO_SUCH_TABLE' || err.message?.includes('doesn\'t exist')) {
-        if (err.code === 'ER_NO_SUCH_TABLE' || err.message?.includes('doesn\'t exist')) {
-          console.warn('⚠️ Table missing in MySQL, attempting setupDatabase...');
-          try {
-            await setupDatabase();
-            return await originalPoolQuery(sql, params);
-          } catch (createErr) {
-            // fallback to localDb
-          }
-        }
+      if (err.code === 'ECONNREFUSED' || err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ETIMEDOUT' || err.message?.includes('ECONNREFUSED')) {
         isMysqlOnline = false;
-        console.warn('⚠️ MySQL connection/table issue, switching to local DB fallback:', err.message);
+        console.warn('⚠️ MySQL connection lost/failed, switching to local DB fallback:', err.message);
         return await handleLocalDbQuery(sql, params);
-      } else if (err.code === 'ER_DUP_FIELDNAME' || err.message?.includes('Duplicate column') || err.code === 'ER_TABLE_EXISTS_ERROR' || err.code === 'ER_BAD_FIELD_ERROR' || err.message?.includes('Unknown column') || err.code === 'ER_DUP_KEYNAME' || err.message?.includes('Duplicate key name')) {
-        // Ignore harmless schema column/index warnings during ALTER TABLE or index creation and return empty/success
-        return [{ affectedRows: 0 }, []];
       } else {
-        // For other database errors during delete/update/insert, fallback to localDb to ensure 100% operation
-        console.warn('⚠️ MySQL query error, falling back to local DB:', err.message);
-        return await handleLocalDbQuery(sql, params);
+        throw err;
       }
     }
   }
@@ -1573,10 +1550,6 @@ async function setupDatabase() {
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda15Url TEXT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda30Url TEXT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN enabledFeatures TEXT', []); } catch (e) {}
-      try { await pool.query('ALTER TABLE settings ADD COLUMN autoReserveEnabled TINYINT(1) DEFAULT 0', []); } catch (e) {}
-      try { await pool.query('ALTER TABLE settings ADD COLUMN autoReserveTime VARCHAR(10) DEFAULT "18:00"', []); } catch (e) {}
-      try { await pool.query('ALTER TABLE settings ADD COLUMN autoReserveQty INT DEFAULT 5', []); } catch (e) {}
-      try { await pool.query('ALTER TABLE settings ADD COLUMN lastAutoReserveDate VARCHAR(50) DEFAULT ""', []); } catch (e) {}
 
       
       // Ensure numbering_rules table exists
@@ -1959,159 +1932,49 @@ app.put("/api/settings", async (req, res) => {
         formattedFeatures = JSON.stringify(formattedFeatures);
       }
 
-      try {
-        const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
-        if (rows && rows.length > 0) {
-          let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
-          const params: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
-          
-          if (formattedFeatures !== undefined) {
-            query += ", enabledFeatures=?";
-            params.push(formattedFeatures);
-          }
-          
-          query += " WHERE id=?";
-          params.push(rows[0].id);
-          
-          await pool.query(query, params);
-        } else {
-          const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
-          const values: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
-          
-          if (formattedFeatures !== undefined) {
-            fields.push("enabledFeatures");
-            values.push(formattedFeatures);
-          }
-          
-          const placeholders = fields.map(() => "?").join(", ");
-          await pool.query(
-            `INSERT INTO settings (${fields.join(", ")}) VALUES (${placeholders})`,
-            values
-          );
+      const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
+      if (rows.length > 0) {
+        let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
+        const params: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+        
+        if (formattedFeatures !== undefined) {
+          query += ", enabledFeatures=?";
+          params.push(formattedFeatures);
         }
-      } catch (dbErr) {
-        console.warn('MySQL settings update error, relying on localDb:', dbErr);
+        
+        query += " WHERE id=?";
+        params.push(rows[0].id);
+        
+        await pool.query(query, params);
+      } else {
+        const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
+        const values: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+        
+        if (formattedFeatures !== undefined) {
+          fields.push("enabledFeatures");
+          values.push(formattedFeatures);
+        }
+        
+        const placeholders = fields.map(() => "?").join(", ");
+        await pool.query(
+          `INSERT INTO settings (${fields.join(", ")}) VALUES (${placeholders})`,
+          values
+        );
       }
 
-      if (!localDb.settings) localDb.settings = [{}];
-      if (localDb.settings.length === 0) localDb.settings.push({});
-      
-      localDb.settings[0] = {
-        ...localDb.settings[0],
-        currentYear: data.currentYear,
-        startSequence: data.startSequence,
-        orgName: data.orgName,
-        headerOrgName: data.headerOrgName ?? '',
-        logoUrl: data.logoUrl,
-        garuda15Url: data.garuda15Url,
-        garuda30Url: data.garuda30Url,
-        faviconUrl: data.faviconUrl,
-        footerText: data.footerText,
-        geminiApiKey: data.geminiApiKey,
-        smtpHost: data.smtpHost,
-        smtpPort: data.smtpPort,
-        smtpUser: data.smtpUser,
-        smtpPassword: data.smtpPassword,
-        smtpFrom: data.smtpFrom,
-      };
-      if (formattedFeatures !== undefined) {
-        localDb.settings[0].enabledFeatures = formattedFeatures;
+      if (localDb.settings && localDb.settings.length > 0) {
+        if (formattedFeatures !== undefined) {
+          localDb.settings[0].enabledFeatures = formattedFeatures;
+        }
+        saveLocalDb();
       }
-      saveLocalDb();
 
-      try {
-        await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
-      } catch (logErr) {}
-
+      await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
       return res.json({ success: true });
     } catch (error: any) {
-      console.error("Error saving settings:", error);
-      if (!localDb.settings) localDb.settings = [{}];
-      if (localDb.settings.length === 0) localDb.settings.push({});
-      localDb.settings[0] = { ...localDb.settings[0], ...data };
-      saveLocalDb();
-      return res.json({ success: true, warning: 'Saved to local store due to error' });
+      console.error("Database error:", error.message);
+      return res.status(500).json({ error: "Database error" });
     }
-});
-
-app.get('/api/settings/auto-reserve', async (req, res) => {
-  try {
-    try {
-      const [rows]: any = await pool.query('SELECT autoReserveEnabled, autoReserveTime, autoReserveQty FROM settings LIMIT 1');
-      if (rows && rows.length > 0) {
-        return res.json({
-          autoReserveEnabled: !!rows[0].autoReserveEnabled,
-          autoReserveTime: rows[0].autoReserveTime || '18:00',
-          autoReserveQty: rows[0].autoReserveQty !== null ? Number(rows[0].autoReserveQty) : 5
-        });
-      }
-    } catch (e) {}
-
-    if (localDb.settings && localDb.settings.length > 0) {
-      return res.json({
-        autoReserveEnabled: !!localDb.settings[0].autoReserveEnabled,
-        autoReserveTime: localDb.settings[0].autoReserveTime || '18:00',
-        autoReserveQty: localDb.settings[0].autoReserveQty !== undefined ? Number(localDb.settings[0].autoReserveQty) : 5
-      });
-    }
-
-    return res.json({
-      autoReserveEnabled: false,
-      autoReserveTime: '18:00',
-      autoReserveQty: 5
-    });
-  } catch (err: any) {
-    return res.json({
-      autoReserveEnabled: false,
-      autoReserveTime: '18:00',
-      autoReserveQty: 5
-    });
-  }
-});
-
-app.put('/api/settings/auto-reserve', async (req, res) => {
-  try {
-    const { autoReserveEnabled, autoReserveTime, autoReserveQty } = req.body;
-    try {
-      const [rows]: any = await pool.query('SELECT id FROM settings LIMIT 1');
-      if (rows && rows.length > 0) {
-        await pool.query(
-          'UPDATE settings SET autoReserveEnabled = ?, autoReserveTime = ?, autoReserveQty = ? WHERE id = ?',
-          [autoReserveEnabled ? 1 : 0, autoReserveTime || '18:00', Number(autoReserveQty) || 5, rows[0].id]
-        );
-      } else {
-        await pool.query(
-          'INSERT INTO settings (autoReserveEnabled, autoReserveTime, autoReserveQty) VALUES (?, ?, ?)',
-          [autoReserveEnabled ? 1 : 0, autoReserveTime || '18:00', Number(autoReserveQty) || 5]
-        );
-      }
-    } catch (dbErr) {
-      console.warn('MySQL auto-reserve save error, updating localDb:', dbErr);
-    }
-    
-    // Update localDb settings as well in memory for standalone local backup consistency
-    if (!localDb.settings) localDb.settings = [{}];
-    if (localDb.settings.length === 0) localDb.settings.push({});
-    localDb.settings[0].autoReserveEnabled = autoReserveEnabled ? 1 : 0;
-    localDb.settings[0].autoReserveTime = autoReserveTime || '18:00';
-    localDb.settings[0].autoReserveQty = Number(autoReserveQty) || 5;
-    saveLocalDb();
-
-    try {
-      await addSystemLog("UPDATE_AUTO_RESERVE_SETTINGS", `อัปเดตการตั้งค่าจองเลขอัตโนมัติ: ${autoReserveEnabled ? "เปิด" : "ปิด"} (เวลา ${autoReserveTime || '18:00'} น., จำนวน ${autoReserveQty || 5} เลข/กฎ)`, "ผู้ดูแลระบบ", getClientIp(req));
-    } catch (logErr) {}
-
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('Error in auto-reserve put:', err);
-    if (!localDb.settings) localDb.settings = [{}];
-    if (localDb.settings.length === 0) localDb.settings.push({});
-    localDb.settings[0].autoReserveEnabled = req.body.autoReserveEnabled ? 1 : 0;
-    localDb.settings[0].autoReserveTime = req.body.autoReserveTime || '18:00';
-    localDb.settings[0].autoReserveQty = Number(req.body.autoReserveQty) || 5;
-    saveLocalDb();
-    return res.json({ success: true, warning: 'Saved locally due to error' });
-  }
 });
 
 app.put("/api/settings/features", async (req, res) => {
@@ -2335,43 +2198,30 @@ app.delete('/api/file-codes/:id', async (req, res) => {
 
 app.get('/api/reserved-numbers', async (req, res) => {
   try {
-    try {
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS reserved_numbers (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          ruleId INT,
-          docType VARCHAR(100),
-          department VARCHAR(255),
-          numberString VARCHAR(100),
-          seqNumber INT,
-          year VARCHAR(20),
-          type VARCHAR(50),
-          status VARCHAR(50),
-          reservedBy VARCHAR(255),
-          reservedFor TEXT,
-          expiresAt VARCHAR(50),
-          usedAt VARCHAR(50),
-          usedForDocId VARCHAR(100),
-          createdAt VARCHAR(50)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-      `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reserved_numbers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ruleId INT,
+        docType VARCHAR(100),
+        department VARCHAR(255),
+        numberString VARCHAR(100),
+        seqNumber INT,
+        year VARCHAR(20),
+        type VARCHAR(50),
+        status VARCHAR(50),
+        reservedBy VARCHAR(255),
+        reservedFor TEXT,
+        expiresAt VARCHAR(50),
+        usedAt VARCHAR(50),
+        usedForDocId VARCHAR(100),
+        createdAt VARCHAR(50)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
-      const [rows]: any = await pool.query('SELECT * FROM reserved_numbers ORDER BY id DESC LIMIT 500');
-      return res.json(rows || []);
-    } catch (mysqlErr) {
-      console.warn('MySQL get reserved numbers error, falling back to localDb:', mysqlErr);
-    }
-
-    if (localDb.reserved_numbers && Array.isArray(localDb.reserved_numbers)) {
-      return res.json(localDb.reserved_numbers);
-    }
-    return res.json([]);
+    const [rows]: any = await pool.query('SELECT * FROM reserved_numbers ORDER BY id DESC LIMIT 500');
+    return res.json(rows);
   } catch (err: any) {
-    console.error('Failed to fetch reserved numbers:', err);
-    if (localDb.reserved_numbers) {
-      return res.json(localDb.reserved_numbers);
-    }
-    return res.json([]);
+    return res.status(500).json({ error: 'Failed to fetch reserved numbers' });
   }
 });
 
@@ -2400,46 +2250,18 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
     const { ruleId, docType, department, prefix, startSeq, count, reservedBy, reservedFor } = req.body;
     const qty = Number(count) || 1;
     const startNumber = Number(startSeq) || 1;
-    let yearStr = req.body.year;
-    if (!yearStr) {
-      try {
-        const [settingsRows]: any = await pool.query('SELECT currentYear FROM settings LIMIT 1');
-        if (settingsRows.length > 0 && settingsRows[0].currentYear) {
-          yearStr = String(settingsRows[0].currentYear);
-        } else {
-          yearStr = '2569';
-        }
-      } catch (e) {
-        yearStr = '2569';
-      }
-    }
-
-    let rule = null;
-    if (ruleId) {
-      const [rRows]: any = await pool.query('SELECT * FROM numbering_rules WHERE id = ?', [ruleId]);
-      if (rRows.length > 0) rule = rRows[0];
-    }
-    if (!rule && docType) {
-      const [rRows]: any = await pool.query('SELECT * FROM numbering_rules WHERE docType = ? AND (department = ? OR department = "ทุกฝ่ายงาน") LIMIT 1', [docType, department || 'ทุกฝ่ายงาน']);
-      if (rRows.length > 0) rule = rRows[0];
-    }
-
+    const yearStr = req.body.year || '2569';
     const createdItems: any[] = [];
     const nowStr = new Date().toISOString();
 
     for (let i = 0; i < qty; i++) {
       const currentSeqNum = startNumber + i;
       let numberStr = '';
-      if (rule) {
-        if (prefix && !rule.prefixPattern) rule.prefixPattern = prefix;
-        numberStr = formatNumberWithRule(rule, currentSeqNum, yearStr, req.body.isCircular || false, docType);
+      if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(docType)) {
+        numberStr = `${prefix || docType} ${currentSeqNum}/${yearStr}`;
       } else {
-        if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(docType)) {
-          numberStr = `${prefix || docType} ${currentSeqNum}/${yearStr}`;
-        } else {
-          const isCirc = req.body.isCircular || false;
-          numberStr = `${prefix || 'รย 0021'}${isCirc ? '/ว ' : '/'}${currentSeqNum}`;
-        }
+        const isCirc = req.body.isCircular || false;
+        numberStr = `${prefix || 'รย 0021'}${isCirc ? '/ว ' : '/'}${currentSeqNum}`;
       }
 
       const [result]: any = await pool.query(
@@ -2478,23 +2300,9 @@ app.post('/api/reserved-numbers/reclaim', async (req, res) => {
         seqNumber = parseInt(match[1], 10);
     }
     
-    let yearVal = year;
-    if (!yearVal) {
-      try {
-        const [settingsRows]: any = await pool.query('SELECT currentYear FROM settings LIMIT 1');
-        if (settingsRows.length > 0 && settingsRows[0].currentYear) {
-          yearVal = String(settingsRows[0].currentYear);
-        } else {
-          yearVal = '2569';
-        }
-      } catch (e) {
-        yearVal = '2569';
-      }
-    }
-    
     const [result]: any = await pool.query(
       'INSERT INTO reserved_numbers (docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, yearVal, 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr]
+      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, year || '2569', 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr]
     );
 
     await addSystemLog("RECLAIM_NUMBER", `ดึงเลขหนังสือ ${numberString} กลับเข้าคลังจอง`, reclaimedBy || "ระบบ", getClientIp(req));
@@ -2503,19 +2311,6 @@ app.post('/api/reserved-numbers/reclaim', async (req, res) => {
     return res.status(500).json({ error: 'Failed to reclaim number' });
   }
 });
-
-function formatNumberWithRule(rule: any, seq: number, yr: string, isCircular: boolean = false, defaultDocType: string = 'หนังสือภายนอก') {
-  const prefix = rule?.prefixPattern || rule?.docType || defaultDocType;
-  const format = rule?.numberFormat || (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(rule?.docType || defaultDocType) ? '{prefix} {seq}/{year}' : '{prefix}/{isCircular ? "ว " : ""}{seq}');
-  const circFlag = isCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
-  
-  return format
-    .replace('{prefix}', prefix)
-    .replace('{seq}', String(seq))
-    .replace('{year}', yr)
-    .replace('{isCircular ? "ว " : ""}', circFlag)
-    .replace('{isCircular ? "ว" : ""}', circFlag.trim());
-}
 
 app.post('/api/reserved-numbers/use', async (req, res) => {
   try {
@@ -2531,62 +2326,10 @@ app.post('/api/reserved-numbers/use', async (req, res) => {
   }
 });
 
-app.delete('/api/reserved-numbers/:id', async (req, res) => {
-  const id = Number(req.params.id);
-  let numStr = '';
-  try {
-    try {
-      const [rows]: any = await pool.query('SELECT numberString FROM reserved_numbers WHERE id = ?', [id]);
-      if (rows && rows.length > 0) {
-        numStr = rows[0].numberString || '';
-      }
-    } catch (e) {
-      // ignore
-    }
-
-    try {
-      await pool.query('DELETE FROM reserved_numbers WHERE id = ?', [id]);
-    } catch (dbErr) {
-      console.warn('MySQL delete reserved number error, updating localDb:', dbErr);
-    }
-
-    // Always ensure localDb is also updated
-    if (localDb.reserved_numbers && Array.isArray(localDb.reserved_numbers)) {
-      localDb.reserved_numbers = localDb.reserved_numbers.filter(item => String(item.id) !== String(id));
-      saveLocalDb();
-    }
-    
-    try {
-      await addSystemLog("DELETE_RESERVED_NUMBER", `ลบเลขจอง/เลขสำรอง: ${numStr || id} (ID: ${id})`, "ผู้ดูแลระบบ", getClientIp(req));
-    } catch (logErr) {}
-
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('Error deleting reserved number:', err);
-    if (localDb.reserved_numbers && Array.isArray(localDb.reserved_numbers)) {
-      localDb.reserved_numbers = localDb.reserved_numbers.filter(item => String(item.id) !== String(id));
-      saveLocalDb();
-    }
-    return res.json({ success: true });
-  }
-});
-
 app.post('/api/numbering/generate-next', async (req, res) => {
   try {
     const { department, docType, isCircular, category, year } = req.body;
-    let yr = year;
-    if (!yr) {
-      try {
-        const [settingsRows]: any = await pool.query('SELECT currentYear FROM settings LIMIT 1');
-        if (settingsRows.length > 0 && settingsRows[0].currentYear) {
-          yr = String(settingsRows[0].currentYear);
-        } else {
-          yr = '2569';
-        }
-      } catch (e) {
-        yr = '2569';
-      }
-    }
+    const yr = year || '2569';
     let actualType = docType || 'หนังสือภายนอก';
     if (docType === 'admin') {
       if (category === 'order') actualType = 'คำสั่ง';
@@ -2610,7 +2353,14 @@ app.post('/api/numbering/generate-next', async (req, res) => {
     }
 
     const nextSeq = (rule.currentSeq || 0) + 1;
-    let formattedNumber = formatNumberWithRule(rule, nextSeq, yr, isCircular, actualType);
+    let formattedNumber = '';
+
+    if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(actualType)) {
+      formattedNumber = `${rule.prefixPattern || actualType} ${nextSeq}/${yr}`;
+    } else {
+      const circFlag = isCircular ? (rule.prefixPattern?.includes('ว') ? '' : 'ว ') : '';
+      formattedNumber = `${rule.prefixPattern || 'รย 0021'}/${circFlag}${nextSeq}`;
+    }
 
     return res.json({
       success: true,
@@ -5922,91 +5672,6 @@ ${JSON.stringify(docsSummaryContext, null, 2)}
     });
   }
 });
-
-
-function getBangkokTime() {
-  const d = new Date();
-  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-  const bangkokDate = new Date(utc + (3600000 * 7));
-  const year = bangkokDate.getFullYear() + 543;
-  const dateStr = bangkokDate.toISOString().split('T')[0];
-  const hour = bangkokDate.getHours();
-  const minute = bangkokDate.getMinutes();
-  return { dateStr, hour, minute, year: String(year) };
-}
-
-async function runAutoReservationCheck() {
-  try {
-    const [settingsRows]: any = await pool.query('SELECT * FROM settings LIMIT 1');
-    if (settingsRows.length === 0) return;
-    const settings = settingsRows[0];
-    
-    if (!settings.autoReserveEnabled) return;
-    
-    const { dateStr, hour, minute, year } = getBangkokTime();
-    
-    const [schedHourStr, schedMinStr] = (settings.autoReserveTime || '18:00').split(':');
-    const schedHour = parseInt(schedHourStr, 10);
-    const schedMin = parseInt(schedMinStr, 10);
-    
-    if (hour === schedHour && minute === schedMin) {
-      if (settings.lastAutoReserveDate === dateStr) {
-        return;
-      }
-      
-      console.log(`[AutoReserve] Starting scheduled reservation at ${settings.autoReserveTime} Bangkok time on ${dateStr}`);
-      
-      await pool.query('UPDATE settings SET lastAutoReserveDate = ? WHERE id = ?', [dateStr, settings.id]);
-      if (localDb.settings && localDb.settings[0]) {
-        localDb.settings[0].lastAutoReserveDate = dateStr;
-        saveLocalDb();
-      }
-      
-      // Fetch active numbering rules
-      const [rules]: any = await pool.query('SELECT * FROM numbering_rules WHERE isActive = 1');
-      const qty = Number(settings.autoReserveQty) || 5;
-      const nowStr = new Date().toISOString();
-      const currentYearStr = settings.currentYear ? String(settings.currentYear) : year;
-      
-      for (const rule of rules) {
-        const startNumber = (rule.currentSeq || 0) + 1;
-        
-        for (let i = 0; i < qty; i++) {
-          const currentSeqNum = startNumber + i;
-          let numberStr = formatNumberWithRule(rule, currentSeqNum, rule.year || currentYearStr, false, rule.docType);
-          
-          await pool.query(
-            'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [
-              rule.id,
-              rule.docType,
-              rule.department,
-              numberStr,
-              currentSeqNum,
-              rule.year || currentYearStr,
-              'reserved',
-              'available',
-              'ระบบจองเลขอัตโนมัติ (Scheduler)',
-              `จองเลขอัตโนมัติรายวัน เวลา ${settings.autoReserveTime} น. (จำนวน ${qty} เลข)`,
-              nowStr
-            ]
-          );
-        }
-        
-        const endSeq = startNumber + qty - 1;
-        await pool.query('UPDATE numbering_rules SET currentSeq = ? WHERE id = ?', [endSeq, rule.id]);
-      }
-      
-      await addSystemLog("AUTO_RESERVE_RUN", `ระบบจองเลขอัตโนมัติทำงานสำเร็จ: ทำการจองกฎออกเลข ${rules.length} กฎ กฎละ ${qty} เลข รวมเป็น ${rules.length * qty} เลข`, "ระบบอัตโนมัติ", "127.0.0.1");
-      console.log(`[AutoReserve] Completed scheduled reservation for ${rules.length} rules.`);
-    }
-  } catch (err) {
-    console.error('[AutoReserve] Error running automated reservation:', err);
-  }
-}
-
-// Start interval checking every 15 seconds
-setInterval(runAutoReservationCheck, 15000);
 
 
 async function startServer() {
