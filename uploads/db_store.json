@@ -361,6 +361,14 @@
   ],
   "system_logs": [
     {
+      "id": 1785814833241,
+      "action": "LOGIN_SUCCESS",
+      "details": "เข้าสู่ระบบสำเร็จ (ผู้ดูแล ระบบ) - ยืนยันรหัสผ่านด้วย Argon2id",
+      "username": "admin",
+      "ipAddress": "182.52.90.33",
+      "timestamp": "2026-08-04T03:40:33.210Z"
+    },
+    {
       "id": 1785760666888,
       "action": "UPDATE_NUMBERING_RULE",
       "details": "อัปเดตกฎออกเลขหนังสือ ID: 2",

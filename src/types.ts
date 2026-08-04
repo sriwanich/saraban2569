@@ -1,4 +1,4 @@
-export type DocType = 'inbox' | 'outbox' | 'admin';
+export type DocType = 'inbox' | 'outbox' | 'admin' | 'internal';
 export type DocCategory = 'order' | 'announcement' | 'circular' | 'certificate' | 'memo';
 export type DocPriority = 'ปกติ' | 'ด่วน' | 'ด่วนมาก' | 'ด่วนที่สุด';
 export type DocSecrecy = 'ปกติ' | 'ลับ' | 'ลับมาก' | 'ลับที่สุด';
