@@ -433,7 +433,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
 
   const baseNavItems = [
     { id: 'overview', icon: Home, label: 'ภาพรวมระบบ' },
-    { id: 'ai_assistant', icon: Sparkles, label: 'ผู้ช่วย AI Smart e-Saraban' },
+    { id: 'ai_assistant', icon: Sparkles, label: 'ผู้ช่วย AI Smart' },
     { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
     { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
     { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ' },

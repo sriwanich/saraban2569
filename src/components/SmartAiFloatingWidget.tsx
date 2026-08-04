@@ -28,7 +28,7 @@ export default function SmartAiFloatingWidget({
         <button
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 z-40 group flex items-center gap-3 px-4 py-3 rounded-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white shadow-2xl hover:shadow-indigo-500/30 active:scale-95 transition-all duration-300 border border-white/20"
-          title="เปิดผู้ช่วย AI Smart e-Saraban"
+          title="เปิดผู้ช่วย AI Smart"
         >
           <div className="relative">
             <Sparkles className="w-5 h-5 animate-pulse" />
