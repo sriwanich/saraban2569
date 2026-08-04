@@ -1784,7 +1784,7 @@ export default function Settings(props: SettingsProps) {
             </div>
 
             {activeSystemDocTab === 'customNumbering' && (
-              <CustomNumberingSettings />
+              <CustomNumberingSettings currentYear={currentYear} />
             )}
 
             {activeSystemDocTab === 'docSettings' && (

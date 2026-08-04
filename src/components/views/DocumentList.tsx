@@ -469,6 +469,11 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                           {row.title}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
+                          {row.fileCode && (
+                            <span className="inline-flex items-center text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 font-mono" title={`รหัสหมวดแฟ้ม: ${row.fileCode}`}>
+                              {row.fileCode}
+                            </span>
+                          )}
                           {getPriorityBadge(row.priority)}
                           {row.attachments && row.attachments.length > 0 && (
                             <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-1.5 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium whitespace-nowrap" title={`${row.attachments.length} ไฟล์แนบ`}>

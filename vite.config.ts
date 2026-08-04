@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      disable: process.env.DISABLE_PWA !== 'false', // ปิดการใช้งาน PWA เป็นค่าเริ่มต้นเพื่อป้องกันปัญหาสิทธิ์การเขียนไฟล์ (Permission Denied) บนเซิร์ฟเวอร์ปลายทาง หากต้องการเปิดให้ระบุ DISABLE_PWA=false ใน .env
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico'],
       workbox: {

@@ -1550,6 +1550,10 @@ async function setupDatabase() {
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda15Url TEXT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN garuda30Url TEXT', []); } catch (e) {}
       try { await pool.query('ALTER TABLE settings ADD COLUMN enabledFeatures TEXT', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN autoReserveEnabled TINYINT(1) DEFAULT 0', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN autoReserveTime VARCHAR(10) DEFAULT "18:00"', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN autoReserveQty INT DEFAULT 5', []); } catch (e) {}
+      try { await pool.query('ALTER TABLE settings ADD COLUMN lastAutoReserveDate VARCHAR(50) DEFAULT ""', []); } catch (e) {}
 
       
       // Ensure numbering_rules table exists
@@ -1977,6 +1981,57 @@ app.put("/api/settings", async (req, res) => {
     }
 });
 
+app.get('/api/settings/auto-reserve', async (req, res) => {
+  try {
+    const [rows]: any = await pool.query('SELECT autoReserveEnabled, autoReserveTime, autoReserveQty FROM settings LIMIT 1');
+    if (rows.length > 0) {
+      return res.json({
+        autoReserveEnabled: !!rows[0].autoReserveEnabled,
+        autoReserveTime: rows[0].autoReserveTime || '18:00',
+        autoReserveQty: rows[0].autoReserveQty !== null ? Number(rows[0].autoReserveQty) : 5
+      });
+    }
+    return res.json({
+      autoReserveEnabled: false,
+      autoReserveTime: '18:00',
+      autoReserveQty: 5
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch auto-reserve settings' });
+  }
+});
+
+app.put('/api/settings/auto-reserve', async (req, res) => {
+  try {
+    const { autoReserveEnabled, autoReserveTime, autoReserveQty } = req.body;
+    const [rows]: any = await pool.query('SELECT id FROM settings LIMIT 1');
+    if (rows.length > 0) {
+      await pool.query(
+        'UPDATE settings SET autoReserveEnabled = ?, autoReserveTime = ?, autoReserveQty = ? WHERE id = ?',
+        [autoReserveEnabled ? 1 : 0, autoReserveTime || '18:00', Number(autoReserveQty) || 5, rows[0].id]
+      );
+    } else {
+      await pool.query(
+        'INSERT INTO settings (autoReserveEnabled, autoReserveTime, autoReserveQty) VALUES (?, ?, ?)',
+        [autoReserveEnabled ? 1 : 0, autoReserveTime || '18:00', Number(autoReserveQty) || 5]
+      );
+    }
+    
+    // Update localDb settings as well in memory for standalone local backup consistency
+    if (localDb.settings && localDb.settings.length > 0) {
+      localDb.settings[0].autoReserveEnabled = autoReserveEnabled ? 1 : 0;
+      localDb.settings[0].autoReserveTime = autoReserveTime || '18:00';
+      localDb.settings[0].autoReserveQty = Number(autoReserveQty) || 5;
+      saveLocalDb();
+    }
+
+    await addSystemLog("UPDATE_AUTO_RESERVE_SETTINGS", `อัปเดตการตั้งค่าจองเลขอัตโนมัติ: ${autoReserveEnabled ? "เปิด" : "ปิด"} (เวลา ${autoReserveTime || '18:00'} น., จำนวน ${autoReserveQty || 5} เลข/กฎ)`, "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to save auto-reserve settings' });
+  }
+});
+
 app.put("/api/settings/features", async (req, res) => {
   const { enabledFeatures, updatedBy, details } = req.body;
   const ip = getClientIp(req);
@@ -2250,7 +2305,19 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
     const { ruleId, docType, department, prefix, startSeq, count, reservedBy, reservedFor } = req.body;
     const qty = Number(count) || 1;
     const startNumber = Number(startSeq) || 1;
-    const yearStr = req.body.year || '2569';
+    let yearStr = req.body.year;
+    if (!yearStr) {
+      try {
+        const [settingsRows]: any = await pool.query('SELECT currentYear FROM settings LIMIT 1');
+        if (settingsRows.length > 0 && settingsRows[0].currentYear) {
+          yearStr = String(settingsRows[0].currentYear);
+        } else {
+          yearStr = '2569';
+        }
+      } catch (e) {
+        yearStr = '2569';
+      }
+    }
     const createdItems: any[] = [];
     const nowStr = new Date().toISOString();
 
@@ -2300,9 +2367,23 @@ app.post('/api/reserved-numbers/reclaim', async (req, res) => {
         seqNumber = parseInt(match[1], 10);
     }
     
+    let yearVal = year;
+    if (!yearVal) {
+      try {
+        const [settingsRows]: any = await pool.query('SELECT currentYear FROM settings LIMIT 1');
+        if (settingsRows.length > 0 && settingsRows[0].currentYear) {
+          yearVal = String(settingsRows[0].currentYear);
+        } else {
+          yearVal = '2569';
+        }
+      } catch (e) {
+        yearVal = '2569';
+      }
+    }
+    
     const [result]: any = await pool.query(
       'INSERT INTO reserved_numbers (docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, year || '2569', 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr]
+      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, yearVal, 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr]
     );
 
     await addSystemLog("RECLAIM_NUMBER", `ดึงเลขหนังสือ ${numberString} กลับเข้าคลังจอง`, reclaimedBy || "ระบบ", getClientIp(req));
@@ -2326,10 +2407,35 @@ app.post('/api/reserved-numbers/use', async (req, res) => {
   }
 });
 
+app.delete('/api/reserved-numbers/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [rows]: any = await pool.query('SELECT numberString FROM reserved_numbers WHERE id = ?', [id]);
+    const numStr = rows.length > 0 ? rows[0].numberString : '';
+    await pool.query('DELETE FROM reserved_numbers WHERE id = ?', [id]);
+    await addSystemLog("DELETE_RESERVED_NUMBER", `ลบเลขจอง/เลขสำรอง: ${numStr} (ID: ${id})`, "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to delete reserved number' });
+  }
+});
+
 app.post('/api/numbering/generate-next', async (req, res) => {
   try {
     const { department, docType, isCircular, category, year } = req.body;
-    const yr = year || '2569';
+    let yr = year;
+    if (!yr) {
+      try {
+        const [settingsRows]: any = await pool.query('SELECT currentYear FROM settings LIMIT 1');
+        if (settingsRows.length > 0 && settingsRows[0].currentYear) {
+          yr = String(settingsRows[0].currentYear);
+        } else {
+          yr = '2569';
+        }
+      } catch (e) {
+        yr = '2569';
+      }
+    }
     let actualType = docType || 'หนังสือภายนอก';
     if (docType === 'admin') {
       if (category === 'order') actualType = 'คำสั่ง';
@@ -3310,15 +3416,15 @@ app.get('/api/documents', async (req, res) => {
   try {
       const { role, department, isCentral } = req.query;
       const query = `
-        SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
+        SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
         UNION ALL
-        SELECT id, 'outbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM outbox_documents
+        SELECT id, 'outbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM outbox_documents
         UNION ALL
-        SELECT id, 'outbox' AS type, NULL AS category, 1 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM circular_documents
+        SELECT id, 'outbox' AS type, NULL AS category, 1 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM circular_documents
         UNION ALL
-        SELECT id, 'internal' AS type, NULL AS category, 0 AS isCircular, 'ปกติ' AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM internal_documents
+        SELECT id, 'internal' AS type, NULL AS category, 0 AS isCircular, 'ปกติ' AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM internal_documents
         UNION ALL
-        SELECT id, 'admin' AS type, category, 0 AS isCircular, 'ปกติ' AS secrecy, NULL AS receiveNumber, year, docNumber, date, 'ปกติ' AS priority, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM admin_documents
+        SELECT id, 'admin' AS type, category, 0 AS isCircular, 'ปกติ' AS secrecy, NULL AS receiveNumber, year, docNumber, date, 'ปกติ' AS priority, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM admin_documents
       `;
       const [rows]: any = await pool.query(query);
       const [deptReceives]: any = await pool.query('SELECT * FROM department_receives');
@@ -3470,6 +3576,7 @@ app.post('/api/documents', async (req, res) => {
   const docId = doc.id || 'doc_' + Math.random().toString(36).substring(2, 9);
   const type = doc.type || 'inbox';
   const folderId = doc.folderId ? parseInt(doc.folderId, 10) : null;
+  const fileCode = doc.fileCode || null;
   const status = doc.status || 'ลงทะเบียน';
   const ip = getClientIp(req);
   const attachmentsJson = JSON.stringify(doc.attachments || []);
@@ -3477,30 +3584,30 @@ app.post('/api/documents', async (req, res) => {
   try {
       if (type === 'inbox') {
         await pool.query(
-          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson]
+          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, fileCode, status, attachmentsJson]
         );
       } else if (type === 'outbox') {
         if (doc.isCircular) {
           await pool.query(
-            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson]
+            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, fileCode, status, attachmentsJson]
           );
         } else {
           await pool.query(
-            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson, 0]
+            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, fileCode, status, attachmentsJson, 0]
           );
         }
       } else if (type === 'internal') {
         await pool.query(
-          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson]
+          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, fileCode, status, attachmentsJson]
         );
       } else if (type === 'admin') {
         await pool.query(
-          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [docId, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [docId, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, fileCode, status, attachmentsJson]
         );
       }
       
@@ -3565,30 +3672,30 @@ app.put('/api/documents/:id', async (req, res) => {
 
       if (type === 'inbox') {
         await pool.query(
-          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, fileCode, status, attachmentsJson]
         );
       } else if (type === 'outbox') {
         if (doc.isCircular) {
           await pool.query(
-            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, fileCode, status, attachmentsJson]
           );
         } else {
           await pool.query(
-            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, 0]
+            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, fileCode, status, attachmentsJson, 0]
           );
         }
       } else if (type === 'internal') {
         await pool.query(
-          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, fileCode, status, attachmentsJson]
         );
       } else if (type === 'admin') {
         await pool.query(
-          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, fileCode, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, fileCode, status, attachmentsJson]
         );
       }
 
@@ -4853,19 +4960,19 @@ app.post('/api/drafts', async (req, res) => {
   const {
     docType, title, docNumber, date, urgency, secrecy,
     fromDept, toDept, subject, content, signatory,
-    signatoryPosition, sealMode, status, createdBy, extraData
+    signatoryPosition, sealMode, status, createdBy, fileCode, extraData
   } = req.body;
   const ip = getClientIp(req);
 
   try {
     const [result]: any = await pool.query(
       `INSERT INTO draft_documents 
-      (docType, title, docNumber, date, urgency, secrecy, fromDept, toDept, subject, content, signatory, signatoryPosition, sealMode, status, createdBy, extraData)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (docType, title, docNumber, date, urgency, secrecy, fromDept, toDept, subject, content, signatory, signatoryPosition, sealMode, status, createdBy, fileCode, extraData)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         docType || 'memo', title || 'ร่างเอกสาร', docNumber || '', date || '', urgency || 'ปกติ', secrecy || 'ปกติ',
         fromDept || '', toDept || '', subject || '', content || '', signatory || '',
-        signatoryPosition || '', sealMode || 'garuda30', status || 'draft', createdBy || 'ผู้ใช้งาน',
+        signatoryPosition || '', sealMode || 'garuda30', status || 'draft', createdBy || 'ผู้ใช้งาน', fileCode || null,
         typeof extraData === 'object' ? JSON.stringify(extraData) : (extraData || '')
       ]
     );
@@ -4878,7 +4985,7 @@ app.post('/api/drafts', async (req, res) => {
       id: Date.now(),
       docType, title, docNumber, date, urgency, secrecy,
       fromDept, toDept, subject, content, signatory,
-      signatoryPosition, sealMode, status, createdBy, extraData,
+      signatoryPosition, sealMode, status, createdBy, fileCode, extraData,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
     };
     localDb.draft_documents.push(newDraft);
@@ -4892,7 +4999,7 @@ app.put('/api/drafts/:id', async (req, res) => {
   const {
     docType, title, docNumber, date, urgency, secrecy,
     fromDept, toDept, subject, content, signatory,
-    signatoryPosition, sealMode, status, createdBy, extraData
+    signatoryPosition, sealMode, status, createdBy, fileCode, extraData
   } = req.body;
   const ip = getClientIp(req);
 
@@ -4901,12 +5008,12 @@ app.put('/api/drafts/:id', async (req, res) => {
       `UPDATE draft_documents SET
         docType=?, title=?, docNumber=?, date=?, urgency=?, secrecy=?,
         fromDept=?, toDept=?, subject=?, content=?, signatory=?,
-        signatoryPosition=?, sealMode=?, status=?, createdBy=?, extraData=?
+        signatoryPosition=?, sealMode=?, status=?, createdBy=?, fileCode=?, extraData=?
        WHERE id=?`,
       [
         docType, title, docNumber, date, urgency, secrecy,
         fromDept, toDept, subject, content, signatory,
-        signatoryPosition, sealMode, status, createdBy,
+        signatoryPosition, sealMode, status, createdBy, fileCode || null,
         typeof extraData === 'object' ? JSON.stringify(extraData) : (extraData || ''),
         id
       ]
@@ -4922,7 +5029,7 @@ app.put('/api/drafts/:id', async (req, res) => {
           ...localDb.draft_documents[idx],
           docType, title, docNumber, date, urgency, secrecy,
           fromDept, toDept, subject, content, signatory,
-          signatoryPosition, sealMode, status, createdBy, extraData,
+          signatoryPosition, sealMode, status, createdBy, fileCode, extraData,
           updatedAt: new Date().toISOString()
         };
         saveLocalDb();
@@ -5671,6 +5778,96 @@ ${JSON.stringify(docsSummaryContext, null, 2)}
     });
   }
 });
+
+
+function getBangkokTime() {
+  const d = new Date();
+  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+  const bangkokDate = new Date(utc + (3600000 * 7));
+  const year = bangkokDate.getFullYear() + 543;
+  const dateStr = bangkokDate.toISOString().split('T')[0];
+  const hour = bangkokDate.getHours();
+  const minute = bangkokDate.getMinutes();
+  return { dateStr, hour, minute, year: String(year) };
+}
+
+async function runAutoReservationCheck() {
+  try {
+    const [settingsRows]: any = await pool.query('SELECT * FROM settings LIMIT 1');
+    if (settingsRows.length === 0) return;
+    const settings = settingsRows[0];
+    
+    if (!settings.autoReserveEnabled) return;
+    
+    const { dateStr, hour, minute, year } = getBangkokTime();
+    
+    const [schedHourStr, schedMinStr] = (settings.autoReserveTime || '18:00').split(':');
+    const schedHour = parseInt(schedHourStr, 10);
+    const schedMin = parseInt(schedMinStr, 10);
+    
+    if (hour === schedHour && minute === schedMin) {
+      if (settings.lastAutoReserveDate === dateStr) {
+        return;
+      }
+      
+      console.log(`[AutoReserve] Starting scheduled reservation at ${settings.autoReserveTime} Bangkok time on ${dateStr}`);
+      
+      await pool.query('UPDATE settings SET lastAutoReserveDate = ? WHERE id = ?', [dateStr, settings.id]);
+      if (localDb.settings && localDb.settings[0]) {
+        localDb.settings[0].lastAutoReserveDate = dateStr;
+        saveLocalDb();
+      }
+      
+      // Fetch active numbering rules
+      const [rules]: any = await pool.query('SELECT * FROM numbering_rules WHERE isActive = 1');
+      const qty = Number(settings.autoReserveQty) || 5;
+      const nowStr = new Date().toISOString();
+      const currentYearStr = settings.currentYear ? String(settings.currentYear) : year;
+      
+      for (const rule of rules) {
+        const startNumber = (rule.currentSeq || 0) + 1;
+        
+        for (let i = 0; i < qty; i++) {
+          const currentSeqNum = startNumber + i;
+          let numberStr = '';
+          if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(rule.docType)) {
+            numberStr = `${rule.prefixPattern || rule.docType} ${currentSeqNum}/${rule.year || currentYearStr}`;
+          } else {
+            numberStr = `${rule.prefixPattern || 'รย 0021'}/${currentSeqNum}`;
+          }
+          
+          await pool.query(
+            'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+              rule.id,
+              rule.docType,
+              rule.department,
+              numberStr,
+              currentSeqNum,
+              rule.year || currentYearStr,
+              'reserved',
+              'available',
+              'ระบบจองเลขอัตโนมัติ (Scheduler)',
+              `จองเลขอัตโนมัติรายวัน เวลา ${settings.autoReserveTime} น. (จำนวน ${qty} เลข)`,
+              nowStr
+            ]
+          );
+        }
+        
+        const endSeq = startNumber + qty - 1;
+        await pool.query('UPDATE numbering_rules SET currentSeq = ? WHERE id = ?', [endSeq, rule.id]);
+      }
+      
+      await addSystemLog("AUTO_RESERVE_RUN", `ระบบจองเลขอัตโนมัติทำงานสำเร็จ: ทำการจองกฎออกเลข ${rules.length} กฎ กฎละ ${qty} เลข รวมเป็น ${rules.length * qty} เลข`, "ระบบอัตโนมัติ", "127.0.0.1");
+      console.log(`[AutoReserve] Completed scheduled reservation for ${rules.length} rules.`);
+    }
+  } catch (err) {
+    console.error('[AutoReserve] Error running automated reservation:', err);
+  }
+}
+
+// Start interval checking every 15 seconds
+setInterval(runAutoReservationCheck, 15000);
 
 
 async function startServer() {

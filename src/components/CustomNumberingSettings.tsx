@@ -19,12 +19,15 @@ import {
   Calendar,
   Building2,
   Tag,
-  AlertCircle
+  AlertCircle,
+  Clock
 } from 'lucide-react';
 
-export default function CustomNumberingSettings() {
+export default function CustomNumberingSettings({ currentYear }: { currentYear?: number } = {}) {
   const [activeSubTab, setActiveSubTab] = useState<'rules' | 'fileCodes' | 'reserved'>('rules');
   
+  const [sysYear, setSysYear] = useState<string>(currentYear ? String(currentYear) : '2569');
+
   // States for Numbering Rules
   const [rules, setRules] = useState<any[]>([]);
   const [loadingRules, setLoadingRules] = useState<boolean>(true);
@@ -51,6 +54,14 @@ export default function CustomNumberingSettings() {
   // Notifications
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Scheduler Config States
+  const [schedulerConfig, setSchedulerConfig] = useState<any>({
+    autoReserveEnabled: false,
+    autoReserveTime: '18:00',
+    autoReserveQty: 5
+  });
+  const [savingScheduler, setSavingScheduler] = useState<boolean>(false);
+
   // Modal Form States
   const [ruleFormData, setRuleFormData] = useState<any>({
     ruleName: '',
@@ -59,7 +70,7 @@ export default function CustomNumberingSettings() {
     docType: 'หนังสือภายนอก',
     prefixPattern: 'รย 0021',
     currentSeq: 1,
-    year: '2569',
+    year: currentYear ? String(currentYear) : '2569',
     isActive: true,
     description: ''
   });
@@ -79,6 +90,7 @@ export default function CustomNumberingSettings() {
     startSeq: 1,
     count: 1,
     isCircular: false,
+    isAuto: true,
     reservedBy: 'ผู้ดูแลระบบสารบรรณ',
     reservedFor: 'จองเลขล่วงหน้าสำหรับโครงการสำคัญ',
     expiresAt: '2026-12-31'
@@ -135,11 +147,83 @@ export default function CustomNumberingSettings() {
     }
   };
 
+  const fetchSystemYear = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.currentYear) {
+          setSysYear(String(data.currentYear));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch system year settings:', err);
+    }
+  };
+
+  const fetchSchedulerConfig = async () => {
+    try {
+      const res = await fetch('/api/settings/auto-reserve');
+      if (res.ok) {
+        const data = await res.json();
+        setSchedulerConfig(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch scheduler config:', err);
+    }
+  };
+
+  const handleSaveSchedulerConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingScheduler(true);
+    try {
+      const res = await fetch('/api/settings/auto-reserve', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(schedulerConfig)
+      });
+      if (res.ok) {
+        showNotification('success', 'บันทึกการตั้งค่าระบบจองเลขอัตโนมัติเรียบร้อยแล้ว');
+        fetchSchedulerConfig();
+      } else {
+        showNotification('error', 'เกิดข้อผิดพลาดในการบันทึกการตั้งค่า');
+      }
+    } catch (err) {
+      showNotification('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    } finally {
+      setSavingScheduler(false);
+    }
+  };
+
   useEffect(() => {
     fetchRules();
     fetchFileCodes();
     fetchReservedNumbers();
+    fetchSystemYear();
+    fetchSchedulerConfig();
   }, []);
+
+  // Synchronize with currentYear prop if passed
+  useEffect(() => {
+    if (currentYear) {
+      setSysYear(String(currentYear));
+    }
+  }, [currentYear]);
+
+  // Sync ruleFormData.year and reserveFormData.expiresAt when sysYear changes
+  useEffect(() => {
+    if (!editingRule) {
+      setRuleFormData(prev => ({
+        ...prev,
+        year: sysYear
+      }));
+    }
+    const ceYear = Number(sysYear) - 543;
+    setReserveFormData(prev => ({
+      ...prev,
+      expiresAt: `${ceYear}-12-31`
+    }));
+  }, [sysYear, editingRule]);
 
   // Save/Update Rule
   const handleSaveRule = async (e: React.FormEvent) => {
@@ -211,20 +295,57 @@ export default function CustomNumberingSettings() {
     }
   };
 
+  const handleDeleteReservedNumber = async (id: number) => {
+    if (!window.confirm('คุณต้องการลบเลขจอง/เลขสำรองนี้ใช่หรือไม่?')) return;
+    try {
+      const res = await fetch(`/api/reserved-numbers/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showNotification('success', 'ลบเลขจอง/เลขสำรองเรียบร้อยแล้ว');
+        fetchReservedNumbers();
+      } else {
+        showNotification('error', 'เกิดข้อผิดพลาดในการลบเลขจอง');
+      }
+    } catch (err) {
+      showNotification('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    }
+  };
+
+  const getMatchedRuleForReservation = () => {
+    const matched = rules.find(r => r.isActive && r.docType === reserveFormData.docType && (r.department === reserveFormData.department || r.department === 'ทุกฝ่ายงาน'));
+    if (!matched) {
+      return rules.find(r => r.isActive && r.docType === reserveFormData.docType);
+    }
+    return matched;
+  };
+
   // Reserve Numbers
   const handleReserveNumbers = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      let submissionData = { ...reserveFormData };
+      if (reserveFormData.isAuto) {
+        const rule = getMatchedRuleForReservation();
+        if (!rule) {
+          showNotification('error', 'ไม่สามารถใช้ระบบจองอัตโนมัติได้เนื่องจากไม่พบกฎการออกเลขที่ตรงกัน');
+          return;
+        }
+        submissionData.ruleId = rule.id;
+        submissionData.prefix = rule.prefixPattern;
+        submissionData.startSeq = rule.currentSeq + 1;
+      }
+
       const res = await fetch('/api/reserved-numbers/reserve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reserveFormData)
+        body: JSON.stringify(submissionData)
       });
       if (res.ok) {
-        showNotification('success', `สำรอง/จองเลขหนังสือเรียบร้อยแล้วจำนวน ${reserveFormData.count} เลข`);
+        showNotification('success', `สำรอง/จองเลขหนังสือเรียบร้อยแล้วจำนวน ${submissionData.count} เลข`);
         setShowReserveModal(false);
         fetchReservedNumbers();
         fetchRules();
+      } else {
+        showNotification('error', 'เกิดข้อผิดพลาดในการจองเลข');
       }
     } catch (err) {
       showNotification('error', 'เกิดข้อผิดพลาดในการจองเลข');
@@ -240,12 +361,12 @@ export default function CustomNumberingSettings() {
     ) || rules.find(r => r.isActive && r.docType === previewDocType);
 
     if (!matchedRule) {
-      return ['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType) ? `${previewDocType} 1/2569` : 'รย 0021/1';
+      return ['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType) ? `${previewDocType} 1/${sysYear}` : 'รย 0021/1';
     }
 
     const nextSeq = (matchedRule.currentSeq || 0) + 1;
     if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType)) {
-      return `${matchedRule.prefixPattern || previewDocType} ${nextSeq}/${matchedRule.year || '2569'}`;
+      return `${matchedRule.prefixPattern || previewDocType} ${nextSeq}/${matchedRule.year || sysYear}`;
     } else {
       const circ = previewIsCircular ? 'ว ' : '';
       return `${matchedRule.prefixPattern || 'รย 0021'}/${circ}${nextSeq}`;
@@ -300,7 +421,7 @@ export default function CustomNumberingSettings() {
                   docType: 'หนังสือภายนอก',
                   prefixPattern: 'รย 0021',
                   currentSeq: 1,
-                  year: '2569',
+                  year: sysYear,
                   isActive: true,
                   description: ''
                 });
@@ -447,7 +568,7 @@ export default function CustomNumberingSettings() {
                 </span>
               </div>
               <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                ปี พ.ศ. 2569 | รันต่อตามลำดับ
+                ปี พ.ศ. {sysYear} | รันต่อตามลำดับ
               </span>
             </div>
           </div>
@@ -685,6 +806,85 @@ export default function CustomNumberingSettings() {
             </div>
           </div>
 
+          {/* Automatic Reservation Scheduler Settings Card */}
+          <div className="p-5 rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-500/[0.04] to-transparent space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
+                <Clock className="w-4 h-4" />
+              </span>
+              <div>
+                <h4 className="text-sm font-bold text-[var(--text-primary)]">
+                  ระบบตั้งเวลาจองเลขอัตโนมัติรายวัน
+                </h4>
+                <p className="text-[11px] text-[var(--text-secondary)]">
+                  ทำการสำรอง/จองเลขหนังสือจากกฎออกเลขที่เปิดใช้งานทั้งหมดโดยอัตโนมัติเมื่อถึงเวลาที่กำหนดในแต่ละวัน
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveSchedulerConfig} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-xs bg-[var(--bg-surface)] p-4 rounded-xl border border-[var(--border-light)] shadow-sm">
+              <div className="space-y-1.5">
+                <label className="font-semibold text-[var(--text-primary)] block">สถานะระบบตั้งเวลา:</label>
+                <div className="flex items-center gap-3 h-9">
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
+                    <input
+                      type="radio"
+                      name="autoReserveEnabled"
+                      checked={schedulerConfig.autoReserveEnabled === true}
+                      onChange={() => setSchedulerConfig({ ...schedulerConfig, autoReserveEnabled: true })}
+                      className="accent-amber-600"
+                    />
+                    <span>เปิดใช้งาน (Active)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
+                    <input
+                      type="radio"
+                      name="autoReserveEnabled"
+                      checked={schedulerConfig.autoReserveEnabled === false}
+                      onChange={() => setSchedulerConfig({ ...schedulerConfig, autoReserveEnabled: false })}
+                      className="accent-amber-600"
+                    />
+                    <span>ปิด (Disabled)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-semibold text-[var(--text-primary)] block">เวลาจองเลขอัตโนมัติ (เวลาไทย):</label>
+                <input
+                  type="time"
+                  value={schedulerConfig.autoReserveTime}
+                  onChange={(e) => setSchedulerConfig({ ...schedulerConfig, autoReserveTime: e.target.value })}
+                  className="w-full h-9 px-3 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-[var(--text-primary)] outline-none focus:border-amber-500"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-semibold text-[var(--text-primary)] block">จำนวนเลขที่ต้องการจอง (ฉบับ/กฎ):</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={schedulerConfig.autoReserveQty}
+                  onChange={(e) => setSchedulerConfig({ ...schedulerConfig, autoReserveQty: Number(e.target.value) })}
+                  className="w-full h-9 px-3 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-amber-700 outline-none focus:border-amber-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <button
+                  type="submit"
+                  disabled={savingScheduler}
+                  className="w-full h-9 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600/50 text-white rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {savingScheduler ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่าเวลา'}
+                </button>
+              </div>
+            </form>
+          </div>
+
           {/* Filter Bar */}
           <div className="p-3 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)] flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-3 flex-wrap">
@@ -746,6 +946,7 @@ export default function CustomNumberingSettings() {
                       <th className="px-4 py-3">ผู้จอง / วัตถุประสงค์</th>
                       <th className="px-4 py-3">วันหมดอายุ</th>
                       <th className="px-4 py-3 text-center">สถานะ</th>
+                      <th className="px-4 py-3 text-right">จัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border-light)]">
@@ -786,6 +987,15 @@ export default function CustomNumberingSettings() {
                               <FileText className="w-3 h-3" /> ออกเอกสารแล้ว
                             </span>
                           )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => handleDeleteReservedNumber(item.id)}
+                            className="p-1.5 rounded-lg hover:bg-rose-500/10 text-rose-600 transition-colors"
+                            title="ลบเลขจอง/เลขสำรองนี้"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1074,40 +1284,92 @@ export default function CustomNumberingSettings() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="font-semibold text-[var(--text-primary)] block mb-1">คำนำหน้า (Prefix):</label>
-                  <input
-                    type="text"
-                    value={reserveFormData.prefix}
-                    onChange={(e) => setReserveFormData({ ...reserveFormData, prefix: e.target.value })}
-                    placeholder="รย 0021"
-                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-amber-700 outline-none"
-                  />
+              <div className="space-y-2 p-2.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl">
+                <label className="font-semibold text-[var(--text-primary)] block">โหมดการจองเลข:</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
+                    <input
+                      type="radio"
+                      name="reservationMode"
+                      checked={reserveFormData.isAuto === true}
+                      onChange={() => setReserveFormData({ ...reserveFormData, isAuto: true })}
+                      className="accent-amber-600"
+                    />
+                    <span>อัตโนมัติ (ตามกฎออกเลข)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-[var(--text-primary)]">
+                    <input
+                      type="radio"
+                      name="reservationMode"
+                      checked={reserveFormData.isAuto === false}
+                      onChange={() => setReserveFormData({ ...reserveFormData, isAuto: false })}
+                      className="accent-amber-600"
+                    />
+                    <span>กำหนดเอง (Manual)</span>
+                  </label>
                 </div>
+              </div>
 
-                <div>
-                  <label className="font-semibold text-[var(--text-primary)] block mb-1">เลขเริ่มต้น:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={reserveFormData.startSeq}
-                    onChange={(e) => setReserveFormData({ ...reserveFormData, startSeq: Number(e.target.value) })}
-                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono outline-none"
-                  />
-                </div>
+              {reserveFormData.isAuto ? (
+                (() => {
+                  const rule = getMatchedRuleForReservation();
+                  if (rule) {
+                    return (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1">
+                        <p className="font-bold text-amber-900 dark:text-amber-200">
+                          กฎการออกเลขที่จะใช้: {rule.ruleName}
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-amber-800 dark:text-amber-300">
+                          <p>คำนำหน้า: <span className="font-mono font-bold">{rule.prefixPattern}</span></p>
+                          <p>เลขล่าสุด: <span className="font-mono font-bold">{rule.currentSeq}</span></p>
+                          <p className="col-span-2">ช่วงลำดับที่จะจอง: <span className="font-mono font-bold text-amber-700 dark:text-amber-400">#{rule.currentSeq + 1} ถึง #{rule.currentSeq + reserveFormData.count}</span></p>
+                        </div>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-700 dark:text-rose-400 font-medium">
+                        ไม่พบกฎการออกเลขเปิดใช้งานสำหรับฝ่ายและประเภทที่เลือก กรุณาเปลี่ยนเป็นโหมดแมนนวลหรือเพิ่มกฎก่อน
+                      </div>
+                    );
+                  }
+                })()
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-[var(--text-primary)] block mb-1">คำนำหน้า (Prefix):</label>
+                    <input
+                      type="text"
+                      value={reserveFormData.prefix || ''}
+                      onChange={(e) => setReserveFormData({ ...reserveFormData, prefix: e.target.value })}
+                      placeholder="รย 0021"
+                      className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-amber-700 outline-none"
+                    />
+                  </div>
 
-                <div>
-                  <label className="font-semibold text-[var(--text-primary)] block mb-1">จำนวนที่จอง (ฉบับ):</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={reserveFormData.count}
-                    onChange={(e) => setReserveFormData({ ...reserveFormData, count: Number(e.target.value) })}
-                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-[var(--primary-color)] outline-none"
-                  />
+                  <div>
+                    <label className="font-semibold text-[var(--text-primary)] block mb-1">เลขเริ่มต้น:</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={reserveFormData.startSeq || 1}
+                      onChange={(e) => setReserveFormData({ ...reserveFormData, startSeq: Number(e.target.value) })}
+                      className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono outline-none"
+                    />
+                  </div>
                 </div>
+              )}
+
+              <div>
+                <label className="font-semibold text-[var(--text-primary)] block mb-1">จำนวนที่จอง (ฉบับ):</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={reserveFormData.count || 1}
+                  onChange={(e) => setReserveFormData({ ...reserveFormData, count: Number(e.target.value) })}
+                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-mono font-bold text-[var(--primary-color)] outline-none"
+                />
               </div>
 
               <div className="flex items-center gap-2">
