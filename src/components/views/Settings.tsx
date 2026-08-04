@@ -1804,12 +1804,7 @@ export default function Settings(props: SettingsProps) {
                   </div>
                 </div>
 
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
-                  <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
-                    <Activity className="w-5 h-5 text-[var(--primary-color)]" /> เลขที่เริ่มต้นของระบบ
-                  </h3>
-                  
-                </div>
+
 
                 <div className="pt-4 border-t border-[var(--border-light)] flex justify-end">
                   <button 
