@@ -368,7 +368,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {(user?.role === 'admin' || !user?.role) && (
+            {(user?.role === 'admin' || user?.role === 'moderator' || !user?.role) && (
               <button 
                 onClick={() => {
                   setSelectedDepts(doc.forwardedTo ? doc.forwardedTo.split(',') : (doc.department ? [doc.department] : []));

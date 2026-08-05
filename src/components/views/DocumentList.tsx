@@ -49,6 +49,19 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   // Extract unique years
   const availableYears = Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => b.localeCompare(a));
 
+  const canDeleteDoc = (row: DocumentItem) => {
+    if (!user) return true;
+    return user.role === 'admin' || user.role === 'moderator';
+  };
+
+  const canEditDoc = (row: DocumentItem) => {
+    if (!user) return true;
+    if (user.role === 'admin' || user.role === 'moderator') return true;
+    const isMine = (row.createdBy && row.createdBy === user.username) ||
+                   (row.assignee && (row.assignee === user.firstName || row.assignee.includes(user.firstName)));
+    return Boolean(isMine);
+  };
+
   const getReceiveNumberDisplay = (row: DocumentItem, isMobile: boolean) => {
     if (user && user.role !== 'admin' && user.department && row.departmentReceives) {
       const deptRec = row.departmentReceives.find(r => r.department === user.department);
@@ -394,7 +407,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                     >
                       <Eye className="w-4 h-4" />
                     </button>
-                    {onEditDoc && (
+                    {onEditDoc && canEditDoc(row) && (
                       <button 
                         onClick={() => onEditDoc(row)}
                         className="p-1.5 text-amber-400 hover:bg-amber-400/10 border border-amber-400/20 rounded-md transition-colors"
@@ -403,7 +416,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                         <Edit2 className="w-4 h-4" />
                       </button>
                     )}
-                    {onDeleteDoc && (
+                    {onDeleteDoc && canDeleteDoc(row) && (
                       <button 
                         onClick={() => onDeleteDoc(row.id)}
                         className="p-1.5 text-red-400 hover:bg-red-400/10 border border-red-400/20 rounded-md transition-colors"
@@ -498,7 +511,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        {onEditDoc && (
+                        {onEditDoc && canEditDoc(row) && (
                           <button 
                             onClick={() => onEditDoc(row)}
                             className="p-1.5 text-amber-400 hover:bg-amber-400/10 rounded-md transition-colors"
@@ -507,7 +520,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                             <Edit2 className="w-4 h-4" />
                           </button>
                         )}
-                        {onDeleteDoc && (
+                        {onDeleteDoc && canDeleteDoc(row) && (
                           <button 
                             onClick={() => onDeleteDoc(row.id)}
                             className="p-1.5 text-red-400 hover:bg-red-400/10 rounded-md transition-colors"

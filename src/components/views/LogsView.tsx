@@ -329,7 +329,7 @@ export default function LogsView({ user }: { user?: any }) {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[var(--primary-color)]' : ''}`} />
               <span>รีเฟรช</span>
             </button>
-            {(!user || user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ' || true) && (
+            {(!user || user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ') && (
               <button
                 onClick={() => setShowClearConfirmModal(true)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-medium rounded-xl transition shadow-xs active:scale-95 cursor-pointer"

@@ -12,7 +12,15 @@ interface SettingsProps {
 
 export default function Settings(props: SettingsProps) {
   const { onSettingsUpdated } = props;
-  const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
+
+  useEffect(() => {
+    if (props.user?.role === 'moderator' && (activeTab === 'system' || activeTab === 'smtp' || activeTab === 'system_doc' || activeTab === 'backup' || activeTab === 'dedup')) {
+      setActiveTab('users');
+    } else if (props.user?.role === 'user' && activeTab !== 'permissions') {
+      setActiveTab('permissions');
+    }
+  }, [props.user?.role]);
   const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'customNumbering' | 'departments' | 'positions'>('docSettings');
   
   // Deduplication state
@@ -919,54 +927,75 @@ export default function Settings(props: SettingsProps) {
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-[var(--border-light)] pb-4 overflow-x-auto scrollbar-none whitespace-nowrap">
+        {(props.user?.role === 'admin' || !props.user?.role) && (
+          <>
+            <button 
+              onClick={() => setActiveTab('system')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
+                activeTab === 'system' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <SettingsIcon className="w-4 h-4" /> ตั้งค่าข้อมูลพื้นฐาน
+            </button>
+            <button 
+              onClick={() => setActiveTab('smtp')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
+                activeTab === 'smtp' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <SettingsIcon className="w-4 h-4" /> ตั้งค่า SMTP
+            </button>
+            <button 
+              onClick={() => setActiveTab('system_doc')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
+                activeTab === 'system_doc' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <Calendar className="w-4 h-4" /> ตั้งค่าระบบสารบรรณ
+            </button>
+          </>
+        )}
+
+        {(props.user?.role === 'admin' || props.user?.role === 'moderator' || !props.user?.role) && (
+          <button 
+            onClick={() => setActiveTab('users')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
+              activeTab === 'users' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <Shield className="w-4 h-4" /> {props.user?.role === 'moderator' ? 'จัดการบุคลากรในฝ่าย' : 'จัดการข้อมูลบุคลากร'}
+          </button>
+        )}
+
         <button 
-          onClick={() => setActiveTab('system')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-            activeTab === 'system' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+          onClick={() => setActiveTab('permissions')}
+          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
+            activeTab === 'permissions' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
           }`}
         >
-          <SettingsIcon className="w-4 h-4" /> ตั้งค่าข้อมูลพื้นฐาน
+          <ShieldCheck className="w-4 h-4" /> กำหนดสิทธิ์ผู้ใช้งาน (Role & Permission)
         </button>
-        <button 
-          onClick={() => setActiveTab('smtp')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-            activeTab === 'smtp' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <SettingsIcon className="w-4 h-4" /> ตั้งค่า SMTP
-        </button>
-        <button 
-          onClick={() => setActiveTab('system_doc')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-            activeTab === 'system_doc' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <Calendar className="w-4 h-4" /> ตั้งค่าระบบสารบรรณ
-        </button>
-        <button 
-          onClick={() => setActiveTab('users')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-            activeTab === 'users' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <Shield className="w-4 h-4" /> จัดการข้อมูลบุคลากร
-        </button>
-        <button 
-          onClick={() => setActiveTab('backup')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-            activeTab === 'backup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <Database className="w-4 h-4" /> สำรองและคืนค่าข้อมูล
-        </button>
-        <button 
-          onClick={() => setActiveTab('dedup')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-            activeTab === 'dedup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <HardDrive className="w-4 h-4" /> จัดการไฟล์ซ้ำ
-        </button>
+
+        {(props.user?.role === 'admin' || !props.user?.role) && (
+          <>
+            <button 
+              onClick={() => setActiveTab('backup')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
+                activeTab === 'backup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <Database className="w-4 h-4" /> สำรองและคืนค่าข้อมูล
+            </button>
+            <button 
+              onClick={() => setActiveTab('dedup')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
+                activeTab === 'dedup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <HardDrive className="w-4 h-4" /> จัดการไฟล์ซ้ำ
+            </button>
+          </>
+        )}
       </div>
 
       {/* Datalist for Position Autocomplete from MySQL / Local DB */}
@@ -2121,21 +2150,39 @@ export default function Settings(props: SettingsProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredUsers.map(user => (
-                      <tr key={user.id} className="border-b border-[var(--border-lighter)] hover:bg-[var(--border-lighter)]/50 transition-colors group">
+                        {filteredUsers.map(user => {
+                          const isEditingAdmin = user.role === 'admin';
+                          const isCurrentModerator = props.user?.role === 'moderator';
+                          const canEditThisUser = !isCurrentModerator || !isEditingAdmin;
+
+                          return (
+                      <tr key={user.id} className={`border-b border-[var(--border-lighter)] hover:bg-[var(--border-lighter)]/50 transition-colors group ${!canEditThisUser ? 'opacity-80' : ''}`}>
                         <td className="py-3 px-4">
                           <div className="font-mono text-sm text-[var(--primary-color)] font-semibold">{user.username || '-'}</div>
-                          <div className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded mt-1">
-                            <Lock className="w-2.5 h-2.5" /> Argon2id
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                              <Lock className="w-2.5 h-2.5" /> Argon2id
+                            </span>
+                            {user.role === 'admin' && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/15 text-amber-500 text-[10px] font-bold rounded">
+                                <Crown className="w-2.5 h-2.5" /> Admin
+                              </span>
+                            )}
+                            {user.role === 'moderator' && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-500/15 text-blue-500 text-[10px] font-bold rounded">
+                                <ShieldCheck className="w-2.5 h-2.5" /> Moderator
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="py-3 px-4">
                           <input 
                             type="email"
                             value={user.email || ""}
+                            disabled={!canEditThisUser}
                             onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, email: e.target.value } : u))}
                             onBlur={(e) => updateUser(user.id, "email", e.target.value)}
-                            className="bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-full"
+                            className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                             placeholder="อีเมล"
                           />
                         </td>
@@ -2144,17 +2191,19 @@ export default function Settings(props: SettingsProps) {
                             <input 
                               type="text"
                               value={user.firstName || ''}
+                              disabled={!canEditThisUser}
                               onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, firstName: e.target.value } : u))}
                               onBlur={(e) => updateUser(user.id, 'firstName', e.target.value)}
-                              className="bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-1/2"
+                              className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-1/2 ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                               placeholder="ชื่อ"
                             />
                             <input 
                               type="text"
                               value={user.lastName || ''}
+                              disabled={!canEditThisUser}
                               onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, lastName: e.target.value } : u))}
                               onBlur={(e) => updateUser(user.id, 'lastName', e.target.value)}
-                              className="bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-1/2"
+                              className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-1/2 ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                               placeholder="นามสกุล"
                             />
                           </div>
@@ -2162,8 +2211,9 @@ export default function Settings(props: SettingsProps) {
                         <td className="py-3 px-4">
                           <select 
                             value={user.position || ''}
+                            disabled={!canEditThisUser}
                             onChange={(e) => updateUser(user.id, 'position', e.target.value)}
-                            className="bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] w-full"
+                            className={`bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                           >
                             <option value="">-- เลือกตำแหน่ง (ตาราง positions) --</option>
                             {positions.map((pos: any) => (
@@ -2177,8 +2227,9 @@ export default function Settings(props: SettingsProps) {
                         <td className="py-3 px-4">
                           <select 
                             value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
+                            disabled={!canEditThisUser}
                             onChange={(e) => updateUser(user.id, 'department', e.target.value)}
-                            className="bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] w-full"
+                            className={`bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                           >
                             {departments.length === 0 ? (
                               <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
@@ -2192,43 +2243,61 @@ export default function Settings(props: SettingsProps) {
                         <td className="py-3 px-4">
                           <select 
                             value={user.role || 'user'}
+                            disabled={!canEditThisUser}
                             onChange={(e) => updateUser(user.id, 'role', e.target.value)}
-                            className="bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] font-medium"
+                            className={`bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] font-medium ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                           >
                             <option value="user">ผู้ใช้งานทั่วไป (User)</option>
-                            <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                            <option value="moderator">ผู้ตรวจสอบ/เจ้าหน้าที่สารบรรณ (Moderator)</option>
+                            {(props.user?.role === 'admin' || user.role === 'admin') && (
+                              <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                            )}
                           </select>
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => setResetPassUser(user)}
-                              title="เปลี่ยนรหัสผ่าน (Argon2id)"
-                              className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-lg transition-colors"
-                            >
-                              <Key className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => confirmDeleteUser(user)}
-                              title="ลบข้อมูลเจ้าหน้าที่"
-                              className="p-1.5 text-[var(--text-secondary)] hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canEditThisUser ? (
+                              <>
+                                <button
+                                  onClick={() => setResetPassUser(user)}
+                                  title="เปลี่ยนรหัสผ่าน (Argon2id)"
+                                  className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Key className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => confirmDeleteUser(user)}
+                                  title="ลบข้อมูลเจ้าหน้าที่"
+                                  className="p-1.5 text-[var(--text-secondary)] hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-[var(--text-muted)] italic px-2 py-1 bg-[var(--bg-canvas)] rounded border border-[var(--border-lighter)]">
+                                สงวนสิทธิ์สำหรับ Admin
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>
-                    ))}
+                          );
+                        })}
                   </tbody>
                 </table>
               </div>
 
               {/* Mobile Cards Layout (Visible on sm/mobile screens) */}
               <div className="block md:hidden space-y-3.5">
-                {filteredUsers.map(user => (
+                {filteredUsers.map(user => {
+                  const isEditingAdmin = user.role === 'admin';
+                  const isCurrentModerator = props.user?.role === 'moderator';
+                  const canEditThisUser = !isCurrentModerator || !isEditingAdmin;
+
+                  return (
                   <div 
                     key={user.id} 
-                    className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 shadow-xs space-y-3.5"
+                    className={`bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 shadow-xs space-y-3.5 ${!canEditThisUser ? 'opacity-85' : ''}`}
                   >
                     {/* Card Top Row: User Avatar, Username & Actions */}
                     <div className="flex items-center justify-between gap-2 pb-3 border-b border-[var(--border-lighter)]">
@@ -2237,11 +2306,16 @@ export default function Settings(props: SettingsProps) {
                           {(user.firstName || user.username || 'U').charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-mono text-xs font-bold text-[var(--primary-color)] truncate">@{user.username}</span>
                             {user.role === 'admin' && (
                               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-amber-500/10 text-amber-500 text-[10px] font-bold rounded-md shrink-0">
                                 <Crown className="w-2.5 h-2.5" /> Admin
+                              </span>
+                            )}
+                            {user.role === 'moderator' && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-blue-500/10 text-blue-500 text-[10px] font-bold rounded-md shrink-0">
+                                <ShieldCheck className="w-2.5 h-2.5" /> Moderator
                               </span>
                             )}
                           </div>
@@ -2252,20 +2326,28 @@ export default function Settings(props: SettingsProps) {
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          onClick={() => setResetPassUser(user)}
-                          className="p-2 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-xl transition active:scale-95 cursor-pointer"
-                          title="เปลี่ยนรหัสผ่าน"
-                        >
-                          <Key className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => confirmDeleteUser(user)}
-                          className="p-2 text-[var(--text-secondary)] hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition active:scale-95 cursor-pointer"
-                          title="ลบข้อมูล"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {canEditThisUser ? (
+                          <>
+                            <button
+                              onClick={() => setResetPassUser(user)}
+                              className="p-2 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-xl transition active:scale-95 cursor-pointer"
+                              title="เปลี่ยนรหัสผ่าน"
+                            >
+                              <Key className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => confirmDeleteUser(user)}
+                              className="p-2 text-[var(--text-secondary)] hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition active:scale-95 cursor-pointer"
+                              title="ลบข้อมูล"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-[10px] text-[var(--text-muted)] italic px-2 py-0.5 bg-[var(--bg-canvas)] rounded border border-[var(--border-lighter)]">
+                            Admin Only
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="mb-2">
@@ -2273,9 +2355,10 @@ export default function Settings(props: SettingsProps) {
                       <input
                         type="email"
                         value={user.email || ""}
+                        disabled={!canEditThisUser}
                         onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, email: e.target.value } : u))}
                         onBlur={(e) => updateUser(user.id, "email", e.target.value)}
-                        className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                        className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                         placeholder="user@example.com"
                       />
                     </div>
@@ -2287,9 +2370,10 @@ export default function Settings(props: SettingsProps) {
                         <input 
                           type="text"
                           value={user.firstName || ''}
+                          disabled={!canEditThisUser}
                           onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, firstName: e.target.value } : u))}
                           onBlur={(e) => updateUser(user.id, 'firstName', e.target.value)}
-                          className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                           placeholder="ชื่อ"
                         />
                       </div>
@@ -2299,9 +2383,10 @@ export default function Settings(props: SettingsProps) {
                         <input 
                           type="text"
                           value={user.lastName || ''}
+                          disabled={!canEditThisUser}
                           onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, lastName: e.target.value } : u))}
                           onBlur={(e) => updateUser(user.id, 'lastName', e.target.value)}
-                          className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                           placeholder="นามสกุล"
                         />
                       </div>
@@ -2311,8 +2396,9 @@ export default function Settings(props: SettingsProps) {
                       <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">ตำแหน่ง (ตาราง positions)</label>
                       <select 
                         value={user.position || ''}
+                        disabled={!canEditThisUser}
                         onChange={(e) => updateUser(user.id, 'position', e.target.value)}
-                        className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                        className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                       >
                         <option value="">-- เลือกตำแหน่ง --</option>
                         {positions.map((pos: any) => (
@@ -2329,8 +2415,9 @@ export default function Settings(props: SettingsProps) {
                         <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">ฝ่าย / กลุ่มงาน</label>
                         <select 
                           value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
+                          disabled={!canEditThisUser}
                           onChange={(e) => updateUser(user.id, 'department', e.target.value)}
-                          className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                         >
                           {departments.length === 0 ? (
                             <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
@@ -2346,26 +2433,278 @@ export default function Settings(props: SettingsProps) {
                         <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">สิทธิ์การใช้งาน</label>
                         <select 
                           value={user.role || 'user'}
+                          disabled={!canEditThisUser}
                           onChange={(e) => updateUser(user.id, 'role', e.target.value)}
-                          className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs font-semibold text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs font-semibold text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                         >
                           <option value="user">ผู้ใช้งานทั่วไป (User)</option>
-                          <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                          <option value="moderator">ผู้ตรวจสอบ/เจ้าหน้าที่สารบรรณ (Moderator)</option>
+                          {(props.user?.role === 'admin' || user.role === 'admin') && (
+                            <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                          )}
                         </select>
                       </div>
                     </div>
 
-                    {isSavingUser === user.id && (
+                    {isSavingUser === String(user.id) && (
                       <div className="text-[10px] text-[var(--primary-color)] font-medium text-right animate-pulse pt-1">
                         กำลังบันทึกการเปลี่ยนแปลง...
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           );
         })()}
+          </div>
+        )}
+
+        {activeTab === 'permissions' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header banner */}
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 text-white shadow-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-6 h-6 text-indigo-400" />
+                    <h3 className="text-xl font-bold font-noto-serif-thai text-white">
+                      การกำหนดสิทธิ์ผู้ใช้งาน (Role & Permission Matrix)
+                    </h3>
+                  </div>
+                  <p className="text-sm text-slate-300 mt-1 leading-relaxed">
+                    โครงสร้างสิทธิ์การใช้งานระบบสารบรรณอิเล็กทรอนิกส์ (EDMS) แบ่งตามระดับสิทธิ์ความรับผิดชอบเรียงตามลำดับความสำคัญ
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Admin (ผู้ดูแลระบบ)
+                  </span>
+                  <span className="text-slate-400 text-xs">&gt;</span>
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    Moderator (ผู้ตรวจสอบ/หัวหน้า)
+                  </span>
+                  <span className="text-slate-400 text-xs">&gt;</span>
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    User (ผู้ใช้งานทั่วไป)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Role Hierarchy Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Admin Card */}
+              <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-amber-500/30 shadow-sm space-y-3 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-bl-full pointer-events-none" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-amber-500/10 text-amber-500 rounded-lg">
+                      <Crown className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-[var(--text-primary)]">Admin</h4>
+                      <span className="text-xs text-[var(--text-muted)]">ผู้ดูแลระบบสารบรรณ</span>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                    Level 1 (สูงสุด)
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                  ผู้ดูแลระบบสารบรรณส่วนกลาง มีสิทธิ์จัดการระบบทั้งหมด กำหนดรูปแบบเลขหนังสือ ผู้ใช้ สิทธิ์ และสำรองข้อมูล
+                </p>
+                <div className="pt-2 border-t border-[var(--border-lighter)] text-xs text-[var(--text-muted)] space-y-1">
+                  <div className="flex items-center gap-1.5 text-emerald-500 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> สิทธิ์เข้าถึงและจัดการ 100%
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 shrink-0 text-amber-500" /> เปลี่ยนสิทธิ์ผู้ใช้และตั้งค่าเชิงเทคนิค
+                  </div>
+                </div>
+              </div>
+
+              {/* Moderator Card */}
+              <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-blue-500/30 shadow-sm space-y-3 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-bl-full pointer-events-none" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-blue-500/10 text-blue-500 rounded-lg">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-[var(--text-primary)]">Moderator</h4>
+                      <span className="text-xs text-[var(--text-muted)]">ผู้ตรวจสอบ / หัวหน้ากลุ่มงาน</span>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/15 text-blue-500 border border-blue-500/30">
+                    Level 2
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                  เจ้าหน้าที่รับ-ส่งหนังสือ หรือหัวหน้ากลุ่มงาน มีสิทธิ์ออกเลขทะเบียนรับ/ส่ง อนุมัติเอกสาร และจัดการบุคลากรในฝ่ายตนเอง
+                </p>
+                <div className="pt-2 border-t border-[var(--border-lighter)] text-xs text-[var(--text-muted)] space-y-1">
+                  <div className="flex items-center gap-1.5 text-emerald-500 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> รับ-ส่ง/ลงทะเบียน/อนุมัติเอกสาร
+                  </div>
+                  <div className="flex items-center gap-1.5 text-amber-500 font-medium">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> จัดการบุคลากรในฝ่าย (ห้ามเปลี่ยน Role)
+                  </div>
+                </div>
+              </div>
+
+              {/* User Card */}
+              <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-emerald-500/30 shadow-sm space-y-3 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-bl-full pointer-events-none" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg">
+                      <UserIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-[var(--text-primary)]">User</h4>
+                      <span className="text-xs text-[var(--text-muted)]">ผู้ใช้งานทั่วไป</span>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                    Level 3
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                  เจ้าหน้าที่ผู้ปฏิบัติงาน สามารถยกร่างหนังสือ สร้างหนังสือส่ง ติดตามสถานะเอกสาร และแก้ไขเฉพาะเอกสารของตนเอง
+                </p>
+                <div className="pt-2 border-t border-[var(--border-lighter)] text-xs text-[var(--text-muted)] space-y-1">
+                  <div className="flex items-center gap-1.5 text-emerald-500 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> สร้างหนังสือ/แก้ไขเอกสารตนเอง
+                  </div>
+                  <div className="flex items-center gap-1.5 text-red-400 font-medium">
+                    <X className="w-3.5 h-3.5 shrink-0" /> ห้ามลบเอกสาร/ห้ามตั้งค่าระบบ
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Permission Comparison Matrix Table */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl overflow-hidden shadow-sm">
+              <div className="p-4 bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-[var(--primary-color)]" />
+                  <h4 className="font-bold text-[var(--text-primary)] text-sm sm:text-base font-noto-serif-thai">
+                    ตารางเปรียบเทียบสิทธิ์การใช้งาน (Permission Matrix)
+                  </h4>
+                </div>
+                <span className="text-xs text-[var(--text-muted)] font-mono">EDMS Permission Standard</span>
+              </div>
+
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-left text-sm border-collapse min-w-[750px]">
+                  <thead>
+                    <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-lighter)] text-xs font-semibold text-[var(--text-secondary)]">
+                      <th className="p-3.5 w-1/3">ฟังก์ชันการทำงาน / กิจกรรม</th>
+                      <th className="p-3.5 text-center w-28 bg-amber-500/5 text-amber-500 font-bold">Admin</th>
+                      <th className="p-3.5 text-center w-28 bg-blue-500/5 text-blue-500 font-bold">Moderator</th>
+                      <th className="p-3.5 text-center w-28 bg-emerald-500/5 text-emerald-500 font-bold">User</th>
+                      <th className="p-3.5">รายละเอียด / เงื่อนไขเพิ่มเติม</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-lighter)] text-xs sm:text-sm">
+                    {/* Section 1 */}
+                    <tr className="bg-[var(--bg-elevated)]/50 font-bold text-[var(--primary-color)] text-xs">
+                      <td colSpan={5} className="py-2 px-3.5">1. งานเอกสารและระบบสารบรรณ (Document Management)</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">ดูข้อมูลเอกสารสารบรรณ</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ ทั้งหมด</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-emerald-500 font-bold">✅ ทั้งหมด</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-emerald-500 font-bold">✅ ตามสิทธิ์</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">User ดูได้เฉพาะเอกสารทั่วไป เอกสารของฝ่ายตนเอง หรือที่ส่งถึงตน</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">เพิ่ม / ออกเลข / ลงทะเบียนหนังสือ</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ ได้ทุกประเภท</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-emerald-500 font-bold">✅ ได้ทุกประเภท</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-emerald-500 font-bold">✅ สร้าง/ยกร่าง</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">Admin/Moderator ใช้รูปแบบเลขรหัส เช่น รย 0021/123 อัตโนมัติ</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">แก้ไขข้อมูลเอกสาร</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ ทุกฉบับ</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-emerald-500 font-bold">✅ ทุกฉบับ</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-amber-500 font-bold">⚠️ เฉพาะของตน</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">User แก้ไขได้เฉพาะเอกสารที่ตนเองยกร่างหรือเป็นเจ้าของเรื่อง</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">ลบข้อมูลเอกสาร</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ อนุญาต</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-emerald-500 font-bold">✅ อนุญาต</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-red-400 font-bold">❌ ไม่อนุญาต</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">ป้องกันการลบเอกสารราชการโดยไม่ได้รับอนุญาต</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">อนุมัติเอกสาร / ลงนามหนังสือ</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ อนุมัติได้</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-emerald-500 font-bold">✅ อนุมัติได้</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-red-400 font-bold">❌ ไม่อนุญาต</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">เฉพาะ Admin และ Moderator (ผู้บริหาร/หัวหน้ากลุ่มงาน)</td>
+                    </tr>
+
+                    {/* Section 2 */}
+                    <tr className="bg-[var(--bg-elevated)]/50 font-bold text-[var(--primary-color)] text-xs">
+                      <td colSpan={5} className="py-2 px-3.5">2. การจัดการบุคลากรและสิทธิ์ (User Management & Role)</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">จัดการผู้ใช้งาน (User Management)</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ ทั้งหมด</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-amber-500 font-bold">⚠️ จำกัดฝ่ายตน</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">Moderator จัดการข้อมูลเจ้าหน้าที่ในฝ่าย/กลุ่มงานของตนเองได้</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">เปลี่ยนสิทธิ์ผู้ใช้งาน (Change Role)</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ ปรับได้ทุก Role</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-red-400 font-bold">❌ ไม่อนุญาต</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">เฉพาะ Admin ที่มีสิทธิ์เปลี่ยนสิทธิ์ผู้ใช้เป็น Admin/Moderator/User</td>
+                    </tr>
+
+                    {/* Section 3 */}
+                    <tr className="bg-[var(--bg-elevated)]/50 font-bold text-[var(--primary-color)] text-xs">
+                      <td colSpan={5} className="py-2 px-3.5">3. แฟ้มดิจิทัล รายงาน และตั้งค่าระบบ (Folders & Settings)</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">จัดการแฟ้มเอกสารดิจิทัล</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ ทั้งหมด</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-emerald-500 font-bold">✅ ส่วนกลาง/ฝ่าย</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-emerald-500 font-bold">✅ แฟ้มส่วนตัว</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">User สร้างและดูแลแฟ้มส่วนตัวได้</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">ตั้งค่าระบบ / เลขสารบรรณ / SMTP</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ เข้าถึงได้</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">สงวนสิทธิ์การตั้งค่าระบบพื้นฐานเฉพาะผู้ดูแลระบบ (Admin)</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">Backup & Restore ข้อมูล</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ เข้าถึงได้</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">สำรองและคืนค่าฐานข้อมูล EDMS</td>
+                    </tr>
+                    <tr className="hover:bg-[var(--border-lighter)]/20 transition-colors">
+                      <td className="p-3.5 font-medium text-[var(--text-primary)]">ดูประวัติระบบ (Audit History Logs)</td>
+                      <td className="p-3.5 text-center bg-amber-500/5"><span className="text-emerald-500 font-bold">✅ ดู Log ทั้งหมด</span></td>
+                      <td className="p-3.5 text-center bg-blue-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-center bg-emerald-500/5"><span className="text-red-400 font-bold">❌ ไม่ได้</span></td>
+                      <td className="p-3.5 text-[var(--text-muted)] text-xs">ตรวจสอบบันทึกการใช้งานและเหตุการณ์ระบบ</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 
@@ -3006,10 +3345,13 @@ export default function Settings(props: SettingsProps) {
                   <select 
                     value={newUser.role}
                     onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                    className="w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    className="w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none font-medium"
                   >
                     <option value="user">ผู้ใช้งานทั่วไป (User)</option>
-                    <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                    <option value="moderator">ผู้ตรวจสอบ/เจ้าหน้าที่สารบรรณ (Moderator)</option>
+                    {(props.user?.role === 'admin' || !props.user?.role) && (
+                      <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                    )}
                   </select>
                 </div>
               </div>

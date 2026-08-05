@@ -193,13 +193,16 @@ export default function CustomNumberingSettings() {
         body: JSON.stringify(scheduleFormData)
       });
 
-      if (res.ok) {
+      const resData = await res.json().catch(() => ({}));
+
+      if (res.ok && resData.success !== false) {
         showNotification('success', editingSchedule ? 'อัปเดตการตั้งเวลาจองเลขอัตโนมัติเรียบร้อย' : 'เพิ่มการตั้งเวลาจองเลขอัตโนมัติเรียบร้อย');
         setShowScheduleModal(false);
         setEditingSchedule(null);
         fetchScheduled();
       } else {
-        showNotification('error', 'เกิดข้อผิดพลาดในการบันทึกการตั้งเวลา');
+        const errorMsg = resData.error || resData.details || 'เกิดข้อผิดพลาดในการบันทึกการตั้งเวลา';
+        showNotification('error', errorMsg);
       }
     } catch (err) {
       showNotification('error', 'ไม่สามารถเชื่อมต่อเครื่องแม่ข่ายได้');

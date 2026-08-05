@@ -59,6 +59,7 @@ export interface DocumentItem {
   forwardNote?: string; // หมายเหตุ/คำสั่งการส่งต่อ
   isCentral?: number; // 1 = สารบรรณกลาง, 0 = สารบรรณฝ่าย
   isCircular?: boolean; // เป็นหนังสือเวียน (สำหรับหนังสือส่ง)
+  createdBy?: string;
   departmentReceives?: {
     id: number;
     docId: string;
@@ -78,7 +79,7 @@ export interface User {
   lastName: string;
   position: string;
   department?: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'moderator' | 'user';
   isArgon2?: boolean;
   avatar?: string;
 }

@@ -449,6 +449,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       navItems.push({ id: 'logs', icon: ShieldCheck, label: 'บันทึกประวัติระบบ' });
     }
     navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' });
+  } else if (currentUser?.role === 'moderator') {
+    navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่า & สิทธิ์การใช้งาน' });
+  } else if (currentUser?.role === 'user') {
+    navItems.push({ id: 'settings', icon: SettingsIcon, label: 'สิทธิ์การใช้งาน' });
   }
 
   const handleViewDoc = (docOrId: DocumentItem | string) => {
@@ -977,7 +981,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                 <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-lg text-sm">
                   <ShieldCheck className="w-4 h-4 text-[var(--primary-color)]" />
                   <span className="font-medium text-[var(--text-primary)]">
-                    {currentUser?.role === 'admin' ? 'ผู้ดูแลระบบ (Administrator)' : currentUser?.role === 'approver' ? 'ผู้อนุมัติ / ผู้บริหาร' : 'ผู้ใช้งานทั่วไป (User)'}
+                    {currentUser?.role === 'admin' ? 'ผู้ดูแลระบบ (Administrator)' : currentUser?.role === 'moderator' ? 'ผู้ตรวจสอบ / เจ้าหน้าที่สารบรรณ (Moderator)' : 'ผู้ใช้งานทั่วไป (User)'}
                   </span>
                   <span className="ml-auto text-xs px-2 py-0.5 rounded bg-[var(--primary-color)]/10 text-[var(--primary-color)] font-mono">
                     {currentUser?.role || 'user'}

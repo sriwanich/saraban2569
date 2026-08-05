@@ -835,7 +835,7 @@ const initialSeedData = {
   users: [
     { id: 1, username: 'admin', password: 'admin', firstName: 'ผู้ดูแลระบบ', lastName: 'ระบบงาน', position: 'นักวิเคราะห์นโยบายและแผนชำนาญการพิเศษ', department: 'ฝ่ายบริหารงานทั่วไป', role: 'admin', avatar: null, email: 'admin@example.com' },
     { id: 2, username: 'somchai', password: 'password', firstName: 'สมชาย', lastName: 'ใจดี', position: 'นักป้องกันและบรรเทาสาธารณภัยปฏิบัติการ', department: 'ฝ่ายป้องกันและปฏิบัติการ', role: 'user', avatar: null, email: 'somchai@example.com' },
-    { id: 3, username: 'somsee', password: 'password', firstName: 'สมศรี', lastName: 'รักษ์ดี', position: 'เจ้าพนักงานธุรการชำนาญงาน', department: 'ฝ่ายบริหารงานทั่วไป', role: 'user', avatar: null, email: 'somsee@example.com' },
+    { id: 3, username: 'somsee', password: 'password', firstName: 'สมศรี', lastName: 'รักษ์ดี', position: 'เจ้าพนักงานธุรการชำนาญงาน', department: 'ฝ่ายบริหารงานทั่วไป', role: 'moderator', avatar: null, email: 'somsee@example.com' },
     { id: 4, username: 'preecha', password: 'password', firstName: 'ปรีชา', lastName: 'มั่นคง', position: 'นายช่างเครื่องกลชำนาญงาน', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', role: 'user', avatar: null, email: 'preecha@example.com' }
   ],
   departments: [
@@ -1379,6 +1379,15 @@ async function handleLocalDbQuery(sql: string, params: any[] = []): Promise<[any
       }
     } else if (tblName === 'system_logs') {
       rows = rows.sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 200);
+    } else if (tblName === 'scheduled_reservations') {
+      if (cleanSql.includes('WHERE id = ?') || cleanSql.includes('WHERE id =')) {
+        rows = rows.filter(s => String(s.id) === String(params[0]));
+      } else if (cleanSql.includes('WHERE isActive = 1') || cleanSql.includes('WHERE isActive = true')) {
+        rows = rows.filter(s => Boolean(s.isActive));
+      }
+      if (cleanSql.includes('ORDER BY id DESC') || cleanSql.includes('ORDER BY id desc')) {
+        rows.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+      }
     }
 
     if (cleanSql.includes('LIMIT 1')) {
@@ -1522,7 +1531,29 @@ const originalPoolQuery = pool.query.bind(pool);
         console.warn('⚠️ MySQL connection lost/failed, switching to local DB fallback:', err.message);
         return await handleLocalDbQuery(sql, params);
       } else {
-        throw err;
+        const isDuplicateOrSchemaError = 
+          err.code === 'ER_DUP_FIELDNAME' || 
+          err.code === 'ER_DUP_KEYNAME' || 
+          err.code === 'ER_TABLE_EXISTS_ERROR' || 
+          err.code === 'ER_CANT_DROP_FIELD_OR_KEY' || 
+          err.code === 'ER_DUP_ENTRY' ||
+          err.errno === 1060 || err.errno === 1061 || err.errno === 1050 || err.errno === 1091 ||
+          (err.message && (
+            err.message.includes('Duplicate column') ||
+            err.message.includes('already exists') ||
+            err.message.includes('Duplicate key')
+          ));
+
+        if (isDuplicateOrSchemaError) {
+          throw err;
+        }
+
+        console.warn('⚠️ MySQL query error, trying local DB fallback:', err.message);
+        try {
+          return await handleLocalDbQuery(sql, params);
+        } catch (fallbackErr) {
+          throw err;
+        }
       }
     }
   }
@@ -1646,7 +1677,56 @@ async function setupDatabase() {
             createdAt VARCHAR(50)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `, []);
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN ruleId INT', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN docType VARCHAR(100)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN department VARCHAR(255)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN numberString VARCHAR(100)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN seqNumber INT', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN year VARCHAR(20)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN type VARCHAR(50)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN status VARCHAR(50)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN reservedBy VARCHAR(255)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN reservedFor TEXT', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN expiresAt VARCHAR(50)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN usedAt VARCHAR(50)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN usedForDocId VARCHAR(100)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN createdAt VARCHAR(50)', []); } catch (e) {}
       } catch (e) { console.warn('Note checking/creating reserved_numbers table:', e); }
+
+      // Ensure scheduled_reservations table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS scheduled_reservations (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            department VARCHAR(255),
+            docType VARCHAR(100),
+            prefix VARCHAR(100),
+            count INT DEFAULT 1,
+            scheduleType VARCHAR(50) DEFAULT 'daily',
+            scheduledTime VARCHAR(20) DEFAULT '18:00',
+            reservedFor TEXT,
+            reservedBy VARCHAR(255),
+            isActive TINYINT(1) DEFAULT 1,
+            lastRunAt VARCHAR(50),
+            nextRunAt VARCHAR(50),
+            createdAt VARCHAR(50)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN name VARCHAR(255)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN department VARCHAR(255)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN docType VARCHAR(100)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN prefix VARCHAR(100)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN count INT DEFAULT 1', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN scheduleType VARCHAR(50) DEFAULT "daily"', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN scheduledTime VARCHAR(20) DEFAULT "18:00"', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN reservedFor TEXT', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN reservedBy VARCHAR(255)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN isActive TINYINT(1) DEFAULT 1', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN lastRunAt VARCHAR(50)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN nextRunAt VARCHAR(50)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN createdAt VARCHAR(50)', []); } catch (e) {}
+      } catch (e) { console.warn('Note checking/creating scheduled_reservations table:', e); }
 
       // Ensure draft_documents table exists
       try {
@@ -2529,8 +2609,8 @@ function startScheduledReservationEngine() {
   }, 30000);
 }
 
-// Scheduled Reservations Endpoints
-app.get('/api/scheduled-reservations', async (req, res) => {
+// Scheduled Reservations Helper
+async function ensureScheduledReservationsTable() {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS scheduled_reservations (
@@ -2550,9 +2630,35 @@ app.get('/api/scheduled-reservations', async (req, res) => {
         createdAt VARCHAR(50)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+    const cols = [
+      'name VARCHAR(255)',
+      'department VARCHAR(255)',
+      'docType VARCHAR(100)',
+      'prefix VARCHAR(100)',
+      'count INT DEFAULT 1',
+      'scheduleType VARCHAR(50) DEFAULT "daily"',
+      'scheduledTime VARCHAR(20) DEFAULT "18:00"',
+      'reservedFor TEXT',
+      'reservedBy VARCHAR(255)',
+      'isActive TINYINT(1) DEFAULT 1',
+      'lastRunAt VARCHAR(50)',
+      'nextRunAt VARCHAR(50)',
+      'createdAt VARCHAR(50)'
+    ];
+    for (const col of cols) {
+      try {
+        await pool.query(`ALTER TABLE scheduled_reservations ADD COLUMN ${col}`);
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
 
+// Scheduled Reservations Endpoints
+app.get('/api/scheduled-reservations', async (req, res) => {
+  try {
+    await ensureScheduledReservationsTable();
     const [rows]: any = await pool.query('SELECT * FROM scheduled_reservations ORDER BY id DESC');
-    const formatted = rows.map((r: any) => ({ ...r, isActive: Boolean(r.isActive) }));
+    const formatted = (rows || []).map((r: any) => ({ ...r, isActive: Boolean(r.isActive) }));
     return res.json(formatted);
   } catch (err: any) {
     const list = localDb.scheduled_reservations || [];
@@ -2562,6 +2668,8 @@ app.get('/api/scheduled-reservations', async (req, res) => {
 
 app.post('/api/scheduled-reservations', async (req, res) => {
   try {
+    await ensureScheduledReservationsTable();
+
     const { name, department, docType, prefix, count, scheduleType, scheduledTime, reservedFor, reservedBy, isActive } = req.body;
     const nowIso = new Date().toISOString();
     const activeVal = isActive !== undefined ? (isActive ? 1 : 0) : 1;
@@ -2582,29 +2690,49 @@ app.post('/api/scheduled-reservations', async (req, res) => {
       createdAt: nowIso
     };
 
+    let insertedId: any = null;
     try {
       const [result]: any = await pool.query(
         'INSERT INTO scheduled_reservations (name, department, docType, prefix, count, scheduleType, scheduledTime, reservedFor, reservedBy, isActive, lastRunAt, nextRunAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [newSchedule.name, newSchedule.department, newSchedule.docType, newSchedule.prefix, newSchedule.count, newSchedule.scheduleType, newSchedule.scheduledTime, newSchedule.reservedFor, newSchedule.reservedBy, activeVal, newSchedule.lastRunAt, newSchedule.nextRunAt, newSchedule.createdAt]
       );
-      newSchedule.id = result.insertId;
+      if (result && result.insertId) {
+        insertedId = result.insertId;
+      }
     } catch (e) {
-      if (!localDb.scheduled_reservations) localDb.scheduled_reservations = [];
-      const newId = localDb.scheduled_reservations.length > 0 ? Math.max(...localDb.scheduled_reservations.map((s: any) => Number(s.id) || 0)) + 1 : 1;
-      newSchedule.id = newId;
-      localDb.scheduled_reservations.unshift(newSchedule);
-      saveLocalDb();
+      console.warn('MySQL insert scheduled_reservations warning:', e);
     }
 
-    await addSystemLog("CREATE_SCHEDULED_RESERVATION", `เพิ่มการตั้งเวลาจองเลขอัตโนมัติ: ${newSchedule.name} (${newSchedule.scheduledTime} น.)`, req.body.createdBy || "ผู้ดูแลระบบ", getClientIp(req));
+    if (!localDb.scheduled_reservations) localDb.scheduled_reservations = [];
+    if (!insertedId) {
+      const newId = localDb.scheduled_reservations.length > 0 ? Math.max(...localDb.scheduled_reservations.map((s: any) => Number(s.id) || 0)) + 1 : 1;
+      insertedId = newId;
+    }
+    newSchedule.id = insertedId;
+
+    const existingIdx = localDb.scheduled_reservations.findIndex((s: any) => Number(s.id) === Number(insertedId));
+    if (existingIdx !== -1) {
+      localDb.scheduled_reservations[existingIdx] = newSchedule;
+    } else {
+      localDb.scheduled_reservations.unshift(newSchedule);
+    }
+    saveLocalDb();
+
+    try {
+      await addSystemLog("CREATE_SCHEDULED_RESERVATION", `เพิ่มการตั้งเวลาจองเลขอัตโนมัติ: ${newSchedule.name} (${newSchedule.scheduledTime} น.)`, req.body.createdBy || "ผู้ดูแลระบบ", getClientIp(req));
+    } catch (logErr) {}
+
     return res.json({ success: true, data: newSchedule });
   } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to create scheduled reservation' });
+    console.error('Create scheduled reservation error:', err);
+    return res.status(500).json({ error: 'Failed to create scheduled reservation', details: err.message });
   }
 });
 
 app.put('/api/scheduled-reservations/:id', async (req, res) => {
   try {
+    await ensureScheduledReservationsTable();
+
     const id = Number(req.params.id);
     const updates = { ...req.body };
     delete updates.id;
@@ -2612,44 +2740,62 @@ app.put('/api/scheduled-reservations/:id', async (req, res) => {
       updates.isActive = updates.isActive ? 1 : 0;
     }
 
-    try {
-      const keys = Object.keys(updates);
-      if (keys.length > 0) {
-        const setClause = keys.map(k => `${k} = ?`).join(', ');
-        const values = keys.map(k => updates[k]);
+    const allowedColumns = ['name', 'department', 'docType', 'prefix', 'count', 'scheduleType', 'scheduledTime', 'reservedFor', 'reservedBy', 'isActive', 'lastRunAt', 'nextRunAt', 'createdAt'];
+    const validKeys = Object.keys(updates).filter(k => allowedColumns.includes(k));
+
+    if (validKeys.length > 0) {
+      try {
+        const setClause = validKeys.map(k => `${k} = ?`).join(', ');
+        const values = validKeys.map(k => updates[k]);
         values.push(id);
         await pool.query(`UPDATE scheduled_reservations SET ${setClause} WHERE id = ?`, values);
-      }
-    } catch (e) {
-      if (localDb.scheduled_reservations) {
-        const idx = localDb.scheduled_reservations.findIndex((s: any) => s.id === id);
-        if (idx !== -1) {
-          localDb.scheduled_reservations[idx] = { ...localDb.scheduled_reservations[idx], ...updates, isActive: Boolean(updates.isActive) };
-          saveLocalDb();
-        }
+      } catch (e) {
+        console.warn('MySQL update scheduled_reservations warning:', e);
       }
     }
 
-    await addSystemLog("UPDATE_SCHEDULED_RESERVATION", `อัปเดตการตั้งเวลาจองเลขอัตโนมัติ ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+    if (!localDb.scheduled_reservations) localDb.scheduled_reservations = [];
+    const idx = localDb.scheduled_reservations.findIndex((s: any) => Number(s.id) === id);
+    if (idx !== -1) {
+      localDb.scheduled_reservations[idx] = {
+        ...localDb.scheduled_reservations[idx],
+        ...updates,
+        isActive: updates.isActive !== undefined ? Boolean(updates.isActive) : localDb.scheduled_reservations[idx].isActive
+      };
+      saveLocalDb();
+    }
+
+    try {
+      await addSystemLog("UPDATE_SCHEDULED_RESERVATION", `อัปเดตการตั้งเวลาจองเลขอัตโนมัติ ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+    } catch (logErr) {}
+
     return res.json({ success: true });
   } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to update scheduled reservation' });
+    console.error('Update scheduled reservation error:', err);
+    return res.status(500).json({ error: 'Failed to update scheduled reservation', details: err.message });
   }
 });
 
 app.delete('/api/scheduled-reservations/:id', async (req, res) => {
   try {
+    await ensureScheduledReservationsTable();
     const id = Number(req.params.id);
+
     try {
       await pool.query('DELETE FROM scheduled_reservations WHERE id = ?', [id]);
     } catch (e) {
-      if (localDb.scheduled_reservations) {
-        localDb.scheduled_reservations = localDb.scheduled_reservations.filter((s: any) => s.id !== id);
-        saveLocalDb();
-      }
+      console.warn('MySQL delete scheduled_reservations warning:', e);
     }
 
-    await addSystemLog("DELETE_SCHEDULED_RESERVATION", `ลบการตั้งเวลาจองเลขอัตโนมัติ ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+    if (localDb.scheduled_reservations) {
+      localDb.scheduled_reservations = localDb.scheduled_reservations.filter((s: any) => Number(s.id) !== id);
+      saveLocalDb();
+    }
+
+    try {
+      await addSystemLog("DELETE_SCHEDULED_RESERVATION", `ลบการตั้งเวลาจองเลขอัตโนมัติ ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+    } catch (logErr) {}
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to delete scheduled reservation' });
@@ -2658,25 +2804,22 @@ app.delete('/api/scheduled-reservations/:id', async (req, res) => {
 
 app.post('/api/scheduled-reservations/:id/toggle', async (req, res) => {
   try {
+    await ensureScheduledReservationsTable();
     const id = Number(req.params.id);
     let newStatus = true;
 
-    try {
-      const [rows]: any = await pool.query('SELECT isActive FROM scheduled_reservations WHERE id = ?', [id]);
-      if (rows.length > 0) {
-        newStatus = !Boolean(rows[0].isActive);
-        await pool.query('UPDATE scheduled_reservations SET isActive = ? WHERE id = ?', [newStatus ? 1 : 0, id]);
-      }
-    } catch (e) {
-      if (localDb.scheduled_reservations) {
-        const target = localDb.scheduled_reservations.find((s: any) => s.id === id);
-        if (target) {
-          target.isActive = !target.isActive;
-          newStatus = target.isActive;
-          saveLocalDb();
-        }
+    if (localDb.scheduled_reservations) {
+      const target = localDb.scheduled_reservations.find((s: any) => Number(s.id) === id);
+      if (target) {
+        target.isActive = !target.isActive;
+        newStatus = target.isActive;
+        saveLocalDb();
       }
     }
+
+    try {
+      await pool.query('UPDATE scheduled_reservations SET isActive = ? WHERE id = ?', [newStatus ? 1 : 0, id]);
+    } catch (e) {}
 
     return res.json({ success: true, isActive: newStatus });
   } catch (err: any) {
@@ -3686,8 +3829,8 @@ app.put('/api/folders/:id', async (req, res) => {
   const ip = getClientIp(req);
   const userLabel = username || 'ผู้ใช้งาน';
 
-  if (role !== 'admin') {
-    return res.status(403).json({ error: 'มีเฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถแก้ไขแฟ้มเอกสารได้' });
+  if (role !== 'admin' && role !== 'moderator') {
+    return res.status(403).json({ error: 'มีเฉพาะผู้ดูแลระบบ (Admin) หรือ ผู้ตรวจสอบ (Moderator) เท่านั้นที่สามารถแก้ไขแฟ้มเอกสารได้' });
   }
 
   try {
@@ -3706,8 +3849,8 @@ app.delete('/api/folders/:id', async (req, res) => {
   const username = req.query.username ? String(req.query.username) : 'ผู้ใช้งาน';
   const ip = getClientIp(req);
 
-  if (role !== 'admin') {
-    return res.status(403).json({ error: 'มีเฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถลบแฟ้มเอกสารได้' });
+  if (role !== 'admin' && role !== 'moderator') {
+    return res.status(403).json({ error: 'มีเฉพาะผู้ดูแลระบบ (Admin) หรือ ผู้ตรวจสอบ (Moderator) เท่านั้นที่สามารถลบแฟ้มเอกสารได้' });
   }
 
   try {

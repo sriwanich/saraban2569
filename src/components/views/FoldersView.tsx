@@ -267,7 +267,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user 
                 </div>
               </div>
 
-              {user?.role === 'admin' && (
+              {(user?.role === 'admin' || user?.role === 'moderator') && (
                 <div className="flex items-center gap-2 self-end sm:self-auto">
                   <button
                     onClick={(e) => handleOpenEdit(activeFolder, e)}
@@ -377,7 +377,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user 
                 />
               </div>
 
-              {user?.role === 'admin' ? (
+              {(user?.role === 'admin' || user?.role === 'moderator') ? (
                 <>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-[var(--text-secondary)]">ประเภทแฟ้มเอกสาร</label>
@@ -456,7 +456,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user 
                         <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-xl group-hover:scale-110 transition-transform">
                           <FolderIcon className="w-5 h-5 fill-amber-500/20" />
                         </div>
-                        {user?.role === 'admin' && (
+                        {(user?.role === 'admin' || user?.role === 'moderator') && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={(e) => handleOpenEdit(folder, e)}
