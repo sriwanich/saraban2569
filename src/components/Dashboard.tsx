@@ -14,7 +14,6 @@ import FoldersView from './views/FoldersView';
 import DraftDocsView from './views/DraftDocsView';
 import WorkflowSlaView from './views/WorkflowSlaView';
 import SmartAiAssistantView from './views/SmartAiAssistantView';
-import SmartAiFloatingWidget from './SmartAiFloatingWidget';
 import DigitalSignatureView from './DigitalSignatureView';
 import RecycleBinView from './views/RecycleBinView';
 import { ThemeMode } from '../App';
@@ -1251,15 +1250,6 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           </div>
         </div>
       )}
-
-      {/* Global Smart AI Floating Widget */}
-      <SmartAiFloatingWidget
-        user={currentUser}
-        documents={documents}
-        onViewDoc={handleViewDoc}
-        onNavigateToDrafts={() => setActiveTab('draft_docs')}
-        onOpenFullAiTab={() => setActiveTab('ai_assistant')}
-      />
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
