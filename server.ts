@@ -1198,8 +1198,13 @@ function loadLocalDb() {
       localDb.workflow_templates = JSON.parse(JSON.stringify(defaultWorkflowTemplates));
       saveLocalDb();
     }
-    if (!localDb.workflow_instances || !Array.isArray(localDb.workflow_instances) || localDb.workflow_instances.length === 0) {
-      localDb.workflow_instances = JSON.parse(JSON.stringify(defaultWorkflowInstances));
+    if (!localDb.workflow_instances || !Array.isArray(localDb.workflow_instances)) {
+      localDb.workflow_instances = [];
+      saveLocalDb();
+    } else {
+      localDb.workflow_instances = localDb.workflow_instances.filter(
+        (i: any) => !['inst-101', 'inst-102', 'inst-103', 'inst-104'].includes(i.id)
+      );
       saveLocalDb();
     }
     if (!localDb.document_versions || !Array.isArray(localDb.document_versions)) {
@@ -1768,9 +1773,10 @@ async function setupDatabase() {
       try { await pool.query('ALTER TABLE users ADD COLUMN resetOtp VARCHAR(10)', []); } catch (e) {}
       try { await pool.query('ALTER TABLE users ADD COLUMN resetOtpExpiry DATETIME', []); } catch (e) {}
 
-      // Ensure attachments & forwarding columns exist in document tables
+      // Ensure attachments, secrecy & forwarding columns exist in document tables
       const docTables = ['inbox_documents', 'outbox_documents', 'circular_documents', 'internal_documents', 'admin_documents'];
       const docCols = [
+        "secrecy VARCHAR(50) DEFAULT 'ปกติ'",
         'attachments TEXT',
         'forwardedTo TEXT',
         'forwardedBy VARCHAR(255)',
@@ -1792,15 +1798,12 @@ async function setupDatabase() {
       } catch (e) {
         // column already exists
       }
-      try {
-        await pool.query("ALTER TABLE inbox_documents ADD COLUMN secrecy VARCHAR(50) DEFAULT 'ปกติ'", []);
-      } catch (e) {
-        // column already exists
-      }
-      try {
-        await pool.query("ALTER TABLE outbox_documents ADD COLUMN secrecy VARCHAR(50) DEFAULT 'ปกติ'", []);
-      } catch (e) {
-        // column already exists
+      for (const tbl of docTables) {
+        try {
+          await pool.query(`ALTER TABLE ${tbl} ADD COLUMN secrecy VARCHAR(50) DEFAULT 'ปกติ'`, []);
+        } catch (e) {
+          // column already exists
+        }
       }
 
       // Ensure departmentId and departmentName columns exist in folders table
@@ -1946,6 +1949,69 @@ async function setupDatabase() {
         }
       } catch (e) {
         console.warn('Note checking/creating project_summaries table:', e);
+      }
+
+      // Ensure workflow_templates table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS workflow_templates (
+            id VARCHAR(255) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            description TEXT,
+            category VARCHAR(100),
+            defaultPriority VARCHAR(50),
+            steps JSON,
+            createdAt VARCHAR(100)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+
+        const [tplRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM workflow_templates');
+        if (tplRows && tplRows[0]?.cnt === 0) {
+          for (const tpl of defaultWorkflowTemplates) {
+            await pool.query(
+              'INSERT INTO workflow_templates (id, name, description, category, defaultPriority, steps, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [tpl.id, tpl.name, tpl.description || '', tpl.category || 'ทั่วไป', tpl.defaultPriority || 'ปกติ', JSON.stringify(tpl.steps || []), tpl.createdAt || new Date().toISOString()]
+            );
+          }
+          console.log('✅ Initialized default workflow templates in MySQL');
+        }
+      } catch (e) {
+        console.warn('Note checking/creating workflow_templates table:', e);
+      }
+
+      // Ensure workflow_instances table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS workflow_instances (
+            id VARCHAR(255) PRIMARY KEY,
+            docId VARCHAR(255),
+            docTitle TEXT,
+            docNumber VARCHAR(255),
+            docType VARCHAR(100),
+            templateId VARCHAR(255),
+            templateName VARCHAR(255),
+            currentStepIndex INT DEFAULT 0,
+            status VARCHAR(50) DEFAULT 'active',
+            startedAt VARCHAR(100),
+            dueAt VARCHAR(100),
+            completedAt VARCHAR(100),
+            department VARCHAR(255),
+            assignee VARCHAR(255),
+            priority VARCHAR(50),
+            steps JSON,
+            slaStatus VARCHAR(50) DEFAULT 'NORMAL',
+            lastEscalatedAt VARCHAR(100),
+            escalationsCount INT DEFAULT 0,
+            INDEX idx_wf_status (status),
+            INDEX idx_wf_docId (docId),
+            INDEX idx_wf_dept (department)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+
+        // Remove old mock/sample workflow instances if present
+        await pool.query("DELETE FROM workflow_instances WHERE id IN ('inst-101', 'inst-102', 'inst-103', 'inst-104')", []);
+      } catch (e) {
+        console.warn('Note checking/creating workflow_instances table:', e);
       }
 
       console.log('✅ Database schema verified and initialized successfully!');
@@ -2943,6 +3009,21 @@ app.post('/api/numbering/generate-next', async (req, res) => {
 // ==================== WORKFLOW & SLA APIS ====================
 app.get("/api/workflows/templates", async (req, res) => {
   try {
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM workflow_templates ORDER BY createdAt ASC');
+        if (rows && rows.length > 0) {
+          const templates = rows.map((r: any) => ({
+            ...r,
+            steps: typeof r.steps === 'string' ? JSON.parse(r.steps) : (r.steps || [])
+          }));
+          return res.json(templates);
+        }
+      } catch (mysqlErr) {
+        console.warn("MySQL fetch workflow_templates failed, using local fallback:", mysqlErr);
+      }
+    }
+
     if (!localDb.workflow_templates || localDb.workflow_templates.length === 0) {
       localDb.workflow_templates = JSON.parse(JSON.stringify(defaultWorkflowTemplates));
       saveLocalDb();
@@ -2957,8 +3038,9 @@ app.post("/api/workflows/templates", async (req, res) => {
   try {
     const tplData = req.body;
     if (!tplData.id) tplData.id = `tpl-${Date.now()}`;
-    if (!localDb.workflow_templates) localDb.workflow_templates = [];
 
+    // Sync localDb
+    if (!localDb.workflow_templates) localDb.workflow_templates = [];
     const existingIdx = localDb.workflow_templates.findIndex((t: any) => t.id === tplData.id);
     if (existingIdx >= 0) {
       localDb.workflow_templates[existingIdx] = { ...localDb.workflow_templates[existingIdx], ...tplData };
@@ -2969,6 +3051,25 @@ app.post("/api/workflows/templates", async (req, res) => {
       });
     }
     saveLocalDb();
+
+    // MySQL Store
+    if (isMysqlOnline) {
+      try {
+        const stepsJson = JSON.stringify(tplData.steps || []);
+        await pool.query(
+          `INSERT INTO workflow_templates (id, name, description, category, defaultPriority, steps, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE name=?, description=?, category=?, defaultPriority=?, steps=?`,
+          [
+            tplData.id, tplData.name, tplData.description || '', tplData.category || 'ทั่วไป', tplData.defaultPriority || 'ปกติ', stepsJson, tplData.createdAt || new Date().toISOString(),
+            tplData.name, tplData.description || '', tplData.category || 'ทั่วไป', tplData.defaultPriority || 'ปกติ', stepsJson
+          ]
+        );
+      } catch (mysqlErr) {
+        console.warn("MySQL save workflow_template failed:", mysqlErr);
+      }
+    }
+
     const ip = getClientIp(req);
     await addSystemLog("CREATE_WORKFLOW_TEMPLATE", `บันทึกแม่แบบ Workflow: ${tplData.name}`, "ผู้ดูแลระบบ", ip);
     return res.json({ success: true, id: tplData.id });
@@ -2984,6 +3085,15 @@ app.delete("/api/workflows/templates/:id", async (req, res) => {
       localDb.workflow_templates = localDb.workflow_templates.filter((t: any) => t.id !== id);
       saveLocalDb();
     }
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query('DELETE FROM workflow_templates WHERE id = ?', [id]);
+      } catch (mysqlErr) {
+        console.warn("MySQL delete workflow_template failed:", mysqlErr);
+      }
+    }
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: "Failed to delete workflow template" });
@@ -2992,13 +3102,30 @@ app.delete("/api/workflows/templates/:id", async (req, res) => {
 
 app.get("/api/workflows/instances", async (req, res) => {
   try {
-    if (!localDb.workflow_instances || localDb.workflow_instances.length === 0) {
-      localDb.workflow_instances = JSON.parse(JSON.stringify(defaultWorkflowInstances));
-      saveLocalDb();
+    let instances: any[] = [];
+    let fetchedFromMysql = false;
+
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM workflow_instances ORDER BY startedAt DESC');
+        instances = (rows || []).map((r: any) => ({
+          ...r,
+          steps: typeof r.steps === 'string' ? JSON.parse(r.steps) : (r.steps || [])
+        }));
+        fetchedFromMysql = true;
+      } catch (mysqlErr) {
+        console.warn("MySQL fetch workflow_instances failed, falling back to localDb:", mysqlErr);
+      }
+    }
+
+    if (!fetchedFromMysql) {
+      instances = (localDb.workflow_instances || []).filter(
+        (i: any) => !['inst-101', 'inst-102', 'inst-103', 'inst-104'].includes(i.id)
+      );
     }
 
     const nowMs = Date.now();
-    const updatedInstances = (localDb.workflow_instances || []).map((inst: any) => {
+    const updatedInstances = instances.map((inst: any) => {
       const dueMs = new Date(inst.dueAt).getTime();
       let slaStatus = inst.slaStatus || "NORMAL";
 
@@ -3026,24 +3153,61 @@ app.get("/api/workflows/instances", async (req, res) => {
 app.post("/api/workflows/instances", async (req, res) => {
   try {
     const { docId, templateId, user } = req.body;
-    if (!localDb.workflow_templates) localDb.workflow_templates = defaultWorkflowTemplates;
-    if (!localDb.workflow_instances) localDb.workflow_instances = [];
+    let template: any = null;
 
-    const template = localDb.workflow_templates.find((t: any) => t.id === templateId) || localDb.workflow_templates[0];
-    
-    const allDocs = [
-      ...(localDb.inbox_documents || []),
-      ...(localDb.outbox_documents || []),
-      ...(localDb.circular_documents || []),
-      ...(localDb.admin_documents || [])
-    ];
-    const doc = allDocs.find((d: any) => String(d.id) === String(docId)) || {
-      docNumber: "รย 0021/999",
-      title: "หนังสือมอบหมายตามเส้นทาง Workflow",
-      department: "ฝ่ายบริหารงานทั่วไป",
-      assignee: user || "เจ้าหน้าที่",
-      priority: "ปกติ"
-    };
+    if (isMysqlOnline) {
+      try {
+        const [tplRows]: any = await pool.query('SELECT * FROM workflow_templates WHERE id = ?', [templateId]);
+        if (tplRows && tplRows.length > 0) {
+          template = {
+            ...tplRows[0],
+            steps: typeof tplRows[0].steps === 'string' ? JSON.parse(tplRows[0].steps) : (tplRows[0].steps || [])
+          };
+        }
+      } catch (err) {}
+    }
+
+    if (!template) {
+      if (!localDb.workflow_templates) localDb.workflow_templates = defaultWorkflowTemplates;
+      template = localDb.workflow_templates.find((t: any) => t.id === templateId) || localDb.workflow_templates[0];
+    }
+
+    let doc: any = null;
+    if (isMysqlOnline) {
+      try {
+        const queries = [
+          `SELECT id, 'inbox' as type, title, docNumber, department, assignee, priority FROM inbox_documents WHERE id = ?`,
+          `SELECT id, 'outbox' as type, title, docNumber, department, assignee, priority FROM outbox_documents WHERE id = ?`,
+          `SELECT id, 'circular' as type, title, docNumber, department, assignee, priority FROM circular_documents WHERE id = ?`,
+          `SELECT id, 'admin' as type, title, docNumber, department, assignee, 'ปกติ' as priority FROM admin_documents WHERE id = ?`,
+          `SELECT id, 'internal' as type, title, docNumber, department, assignee, priority FROM internal_documents WHERE id = ?`
+        ];
+        for (const q of queries) {
+          const [dRows]: any = await pool.query(q, [docId]);
+          if (dRows && dRows.length > 0) {
+            doc = dRows[0];
+            break;
+          }
+        }
+      } catch (err) {}
+    }
+
+    if (!doc) {
+      const allDocs = [
+        ...(localDb.inbox_documents || []),
+        ...(localDb.outbox_documents || []),
+        ...(localDb.circular_documents || []),
+        ...(localDb.admin_documents || []),
+        ...(localDb.internal_documents || [])
+      ];
+      doc = allDocs.find((d: any) => String(d.id) === String(docId)) || {
+        docNumber: "รย 0021/999",
+        title: "หนังสือมอบหมายตามเส้นทาง Workflow",
+        department: "ฝ่ายบริหารงานทั่วไป",
+        assignee: user || "เจ้าหน้าที่",
+        priority: "ปกติ"
+      };
+    }
 
     const startTime = new Date();
     const totalSlaHours = (template.steps || []).reduce((acc: number, cur: any) => acc + (cur.slaHours || 24), 0);
@@ -3076,6 +3240,7 @@ app.post("/api/workflows/instances", async (req, res) => {
       status: "active",
       startedAt: startTime.toISOString(),
       dueAt: dueTime.toISOString(),
+      completedAt: null,
       department: doc.department || "ฝ่ายบริหารงานทั่วไป",
       assignee: doc.assignee || user || "ผู้รับผิดชอบ",
       priority: doc.priority || "ปกติ",
@@ -3083,8 +3248,27 @@ app.post("/api/workflows/instances", async (req, res) => {
       slaStatus: "NORMAL"
     };
 
+    if (!localDb.workflow_instances) localDb.workflow_instances = [];
     localDb.workflow_instances.unshift(newInst);
     saveLocalDb();
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query(
+          `INSERT INTO workflow_instances 
+           (id, docId, docTitle, docNumber, docType, templateId, templateName, currentStepIndex, status, startedAt, dueAt, department, assignee, priority, steps, slaStatus)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            newInst.id, newInst.docId, newInst.docTitle, newInst.docNumber, newInst.docType,
+            newInst.templateId, newInst.templateName, newInst.currentStepIndex, newInst.status,
+            newInst.startedAt, newInst.dueAt, newInst.department, newInst.assignee, newInst.priority,
+            JSON.stringify(newInst.steps), newInst.slaStatus
+          ]
+        );
+      } catch (mysqlErr) {
+        console.warn("MySQL save workflow_instance failed:", mysqlErr);
+      }
+    }
 
     const ip = getClientIp(req);
     await addSystemLog("START_WORKFLOW", `มอบหมายเส้นทาง Workflow: ${template.name} ให้หนังสือ ${doc.docNumber}`, user || "ผู้ดูแลระบบ", ip);
@@ -3100,13 +3284,29 @@ app.put("/api/workflows/instances/:id/step", async (req, res) => {
     const { id } = req.params;
     const { action, note, user } = req.body;
 
-    if (!localDb.workflow_instances) localDb.workflow_instances = [];
-    const instIdx = localDb.workflow_instances.findIndex((i: any) => i.id === id);
-    if (instIdx < 0) {
+    let inst: any = null;
+
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM workflow_instances WHERE id = ?', [id]);
+        if (rows && rows.length > 0) {
+          inst = {
+            ...rows[0],
+            steps: typeof rows[0].steps === 'string' ? JSON.parse(rows[0].steps) : (rows[0].steps || [])
+          };
+        }
+      } catch (err) {}
+    }
+
+    if (!inst) {
+      if (!localDb.workflow_instances) localDb.workflow_instances = [];
+      inst = localDb.workflow_instances.find((i: any) => i.id === id);
+    }
+
+    if (!inst) {
       return res.status(404).json({ error: "Workflow instance not found" });
     }
 
-    const inst = localDb.workflow_instances[instIdx];
     const currentIdx = inst.currentStepIndex || 0;
 
     if (action === "approve") {
@@ -3137,8 +3337,24 @@ app.put("/api/workflows/instances/:id/step", async (req, res) => {
       inst.status = "rejected";
     }
 
-    localDb.workflow_instances[instIdx] = inst;
-    saveLocalDb();
+    if (localDb.workflow_instances) {
+      const localIdx = localDb.workflow_instances.findIndex((i: any) => i.id === id);
+      if (localIdx >= 0) {
+        localDb.workflow_instances[localIdx] = inst;
+        saveLocalDb();
+      }
+    }
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query(
+          `UPDATE workflow_instances SET currentStepIndex=?, status=?, completedAt=?, steps=?, slaStatus=? WHERE id=?`,
+          [inst.currentStepIndex, inst.status, inst.completedAt || null, JSON.stringify(inst.steps), inst.slaStatus, id]
+        );
+      } catch (mysqlErr) {
+        console.warn("MySQL update workflow step failed:", mysqlErr);
+      }
+    }
 
     const ip = getClientIp(req);
     await addSystemLog("WORKFLOW_PROGRESS", `อัปเดตขั้นตอน Workflow (${action}): ${inst.docNumber} - ${inst.docTitle}`, user || "ผู้รับผิดชอบ", ip);
@@ -3152,13 +3368,26 @@ app.post("/api/workflows/instances/:id/escalate", async (req, res) => {
   try {
     const { id } = req.params;
     const { note, user } = req.body;
+    const nowIso = new Date().toISOString();
 
-    if (!localDb.workflow_instances) localDb.workflow_instances = [];
-    const instIdx = localDb.workflow_instances.findIndex((i: any) => i.id === id);
-    if (instIdx >= 0) {
-      localDb.workflow_instances[instIdx].lastEscalatedAt = new Date().toISOString();
-      localDb.workflow_instances[instIdx].escalationsCount = (localDb.workflow_instances[instIdx].escalationsCount || 0) + 1;
-      saveLocalDb();
+    if (localDb.workflow_instances) {
+      const instIdx = localDb.workflow_instances.findIndex((i: any) => i.id === id);
+      if (instIdx >= 0) {
+        localDb.workflow_instances[instIdx].lastEscalatedAt = nowIso;
+        localDb.workflow_instances[instIdx].escalationsCount = (localDb.workflow_instances[instIdx].escalationsCount || 0) + 1;
+        saveLocalDb();
+      }
+    }
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query(
+          `UPDATE workflow_instances SET lastEscalatedAt = ?, escalationsCount = COALESCE(escalationsCount, 0) + 1 WHERE id = ?`,
+          [nowIso, id]
+        );
+      } catch (mysqlErr) {
+        console.warn("MySQL escalate workflow failed:", mysqlErr);
+      }
     }
 
     const ip = getClientIp(req);
