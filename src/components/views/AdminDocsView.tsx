@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, DocCategory, Folder, formatThaiDateShort, formatThaiDateMedium, formatThaiDateTime } from '../../types';
-import { Search, Plus, Calendar, FileText, Eye, Edit2, Trash2, Tag, Layers, CheckCircle2, Circle, Paperclip, X } from 'lucide-react';
+import { Search, Plus, Calendar, FileText, Eye, Edit2, Trash2, Tag, Layers, CheckCircle2, Circle, Paperclip, X, Pin } from 'lucide-react';
 
 interface Props {
   documents: DocumentItem[];
@@ -9,9 +9,11 @@ interface Props {
   onCreateDoc: () => void;
   onEditDoc: (doc: DocumentItem) => void;
   onDeleteDoc: (id: string) => void;
+  favorites?: string[];
+  onToggleFavorite?: (doc: DocumentItem) => void;
 }
 
-export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc }: Props) {
+export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite }: Props) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedYear, setSelectedYear] = useState('all');
@@ -229,9 +231,24 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
             filteredDocs.map((row) => (
               <div key={row.id} className="p-4 space-y-3 hover:bg-[var(--border-lighter)]/30 transition-colors">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="text-xs font-mono font-semibold text-[var(--text-primary)] bg-[var(--bg-elevated)] px-2.5 py-1 rounded border border-[var(--border-light)]">
-                    {row.docNumber}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {onToggleFavorite && (
+                      <button
+                        onClick={() => onToggleFavorite(row)}
+                        className={`p-1 rounded-md transition-colors ${
+                          favorites.includes(row.id)
+                            ? 'text-amber-500 bg-amber-500/10 border border-amber-500/20'
+                            : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
+                        }`}
+                        title={favorites.includes(row.id) ? 'ยกเลิกปักหมุด' : 'ปักหมุด'}
+                      >
+                        <Pin className={`w-3 h-3 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
+                      </button>
+                    )}
+                    <span className="text-xs font-mono font-semibold text-[var(--text-primary)] bg-[var(--bg-elevated)] px-2.5 py-1 rounded border border-[var(--border-light)]">
+                      {row.docNumber}
+                    </span>
+                  </div>
                   <span className="text-[11px] text-[var(--text-muted)] font-mono bg-[var(--bg-overlay)] px-2 py-0.5 rounded border border-[var(--border-light)]">
                     พ.ศ. {row.year}
                   </span>
@@ -312,14 +329,29 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
                       </span>
                     </td>
                     <td className="p-3.5 leading-relaxed align-top">
-                      <div className="font-medium text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer flex items-center gap-1.5" onClick={() => onViewDoc(row)}>
-                        <span>{row.title}</span>
-                        {row.attachments && row.attachments.length > 0 && (
-                          <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-1.5 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium shrink-0" title={`${row.attachments.length} ไฟล์แนบ`}>
-                            <Paperclip className="w-3 h-3" />
-                            <span>{row.attachments.length}</span>
-                          </span>
+                      <div className="flex items-center gap-2">
+                        {onToggleFavorite && (
+                          <button
+                            onClick={() => onToggleFavorite(row)}
+                            className={`p-1 rounded-md transition-colors shrink-0 ${
+                              favorites.includes(row.id)
+                                ? 'text-amber-500 hover:bg-amber-500/10'
+                                : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
+                            }`}
+                            title={favorites.includes(row.id) ? 'ยกเลิกปักหมุดเอกสารสำคัญ' : 'ปักหมุดเอกสารสำคัญ'}
+                          >
+                            <Pin className={`w-3.5 h-3.5 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
+                          </button>
                         )}
+                        <div className="font-medium text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer flex items-center gap-1.5" onClick={() => onViewDoc(row)}>
+                          <span>{row.title}</span>
+                          {row.attachments && row.attachments.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-1.5 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium shrink-0" title={`${row.attachments.length} ไฟล์แนบ`}>
+                              <Paperclip className="w-3 h-3" />
+                              <span>{row.attachments.length}</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {row.content && (
                         <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">{row.content}</p>

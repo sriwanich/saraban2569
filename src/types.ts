@@ -59,6 +59,7 @@ export interface DocumentItem {
   forwardNote?: string; // หมายเหตุ/คำสั่งการส่งต่อ
   isCentral?: number; // 1 = สารบรรณกลาง, 0 = สารบรรณฝ่าย
   isCircular?: boolean; // เป็นหนังสือเวียน (สำหรับหนังสือส่ง)
+  readStatus?: 'read' | 'reading' | 'sent';
   createdBy?: string;
   departmentReceives?: {
     id: number;
@@ -263,6 +264,33 @@ export interface DocumentVersion {
   modifiedBy: string;
   modifiedAt: string;
   isCurrent?: boolean;
+}
+
+export interface DigitalSignatureRecord {
+  id: string;
+  docId: string;
+  docTitle: string;
+  docNumber: string;
+  docType?: string;
+  signerName: string;
+  signerPosition: string;
+  signerDepartment: string;
+  signerEmail?: string;
+  signatureType: 'e-signature' | 'digital-signature';
+  signatureDataUrl?: string;
+  certificateIssuer: string;
+  certificateSerial: string;
+  hashAlgorithm: 'SHA-256' | 'SHA-512';
+  documentHash: string;
+  signatureHash: string;
+  timestampIso: string;
+  timestampFormatted: string;
+  tsaToken: string;
+  qrCodeDataUrl: string;
+  verifyUrl: string;
+  ipAddress?: string;
+  pdfPath?: string;
+  status: 'valid' | 'revoked';
 }
 
 

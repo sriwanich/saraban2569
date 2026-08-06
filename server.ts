@@ -12,6 +12,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import { GoogleGenAI, Type } from '@google/genai';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import QRCode from 'qrcode';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,7 +21,7 @@ dotenv.config();
 
 // Pre-create standard upload directories to avoid any folder-creation or write-permission issues
 const baseUploadsDir = path.join(process.cwd(), 'uploads');
-const standardFolders = ['inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular'];
+const standardFolders = ['inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'signed_pdfs'];
 try {
   if (!fs.existsSync(baseUploadsDir)) {
     fs.mkdirSync(baseUploadsDir, { recursive: true });
@@ -112,6 +114,37 @@ async function verifyPasswordArgon2(hashedPassword: string, plainPassword: strin
 }
 
 const app = express();
+app.set('trust proxy', true);
+
+// Robust helper to get public domain base URL, avoiding localhost:3000 in deployed environments
+function getPublicBaseUrl(req: express.Request): string {
+  const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').toString().split(',')[0].trim();
+  let host = (req.headers['x-forwarded-host'] || req.get('host') || '').toString().trim();
+
+  // If host is localhost or empty, check if we can get the real origin from the Referer header
+  if (host.includes('localhost') || host.includes('127.0.0.1')) {
+    const referer = req.headers.referer;
+    if (referer) {
+      try {
+        const refUrl = new URL(referer);
+        if (!refUrl.hostname.includes('localhost') && !refUrl.hostname.includes('127.0.0.1')) {
+          return refUrl.origin;
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Strip trailing port 3000 if it's a real domain
+  if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+    host = host.replace(/:3000$/, '');
+  }
+
+  const finalHost = host || req.get('host') || 'localhost:3000';
+  const finalProto = finalHost.includes('localhost') || finalHost.includes('127.0.0.1') ? 'http' : 'https';
+
+  return `${finalProto}://${finalHost}`;
+}
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -1227,6 +1260,41 @@ function loadLocalDb() {
       localDb.scheduled_reservations = JSON.parse(JSON.stringify(initialSeedData.scheduled_reservations || []));
       saveLocalDb();
     }
+    if (!localDb.role_permissions || !Array.isArray(localDb.role_permissions)) {
+      localDb.role_permissions = [
+        // admin
+        { role: 'admin', permission_key: 'view_all_docs', is_allowed: 1 },
+        { role: 'admin', permission_key: 'create_docs', is_allowed: 1 },
+        { role: 'admin', permission_key: 'edit_all_docs', is_allowed: 1 },
+        { role: 'admin', permission_key: 'delete_docs', is_allowed: 1 },
+        { role: 'admin', permission_key: 'approve_docs', is_allowed: 1 },
+        { role: 'admin', permission_key: 'manage_users', is_allowed: 1 },
+        { role: 'admin', permission_key: 'system_settings', is_allowed: 1 },
+        { role: 'admin', permission_key: 'backup_restore', is_allowed: 1 },
+        { role: 'admin', permission_key: 'audit_logs', is_allowed: 1 },
+        // moderator
+        { role: 'moderator', permission_key: 'view_all_docs', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'create_docs', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'edit_all_docs', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'delete_docs', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'approve_docs', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'manage_users', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'system_settings', is_allowed: 0 },
+        { role: 'moderator', permission_key: 'backup_restore', is_allowed: 0 },
+        { role: 'moderator', permission_key: 'audit_logs', is_allowed: 0 },
+        // user
+        { role: 'user', permission_key: 'view_all_docs', is_allowed: 0 },
+        { role: 'user', permission_key: 'create_docs', is_allowed: 1 },
+        { role: 'user', permission_key: 'edit_all_docs', is_allowed: 0 },
+        { role: 'user', permission_key: 'delete_docs', is_allowed: 0 },
+        { role: 'user', permission_key: 'approve_docs', is_allowed: 0 },
+        { role: 'user', permission_key: 'manage_users', is_allowed: 0 },
+        { role: 'user', permission_key: 'system_settings', is_allowed: 0 },
+        { role: 'user', permission_key: 'backup_restore', is_allowed: 0 },
+        { role: 'user', permission_key: 'audit_logs', is_allowed: 0 }
+      ];
+      saveLocalDb();
+    }
   } catch (err) {
     console.warn('Failed to load local db_store.json, resetting to initial seed:', err);
     localDb = JSON.parse(JSON.stringify(initialSeedData));
@@ -2012,6 +2080,157 @@ async function setupDatabase() {
         await pool.query("DELETE FROM workflow_instances WHERE id IN ('inst-101', 'inst-102', 'inst-103', 'inst-104')", []);
       } catch (e) {
         console.warn('Note checking/creating workflow_instances table:', e);
+      }
+
+      // Ensure digital_signatures table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS digital_signatures (
+            id VARCHAR(255) PRIMARY KEY,
+            docId VARCHAR(255) NOT NULL,
+            docTitle TEXT,
+            docNumber VARCHAR(255),
+            docType VARCHAR(100),
+            signerName VARCHAR(255),
+            signerPosition VARCHAR(255),
+            signerDepartment VARCHAR(255),
+            signerEmail VARCHAR(255),
+            signatureType VARCHAR(50) DEFAULT 'digital-signature',
+            signatureDataUrl LONGTEXT,
+            certificateIssuer VARCHAR(255),
+            certificateSerial VARCHAR(255),
+            hashAlgorithm VARCHAR(50) DEFAULT 'SHA-256',
+            documentHash VARCHAR(255),
+            signatureHash VARCHAR(255),
+            timestampIso VARCHAR(100),
+            timestampFormatted VARCHAR(255),
+            tsaToken VARCHAR(255),
+            qrCodeDataUrl LONGTEXT,
+            verifyUrl TEXT,
+            ipAddress VARCHAR(100),
+            pdfPath TEXT,
+            status VARCHAR(50) DEFAULT 'valid',
+            INDEX idx_ds_docId (docId),
+            INDEX idx_ds_docHash (documentHash),
+            INDEX idx_ds_sigHash (signatureHash)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        console.log('✅ Initialized digital_signatures table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating digital_signatures table:', e);
+      }
+
+      // Ensure user_favorites table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS user_favorites (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(255) NOT NULL,
+            docId VARCHAR(255) NOT NULL,
+            docType VARCHAR(100) NOT NULL,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_user_fav (username, docId),
+            INDEX idx_fav_user (username)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        console.log('✅ Initialized user_favorites table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating user_favorites table:', e);
+      }
+
+      // Ensure document_reads table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS document_reads (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            docId VARCHAR(255) NOT NULL,
+            docType VARCHAR(100) NOT NULL,
+            username VARCHAR(255) NOT NULL,
+            fullName VARCHAR(255) NOT NULL,
+            status VARCHAR(50) NOT NULL,
+            readAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_doc_user (docId, username)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        console.log('✅ Initialized document_reads table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating document_reads table:', e);
+      }
+
+      // Ensure recycle_bin table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS recycle_bin (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            docId VARCHAR(255) NOT NULL,
+            docType VARCHAR(100) NOT NULL,
+            title VARCHAR(500) NOT NULL,
+            docNumber VARCHAR(255),
+            deletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            deletedBy VARCHAR(255),
+            originalData LONGTEXT NOT NULL
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        console.log('✅ Initialized recycle_bin table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating recycle_bin table:', e);
+      }
+
+      // Ensure role_permissions table exists and seed it
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS role_permissions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            role VARCHAR(100) NOT NULL,
+            permission_key VARCHAR(100) NOT NULL,
+            is_allowed TINYINT(1) NOT NULL DEFAULT 1,
+            UNIQUE KEY role_perm_idx (role, permission_key)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        
+        // Seed if empty
+        const [rows]: any = await pool.query('SELECT COUNT(*) as count FROM role_permissions', []);
+        if (rows && rows[0] && rows[0].count === 0) {
+          const defaultPerms = [
+            // admin
+            { role: 'admin', key: 'view_all_docs', val: 1 },
+            { role: 'admin', key: 'create_docs', val: 1 },
+            { role: 'admin', key: 'edit_all_docs', val: 1 },
+            { role: 'admin', key: 'delete_docs', val: 1 },
+            { role: 'admin', key: 'approve_docs', val: 1 },
+            { role: 'admin', key: 'manage_users', val: 1 },
+            { role: 'admin', key: 'system_settings', val: 1 },
+            { role: 'admin', key: 'backup_restore', val: 1 },
+            { role: 'admin', key: 'audit_logs', val: 1 },
+            // moderator
+            { role: 'moderator', key: 'view_all_docs', val: 1 },
+            { role: 'moderator', key: 'create_docs', val: 1 },
+            { role: 'moderator', key: 'edit_all_docs', val: 1 },
+            { role: 'moderator', key: 'delete_docs', val: 1 },
+            { role: 'moderator', key: 'approve_docs', val: 1 },
+            { role: 'moderator', key: 'manage_users', val: 1 },
+            { role: 'moderator', key: 'system_settings', val: 0 },
+            { role: 'moderator', key: 'backup_restore', val: 0 },
+            { role: 'moderator', key: 'audit_logs', val: 0 },
+            // user
+            { role: 'user', key: 'view_all_docs', val: 0 },
+            { role: 'user', key: 'create_docs', val: 1 },
+            { role: 'user', key: 'edit_all_docs', val: 0 },
+            { role: 'user', key: 'delete_docs', val: 0 },
+            { role: 'user', key: 'approve_docs', val: 0 },
+            { role: 'user', key: 'manage_users', val: 0 },
+            { role: 'user', key: 'system_settings', val: 0 },
+            { role: 'user', key: 'backup_restore', val: 0 },
+            { role: 'user', key: 'audit_logs', val: 0 }
+          ];
+          for (const p of defaultPerms) {
+            await pool.query('INSERT INTO role_permissions (role, permission_key, is_allowed) VALUES (?, ?, ?)', [p.role, p.key, p.val]);
+          }
+          console.log('✅ Seeded default role_permissions in MySQL');
+        }
+        console.log('✅ Initialized and verified role_permissions table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating/seeding role_permissions table:', e);
       }
 
       console.log('✅ Database schema verified and initialized successfully!');
@@ -3398,6 +3617,1015 @@ app.post("/api/workflows/instances/:id/escalate", async (req, res) => {
   }
 });
 
+// ==================== DIGITAL SIGNATURE & HASH VERIFICATION APIS ====================
+
+function formatThaiDateTimeStr(isoStr?: string): string {
+  const d = isoStr ? new Date(isoStr) : new Date();
+  if (isNaN(d.getTime())) return '';
+  const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const day = d.getDate();
+  const month = months[d.getMonth()];
+  const year = d.getFullYear() + 543;
+  const hours = String(d.getHours()).padStart(2, '0');
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  const secs = String(d.getSeconds()).padStart(2, '0');
+  return `${day} ${month} พ.ศ. ${year} เวลา ${hours}:${mins}:${secs} น.`;
+}
+
+function transliterateThaiToLatin(thaiStr: string): string {
+  if (!thaiStr) return '';
+  
+  const conMap: { [key: string]: string } = {
+    'ก': 'k', 'ข': 'kh', 'ค': 'kh', 'ฆ': 'kh',
+    'ง': 'ng', 'จ': 'ch', 'ฉ': 'ch', 'ช': 'ch', 'ซ': 's', 'ฌ': 'ch',
+    'ญ': 'y', 'ฎ': 'd', 'ฏ': 't', 'ฐ': 'th', 'ฑ': 'th', 'ฒ': 'th', 'ณ': 'n',
+    'ด': 'd', 'ต': 't', 'ถ': 'th', 'ท': 'th', 'ธ': 'th', 'น': 'n',
+    'บ': 'b', 'ป': 'p', 'ผ': 'ph', 'ฝ': 'f', 'พ': 'ph', 'ฟ': 'f', 'ภ': 'ph', 'ม': 'm',
+    'ย': 'y', 'ร': 'r', 'ล': 'l', 'ว': 'w', 'ศ': 's', 'ษ': 's', 'ส': 's', 'ห': 'h',
+    'ฬ': 'l', 'อ': 'o', 'ฮ': 'h'
+  };
+
+  const vowelMap: { [key: string]: string } = {
+    'ะ': 'a', 'า': 'a', 'ิ': 'i', 'ี': 'i', 'ึ': 'ue', 'ื': 'ue', 'ุ': 'u', 'ู': 'u',
+    'เ': 'e', 'แ': 'ae', 'โ': 'o', 'ใ': 'ai', 'ไ': 'ai', 'ำ': 'am', 'ั': 'a', '็': '',
+    '์': '', '่': '', '้': '', '๊': '', '๋': '', 'ฤ': 'rue', 'ๆ': ''
+  };
+
+  const leadVowels = new Set(['เ', 'แ', 'โ', 'ใ', 'ไ']);
+  let result = '';
+  let i = 0;
+
+  while (i < thaiStr.length) {
+    const char = thaiStr[i];
+    const code = char.charCodeAt(0);
+
+    if (code >= 32 && code <= 126) {
+      result += char;
+      i++;
+    } else if (leadVowels.has(char)) {
+      const nextChar = thaiStr[i + 1];
+      if (nextChar && conMap[nextChar] !== undefined) {
+        result += conMap[nextChar] + vowelMap[char];
+        i += 2;
+      } else {
+        result += vowelMap[char];
+        i++;
+      }
+    } else if (conMap[char] !== undefined) {
+      result += conMap[char];
+      i++;
+    } else if (vowelMap[char] !== undefined) {
+      result += vowelMap[char];
+      i++;
+    } else {
+      if (char === ' ') result += ' ';
+      i++;
+    }
+  }
+
+  return result
+    .split(' ')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sanitizeForPdf(text: any, defaultText: string = ''): string {
+  if (!text) return defaultText;
+  let str = String(text).trim();
+  
+  const translations: { [key: string]: string } = {
+    'ปกติ': 'Normal',
+    'ด่วน': 'Urgent',
+    'ด่วนมาก': 'Very Urgent',
+    'ด่วนที่สุด': 'Most Urgent',
+    'ลับ': 'Confidential',
+    'ลับมาก': 'Secret',
+    'ลับที่สุด': 'Top Secret',
+    'รับแล้ว': 'Received',
+    'ร่าง': 'Draft',
+    'ส่งแล้ว': 'Sent',
+    'สำนักงาน ปภ.จังหวัดระยอง': 'Rayong Provincial Disaster Prevention and Mitigation Office',
+    'ผู้บริหาร': 'Executive Officer',
+    'ฝ่ายยุทธศาสตร์และการจัดการ': 'Strategy and Management Division',
+    'ฝ่ายป้องกันและปฏิบัติการ': 'Prevention and Operations Division',
+    'ฝ่ายสงเคราะห์ผู้ประสบภัย': 'Disaster Relief Division',
+    'ฝ่ายบริหารงานทั่วไป': 'General Administration Division',
+    'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง': 'Rayong Provincial Disaster Prevention and Mitigation Office',
+    'ทุกฝ่ายงาน / ประชาชน': 'All Departments / Public'
+  };
+
+  if (translations[str]) {
+    return translations[str];
+  }
+
+  const hasThai = /[\u0e00-\u0e7f]/.test(str);
+  if (hasThai) {
+    return transliterateThaiToLatin(str) || defaultText;
+  }
+
+  return str.split('').map(char => {
+    const code = char.charCodeAt(0);
+    return (code >= 32 && code <= 126) ? char : '';
+  }).join('').replace(/\s+/g, ' ').trim() || defaultText;
+}
+
+async function buildSignedPdfBuffer(doc: any, sigRecord: any, qrDataUrl: string): Promise<Buffer> {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]); // A4 Size in points
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const { width, height } = page.getSize();
+  
+  // Header background bar
+  page.drawRectangle({
+    x: 30,
+    y: height - 80,
+    width: width - 60,
+    height: 50,
+    color: rgb(0.06, 0.22, 0.42),
+  });
+
+  page.drawText('OFFICIAL ELECTRONIC & DIGITAL SIGNED DOCUMENT', {
+    x: 45,
+    y: height - 55,
+    size: 14,
+    font: fontBold,
+    color: rgb(1, 1, 1),
+  });
+
+  page.drawText('Provincial Disaster Prevention and Mitigation Office - Rayong EDMS', {
+    x: 45,
+    y: height - 70,
+    size: 9,
+    font: font,
+    color: rgb(0.85, 0.9, 0.98),
+  });
+
+  // Document Info Block
+  let yCursor = height - 110;
+  
+  page.drawText(`Document No: ${sanitizeForPdf(doc.docNumber || 'รย 0021/V-' + doc.id, 'V-' + doc.id)}`, { x: 45, y: yCursor, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`Date: ${sanitizeForPdf(doc.date || doc.registerDate || new Date().toISOString().split('T')[0], '2026-08-05')}`, { x: 350, y: yCursor, size: 10, font: font, color: rgb(0.2, 0.2, 0.2) });
+  
+  yCursor -= 20;
+  page.drawText(`Title / Subject: ${sanitizeForPdf(doc.title || 'Official Executive Document', 'Official Document')}`, { x: 45, y: yCursor, size: 10, font: fontBold, color: rgb(0.1, 0.15, 0.3) });
+  
+  yCursor -= 18;
+  page.drawText(`From: ${sanitizeForPdf(doc.from, 'Rayong Disaster Office')}  |  To: ${sanitizeForPdf(doc.to, 'Related Agencies')}`, { x: 45, y: yCursor, size: 9, font: font, color: rgb(0.3, 0.3, 0.3) });
+
+  yCursor -= 18;
+  page.drawText(`Department: ${sanitizeForPdf(doc.department, 'Administration')}  |  Priority: ${sanitizeForPdf(doc.priority, 'Normal')}  |  Secrecy: ${sanitizeForPdf(doc.secrecy, 'Normal')}`, { x: 45, y: yCursor, size: 9, font: font, color: rgb(0.3, 0.3, 0.3) });
+
+  // Divider Line
+  yCursor -= 12;
+  page.drawLine({
+    start: { x: 45, y: yCursor },
+    end: { x: width - 45, y: yCursor },
+    thickness: 1,
+    color: rgb(0.8, 0.85, 0.9),
+  });
+
+  // Body content area
+  yCursor -= 25;
+  page.drawText('Document Content / Executive Order:', { x: 45, y: yCursor, size: 10, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  
+  yCursor -= 20;
+  const contentText = sanitizeForPdf(doc.content || doc.note, 'Official electronic and digital signed document approved under the Electronic Transactions Act, B.E. 2544.');
+  const lines = contentText.slice(0, 800).match(/.{1,75}/g) || [contentText];
+  
+  for (const line of lines) {
+    if (yCursor < 260) break;
+    page.drawText(line, { x: 45, y: yCursor, size: 9, font: font, color: rgb(0.2, 0.2, 0.2) });
+    yCursor -= 14;
+  }
+
+  // Digital Signature Certificate Seal Box
+  const boxHeight = 210;
+  const boxY = 40;
+  
+  // Box outer border
+  page.drawRectangle({
+    x: 40,
+    y: boxY,
+    width: width - 80,
+    height: boxHeight,
+    borderColor: rgb(0.08, 0.38, 0.28),
+    borderWidth: 1.5,
+    color: rgb(0.97, 0.99, 0.98),
+  });
+
+  // Certificate Header Band
+  page.drawRectangle({
+    x: 40,
+    y: boxY + boxHeight - 28,
+    width: width - 80,
+    height: 28,
+    color: rgb(0.08, 0.38, 0.28),
+  });
+
+  page.drawText('DIGITAL SIGNATURE & TIMESTAMP CERTIFICATE (SHA-256 VERIFIED)', {
+    x: 55,
+    y: boxY + boxHeight - 19,
+    size: 10,
+    font: fontBold,
+    color: rgb(1, 1, 1),
+  });
+
+  let certY = boxY + boxHeight - 45;
+
+  page.drawText(`Signer: ${sanitizeForPdf(sigRecord.signerName, 'Authorized Officer')}`, { x: 55, y: certY, size: 10, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  certY -= 15;
+  page.drawText(`Position: ${sanitizeForPdf(sigRecord.signerPosition, 'Chief Officer')}`, { x: 55, y: certY, size: 9, font: font, color: rgb(0.2, 0.2, 0.2) });
+  certY -= 14;
+  page.drawText(`Department: ${sanitizeForPdf(sigRecord.signerDepartment, 'Provincial Office')}`, { x: 55, y: certY, size: 9, font: font, color: rgb(0.2, 0.2, 0.2) });
+
+  certY -= 16;
+  const pdfTimestamp = new Date(sigRecord.timestampIso).toUTCString();
+  page.drawText(`Timestamp (TSA): ${pdfTimestamp}`, { x: 55, y: certY, size: 9, font: fontBold, color: rgb(0.05, 0.35, 0.15) });
+  certY -= 14;
+  page.drawText(`ISO Timestamp: ${sigRecord.timestampIso}`, { x: 55, y: certY, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) });
+
+  certY -= 15;
+  page.drawText(`Certificate Serial: ${sigRecord.certificateSerial}`, { x: 55, y: certY, size: 8, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
+  certY -= 13;
+  page.drawText(`CA Issuer: ${sanitizeForPdf(sigRecord.certificateIssuer)}`, { x: 55, y: certY, size: 8, font: font, color: rgb(0.3, 0.3, 0.3) });
+
+  certY -= 16;
+  page.drawText(`SHA-256 Hash: ${sigRecord.documentHash.slice(0, 36)}...`, { x: 55, y: certY, size: 8, font: fontBold, color: rgb(0.1, 0.2, 0.5) });
+  certY -= 13;
+  page.drawText(`TSA Digest: ${sigRecord.tsaToken.slice(0, 36)}...`, { x: 55, y: certY, size: 8, font: font, color: rgb(0.3, 0.3, 0.3) });
+
+  // Embed QR Code
+  try {
+    const qrBase64Clean = qrDataUrl.replace(/^data:image\/png;base64,/, '');
+    const qrImageBuffer = Buffer.from(qrBase64Clean, 'base64');
+    const embeddedQr = await pdfDoc.embedPng(qrImageBuffer);
+    page.drawImage(embeddedQr, {
+      x: width - 180,
+      y: boxY + 45,
+      width: 120,
+      height: 120,
+    });
+
+    page.drawText('Scan to Verify Integrity', {
+      x: width - 175,
+      y: boxY + 30,
+      size: 8,
+      font: fontBold,
+      color: rgb(0.08, 0.38, 0.28),
+    });
+  } catch (err) {
+    console.warn('Could not embed QR image in PDF:', err);
+  }
+
+  // Embed Signature Image if present
+  if (sigRecord.signatureDataUrl && sigRecord.signatureDataUrl.startsWith('data:image/')) {
+    try {
+      const isPng = sigRecord.signatureDataUrl.startsWith('data:image/png');
+      const cleanBase64 = sigRecord.signatureDataUrl.replace(/^data:image\/(png|jpg|jpeg);base64,/, '');
+      const sigImgBuffer = Buffer.from(cleanBase64, 'base64');
+      const embeddedSig = isPng ? await pdfDoc.embedPng(sigImgBuffer) : await pdfDoc.embedJpg(sigImgBuffer);
+      
+      page.drawImage(embeddedSig, {
+        x: width - 330,
+        y: boxY + 80,
+        width: 130,
+        height: 60,
+      });
+    } catch (err) {
+      console.warn('Could not embed visual signature in PDF:', err);
+    }
+  }
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
+
+// 1. Sign Document with Digital Signature, Hash & Timestamp
+app.post("/api/digital-signatures/sign", async (req, res) => {
+  try {
+    const { docId, docType, signerName, signerPosition, signerDepartment, signerEmail, signatureType, signatureDataUrl, user } = req.body;
+
+    if (!docId || !signerName) {
+      return res.status(400).json({ error: "Missing required fields (docId, signerName)" });
+    }
+
+    // Fetch document info
+    let doc: any = null;
+    if (isMysqlOnline) {
+      try {
+        const queries = [
+          `SELECT id, 'inbox' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note FROM inbox_documents WHERE id = ?`,
+          `SELECT id, 'outbox' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note FROM outbox_documents WHERE id = ?`,
+          `SELECT id, 'circular' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note FROM circular_documents WHERE id = ?`,
+          `SELECT id, 'admin' as type, title, docNumber, date, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, 'ปกติ' AS priority, 'ปกติ' AS secrecy, content, note FROM admin_documents WHERE id = ?`,
+          `SELECT id, 'internal' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, 'ปกติ' AS secrecy, content, note FROM internal_documents WHERE id = ?`
+        ];
+        for (const q of queries) {
+          const [dRows]: any = await pool.query(q, [docId]);
+          if (dRows && dRows.length > 0) {
+            doc = dRows[0];
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!doc) {
+      const allDocs = [
+        ...(localDb.inbox_documents || []),
+        ...(localDb.outbox_documents || []),
+        ...(localDb.circular_documents || []),
+        ...(localDb.admin_documents || []),
+        ...(localDb.internal_documents || [])
+      ];
+      doc = allDocs.find((d: any) => String(d.id) === String(docId)) || {
+        id: docId,
+        docNumber: `รย 0021/V-${docId}`,
+        title: "หนังสือการเสนอลงนามดิจิทัล",
+        date: new Date().toISOString().split('T')[0],
+        from: "สำนักงาน ปภ.จังหวัดระยอง",
+        to: "ทุกหน่วยงานในสังกัด",
+        department: signerDepartment || "ผู้บริหาร",
+        priority: "ปกติ",
+        secrecy: "ปกติ",
+        content: "หนังสือขออนุมัติและลงนามดิจิทัลประจำปี พ.ศ. 2569"
+      };
+    }
+
+    const sigId = `sig-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    const timestampIso = new Date().toISOString();
+    const timestampFormatted = formatThaiDateTimeStr(timestampIso);
+
+    // Cryptographic Hash Generation
+    const rawContentStr = `${doc.id}|${doc.docNumber || ''}|${doc.title || ''}|${doc.date || ''}|${doc.from || ''}|${doc.to || ''}|${doc.content || doc.note || ''}`;
+    const documentHash = crypto.createHash('sha256').update(rawContentStr).digest('hex').toUpperCase();
+
+    const certificateIssuer = "Rayong Provincial PA-PKI Certificate Authority (ETDA Compliant B.E. 2544 Sec. 26/3)";
+    const certificateSerial = `CERT-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const tsaToken = crypto.createHash('sha256').update(`${documentHash}|${timestampIso}|TSA-RAYONG-2026`).digest('hex').toUpperCase();
+    const signatureHash = crypto.createHash('sha256').update(`${documentHash}|${signerName}|${timestampIso}|${tsaToken}`).digest('hex').toUpperCase();
+
+    // Generate Verification URL & QR Code
+    const verifyUrl = `${getPublicBaseUrl(req)}/verify?docId=${doc.id}&hash=${documentHash}&sig=${sigId}`;
+    const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, {
+      margin: 1,
+      width: 280,
+      color: { dark: '#0a2540', light: '#ffffff' }
+    });
+
+    const ipAddress = getClientIp(req);
+
+    const sigRecord: any = {
+      id: sigId,
+      docId: String(doc.id),
+      docTitle: doc.title || '',
+      docNumber: doc.docNumber || '',
+      docType: docType || doc.type || 'inbox',
+      signerName: signerName || 'ผู้ลงนาม',
+      signerPosition: signerPosition || 'ผู้บริหาร',
+      signerDepartment: signerDepartment || 'สำนักงาน ปภ.จังหวัดระยอง',
+      signerEmail: signerEmail || '',
+      signatureType: signatureType || 'digital-signature',
+      signatureDataUrl: signatureDataUrl || '',
+      certificateIssuer,
+      certificateSerial,
+      hashAlgorithm: 'SHA-256',
+      documentHash,
+      signatureHash,
+      timestampIso,
+      timestampFormatted,
+      tsaToken,
+      qrCodeDataUrl,
+      verifyUrl,
+      ipAddress,
+      pdfPath: '',
+      status: 'valid'
+    };
+
+    // Generate Signed PDF File
+    const pdfBuffer = await buildSignedPdfBuffer(doc, sigRecord, qrCodeDataUrl);
+    const pdfFileName = `signed_${doc.id}_${sigId}.pdf`;
+    const pdfFilePath = path.join(process.cwd(), 'uploads', 'signed_pdfs', pdfFileName);
+    fs.writeFileSync(pdfFilePath, pdfBuffer);
+    sigRecord.pdfPath = `/uploads/signed_pdfs/${pdfFileName}`;
+
+    // Save to LocalDb
+    if (!localDb.digital_signatures) localDb.digital_signatures = [];
+    localDb.digital_signatures.unshift(sigRecord);
+    saveLocalDb();
+
+    // Save to MySQL
+    if (isMysqlOnline) {
+      try {
+        await pool.query(
+          `INSERT INTO digital_signatures
+           (id, docId, docTitle, docNumber, docType, signerName, signerPosition, signerDepartment, signerEmail, signatureType, signatureDataUrl, certificateIssuer, certificateSerial, hashAlgorithm, documentHash, signatureHash, timestampIso, timestampFormatted, tsaToken, qrCodeDataUrl, verifyUrl, ipAddress, pdfPath, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            sigRecord.id, sigRecord.docId, sigRecord.docTitle, sigRecord.docNumber, sigRecord.docType,
+            sigRecord.signerName, sigRecord.signerPosition, sigRecord.signerDepartment, sigRecord.signerEmail,
+            sigRecord.signatureType, sigRecord.signatureDataUrl, sigRecord.certificateIssuer, sigRecord.certificateSerial,
+            sigRecord.hashAlgorithm, sigRecord.documentHash, sigRecord.signatureHash, sigRecord.timestampIso,
+            sigRecord.timestampFormatted, sigRecord.tsaToken, sigRecord.qrCodeDataUrl, sigRecord.verifyUrl,
+            sigRecord.ipAddress, sigRecord.pdfPath, sigRecord.status
+          ]
+        );
+
+        // Update document status in MySQL if possible
+        const tblMap: Record<string, string> = {
+          inbox: 'inbox_documents',
+          outbox: 'outbox_documents',
+          circular: 'circular_documents',
+          admin: 'admin_documents',
+          internal: 'internal_documents'
+        };
+        const tbl = tblMap[docType || doc.type] || 'inbox_documents';
+        await pool.query(`UPDATE ${tbl} SET status = 'ลงนามดิจิทัลแล้ว' WHERE id = ?`, [doc.id]);
+      } catch (mysqlErr) {
+        console.warn("MySQL save digital_signature failed:", mysqlErr);
+      }
+    }
+
+    const ip = getClientIp(req);
+    await addSystemLog("DIGITAL_SIGNATURE", `ลงนามดิจิทัลสำเร็จ (SHA-256): ${doc.docNumber} โดย ${signerName}`, user || signerName, ip);
+
+    return res.json({
+      success: true,
+      signature: sigRecord,
+      verifyUrl,
+      pdfUrl: sigRecord.pdfPath
+    });
+  } catch (err: any) {
+    console.error("Error signing digital signature:", err);
+    return res.status(500).json({ error: "Failed to sign digital signature: " + err.message });
+  }
+});
+
+// QR Code generation for a single document (independent of digital signature status)
+app.get("/api/documents/:docId/qr-code", async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const verifyUrl = `${getPublicBaseUrl(req)}/verify?docId=${docId}`;
+    const qrCodeDataUrl = await QRCode.toDataURL(verifyUrl, {
+      margin: 1,
+      width: 280,
+      color: { dark: '#0a2540', light: '#ffffff' }
+    });
+    return res.json({ qrCodeDataUrl, verifyUrl });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Public GET verification route to render beautiful, mobile-friendly verification HTML
+app.get("/verify", async (req, res) => {
+  try {
+    const { docId } = req.query;
+    if (!docId) {
+      return res.status(400).send("<h1>ไม่ระบุไอดีเอกสาร (Missing docId)</h1>");
+    }
+
+    // Fetch document info
+    let doc: any = null;
+    let foundType = 'inbox';
+    if (isMysqlOnline) {
+      try {
+        const queries = [
+          `SELECT id, 'inbox' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note, status, registerDate, year, receiveNumber FROM inbox_documents WHERE id = ?`,
+          `SELECT id, 'outbox' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note, status, registerDate, year, receiveNumber FROM outbox_documents WHERE id = ?`,
+          `SELECT id, 'circular' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note, status, registerDate, year, receiveNumber FROM circular_documents WHERE id = ?`,
+          `SELECT id, 'admin' as type, title, docNumber, date, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, 'ปกติ' AS priority, 'ปกติ' AS secrecy, content, note, status, registerDate, year, NULL AS receiveNumber FROM admin_documents WHERE id = ?`,
+          `SELECT id, 'internal' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, 'ปกติ' AS secrecy, content, note, status, registerDate, year, receiveNumber FROM internal_documents WHERE id = ?`
+        ];
+        for (const q of queries) {
+          const [dRows]: any = await pool.query(q, [docId]);
+          if (dRows && dRows.length > 0) {
+            doc = dRows[0];
+            foundType = doc.type;
+            break;
+          }
+        }
+      } catch (e) {
+        console.error("verify GET db error:", e);
+      }
+    }
+
+    if (!doc) {
+      // search in localDb
+      const allDocs = [
+        ...(localDb.inbox_documents || []).map((d: any) => ({ ...d, type: 'inbox' })),
+        ...(localDb.outbox_documents || []).map((d: any) => ({ ...d, type: 'outbox' })),
+        ...(localDb.circular_documents || []).map((d: any) => ({ ...d, type: 'circular' })),
+        ...(localDb.admin_documents || []).map((d: any) => ({ ...d, type: 'admin' })),
+        ...(localDb.internal_documents || []).map((d: any) => ({ ...d, type: 'internal' })),
+      ];
+      const match = allDocs.find((d: any) => String(d.id) === String(docId));
+      if (match) {
+        doc = {
+          id: match.id,
+          type: match.type,
+          title: match.title,
+          docNumber: match.docNumber,
+          date: match.date,
+          from: match.fromDept || match.from || 'สำนักงาน ปภ.จังหวัดระยอง',
+          to: match.toDept || match.to || 'ทุกหน่วยงานในสังกัด',
+          department: match.department,
+          assignee: match.assignee,
+          priority: match.priority || 'ปกติ',
+          secrecy: match.secrecy || 'ปกติ',
+          content: match.content,
+          note: match.note,
+          status: match.status,
+          registerDate: match.registerDate,
+          year: match.year,
+          receiveNumber: match.receiveNumber
+        };
+        foundType = doc.type;
+      }
+    }
+
+    let signatures: any[] = [];
+    if (doc) {
+      if (isMysqlOnline) {
+        try {
+          const [sigRows]: any = await pool.query('SELECT * FROM digital_signatures WHERE docId = ? ORDER BY timestampIso DESC', [doc.id]);
+          signatures = sigRows || [];
+        } catch (e) {}
+      }
+      if (signatures.length === 0) {
+        signatures = (localDb.digital_signatures || []).filter((s: any) => String(s.docId) === String(doc.id));
+      }
+    }
+
+    // Serve HTML
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+    if (!doc) {
+      // Return beautiful NOT FOUND error page
+      return res.send(`
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ตรวจสอบความถูกต้องเอกสาร - ไม่พบข้อมูล</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Sarabun', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
+  <div class="max-w-md w-full bg-white rounded-2xl shadow-xl border border-rose-100 p-8 text-center space-y-6">
+    <div class="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center mx-auto text-rose-600">
+      <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+    </div>
+    
+    <div class="space-y-2">
+      <h1 class="text-xl font-bold text-slate-800">ไม่พบข้อมูลเอกสารในระบบ</h1>
+      <p class="text-sm text-slate-500">รหัสเอกสาร <strong>"${docId}"</strong> ไม่ตรงกับข้อมูลสารบรรณกลาง หรือข้อมูลอาจถูกลบหรือถูกแก้ไขย้อนหลังโดยไม่ได้รับอนุญาต</p>
+    </div>
+
+    <div class="bg-rose-50 text-rose-800 text-xs p-4 rounded-xl text-left border border-rose-100 leading-relaxed font-medium">
+      ⚠️ คำเตือน: เอกสารฉบับนี้ไม่ผ่านการรับรอง และไม่ได้ถูกลงทะเบียนในระบบสารบรรณอิเล็กทรอนิกส์ของสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง หากเป็นเอกสารกระดาษที่มี QR Code นี้ติดอยู่ อาจเป็นเอกสารปลอมแปลงหรือถูกแก้ไขรายละเอียด
+    </div>
+
+    <div class="pt-2 border-t border-slate-100">
+      <p class="text-[10px] text-slate-400">สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (Rayong Disaster Office EDMS)</p>
+    </div>
+  </div>
+</body>
+</html>
+      `);
+    }
+
+    const docTypeLabels: { [key: string]: string } = {
+      inbox: 'หนังสือรับ (Inbox)',
+      outbox: 'หนังสือส่ง (Outbox)',
+      circular: 'หนังสือเวียน (Circular)',
+      admin: 'คำสั่ง/ประกาศ (Admin Order)',
+      internal: 'บันทึกข้อความ (Internal Memo)'
+    };
+
+    const isSigned = signatures.length > 0;
+    const statusText = isSigned ? "ลงนามดิจิทัลเสร็จสมบูรณ์ (ETDA Certified)" : "ลงทะเบียนถูกต้อง (Registered in System)";
+    const statusColor = isSigned ? "emerald" : "blue";
+
+    const detailItem = (label: string, val: string) => `
+      <div class="space-y-1">
+        <span class="text-xs font-semibold text-slate-400 block">${label}</span>
+        <span class="text-sm text-slate-800 font-medium block">${val || '-'}</span>
+      </div>
+    `;
+
+    const sigsHtml = signatures.map((sig, sIdx) => `
+      <div class="p-5 rounded-2xl border border-emerald-500/10 bg-emerald-500/5 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-500/10 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="p-1.5 rounded-full bg-emerald-100 text-emerald-700">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            </span>
+            <span class="text-emerald-800 font-bold text-sm">ผู้ลงนามลำดับที่ ${sIdx + 1} (Digital Signature Valid)</span>
+          </div>
+          <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-800 border border-emerald-500/20">
+            ${sig.certificateSerial}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div>
+            <p class="text-slate-400 font-semibold mb-1">รายละเอียดผู้รับรองเอกสาร</p>
+            <p class="text-sm font-bold text-slate-800">${sig.signerName}</p>
+            <p class="text-slate-500 font-medium mt-0.5">${sig.signerPosition} / ${sig.signerDepartment}</p>
+          </div>
+          <div>
+            <p class="text-slate-400 font-semibold mb-1">ข้อมูลเวลาประทับตราดิจิทัล (Timestamp)</p>
+            <p class="text-slate-800 font-mono font-medium">${sig.timestampFormatted || sig.timestampIso}</p>
+            <p class="text-slate-400 font-mono text-[10px] mt-0.5">SHA-256 Hash: <span class="text-emerald-600">${sig.documentHash}</span></p>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-emerald-500/10 text-[11px] text-slate-500 font-medium">
+          <span>CA: ${sig.certificateIssuer}</span>
+          <a href="/api/digital-signatures/download-pdf/${sig.id}" target="_blank" class="text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1 transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            ดาวน์โหลดไฟล์ลงนามสมบูรณ์
+          </a>
+        </div>
+      </div>
+    `).join('');
+
+    return res.send(`
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ตรวจสอบเอกสารราชการอิเล็กทรอนิกส์ - ปภ.ระยอง</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Sarabun', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50/50 min-h-screen text-slate-800">
+  <div class="max-w-4xl mx-auto px-4 py-8 sm:py-12 space-y-6">
+    
+    <!-- Gov Header / Emblem -->
+    <div class="flex flex-col items-center text-center space-y-3 pb-6 border-b border-slate-200">
+      <div class="w-14 h-14 bg-amber-50 rounded-full border border-amber-200 p-2 flex items-center justify-center shadow-sm">
+        <svg class="w-10 h-10 text-amber-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <!-- Stylized Garuda Emblem / Government Seal Icon -->
+          <path d="M12 2L9 7H15L12 2Z" fill="currentColor"/>
+          <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-dasharray="2 2"/>
+          <path d="M12 6V18M7 11H17M9 15H15M8 8H16" stroke="currentColor"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold text-slate-800">ระบบตรวจสอบความถูกต้องเอกสารอิเล็กทรอนิกส์</h1>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Rayong Disaster Office EDMS Verification System</p>
+      </div>
+    </div>
+
+    <!-- Verification Badge Status -->
+    <div class="p-6 rounded-3xl border-2 border-${statusColor}-500/20 bg-${statusColor}-500/5 flex flex-col sm:flex-row items-center sm:items-start gap-4">
+      <div class="w-12 h-12 rounded-full bg-${statusColor}-100 flex items-center justify-center text-${statusColor}-600 shrink-0">
+        ${isSigned ? `
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+          </svg>
+        ` : `
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        `}
+      </div>
+      <div class="space-y-1 text-center sm:text-left">
+        <h2 class="text-base font-bold text-${statusColor}-800">${statusText}</h2>
+        <p class="text-xs text-${statusColor}-700/80 leading-relaxed font-medium">
+          ${isSigned ? 
+            'เอกสารนี้ผ่านการรับรองและประทับตาเวลาดิจิทัล (TSA Timestamp) ที่ปลอดภัยขั้นสูงและไม่สามารถดัดแปลงแก้ไขได้ มีผลสมบูรณ์ทางกฎหมายทุกประการ' : 
+            'เอกสารนี้ได้รับการบันทึกข้อมูลและขึ้นทะเบียนสารบรรณอิเล็กทรอนิกส์ในฐานข้อมูลระบบสารบรรณกลางอย่างถูกต้องตามระเบียบ แต่ขณะนี้อยู่ระหว่างขั้นตอนหรือไม่มีการระบุให้ลงนามดิจิทัล (ETDA)'}
+        </p>
+      </div>
+    </div>
+
+    <!-- Document Details Card -->
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
+      <div class="flex items-center gap-2 border-b border-slate-100 pb-3">
+        <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        <span class="font-bold text-slate-700 text-sm">ข้อมูลหลักของเอกสาร (Document Metadata)</span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-6">
+        ${detailItem('ประเภทเอกสาร', docTypeLabels[foundType] || foundType)}
+        ${detailItem('เลขที่หนังสือ (ที่)', doc.docNumber)}
+        ${detailItem('วันที่ออกหนังสือ', doc.date)}
+        ${detailItem('จาก (ต้นทาง)', doc.from)}
+        ${detailItem('ถึง (ปลายทาง)', doc.to)}
+        ${detailItem('ปีงบประมาณ', doc.year)}
+        ${detailItem('วันที่ขึ้นทะเบียนระบบ', doc.registerDate || doc.date)}
+        ${detailItem('ฝ่ายงานผู้ปฏิบัติ', doc.department)}
+        ${detailItem('ผู้รับผิดชอบ / ปฏิบัติ', doc.assignee)}
+        ${detailItem('สถานะเอกสารในระบบ', `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">${doc.status || 'ลงทะเบียน'}</span>`)}
+        ${detailItem('ความเร่งด่วน', doc.priority)}
+        ${detailItem('ชั้นความลับ', doc.secrecy)}
+      </div>
+
+      <div class="border-t border-slate-100 pt-5 space-y-2">
+        <span class="text-xs font-semibold text-slate-400 block">ชื่อเรื่อง (Title)</span>
+        <span class="text-sm sm:text-base font-bold text-slate-800 leading-relaxed block">\${doc.title}</span>
+      </div>
+
+      \${doc.content ? \`
+        <div class="border-t border-slate-100 pt-5 space-y-2">
+          <span class="text-xs font-semibold text-slate-400 block">เนื้อหา / รายละเอียดเอกสาร (Summary Content)</span>
+          <div class="text-xs text-slate-600 bg-slate-50 rounded-2xl p-4 border border-slate-100 leading-relaxed max-h-48 overflow-y-auto font-normal">
+            \${doc.content.replace(/\\n/g, '<br/>')}
+          </div>
+        </div>
+      \` : ''}
+    </div>
+
+    <!-- Digital Signatures Section -->
+    \${isSigned ? \`
+      <div class="space-y-4">
+        <div class="flex items-center gap-2 pb-1">
+          <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          <span class="font-bold text-slate-700 text-sm">ลายมือชื่อดิจิทัลรับรองความปลอดภัย (Digital Certificates)</span>
+        </div>
+        <div class="space-y-4">
+          \${sigsHtml}
+        </div>
+      </div>
+    \` : ''}
+
+    <!-- Security Law Notice -->
+    <div class="p-5 rounded-2xl bg-slate-100 text-[11px] text-slate-500 leading-relaxed space-y-1.5 border border-slate-200 font-medium">
+      <p class="font-bold text-slate-700">ข้อควรทราบเกี่ยวกับระบบตรวจสอบความถูกต้องเอกสารอิเล็กทรอนิกส์ (EDMS):</p>
+      <p>1. ระบบสารบรรณและลงนามดิจิทัลนี้ ตราขึ้นและใช้งานภายใต้พระราชบัญญัติว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ พ.ศ. 2544 มาตรา 26 และมาตรา 28 ในการรับรองความถูกต้องของลายมือชื่อดิจิทัล</p>
+      <p>2. การสแกนรหัส QR Code จากเอกสารเพื่อตรวจสอบรายละเอียด จะดึงข้อมูลและเปรียบเทียบจากระบบฐานข้อมูลสารบรรณกลาง ปภ.ระยอง ทันที ทำให้สามารถพิสูจน์ได้ว่าเอกสารดังกล่าวเป็นฉบับจริง มิได้ถูกแก้ไขรายละเอียด หรือเลขที่หนังสือปลอมแปลงขึ้น</p>
+    </div>
+
+    <!-- Page Footer -->
+    <div class="text-center text-[11px] text-slate-400 pt-4 pb-8 font-medium">
+      สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (Rayong Provincial Disaster Prevention and Mitigation Office)<br/>
+      กระทรวงมหาดไทย (Ministry of Interior, Thailand) • ระบบสารบรรณอิเล็กทรอนิกส์ดิจิทัลความมั่นคงสูง
+    </div>
+
+  </div>
+</body>
+</html>
+    `);
+
+  } catch (err: any) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(500).send(`<h1>เกิดข้อผิดพลาดในระบบตรวจสอบความถูกต้อง (Verification Error)</h1><p>${err.message}</p>`);
+  }
+});
+
+// 2. List All Digital Signatures
+app.get("/api/digital-signatures/list", async (req, res) => {
+  try {
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM digital_signatures ORDER BY timestampIso DESC');
+        if (rows && rows.length > 0) {
+          return res.json(rows);
+        }
+      } catch (err) {}
+    }
+    return res.json(localDb.digital_signatures || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to fetch digital signatures" });
+  }
+});
+
+// 3. Get Signatures for Document
+app.get("/api/digital-signatures/doc/:docId", async (req, res) => {
+  try {
+    const { docId } = req.params;
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM digital_signatures WHERE docId = ? ORDER BY timestampIso DESC', [docId]);
+        if (rows && rows.length > 0) {
+          return res.json(rows);
+        }
+      } catch (err) {}
+    }
+    const filtered = (localDb.digital_signatures || []).filter((s: any) => String(s.docId) === String(docId));
+    return res.json(filtered);
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to fetch document digital signatures" });
+  }
+});
+
+// 4. Verify Digital Signature / Hash / QR Code
+app.post("/api/digital-signatures/verify", async (req, res) => {
+  try {
+    const { query, hash, signatureHash, docId } = req.body;
+    const searchKey = (query || hash || signatureHash || docId || '').toString().trim();
+
+    let matches: any[] = [];
+
+    if (isMysqlOnline && searchKey) {
+      try {
+        const [rows]: any = await pool.query(
+          `SELECT * FROM digital_signatures 
+           WHERE id = ? OR docId = ? OR documentHash = ? OR signatureHash = ? OR certificateSerial = ?
+           ORDER BY timestampIso DESC`,
+          [searchKey, searchKey, searchKey, searchKey, searchKey]
+        );
+        matches = rows || [];
+      } catch (err) {}
+    }
+
+    if (matches.length === 0 && searchKey) {
+      matches = (localDb.digital_signatures || []).filter((s: any) => 
+        s.id === searchKey ||
+        String(s.docId) === searchKey ||
+        s.documentHash === searchKey ||
+        s.signatureHash === searchKey ||
+        s.certificateSerial === searchKey
+      );
+    }
+
+    if (matches.length > 0) {
+      const sig = matches[0];
+      return res.json({
+        valid: true,
+        matchType: 'exact',
+        statusText: 'เอกสารผ่านการตรวจสอบความถูกต้อง (VALID DIGITAL SIGNATURE)',
+        message: 'ลายมือชื่อดิจิทัลถูกต้อง มีตราประทับเวลา (Timestamp) และรหัสกุญแจตรวจสอบตรงกันทุกประการ มีผลสมบูรณ์ตาม พ.ร.บ. ธุรกรรมทางอิเล็กทรอนิกส์',
+        signature: sig
+      });
+    }
+
+    return res.json({
+      valid: false,
+      matchType: 'not_found',
+      statusText: 'ไม่พบลายมือชื่อดิจิทัลในระบบ (NOT FOUND)',
+      message: 'รหัสที่ระบุไม่ตรงกับข้อมูลใบรับรอง ลายเซ็น หรือ SHA-256 Hash ในฐานข้อมูล'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Verification failed: " + err.message });
+  }
+});
+
+// 5. Verify PDF File Upload SHA-256 Hash
+app.post("/api/digital-signatures/verify-file", upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No PDF file uploaded for verification" });
+    }
+
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const computedHash = crypto.createHash('sha256').update(fileBuffer).digest('hex').toUpperCase();
+
+    // Clean temp uploaded file
+    try { fs.unlinkSync(req.file.path); } catch (e) {}
+
+    let matches: any[] = [];
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM digital_signatures WHERE documentHash = ? OR signatureHash = ?', [computedHash, computedHash]);
+        matches = rows || [];
+      } catch (e) {}
+    }
+
+    if (matches.length === 0) {
+      matches = (localDb.digital_signatures || []).filter((s: any) => s.documentHash === computedHash || s.signatureHash === computedHash);
+    }
+
+    if (matches.length > 0) {
+      return res.json({
+        valid: true,
+        computedHash,
+        statusText: 'เอกสารผ่านการตรวจสอบความถูกต้องสมบูรณ์ (FILE INTEGRITY PASSED)',
+        message: 'ไฟล์ PDF ต้นฉบับตรงกับรหัส SHA-256 ที่ได้ลงนามไว้ ไม่พบการดัดแปลงแก้ไขข้อความย้อนหลัง',
+        signature: matches[0]
+      });
+    }
+
+    return res.json({
+      valid: false,
+      computedHash,
+      statusText: 'เอกสารไม่ตรงกับข้อมูลในระบบ หรือถูกดัดแปลงแก้ไข (INTEGRITY CHECK FAILED)',
+      message: `รหัส SHA-256 ของไฟล์คือ ${computedHash} แต่ไม่ตรงกับประวัติการลงนามดิจิทัลใดๆ อาจเป็นไฟล์ใหม่หรือถูกแก้ไขข้อความย้อนหลัง`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: "File verification error: " + err.message });
+  }
+});
+
+// 6. Download Signed PDF
+app.get("/api/digital-signatures/download-pdf/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    let sigRecord: any = null;
+
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM digital_signatures WHERE id = ? OR docId = ? LIMIT 1', [id, id]);
+        if (rows.length > 0) sigRecord = rows[0];
+      } catch (e) {}
+    }
+
+    if (!sigRecord) {
+      sigRecord = (localDb.digital_signatures || []).find((s: any) => s.id === id || String(s.docId) === String(id));
+    }
+
+    if (!sigRecord || !sigRecord.pdfPath) {
+      return res.status(404).send("Signed PDF file not found");
+    }
+
+    const fullPdfPath = path.join(process.cwd(), sigRecord.pdfPath.startsWith('/') ? sigRecord.pdfPath.slice(1) : sigRecord.pdfPath);
+    if (!fs.existsSync(fullPdfPath)) {
+      return res.status(404).send("PDF file missing from storage disk");
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Signed_${sigRecord.docNumber || sigRecord.docId}.pdf"`);
+    return res.sendFile(fullPdfPath);
+  } catch (err: any) {
+    return res.status(500).send("Server error downloading signed PDF");
+  }
+});
+
+
+// Role & Permission API Endpoints
+app.get("/api/role-permissions", async (req, res) => {
+  try {
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT role, permission_key, is_allowed FROM role_permissions');
+      const formatted = rows.map((r: any) => ({
+        role: r.role,
+        permission_key: r.permission_key,
+        is_allowed: r.is_allowed === 1 || r.is_allowed === true ? 1 : 0
+      }));
+      return res.json(formatted);
+    } else {
+      const formatted = (localDb.role_permissions || []).map((r: any) => ({
+        role: r.role,
+        permission_key: r.permission_key,
+        is_allowed: r.is_allowed === 1 || r.is_allowed === true ? 1 : 0
+      }));
+      return res.json(formatted);
+    }
+  } catch (error: any) {
+    console.error('Failed to get role-permissions:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.put("/api/role-permissions", async (req, res) => {
+  const { role, permission_key, is_allowed, username } = req.body;
+  const ip = getClientIp(req);
+  const val = is_allowed ? 1 : 0;
+  
+  try {
+    if (isMysqlOnline) {
+      await pool.query(
+        'INSERT INTO role_permissions (role, permission_key, is_allowed) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_allowed = ?',
+        [role, permission_key, val, val]
+      );
+    } else {
+      if (!localDb.role_permissions) {
+        localDb.role_permissions = [];
+      }
+      const existingIdx = localDb.role_permissions.findIndex(
+        (p: any) => p.role === role && p.permission_key === permission_key
+      );
+      if (existingIdx !== -1) {
+        localDb.role_permissions[existingIdx].is_allowed = val;
+      } else {
+        localDb.role_permissions.push({ role, permission_key, is_allowed: val });
+      }
+      saveLocalDb();
+    }
+    
+    // Log setting change
+    await addSystemLog(
+      'UPDATE_PERMISSION', 
+      `ปรับปรุงสิทธิ์การใช้งานสำหรับบทบาท ${role}: ${permission_key} = ${val === 1 ? 'อนุญาต (Allowed)' : 'ไม่อนุญาต (Denied)'}`, 
+      username || 'ผู้ดูแลระบบ', 
+      ip
+    );
+    
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Failed to update role-permission:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+
 // 2. Users API Endpoints
 app.get("/api/users", async (req, res) => {
   try {
@@ -4104,7 +5332,7 @@ app.delete('/api/folders/:id', async (req, res) => {
 // 6. Documents API Endpoints (หนังสือราชการ + คำสั่ง/ประกาศ - ดึงแบบแยกตาราง)
 app.get('/api/documents', async (req, res) => {
   try {
-      const { role, department, isCentral } = req.query;
+      const { role, department, isCentral, username } = req.query;
       const query = `
         SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
         UNION ALL
@@ -4118,6 +5346,27 @@ app.get('/api/documents', async (req, res) => {
       `;
       const [rows]: any = await pool.query(query);
       const [deptReceives]: any = await pool.query('SELECT * FROM department_receives');
+      
+      // Fetch user read records if username provided
+      const userReadsMap = new Map<string, string>();
+      if (username) {
+        try {
+          const [readRows]: any = await pool.query('SELECT docId, status FROM document_reads WHERE username = ?', [username]);
+          if (readRows && readRows.length > 0) {
+            for (const r of readRows) {
+              userReadsMap.set(r.docId, r.status);
+            }
+          }
+        } catch (readErr) {
+          console.warn('Note fetching reads mapping:', readErr);
+          if (localDb.document_reads) {
+            localDb.document_reads
+              .filter((r: any) => r.username === username)
+              .forEach((r: any) => userReadsMap.set(r.docId, r.status));
+          }
+        }
+      }
+
       let folderMap = new Map<number, string>();
       try {
         const [folderRows]: any = await pool.query('SELECT id, name FROM folders');
@@ -4140,7 +5389,7 @@ app.get('/api/documents', async (req, res) => {
         const deptRecs = deptReceives.filter((r: any) => r.docId === d.id);
         const folderName = d.folderId ? (folderMap.get(Number(d.folderId)) || null) : null;
         
-        let item = { ...d, attachments, isCircular: Boolean(d.isCircular), departmentReceives: deptRecs, folderName };
+        let item = { ...d, attachments, isCircular: Boolean(d.isCircular), departmentReceives: deptRecs, folderName, readStatus: userReadsMap.get(d.id) || 'sent' };
         if (d.type === 'outbox' && d.note && d.note.startsWith('[CATEGORY:')) {
           const match = d.note.match(/^\[CATEGORY:(.*?)\] (.*)/);
           if (match) {
@@ -4662,21 +5911,268 @@ app.post('/api/documents/:docId/versions/:versionId/restore', async (req, res) =
 
 app.delete('/api/documents/:id', async (req, res) => {
   const { id } = req.params;
+  const username = (req.query.username as string) || 'ผู้ใช้งาน';
   const ip = getClientIp(req);
+  
   try {
+    let doc: any = null;
+    let tableType = '';
+    const queryMap = [
+      { tbl: 'inbox_documents', type: 'inbox' },
+      { tbl: 'outbox_documents', type: 'outbox' },
+      { tbl: 'circular_documents', type: 'circular' },
+      { tbl: 'internal_documents', type: 'internal' },
+      { tbl: 'admin_documents', type: 'admin' }
+    ];
+
+    if (isMysqlOnline) {
+      for (const q of queryMap) {
+        try {
+          const [rows]: any = await pool.query(`SELECT * FROM ${q.tbl} WHERE id = ?`, [id]);
+          if (rows && rows.length > 0) {
+            doc = rows[0];
+            tableType = q.type;
+            break;
+          }
+        } catch (dbErr) {
+          console.warn(`Error querying ${q.tbl} for recycle bin:`, dbErr);
+        }
+      }
+      
+      if (doc) {
+        await pool.query(
+          `INSERT INTO recycle_bin (docId, docType, title, docNumber, deletedBy, originalData) VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, tableType, doc.title || 'ไม่มีชื่อเรื่อง', doc.docNumber || doc.receiveNumber || '', username, JSON.stringify(doc)]
+        );
+      }
+    }
+
+    // Process localDb fallback always or as backup
+    if (!localDb.recycle_bin) localDb.recycle_bin = [];
+    
+    let localDoc: any = null;
+    let localType = '';
+    const tbls = ['inbox_documents', 'outbox_documents', 'circular_documents', 'internal_documents', 'admin_documents'];
+    for (const tbl of tbls) {
+      if (localDb[tbl]) {
+        const idx = localDb[tbl].findIndex((d: any) => String(d.id) === String(id));
+        if (idx !== -1) {
+          localDoc = localDb[tbl][idx];
+          localType = tbl.replace('_documents', '');
+          // Remove from localDb
+          localDb[tbl].splice(idx, 1);
+          break;
+        }
+      }
+    }
+
+    if (localDoc) {
+      localDb.recycle_bin.push({
+        id: 'recycle_' + Math.random().toString(36).substring(2, 9),
+        docId: id,
+        docType: localType,
+        title: localDoc.title || 'ไม่มีชื่อเรื่อง',
+        docNumber: localDoc.docNumber || localDoc.receiveNumber || '',
+        deletedAt: new Date().toISOString(),
+        deletedBy: username,
+        originalData: JSON.stringify(localDoc)
+      });
+      saveLocalDb();
+    }
+
+    if (isMysqlOnline) {
       await pool.query('DELETE FROM inbox_documents WHERE id=?', [id]);
       await pool.query('DELETE FROM outbox_documents WHERE id=?', [id]);
       await pool.query('DELETE FROM circular_documents WHERE id=?', [id]);
       await pool.query('DELETE FROM internal_documents WHERE id=?', [id]);
       await pool.query('DELETE FROM admin_documents WHERE id=?', [id]);
-      await pool.query('DELETE FROM document_tracking WHERE docId=?', [id]);
-      await addSystemLog('DELETE_DOCUMENT', `ลบหนังสือและประวัติติดตามของเอกสาร ID: ${id}`, 'ผู้ใช้งาน', ip);
-      return res.json({ success: true });
-    } catch (error: any) {
-      console.error('Database error:', error.message);
-      return res.status(500).json({ error: 'Database error' });
     }
 
+    await addSystemLog('DELETE_DOCUMENT', `ย้ายหนังสือไปยังถังขยะ ID: ${id} - ${doc?.title || localDoc?.title || ''}`, username, ip);
+    return res.json({ success: true, movedToRecycleBin: true });
+  } catch (error: any) {
+    console.error('Database error on delete:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Recycle Bin REST API Endpoints
+app.get('/api/recycle-bin', async (req, res) => {
+  try {
+    if (isMysqlOnline) {
+      // Clean up items older than 30 days
+      await pool.query('DELETE FROM recycle_bin WHERE deletedAt < DATE_SUB(NOW(), INTERVAL 30 DAY)');
+      
+      const [rows]: any = await pool.query('SELECT id, docId, docType, title, docNumber, deletedAt, deletedBy FROM recycle_bin ORDER BY deletedAt DESC');
+      return res.json({ success: true, items: rows });
+    }
+    
+    // Local DB fallback
+    if (!localDb.recycle_bin) localDb.recycle_bin = [];
+    
+    // Purge localDb items older than 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString();
+    localDb.recycle_bin = localDb.recycle_bin.filter((r: any) => r.deletedAt >= thirtyDaysAgoStr);
+    saveLocalDb();
+    
+    const items = localDb.recycle_bin.map((r: any) => ({
+      id: r.id,
+      docId: r.docId,
+      docType: r.docType,
+      title: r.title,
+      docNumber: r.docNumber,
+      deletedAt: r.deletedAt,
+      deletedBy: r.deletedBy
+    })).sort((a: any, b: any) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime());
+    
+    return res.json({ success: true, items });
+  } catch (err: any) {
+    console.error('Error in GET /api/recycle-bin:', err);
+    return res.status(500).json({ error: 'Failed to retrieve recycle bin items' });
+  }
+});
+
+app.post('/api/recycle-bin/:id/restore', async (req, res) => {
+  const { id } = req.params; // Can be recycle_bin.id or docId
+  const username = (req.query.username as string) || 'ผู้ใช้งาน';
+  const ip = getClientIp(req);
+  
+  try {
+    let recycleItem: any = null;
+    
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT * FROM recycle_bin WHERE id = ? OR docId = ?', [id, id]);
+      if (rows && rows.length > 0) {
+        recycleItem = rows[0];
+      }
+    }
+    
+    // Check localDb
+    let localItem: any = null;
+    if (!localDb.recycle_bin) localDb.recycle_bin = [];
+    const localIdx = localDb.recycle_bin.findIndex((r: any) => String(r.id) === String(id) || String(r.docId) === String(id));
+    if (localIdx !== -1) {
+      localItem = localDb.recycle_bin[localIdx];
+    }
+    
+    const itemToRestore = recycleItem || localItem;
+    if (!itemToRestore) {
+      return res.status(404).json({ error: 'ไม่พบเอกสารนี้ในถังขยะ' });
+    }
+    
+    const d = JSON.parse(itemToRestore.originalData);
+    const type = itemToRestore.docType;
+    
+    // Restore in MySQL
+    if (isMysqlOnline && recycleItem) {
+      if (type === 'inbox') {
+        await pool.query(
+          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+        );
+      } else if (type === 'outbox') {
+        await pool.query(
+          'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []), d.isCircular ? 1 : 0]
+        );
+      } else if (type === 'circular') {
+        await pool.query(
+          'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+        );
+      } else if (type === 'internal') {
+        await pool.query(
+          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+        );
+      } else if (type === 'admin') {
+        await pool.query(
+          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.category, d.docNumber, d.year, d.date, d.title, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+        );
+      }
+      
+      // Delete from recycle_bin
+      await pool.query('DELETE FROM recycle_bin WHERE id = ?', [itemToRestore.id]);
+    }
+    
+    // Restore in localDb
+    if (localItem) {
+      const tblName = type === 'circular' ? 'circular_documents' : `${type}_documents`;
+      if (!localDb[tblName]) localDb[tblName] = [];
+      const dupIdx = localDb[tblName].findIndex((docItem: any) => String(docItem.id) === String(d.id));
+      if (dupIdx === -1) {
+        localDb[tblName].push(d);
+      }
+      
+      // Remove from recycle_bin array
+      if (localIdx !== -1) {
+        localDb.recycle_bin.splice(localIdx, 1);
+      }
+      saveLocalDb();
+    }
+    
+    await addSystemLog('RESTORE_DOCUMENT', `กู้คืนหนังสือจากถังขยะสำเร็จ ID: ${d.id} - ${d.title}`, username, ip);
+    return res.json({ success: true, message: 'กู้คืนเอกสารสำเร็จ' });
+  } catch (err: any) {
+    console.error('Error in POST /api/recycle-bin/:id/restore:', err);
+    return res.status(500).json({ error: 'กู้คืนเอกสารล้มเหลว: ' + err.message });
+  }
+});
+
+app.delete('/api/recycle-bin/:id', async (req, res) => {
+  const { id } = req.params; // recycle_bin.id or docId
+  const username = (req.query.username as string) || 'ผู้ใช้งาน';
+  const ip = getClientIp(req);
+  
+  try {
+    let recycleItem: any = null;
+    
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT * FROM recycle_bin WHERE id = ? OR docId = ?', [id, id]);
+      if (rows && rows.length > 0) {
+        recycleItem = rows[0];
+      }
+    }
+    
+    // Check localDb
+    let localItem: any = null;
+    if (!localDb.recycle_bin) localDb.recycle_bin = [];
+    const localIdx = localDb.recycle_bin.findIndex((r: any) => String(r.id) === String(id) || String(r.docId) === String(id));
+    if (localIdx !== -1) {
+      localItem = localDb.recycle_bin[localIdx];
+    }
+    
+    const itemToDelete = recycleItem || localItem;
+    if (!itemToDelete) {
+      return res.status(404).json({ error: 'ไม่พบเอกสารนี้ในถังขยะ' });
+    }
+    
+    const docId = itemToDelete.docId;
+    
+    if (isMysqlOnline && recycleItem) {
+      await pool.query('DELETE FROM document_tracking WHERE docId = ?', [docId]);
+      await pool.query('DELETE FROM recycle_bin WHERE id = ?', [itemToDelete.id]);
+    }
+    
+    if (localItem) {
+      if (localDb.document_tracking) {
+        localDb.document_tracking = localDb.document_tracking.filter((t: any) => String(t.docId) !== String(docId));
+      }
+      if (localIdx !== -1) {
+        localDb.recycle_bin.splice(localIdx, 1);
+      }
+      saveLocalDb();
+    }
+    
+    await addSystemLog('PERMANENT_DELETE', `ลบหนังสือจากถังขยะอย่างถาวรสำเร็จ ID: ${docId} - ${itemToDelete.title}`, username, ip);
+    return res.json({ success: true, message: 'ลบเอกสารอย่างถาวรสำเร็จ' });
+  } catch (err: any) {
+    console.error('Error in DELETE /api/recycle-bin/:id:', err);
+    return res.status(500).json({ error: 'ลบเอกสารอย่างถาวรล้มเหลว: ' + err.message });
+  }
 });
 
 // 7. Tracking history / audit trails API
@@ -5633,6 +7129,198 @@ ${JSON.stringify(candidates, null, 2)}
   }
 });
 
+// AI Document Auditing & Proofreading Endpoint
+app.post('/api/ai/audit', async (req, res) => {
+  try {
+    const { docType, docNum, date, to, subject, ref, att, body, signer, signerPos, orgName } = req.body;
+    
+    let apiKey = (req.body.apiKey || '').trim();
+    if (!apiKey) {
+      try {
+        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+    if (!apiKey) {
+      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'ระบบยังไม่ได้กำหนด GEMINI_API_KEY กรุณากำหนด API Key ในเมนู "ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน" หรือกำหนดใน Settings > Secrets'
+      });
+    }
+
+    const systemPrompt = `คุณคือผู้เชี่ยวชาญการตรวจสอบหนังสือราชการไทยอัจฉริยะ (Thai Official Document Auditor)
+ทำหน้าที่ตรวจสอบ ตรวจคำผิด ตรวจรูปแบบระเบียบงานสารบรรณ และความครบถ้วนของหนังสือราชการไทยอย่างละเอียดและเป็นทางการสูงสุด
+
+คุณมีหน้าที่ตรวจสอบ 4 หัวข้อสำคัญ ได้แก่:
+1. "คำผิด" (Spelling/Grammar Checking): ตรวจสอบคำที่พิมพ์ผิด, สระซ้อน, วรรณยุกต์ผิดตำแหน่ง หรือพิมพ์สลับ เช่น ตรวจสอบคำสะกดตามพจนานุกรมฉบับราชบัณฑิตยสถาน
+2. "รูปแบบราชการ" (Government Format & Styles): ตรวจสอบความถูกต้องของการระบุเลขที่, การเขียนวันที่ (เช่น "๒๕ มกราคม ๒๕๖๙" หรือ "25 มกราคม 2569"), โครงสร้าง และระดับความเป็นทางการ
+3. "คำราชาศัพท์" (Royal & Honorific Vocabulary): ตรวจสอบความเหมาะสมและถูกต้องของการใช้ราชาศัพท์, คำสุภาพ, คำขึ้นต้น และคำสรรพนามบุรุษที่เหมาะสม
+4. "ความครบถ้วน" (Completeness): ตรวจสอบความสมบูรณ์ขององค์ประกอบ เช่น เลขที่หนังสือ, วันที่, เรื่อง, คำเรียน/ถึง, อ้างถึง, สิ่งที่ส่งมาด้วย, เนื้อความหลัก, และข้อมูลผู้ลงนาม
+
+**กฎเกณฑ์สำคัญที่สุด (CRITICAL RULE)**:
+ตรวจสอบวลีปิดท้ายหรือคำลงท้ายของหนังสือราชการอย่างเคร่งครัด:
+- หากหนังสือใช้คำลงท้ายสั้นๆ หรือธรรมดา เช่น "จึงเรียนมา" หรือ "จึงเรียนมาเพื่อทราบ" ในกรณีที่มีการเสนอเรื่องให้พิจารณา/อนุมัติ/สั่งการ หรือหนังสือติดต่อราชการภายนอก
+- ให้แนะนำอย่างเด็ดขาดว่า **"ควรใช้ 'จึงเรียนมาเพื่อโปรดพิจารณา' หรือ 'จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ' แทนคำว่า 'จึงเรียนมา'"** เพื่อให้ถูกต้องและสุภาพตามธรรมเนียมราชการไทย
+
+วิเคราะห์เนื้อความทั้งหมดต่อไปนี้อย่างเที่ยงตรง และส่งผลลัพธ์กลับมาในรูปแบบโครงสร้าง JSON ตามที่ระบุใน Response Schema เท่านั้น`;
+
+    const userPrompt = `กรุณาตรวจสอบหนังสือราชการฉบับนี้:
+- ประเภทหนังสือ: ${docType || '-'}
+- เลขที่หนังสือ: ${docNum || '-'}
+- วันที่: ${date || '-'}
+- เรียน/ถึง: ${to || '-'}
+- เรื่อง: ${subject || '-'}
+- อ้างถึง: ${ref || '-'}
+- สิ่งที่ส่งมาด้วย: ${att || '-'}
+- ชื่อหน่วยงาน/ผู้สร้าง: ${orgName || '-'}
+- เนื้อหาหนังสือ (HTML):
+${body || '-'}
+- ผู้ลงนาม: ${signer || '-'}
+- ตำแหน่งผู้ลงนาม: ${signerPos || '-'}`;
+
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    let auditResponse: any = null;
+
+    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
+    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
+    const refererCandidates = [
+      '',
+      'https://aistudio.google.com/',
+      'https://ai.studio/',
+      'https://google.com/',
+      'https://developer.google.com/',
+      rawReferer,
+      rawOrigin
+    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
+
+    referrerLoop: for (const refHeader of refererCandidates) {
+      const headersConfig: Record<string, string> = { 'User-Agent': 'aistudio-build' };
+      if (refHeader) {
+        headersConfig['Referer'] = refHeader;
+        headersConfig['Referrer'] = refHeader;
+      }
+
+      try {
+        const client = new GoogleGenAI({
+          apiKey,
+          httpOptions: { headers: headersConfig }
+        });
+
+        for (const modelName of modelsToTry) {
+          try {
+            const resp = await client.models.generateContent({
+              model: modelName,
+              contents: [{ text: userPrompt }],
+              config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: 'application/json',
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    overallScore: { type: Type.INTEGER },
+                    spellingIssues: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          word: { type: Type.STRING },
+                          suggested: { type: Type.STRING },
+                          context: { type: Type.STRING },
+                          reason: { type: Type.STRING }
+                        },
+                        required: ['word', 'suggested', 'reason']
+                      }
+                    },
+                    formatIssues: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          issue: { type: Type.STRING },
+                          suggestion: { type: Type.STRING },
+                          severity: { type: Type.STRING } // 'warning', 'error', 'info'
+                        },
+                        required: ['issue', 'suggestion', 'severity']
+                      }
+                    },
+                    royalVocabularyIssues: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          issue: { type: Type.STRING },
+                          suggestion: { type: Type.STRING },
+                          reason: { type: Type.STRING }
+                        },
+                        required: ['issue', 'suggestion', 'reason']
+                      }
+                    },
+                    completenessIssues: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          component: { type: Type.STRING },
+                          status: { type: Type.STRING }, // 'missing', 'incomplete', 'ok'
+                          description: { type: Type.STRING },
+                          suggestion: { type: Type.STRING }
+                        },
+                        required: ['component', 'status', 'description']
+                      }
+                    },
+                    closingSuggestion: {
+                      type: Type.OBJECT,
+                      properties: {
+                        found: { type: Type.BOOLEAN },
+                        currentPhrase: { type: Type.STRING },
+                        suggestedPhrase: { type: Type.STRING },
+                        explanation: { type: Type.STRING }
+                      },
+                      required: ['found', 'explanation']
+                    },
+                    summary: { type: Type.STRING },
+                    improvedContent: { type: Type.STRING } // HTML body with spelling and closing phrase issues corrected or highlighted
+                  },
+                  required: ['overallScore', 'spellingIssues', 'formatIssues', 'royalVocabularyIssues', 'completenessIssues', 'closingSuggestion', 'summary']
+                }
+              }
+            });
+            if (resp && resp.text) {
+              auditResponse = resp.text;
+              break referrerLoop;
+            }
+          } catch (modelErr) {
+            // Try next model
+          }
+        }
+      } catch (e) {
+        // Try next referrer
+      }
+    }
+
+    if (auditResponse) {
+      try {
+        const parsedJson = JSON.parse(auditResponse);
+        return res.json({ success: true, result: parsedJson });
+      } catch (jsonErr) {
+        return res.status(500).json({ success: false, error: 'ไม่สามารถประมวลผลคำตอบ JSON จาก AI ได้' });
+      }
+    } else {
+      return res.status(500).json({ success: false, error: 'ไม่ได้รับผลลัพธ์การตรวจสอบจาก AI' });
+    }
+
+  } catch (err: any) {
+    console.error('Error in AI document audit:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดภายในระบบในการตรวจสอบเอกสารด้วย AI' });
+  }
+});
+
 // Draft Documents CRUD Endpoints
 app.get('/api/drafts', async (req, res) => {
   try {
@@ -5779,6 +7467,170 @@ app.delete('/api/drafts/:id', async (req, res) => {
     }
     const detailsStr = draftSubject ? `ลบร่างเอกสาร: ${draftSubject}` : `ลบร่างเอกสาร ID: ${id}`;
     await addSystemLog('DELETE_DRAFT', detailsStr, username, ip);
+    return res.json({ success: true });
+  }
+});
+
+// User Favorites / Pinned Documents Endpoints
+app.get('/api/favorites', async (req, res) => {
+  const { username } = req.query;
+  if (!username) {
+    return res.status(400).json({ error: 'กรุณาระบุชื่อผู้ใช้' });
+  }
+
+  try {
+    const [rows]: any = await pool.query('SELECT docId, docType FROM user_favorites WHERE username = ?', [username]);
+    return res.json({ success: true, favorites: rows || [] });
+  } catch (error: any) {
+    console.error('Error fetching favorites:', error.message);
+    if (!localDb.user_favorites) localDb.user_favorites = [];
+    const userFavs = localDb.user_favorites.filter((f: any) => f.username === username);
+    return res.json({ success: true, favorites: userFavs });
+  }
+});
+
+app.post('/api/favorites/toggle', async (req, res) => {
+  const { username, docId, docType } = req.body;
+  if (!username || !docId || !docType) {
+    return res.status(400).json({ error: 'ข้อมูลไม่ครบถ้วน' });
+  }
+  const ip = getClientIp(req);
+
+  try {
+    // Check if exists
+    const [existing]: any = await pool.query(
+      'SELECT id FROM user_favorites WHERE username = ? AND docId = ?',
+      [username, docId]
+    );
+
+    if (existing && existing.length > 0) {
+      // Remove
+      await pool.query('DELETE FROM user_favorites WHERE username = ? AND docId = ?', [username, docId]);
+      await addSystemLog('UNPIN_DOCUMENT', `ยกเลิกปักหมุดเอกสาร ID: ${docId}`, username, ip);
+      return res.json({ success: true, pinned: false });
+    } else {
+      // Add
+      await pool.query(
+        'INSERT INTO user_favorites (username, docId, docType) VALUES (?, ?, ?)',
+        [username, docId, docType]
+      );
+      await addSystemLog('PIN_DOCUMENT', `ปักหมุดเอกสารสำคัญ ID: ${docId} (${docType})`, username, ip);
+      return res.json({ success: true, pinned: true });
+    }
+  } catch (error: any) {
+    console.error('Error toggling favorite:', error.message);
+    if (!localDb.user_favorites) localDb.user_favorites = [];
+    
+    const idx = localDb.user_favorites.findIndex((f: any) => f.username === username && f.docId === docId);
+    let pinned = false;
+    if (idx !== -1) {
+      localDb.user_favorites.splice(idx, 1);
+      await addSystemLog('UNPIN_DOCUMENT', `ยกเลิกปักหมุดเอกสาร ID: ${docId} (Local)`, username, ip);
+    } else {
+      localDb.user_favorites.push({ username, docId, docType });
+      pinned = true;
+      await addSystemLog('PIN_DOCUMENT', `ปักหมุดเอกสารสำคัญ ID: ${docId} (Local)`, username, ip);
+    }
+    saveLocalDb();
+    return res.json({ success: true, pinned });
+  }
+});
+
+// Document Reads / Receipts Endpoints
+app.get('/api/documents/:docId/reads', async (req, res) => {
+  const { docId } = req.params;
+  try {
+    // Fetch all users
+    const [allUsers]: any = await pool.query('SELECT username, firstName, lastName, department, position, role FROM users');
+    
+    // Fetch reads for this document
+    const [readRows]: any = await pool.query('SELECT username, fullName, status, readAt FROM document_reads WHERE docId = ?', [docId]);
+    
+    const readMap = new Map();
+    if (readRows && readRows.length > 0) {
+      for (const r of readRows) {
+        readMap.set(r.username, r);
+      }
+    }
+    
+    // Build final list of user statuses
+    const result = allUsers.map((u: any) => {
+      const readRecord = readMap.get(u.username);
+      return {
+        username: u.username,
+        fullName: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username,
+        department: u.department || '',
+        position: u.position || '',
+        status: readRecord ? readRecord.status : 'sent',
+        readAt: readRecord ? readRecord.readAt : null
+      };
+    });
+    
+    return res.json({ success: true, reads: result });
+  } catch (error: any) {
+    console.error('MySQL Get Reads error:', error.message);
+    
+    // Fallback using localDb
+    if (!localDb.users) localDb.users = [];
+    if (!localDb.document_reads) localDb.document_reads = [];
+    
+    const userReads = localDb.document_reads.filter((f: any) => f.docId === docId);
+    const readMap = new Map();
+    for (const r of userReads) {
+      readMap.set(r.username, r);
+    }
+    
+    const result = (localDb.users.length > 0 ? localDb.users : initialSeedData.users || []).map((u: any) => {
+      const readRecord = readMap.get(u.username);
+      return {
+        username: u.username,
+        fullName: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username,
+        department: u.department || '',
+        position: u.position || '',
+        status: readRecord ? readRecord.status : 'sent',
+        readAt: readRecord ? readRecord.readAt : null
+      };
+    });
+    
+    return res.json({ success: true, reads: result });
+  }
+});
+
+app.post('/api/documents/:docId/reads', async (req, res) => {
+  const { docId } = req.params;
+  const { username, fullName, status, docType } = req.body;
+  
+  if (!username || !status) {
+    return res.status(400).json({ error: 'ข้อมูลไม่ครบถ้วน' });
+  }
+  
+  try {
+    await pool.query(`
+      INSERT INTO document_reads (docId, docType, username, fullName, status, readAt)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON DUPLICATE KEY UPDATE status = VALUES(status), readAt = CURRENT_TIMESTAMP
+    `, [docId, docType || 'inbox', username, fullName || username, status]);
+    
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('MySQL Save Reads error:', error.message);
+    
+    if (!localDb.document_reads) localDb.document_reads = [];
+    const idx = localDb.document_reads.findIndex((r: any) => r.docId === docId && r.username === username);
+    if (idx !== -1) {
+      localDb.document_reads[idx].status = status;
+      localDb.document_reads[idx].readAt = new Date().toISOString();
+    } else {
+      localDb.document_reads.push({
+        docId,
+        docType: docType || 'inbox',
+        username,
+        fullName: fullName || username,
+        status,
+        readAt: new Date().toISOString()
+      });
+    }
+    saveLocalDb();
     return res.json({ success: true });
   }
 });

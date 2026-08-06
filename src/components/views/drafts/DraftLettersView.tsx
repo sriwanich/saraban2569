@@ -3,7 +3,8 @@ import {
   FileText, Mail, Award, CheckSquare, MessageSquare, FileCode, 
   BookOpen, Shield, Volume2, Newspaper, Send, Bold, Italic, 
   Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, 
-  Plus, Eye, Save, Printer, FileDown, Trash2, History, Crown, Paperclip, X
+  Plus, Eye, Save, Printer, FileDown, Trash2, History, Crown, Paperclip, X,
+  Sparkles, AlertCircle, CheckCircle2, ChevronRight
 } from 'lucide-react';
 import { LETTER_TYPES, buildOfficialDoc, downloadAsDoc, thDate, DraftItem } from './draftData';
 
@@ -44,6 +45,53 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
 
   // Preview Modal
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+
+  // AI Audit State
+  const [isAuditing, setIsAuditing] = useState<boolean>(false);
+  const [auditResult, setAuditResult] = useState<any>(null);
+  const [showAuditPanel, setShowAuditPanel] = useState<boolean>(false);
+  const [activeAuditTab, setActiveAuditTab] = useState<'all' | 'spelling' | 'format' | 'royal' | 'completeness'>('all');
+
+  const handleAuditDocument = async () => {
+    setIsAuditing(true);
+    setAuditResult(null);
+    setShowAuditPanel(true);
+
+    const payload = {
+      docType,
+      docNum,
+      date,
+      to,
+      subject,
+      ref: refText,
+      att: attText,
+      body: editorRef.current?.innerHTML || '',
+      signer,
+      signerPos,
+      orgName: user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'
+    };
+
+    try {
+      const res = await fetch('/api/ai/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success && data.result) {
+        setAuditResult(data.result);
+      } else {
+        alert(data.error || 'เกิดข้อผิดพลาดในการตรวจสอบด้วย AI');
+        setShowAuditPanel(false);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ AI ตรวจสอบได้');
+      setShowAuditPanel(false);
+    } finally {
+      setIsAuditing(false);
+    }
+  };
 
   useEffect(() => {
     fetch('/api/drafts')
@@ -347,8 +395,9 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
 
           {/* Form Card */}
           {showForm && (
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 shadow-sm space-y-6 animate-fade-in">
-              <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-4">
+            <div className={`grid grid-cols-1 ${showAuditPanel ? 'lg:grid-cols-3' : ''} gap-6 animate-fade-in items-start`}>
+              <div className={`${showAuditPanel ? 'lg:col-span-2' : ''} bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 shadow-sm space-y-6`}>
+                <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-4">
                 <h3 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
                   <FileText className="w-5 h-5 text-[var(--primary-color)]" /> {selectedTitle}
                 </h3>
@@ -659,6 +708,13 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                   >
                     <Save className="w-4 h-4" /> บันทึกหนังสือร่าง
                   </button>
+                  <button
+                    onClick={handleAuditDocument}
+                    disabled={isAuditing}
+                    className="px-4 py-2 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-500 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    <Sparkles className="w-4 h-4 animate-pulse" /> ตรวจสอบด้วย AI
+                  </button>
                 </div>
 
                 <div className="flex gap-2">
@@ -682,6 +738,205 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                   </button>
                 </div>
               </div>
+            </div>
+
+              {/* AI Audit Panel Column */}
+              {showAuditPanel && (
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-5 shadow-sm space-y-4 lg:sticky lg:top-4 max-h-[85vh] overflow-y-auto custom-scrollbar flex flex-col">
+                  <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-indigo-500 animate-pulse" />
+                      <h3 className="font-bold text-sm text-[var(--text-primary)] font-noto-serif-thai">
+                        ผลการตรวจหนังสือด้วย AI
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setShowAuditPanel(false)}
+                      className="p-1 hover:bg-[var(--border-lighter)] rounded-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {isAuditing && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center space-y-3">
+                      <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                      <p className="text-xs text-[var(--text-secondary)]">กำลังวิเคราะห์ความครบถ้วน รูปแบบ ไวยากรณ์ คำราชาศัพท์ และคำปิดท้ายด้วย AI...</p>
+                    </div>
+                  )}
+
+                  {!isAuditing && auditResult && (
+                    <div className="space-y-4">
+                      {/* Score section */}
+                      <div className="p-4 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl flex items-center justify-between">
+                        <div>
+                          <div className="text-xs text-[var(--text-secondary)] font-semibold mb-1">คะแนนความสมบูรณ์</div>
+                          <div className="text-2xl font-black font-mono text-indigo-500">{auditResult.overallScore} <span className="text-xs text-[var(--text-muted)] font-normal">/ 100</span></div>
+                        </div>
+                        <div className="w-2/3 bg-[var(--border-lighter)] rounded-full h-2.5 overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              auditResult.overallScore >= 80 ? 'bg-emerald-500' : auditResult.overallScore >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${auditResult.overallScore}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Summary */}
+                      <p className="text-xs text-[var(--text-secondary)] italic">
+                        "{auditResult.summary}"
+                      </p>
+
+                      {/* Crucial recommendation suggestion block if closure requires improvement */}
+                      {auditResult.closingSuggestion && auditResult.closingSuggestion.found && (
+                        <div className="p-4 bg-amber-500/10 border-l-4 border-amber-500 text-amber-800 dark:text-amber-300 rounded-r-xl space-y-2">
+                          <div className="font-bold text-xs flex items-center gap-1.5">
+                            <AlertCircle className="w-4 h-4 text-amber-500" />
+                            คำลงท้ายที่ควรปรับปรุงตามหลักราชการ
+                          </div>
+                          <p className="text-xs leading-relaxed">
+                            ควรใช้คำว่า <strong className="underline text-amber-600 dark:text-amber-400">"{auditResult.closingSuggestion.suggestedPhrase}"</strong> แทน <span className="line-through text-slate-400">"{auditResult.closingSuggestion.currentPhrase}"</span>
+                          </p>
+                          <p className="text-[11px] leading-relaxed opacity-90">
+                            {auditResult.closingSuggestion.explanation}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Apply auto fix button */}
+                      {auditResult.improvedContent && (
+                        <button
+                          onClick={() => {
+                            if (editorRef.current && auditResult.improvedContent) {
+                              editorRef.current.innerHTML = auditResult.improvedContent;
+                              alert('ปรับปรุงข้อความและคำลงท้ายเรียบร้อยแล้ว');
+                            }
+                          }}
+                          className="w-full py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-semibold rounded-lg hover:from-indigo-500 hover:to-purple-500 shadow transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" /> นำข้อเสนอแนะทั้งหมดไปปรับปรุงแบบร่าง
+                        </button>
+                      )}
+
+                      {/* Audit Tabs */}
+                      <div className="flex gap-1 border-b border-[var(--border-lighter)] overflow-x-auto pb-1">
+                        {([
+                          { id: 'all', label: 'ทั้งหมด' },
+                          { id: 'spelling', label: `คำผิด (${auditResult.spellingIssues?.length || 0})` },
+                          { id: 'format', label: `รูปแบบ (${auditResult.formatIssues?.length || 0})` },
+                          { id: 'royal', label: `ราชาศัพท์ (${auditResult.royalVocabularyIssues?.length || 0})` },
+                          { id: 'completeness', label: `ครบถ้วน (${auditResult.completenessIssues?.length || 0})` }
+                        ] as const).map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setActiveAuditTab(tab.id)}
+                            className={`px-2 py-1 text-[11px] font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+                              activeAuditTab === tab.id 
+                                ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20' 
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Tab Contents */}
+                      <div className="space-y-3 pt-1">
+                        {/* Spelling issues */}
+                        {(activeAuditTab === 'all' || activeAuditTab === 'spelling') && auditResult.spellingIssues && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1">✍️ คำที่ตรวจพบคำผิด</h4>
+                            {auditResult.spellingIssues.length === 0 ? (
+                              <p className="text-[11px] text-[var(--text-muted)] italic">ไม่พบคำผิดสะกด</p>
+                            ) : (
+                              auditResult.spellingIssues.map((issue: any, idx: number) => (
+                                <div key={idx} className="p-3 bg-[var(--bg-overlay)] border border-[var(--border-lighter)] rounded-xl space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs text-red-500 line-through font-medium">"{issue.word}"</span>
+                                    <span className="text-xs text-[var(--text-secondary)] font-bold">➡️</span>
+                                    <span className="text-xs text-emerald-500 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">"{issue.suggested}"</span>
+                                  </div>
+                                  {issue.context && (
+                                    <p className="text-[11px] text-[var(--text-muted)] leading-relaxed italic">บริบท: ...{issue.context}...</p>
+                                  )}
+                                  <p className="text-[10px] text-[var(--text-secondary)] leading-relaxed">{issue.reason}</p>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+
+                        {/* Format issues */}
+                        {(activeAuditTab === 'all' || activeAuditTab === 'format') && auditResult.formatIssues && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1">📐 รูปแบบโครงสร้างหนังสือราชการ</h4>
+                            {auditResult.formatIssues.length === 0 ? (
+                              <p className="text-[11px] text-[var(--text-muted)] italic">โครงสร้างและรูปแบบถูกต้องตามมาตรฐาน</p>
+                            ) : (
+                              auditResult.formatIssues.map((issue: any, idx: number) => (
+                                <div key={idx} className="p-3 bg-[var(--bg-overlay)] border border-[var(--border-lighter)] rounded-xl space-y-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`w-2 h-2 rounded-full ${issue.severity === 'error' ? 'bg-red-500' : issue.severity === 'warning' ? 'bg-amber-500' : 'bg-blue-500'}`} />
+                                    <span className="text-xs font-semibold text-[var(--text-primary)]">{issue.issue}</span>
+                                  </div>
+                                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed"><strong>คำแนะนำ:</strong> {issue.suggestion}</p>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+
+                        {/* Royal terms */}
+                        {(activeAuditTab === 'all' || activeAuditTab === 'royal') && auditResult.royalVocabularyIssues && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1">👑 คำราชาศัพท์และระดับภาษา</h4>
+                            {auditResult.royalVocabularyIssues.length === 0 ? (
+                              <p className="text-[11px] text-[var(--text-muted)] italic">การใช้ภาษาและคำราชาศัพท์เหมาะสมดีแล้ว</p>
+                            ) : (
+                              auditResult.royalVocabularyIssues.map((issue: any, idx: number) => (
+                                <div key={idx} className="p-3 bg-[var(--bg-overlay)] border border-[var(--border-lighter)] rounded-xl space-y-1">
+                                  <div className="text-xs font-semibold text-[var(--text-primary)]">{issue.issue}</div>
+                                  <p className="text-[11px] text-emerald-500 font-semibold">ควรปรับปรุงเป็น: "{issue.suggestion}"</p>
+                                  <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">{issue.reason}</p>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+
+                        {/* Completeness */}
+                        {(activeAuditTab === 'all' || activeAuditTab === 'completeness') && auditResult.completenessIssues && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1">📋 ความครบถ้วนขององค์ประกอบ</h4>
+                            {auditResult.completenessIssues.length === 0 ? (
+                              <p className="text-[11px] text-[var(--text-muted)] italic">องค์ประกอบครบถ้วนสมบูรณ์</p>
+                            ) : (
+                              auditResult.completenessIssues.map((issue: any, idx: number) => (
+                                <div key={idx} className="p-3 bg-[var(--bg-overlay)] border border-[var(--border-lighter)] rounded-xl flex items-start gap-2.5">
+                                  {issue.status === 'ok' ? (
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                                  ) : (
+                                    <AlertCircle className={`w-4 h-4 shrink-0 mt-0.5 ${issue.status === 'missing' ? 'text-red-500' : 'text-amber-500'}`} />
+                                  )}
+                                  <div className="space-y-0.5">
+                                    <div className="text-xs font-bold text-[var(--text-primary)]">{issue.component}</div>
+                                    <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">{issue.description}</p>
+                                    {issue.suggestion && (
+                                      <p className="text-[10px] text-indigo-500 font-medium leading-relaxed">💡 {issue.suggestion}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

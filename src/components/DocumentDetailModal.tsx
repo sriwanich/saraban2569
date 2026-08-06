@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { DocumentItem, TrackingLog, Folder, formatThaiDate, formatThaiDateFull, formatThaiDateTime } from '../types';
-import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch } from 'lucide-react';
+import { DocumentItem, TrackingLog, Folder, DigitalSignatureRecord, formatThaiDate, formatThaiDateFull, formatThaiDateTime } from '../types';
+import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import AiCrossReferencePanel, { DetectionResult } from './ai-cross-reference-panel';
 import VersionControlPanel from './VersionControlPanel';
+import DigitalSignatureModal from './DigitalSignatureModal';
 
 interface Props {
   doc: DocumentItem;
@@ -17,12 +18,72 @@ interface Props {
 }
 
 export default function DocumentDetailModal({ doc, allDocuments, onClose, user, onStatusUpdated, onEdit, onSelectDoc }: Props) {
-  const [activeTab, setActiveTab] = useState<'details' | 'tracking' | 'versions'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'tracking' | 'versions' | 'reads'>('details');
   const [trackingLogs, setTrackingLogs] = useState<TrackingLog[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [newStatus, setNewStatus] = useState(doc.status || 'ลงทะเบียน');
   const [comments, setComments] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Read Receipts States
+  const [readsList, setReadsList] = useState<any[]>([]);
+  const [isFetchingReads, setIsFetchingReads] = useState(false);
+  const [readsSearch, setReadsSearch] = useState('');
+  const [readsFilter, setReadsFilter] = useState<'all' | 'read' | 'reading' | 'sent'>('all');
+
+  const fetchReads = async () => {
+    setIsFetchingReads(true);
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/reads`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.reads) {
+          setReadsList(data.reads);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching reads:', err);
+    } finally {
+      setIsFetchingReads(false);
+    }
+  };
+
+  const markAsReading = async () => {
+    if (!user?.username) return;
+    try {
+      await fetch(`/api/documents/${doc.id}/reads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: user.username,
+          fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
+          status: 'reading',
+          docType: doc.type
+        })
+      });
+      fetchReads();
+    } catch (err) {
+      console.error('Error marking as reading:', err);
+    }
+  };
+
+  const markAsRead = async () => {
+    if (!user?.username) return;
+    try {
+      await fetch(`/api/documents/${doc.id}/reads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: user.username,
+          fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
+          status: 'read',
+          docType: doc.type
+        })
+      });
+    } catch (err) {
+      console.error('Error marking as read:', err);
+    }
+  };
 
   // AI Cross-Reference State
   const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
@@ -37,6 +98,39 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
   // Department receive state
   const [isReceivingDept, setIsReceivingDept] = useState(false);
+
+  // Digital Signature state
+  const [isSigModalOpen, setIsSigModalOpen] = useState(false);
+  const [docSignatures, setDocSignatures] = useState<DigitalSignatureRecord[]>([]);
+
+  // Document Verification QR Code State
+  const [docQrCode, setDocQrCode] = useState<string>('');
+  const [docVerifyUrl, setDocVerifyUrl] = useState<string>('');
+
+  const fetchDocQrCode = async () => {
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/qr-code`);
+      if (res.ok) {
+        const data = await res.json();
+        setDocQrCode(data.qrCodeDataUrl);
+        setDocVerifyUrl(data.verifyUrl);
+      }
+    } catch (err) {
+      console.error('Error fetching general document QR verification code:', err);
+    }
+  };
+
+  const fetchDocSignatures = async () => {
+    try {
+      const res = await fetch(`/api/digital-signatures/doc/${doc.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDocSignatures(data);
+      }
+    } catch (err) {
+      console.error('Error fetching doc digital signatures:', err);
+    }
+  };
 
   // Fetch tracking history for this document
   const fetchTracking = async () => {
@@ -78,8 +172,21 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
     fetchFolders();
     fetchDepts();
     fetchTracking();
+    fetchDocSignatures();
+    fetchDocQrCode();
     handleRunAiCrossRef();
   }, [doc.id]);
+
+  // Handle marking as reading on load and marking as read on unmount
+  useEffect(() => {
+    if (doc.id && user?.username) {
+      markAsReading();
+      fetchReads();
+    }
+    return () => {
+      markAsRead();
+    };
+  }, [doc.id, user?.username]);
 
   const handleRunAiCrossRef = async () => {
     setIsDetecting(true);
@@ -441,6 +548,16 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
               <GitBranch className="w-4 h-4 text-blue-500" />
               <span>ประวัติเวอร์ชัน (Version Control)</span>
             </button>
+            <button 
+              onClick={() => {
+                setActiveTab('reads');
+                fetchReads();
+              }} 
+              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'reads' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <span>สถานะการอ่าน ({readsList.filter(r => r.status === 'read' || r.status === 'reading').length}/{readsList.length || 1})</span>
+            </button>
           </div>
 
           {activeTab === 'versions' && (
@@ -457,7 +574,212 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             </div>
           )}
 
-          <div className={`flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden ${activeTab === 'versions' ? 'hidden' : ''}`}>
+          {activeTab === 'reads' && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-slate-50 dark:bg-slate-900/40 space-y-6">
+              {/* Stats Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 shadow-sm">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">สมาชิกทั้งหมด</div>
+                  <div className="text-2xl font-bold text-slate-800 dark:text-slate-100 mt-1">{readsList.length} คน</div>
+                </div>
+                
+                <div className="bg-gradient-to-br from-amber-500/5 to-amber-500/10 dark:from-amber-950/10 dark:to-amber-900/10 p-4 rounded-xl border border-amber-500/20 shadow-sm flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-amber-600 dark:text-amber-400 font-medium font-semibold">✓✓ เปิดแล้ว</div>
+                    <div className="text-2xl font-bold text-amber-700 dark:text-amber-400 mt-1">
+                      {readsList.filter(r => r.status === 'read').length} คน
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold text-amber-600 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/20">LINE Style</span>
+                </div>
+
+                <div className="bg-gradient-to-br from-green-500/5 to-green-500/10 dark:from-green-950/10 dark:to-green-900/10 p-4 rounded-xl border border-green-500/20 shadow-sm flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-green-600 dark:text-green-400 font-medium font-semibold">กำลังอ่าน</div>
+                    <div className="text-2xl font-bold text-green-700 dark:text-green-400 mt-1">
+                      {readsList.filter(r => r.status === 'reading').length} คน
+                    </div>
+                  </div>
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                  </span>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-500/5 to-blue-500/10 dark:from-blue-950/10 dark:to-blue-900/10 p-4 rounded-xl border border-blue-500/20 shadow-sm">
+                  <div className="text-xs text-blue-600 dark:text-blue-400 font-medium font-semibold">✓ ส่งแล้ว (ยังไม่เปิด)</div>
+                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-400 mt-1">
+                    {readsList.filter(r => r.status === 'sent').length} คน
+                  </div>
+                </div>
+              </div>
+
+              {/* Search and Filters bar */}
+              <div className="bg-[var(--bg-surface)] p-4 rounded-xl border border-[var(--border-light)] shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+                {/* Search */}
+                <div className="relative w-full md:max-w-xs">
+                  <input
+                    type="text"
+                    placeholder="ค้นหาชื่อ, กลุ่มงาน, ตำแหน่ง..."
+                    value={readsSearch}
+                    onChange={(e) => setReadsSearch(e.target.value)}
+                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg pl-9 pr-4 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors"
+                  />
+                  <span className="absolute left-3 top-2.5 text-[var(--text-muted)]">
+                    <User className="w-3.5 h-3.5" />
+                  </span>
+                  {readsSearch && (
+                    <button
+                      onClick={() => setReadsSearch('')}
+                      className="absolute right-2.5 top-2.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filters */}
+                <div className="flex gap-1.5 overflow-x-auto w-full md:w-auto shrink-0 pb-1 md:pb-0">
+                  {(['all', 'read', 'reading', 'sent'] as const).map((type) => {
+                    const label = {
+                      all: 'ทั้งหมด',
+                      read: '✓✓ เปิดแล้ว',
+                      reading: 'กำลังอ่าน',
+                      sent: '✓ ส่งแล้ว'
+                    }[type];
+                    
+                    const count = type === 'all' 
+                      ? readsList.length 
+                      : readsList.filter(r => r.status === type).length;
+
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => setReadsFilter(type)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                          readsFilter === type
+                            ? 'bg-[var(--primary-color)] text-white shadow-sm font-bold'
+                            : 'bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)]'
+                        }`}
+                      >
+                        {label} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Readers List */}
+              <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm overflow-hidden divide-y divide-[var(--border-lighter)]/40">
+                {isFetchingReads ? (
+                  <div className="p-8 text-center text-xs text-[var(--text-muted)]">กำลังดึงข้อมูลสถานะการเปิดอ่าน...</div>
+                ) : readsList.filter(u => {
+                  const searchLower = readsSearch.toLowerCase();
+                  const matchesSearch = u.fullName.toLowerCase().includes(searchLower) || 
+                                        u.username.toLowerCase().includes(searchLower) ||
+                                        (u.department && u.department.toLowerCase().includes(searchLower)) ||
+                                        (u.position && u.position.toLowerCase().includes(searchLower));
+                  
+                  if (!matchesSearch) return false;
+                  if (readsFilter === 'all') return true;
+                  return u.status === readsFilter;
+                }).length > 0 ? (
+                  readsList.filter(u => {
+                    const searchLower = readsSearch.toLowerCase();
+                    const matchesSearch = u.fullName.toLowerCase().includes(searchLower) || 
+                                          u.username.toLowerCase().includes(searchLower) ||
+                                          (u.department && u.department.toLowerCase().includes(searchLower)) ||
+                                          (u.position && u.position.toLowerCase().includes(searchLower));
+                    
+                    if (!matchesSearch) return false;
+                    if (readsFilter === 'all') return true;
+                    return u.status === readsFilter;
+                  }).map((reader) => {
+                    const initials = reader.fullName ? reader.fullName.substring(0, 2) : reader.username.substring(0, 2);
+                    const formatReadTime = (dateString: string | null) => {
+                      if (!dateString) return '';
+                      try {
+                        const d = new Date(dateString);
+                        if (isNaN(d.getTime())) return '';
+                        const hh = String(d.getHours()).padStart(2, '0');
+                        const mm = String(d.getMinutes()).padStart(2, '0');
+                        return `อ่านเมื่อ ${hh}:${mm}`;
+                      } catch (e) {
+                        return '';
+                      }
+                    };
+                    
+                    return (
+                      <div key={reader.username} className="p-3.5 sm:px-6 flex items-center justify-between gap-4 hover:bg-[var(--border-lighter)]/20 transition-colors">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center font-bold text-xs shrink-0 border border-[var(--primary-color)]/20">
+                            {initials}
+                          </div>
+                          
+                          <div className="min-w-0">
+                            <div className="font-semibold text-xs sm:text-sm text-[var(--text-primary)] truncate flex items-center gap-1.5">
+                              <span>{reader.fullName}</span>
+                              {reader.username === user?.username && (
+                                <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 py-0.2 rounded font-medium">คุณ</span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-[var(--text-secondary)] font-medium truncate mt-0.5">
+                              {reader.position || 'ตำแหน่งปฏิบัติการ'} {reader.department ? `· ${reader.department}` : ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-right">
+                          {reader.status === 'read' && (
+                            <div className="flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                <span>✓✓ เปิดแล้ว</span>
+                              </span>
+                              <span className="text-[10px] text-amber-500/80 font-mono mt-1">
+                                {formatReadTime(reader.readAt)} น.
+                              </span>
+                            </div>
+                          )}
+
+                          {reader.status === 'reading' && (
+                            <div className="flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg bg-green-500/10 text-green-500 border border-green-500/20">
+                                <span className="flex h-1.5 w-1.5 relative">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+                                </span>
+                                <span>กำลังอ่าน</span>
+                              </span>
+                              <span className="text-[10px] text-green-500/80 font-mono mt-1">
+                                กำลังเปิดดูอยู่ขณะนี้
+                              </span>
+                            </div>
+                          )}
+
+                          {reader.status === 'sent' && (
+                            <div className="flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-500/10 text-slate-400 border border-slate-500/10">
+                                <span>✓ ส่งแล้ว</span>
+                              </span>
+                              <span className="text-[10px] text-slate-400/80 font-mono mt-1">
+                                ยังไม่เปิดอ่าน
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="p-12 text-center text-xs text-[var(--text-muted)] italic">
+                    ไม่พบข้อมูลผู้ใช้ที่สอดคล้องกับการค้นหา
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className={`flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden ${(activeTab === 'versions' || activeTab === 'reads') ? 'hidden' : ''}`}>
               {/* Column 1: Document Sheet Details */}
               <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pb-12 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
 
@@ -638,6 +960,129 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                         <Paperclip className="w-3.5 h-3.5 text-[var(--text-muted)]" /> ไม่พบไฟล์แนบในระบบ
                       </div>
                     )}
+                  </div>
+                ))}
+
+                {detailRow('ลายมือชื่อดิจิทัล (ETDA) :', (
+                  <div className="space-y-4 w-full">
+                    {docSignatures && docSignatures.length > 0 ? (
+                      <div className="space-y-3">
+                        {docSignatures.map((sig, sIdx) => (
+                          <div key={sig.id || sIdx} className="p-4 rounded-xl border-2 border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-950/10 space-y-3 text-xs">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-500/10 pb-2">
+                              <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1.5 text-xs sm:text-sm">
+                                <ShieldCheck className="w-4 h-4 text-emerald-500" /> รับรองแล้วด้วยลายมือชื่อดิจิทัล (Digital Signature Valid)
+                              </span>
+                              <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20">
+                                {sig.certificateSerial}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                              <div className="md:col-span-3 flex justify-center md:justify-start">
+                                <div className="relative bg-white p-2 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                                  {sig.qrCodeDataUrl ? (
+                                    <img src={sig.qrCodeDataUrl} alt="QR Code" className="w-20 h-20 object-contain rounded" />
+                                  ) : (
+                                    <div className="w-20 h-20 bg-slate-50 flex items-center justify-center rounded">
+                                      <QrCode className="w-8 h-8 text-slate-300" />
+                                    </div>
+                                  )}
+                                  <div className="absolute inset-0 border-2 border-emerald-500/20 rounded-xl m-1 pointer-events-none" />
+                                </div>
+                              </div>
+
+                              <div className="md:col-span-9 space-y-2 text-center md:text-left">
+                                <div>
+                                  <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Signed By</div>
+                                  <p className="font-bold text-slate-800 dark:text-slate-100 text-sm leading-tight">{sig.signerName}</p>
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{sig.signerPosition} / {sig.signerDepartment}</p>
+                                </div>
+                                
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-slate-600 dark:text-slate-300 font-mono mt-1">
+                                  <div className="p-2 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-800/60 text-left">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Timestamp (TSA)</p>
+                                    <p className="font-semibold text-emerald-600 dark:text-emerald-400">{sig.timestampFormatted}</p>
+                                  </div>
+                                  <div className="p-2 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-800/60 text-left">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Fingerprint</p>
+                                    <p className="font-mono text-emerald-600 dark:text-emerald-400 truncate w-full max-w-[140px]">{sig.documentHash}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-3 border-t border-emerald-500/20">
+                              <a
+                                href={`/api/digital-signatures/download-pdf/${sig.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-emerald-600 hover:bg-slate-800 dark:hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md transition-colors w-full sm:w-auto justify-center"
+                              >
+                                <Download className="w-4 h-4" /> ดาวน์โหลดเอกสาร (PDF)
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                        
+                        <div className="pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsSigModalOpen(true)}
+                            className="px-4 py-2 text-xs font-bold rounded-xl border border-dashed border-emerald-500 hover:bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <PenTool className="w-3.5 h-3.5" /> ลงนามร่วม (Co-sign Document)
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/20 text-center space-y-3">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 italic">
+                          ยังไม่มีผู้ลงนามรับรองเอกสารนี้ด้วยระบบดิจิทัล (SHA-256 Security)
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIsSigModalOpen(true)}
+                          className="mx-auto px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <PenTool className="w-3.5 h-3.5" /> ลงนามรับรองดิจิทัลด้วยตนเอง (Sign PDF)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {detailRow('QR Code ตรวจสอบความถูกต้อง :', (
+                  <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 flex flex-col sm:flex-row items-center gap-4 text-xs w-full">
+                    <div className="bg-white p-2 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
+                      {docQrCode ? (
+                        <img src={docQrCode} alt="Verification QR Code" className="w-24 h-24 object-contain rounded" />
+                      ) : (
+                        <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 flex items-center justify-center rounded">
+                          <QrCode className="w-8 h-8 text-slate-300" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1.5 flex-1 text-center sm:text-left">
+                      <p className="font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm flex items-center justify-center sm:justify-start gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-blue-500 shrink-0" /> QR Verification Code ประจำเอกสาร
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        เอกสารทุกฉบับในระบบได้รับการกำหนด QR Code ตรวจสอบความถูกต้องเฉพาะฉบับ สแกนด้วยอุปกรณ์เพื่อตรวจสอบสถานะจริงในฐานข้อมูล ป้องกันการปลอมแปลงและแก้ไขรายละเอียด
+                      </p>
+                      {docVerifyUrl && (
+                        <div className="pt-1 flex items-center justify-center sm:justify-start gap-2">
+                          <a
+                            href={docVerifyUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 font-bold hover:underline flex items-center gap-1 font-mono text-[10px] break-all max-w-xs truncate"
+                          >
+                            {docVerifyUrl} <ExternalLink className="w-3 h-3 shrink-0" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -837,6 +1282,21 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             </form>
           </div>
         </div>
+      )}
+
+      {isSigModalOpen && (
+        <DigitalSignatureModal
+          doc={doc}
+          user={user}
+          onClose={() => setIsSigModalOpen(false)}
+          onSignedSuccess={async (newSig) => {
+            setIsSigModalOpen(false);
+            await fetchDocSignatures();
+            // sync doc status
+            doc.status = 'ลงนามดิจิทัลแล้ว';
+            if (onStatusUpdated) onStatusUpdated();
+          }}
+        />
       )}
     </div>
   );

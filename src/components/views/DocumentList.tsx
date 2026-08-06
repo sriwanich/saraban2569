@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, User, formatThaiDate, formatThaiDateShort, formatThaiDateMedium, formatThaiDateTime } from '../../types';
-import { Search, Eye, Edit2, Trash2, FileText, Plus, Printer, Paperclip, X } from 'lucide-react';
+import { Search, Eye, Edit2, Trash2, FileText, Plus, Printer, Paperclip, X, Pin } from 'lucide-react';
 
 interface Props {
   title: string;
@@ -10,9 +10,12 @@ interface Props {
   onCreateDoc?: () => void;
   onEditDoc?: (doc: DocumentItem) => void;
   onDeleteDoc?: (id: string) => void;
+  favorites?: string[];
+  onToggleFavorite?: (doc: DocumentItem) => void;
+  hasPermission?: (key: string) => boolean;
 }
 
-export default function DocumentList({ title, documents, user, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc }: Props) {
+export default function DocumentList({ title, documents, user, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite, hasPermission }: Props) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState<string>('all');
   const [orgName, setOrgName] = useState('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
@@ -50,11 +53,19 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   const availableYears = Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => b.localeCompare(a));
 
   const canDeleteDoc = (row: DocumentItem) => {
+    if (hasPermission) {
+      return hasPermission('delete_docs');
+    }
     if (!user) return true;
     return user.role === 'admin' || user.role === 'moderator';
   };
 
   const canEditDoc = (row: DocumentItem) => {
+    if (hasPermission) {
+      const isMine = (row.createdBy && row.createdBy === user?.username) ||
+                     (row.assignee && user?.firstName && (row.assignee === user.firstName || row.assignee.includes(user.firstName)));
+      return hasPermission('edit_all_docs') || Boolean(isMine);
+    }
     if (!user) return true;
     if (user.role === 'admin' || user.role === 'moderator') return true;
     const isMine = (row.createdBy && row.createdBy === user.username) ||
@@ -338,6 +349,19 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
               <div key={row.id} className="p-4 space-y-3 hover:bg-[var(--border-lighter)]/30 transition-colors">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex flex-wrap gap-1.5 items-center">
+                    {onToggleFavorite && (
+                      <button
+                        onClick={() => onToggleFavorite(row)}
+                        className={`p-1 rounded-md transition-colors ${
+                          favorites.includes(row.id)
+                            ? 'text-amber-500 bg-amber-500/10 border border-amber-500/20'
+                            : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
+                        }`}
+                        title={favorites.includes(row.id) ? 'ยกเลิกปักหมุด' : 'ปักหมุด'}
+                      >
+                        <Pin className={`w-3 h-3 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
+                      </button>
+                    )}
                     <span className="text-xs font-mono font-bold text-[var(--primary-color)] bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 px-2.5 py-0.5 rounded-md">
                       {title.includes('ส่ง') ? 'เลขส่ง' : 'เลขรับ'}: {getReceiveNumberDisplay(row, true)}
                     </span>
@@ -370,6 +394,25 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                       <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-2 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium">
                         <Paperclip className="w-3 h-3" />
                         <span>{row.attachments.length} ไฟล์</span>
+                      </span>
+                    )}
+                    {row.readStatus === 'read' && (
+                      <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded" title="คุณเปิดอ่านแล้ว">
+                        ✓✓ เปิดแล้ว
+                      </span>
+                    )}
+                    {row.readStatus === 'reading' && (
+                      <span className="text-[10px] text-green-500 font-bold bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded flex items-center gap-1" title="คุณกำลังอ่านอยู่">
+                        <span className="flex h-1.5 w-1.5 relative shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+                        </span>
+                        กำลังอ่าน
+                      </span>
+                    )}
+                    {row.readStatus === 'sent' && (
+                      <span className="text-[10px] text-slate-400 font-medium bg-slate-500/10 border border-slate-500/10 px-1.5 py-0.5 rounded" title="ส่งถึงคุณแล้ว (ยังไม่ได้เปิด)">
+                        ✓ ส่งแล้ว
                       </span>
                     )}
                   </div>
@@ -478,15 +521,47 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                     </td>
                     <td className="p-3.5 text-[var(--text-primary)] align-top leading-relaxed">
                       <div className="flex items-start gap-2 flex-wrap">
+                        {onToggleFavorite && (
+                          <button
+                            onClick={() => onToggleFavorite(row)}
+                            className={`p-1 rounded-md transition-colors shrink-0 ${
+                              favorites.includes(row.id)
+                                ? 'text-amber-500 hover:bg-amber-500/10'
+                                : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
+                            }`}
+                            title={favorites.includes(row.id) ? 'ยกเลิกปักหมุดเอกสารสำคัญ' : 'ปักหมุดเอกสารสำคัญ'}
+                          >
+                            <Pin className={`w-3.5 h-3.5 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
+                          </button>
+                        )}
                         <span className="font-medium hover:text-[var(--primary-color)] cursor-pointer transition-colors" onClick={() => onViewDoc(row)}>
                           {row.title}
                         </span>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1 shrink-0 flex-wrap">
                           {getPriorityBadge(row.priority)}
                           {row.attachments && row.attachments.length > 0 && (
                             <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-1.5 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium whitespace-nowrap" title={`${row.attachments.length} ไฟล์แนบ`}>
                               <Paperclip className="w-3 h-3" />
                               <span>{row.attachments.length}</span>
+                            </span>
+                          )}
+                          {row.readStatus === 'read' && (
+                            <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded" title="คุณเปิดอ่านแล้ว">
+                              ✓✓ เปิดแล้ว
+                            </span>
+                          )}
+                          {row.readStatus === 'reading' && (
+                            <span className="text-[10px] text-green-500 font-bold bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded flex items-center gap-1" title="คุณกำลังอ่านอยู่">
+                              <span className="flex h-1.5 w-1.5 relative shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+                              </span>
+                              กำลังอ่าน
+                            </span>
+                          )}
+                          {row.readStatus === 'sent' && (
+                            <span className="text-[10px] text-slate-400 font-medium bg-slate-500/10 border border-slate-500/10 px-1.5 py-0.5 rounded" title="ส่งถึงคุณแล้ว (ยังไม่ได้เปิด)">
+                              ✓ ส่งแล้ว
                             </span>
                           )}
                         </div>

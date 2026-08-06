@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone, FileEdit, GitMerge, Sparkles } from 'lucide-react';
+import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone, FileEdit, GitMerge, Sparkles, Pin } from 'lucide-react';
 
 import { db } from '../firebase';
 import { DocumentItem, DocType } from '../types';
@@ -15,6 +15,8 @@ import DraftDocsView from './views/DraftDocsView';
 import WorkflowSlaView from './views/WorkflowSlaView';
 import SmartAiAssistantView from './views/SmartAiAssistantView';
 import SmartAiFloatingWidget from './SmartAiFloatingWidget';
+import DigitalSignatureView from './DigitalSignatureView';
+import RecycleBinView from './views/RecycleBinView';
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 
@@ -89,6 +91,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [positionsList, setPositionsList] = useState<any[]>([]);
   const [departmentsList, setDepartmentsList] = useState<any[]>([]);
+  const [rolePermissions, setRolePermissions] = useState<any[]>([]);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
     firstName: user?.firstName || '',
@@ -116,18 +119,44 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   useEffect(() => {
     const fetchMeta = async () => {
       try {
-        const [posRes, deptRes] = await Promise.all([
+        const [posRes, deptRes, permRes] = await Promise.all([
           fetch('/api/positions'),
-          fetch('/api/departments')
+          fetch('/api/departments'),
+          fetch('/api/role-permissions')
         ]);
         if (posRes.ok) setPositionsList(await posRes.json());
         if (deptRes.ok) setDepartmentsList(await deptRes.json());
+        if (permRes.ok) setRolePermissions(await permRes.json());
       } catch (err) {
         console.error('Error fetching meta lists:', err);
       }
     };
     fetchMeta();
   }, []);
+
+  const hasPermission = (key: string): boolean => {
+    if (!currentUser?.role) return false;
+    
+    // Hardcoded minimums to prevent lockout
+    if (currentUser.role === 'admin' && (key === 'system_settings' || key === 'manage_users')) {
+      return true;
+    }
+
+    const perm = rolePermissions.find(p => p.role === currentUser.role && p.permission_key === key);
+    if (perm) {
+      return perm.is_allowed === 1;
+    }
+    
+    // Fallbacks if not configured in DB yet
+    if (currentUser.role === 'admin') return true;
+    if (currentUser.role === 'moderator') {
+      return ['view_all_docs', 'create_docs', 'edit_all_docs', 'approve_docs'].includes(key);
+    }
+    if (currentUser.role === 'user') {
+      return ['create_docs', 'view_all_docs'].includes(key);
+    }
+    return false;
+  };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -316,7 +345,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       const queryParams = new URLSearchParams({
         role: currentUser?.role || 'user',
         department: currentUser?.department || '',
-        isCentral: String(currentUser?.isCentral ?? 1)
+        isCentral: String(currentUser?.isCentral ?? 1),
+        username: currentUser?.username || ''
       }).toString();
       const res = await fetch(`/api/documents?${queryParams}`);
       if (res.ok) {
@@ -333,9 +363,55 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
+  const [favorites, setFavorites] = useState<string[]>([]);
+
+  const fetchFavorites = async () => {
+    if (!currentUser?.username) return;
+    try {
+      const res = await fetch(`/api/favorites?username=${encodeURIComponent(currentUser.username)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.favorites) {
+          setFavorites(data.favorites.map((f: any) => f.docId));
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching favorites:', err);
+    }
+  };
+
+  const handleToggleFavorite = async (doc: DocumentItem) => {
+    if (!currentUser?.username) {
+      alert('กรุณาเข้าสู่ระบบเพื่อใช้งานฟังก์ชันนี้');
+      return;
+    }
+    try {
+      const res = await fetch('/api/favorites/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: currentUser.username,
+          docId: doc.id,
+          docType: doc.type || 'inbox'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pinned) {
+          setFavorites(prev => [...prev, doc.id]);
+        } else {
+          setFavorites(prev => prev.filter(id => id !== doc.id));
+        }
+      }
+    } catch (err) {
+      console.error('Error toggling favorite:', err);
+    }
+  };
+
   const refreshData = async () => {
     await fetchDocuments();
     await fetchNotifications();
+    await fetchFavorites();
   };
 
   const fetchSettings = async () => {
@@ -416,7 +492,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (!deletingDocId) return;
     setIsDeletingDoc(true);
     try {
-      await fetch(`/api/documents/${deletingDocId}`, {
+      const userFullName = currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username : 'ผู้ใช้งาน';
+      await fetch(`/api/documents/${deletingDocId}?username=${encodeURIComponent(userFullName)}`, {
         method: 'DELETE'
       });
       if (selectedDoc && selectedDoc.id === deletingDocId) {
@@ -437,9 +514,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
     { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
     { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ' },
+    { id: 'favorites', icon: Pin, label: 'เอกสารสำคัญปักหมุด' },
     { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร' },
     { id: 'workflow', icon: GitMerge, label: 'Workflow & SLA' },
     { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล' },
+    { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)' },
+    { id: 'recycle_bin', icon: Trash2, label: 'ถังขยะเอกสาร' },
   ];
 
   const navItems = baseNavItems.filter(item => enabledFeatures[item.id] !== false);
@@ -486,6 +566,9 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           onEditDoc={handleEditDoc}
           onDeleteDoc={handleDeleteDoc}
           user={currentUser}
+          favorites={favorites}
+          onToggleFavorite={handleToggleFavorite}
+          hasPermission={hasPermission}
         />;
       case 'outbox':
         return <DocumentList 
@@ -496,6 +579,9 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           onEditDoc={handleEditDoc}
           onDeleteDoc={handleDeleteDoc}
           user={currentUser}
+          favorites={favorites}
+          onToggleFavorite={handleToggleFavorite}
+          hasPermission={hasPermission}
         />;
       case 'admin_docs':
         return <AdminDocsView 
@@ -505,6 +591,20 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           onEditDoc={handleEditDoc}
           onDeleteDoc={handleDeleteDoc}
           user={currentUser}
+          favorites={favorites}
+          onToggleFavorite={handleToggleFavorite}
+        />;
+      case 'favorites':
+        return <DocumentList 
+          title="เอกสารสำคัญปักหมุด" 
+          documents={documents.filter(d => favorites.includes(d.id))} 
+          onViewDoc={setSelectedDoc} 
+          onEditDoc={handleEditDoc}
+          onDeleteDoc={handleDeleteDoc}
+          user={currentUser}
+          favorites={favorites}
+          onToggleFavorite={handleToggleFavorite}
+          hasPermission={hasPermission}
         />;
       case 'draft_docs':
         return <DraftDocsView 
@@ -527,6 +627,19 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           onViewDoc={setSelectedDoc}
           onRefreshDocs={refreshData}
           user={currentUser}
+          hasPermission={hasPermission}
+        />;
+      case 'digital_signatures':
+        return <DigitalSignatureView 
+          user={currentUser} 
+          documents={documents} 
+          onViewDoc={handleViewDoc} 
+          onRefreshData={refreshData} 
+        />;
+      case 'recycle_bin':
+        return <RecycleBinView 
+          user={currentUser} 
+          onRefreshMainData={refreshData} 
         />;
       case 'logs':
         if (currentUser?.role !== 'admin') {
@@ -534,7 +647,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         }
         return <LogsView user={currentUser} />;
       case 'settings':
-        return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} />;
+        return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} />;
       case 'notifications':
         return (
           <div className="space-y-6">
@@ -871,7 +984,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             setDocToEdit(docToEdit);
             setIsCreateModalOpen(true);
           }}
-          onClose={() => setSelectedDoc(null)} 
+          onClose={() => {
+            setSelectedDoc(null);
+            refreshData();
+          }} 
         />
       )}
 

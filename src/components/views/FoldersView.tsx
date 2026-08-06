@@ -9,9 +9,10 @@ interface Props {
   onViewDoc: (doc: DocumentItem) => void;
   onRefreshDocs: () => void;
   user: any;
+  hasPermission?: (key: string) => boolean;
 }
 
-export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user }: Props) {
+export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user, hasPermission }: Props) {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activeFolder, setActiveFolder] = useState<Folder | null>(null);
   
@@ -87,8 +88,8 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user 
         body: JSON.stringify({
           name: newFolderName,
           description: newFolderDesc,
-          isPrivate: user?.role === 'admin' ? (folderType === 'private') : true,
-          departmentName: user?.role === 'admin' ? (folderType === 'private' ? selectedDept : '') : user?.department,
+          isPrivate: (hasPermission ? hasPermission('system_settings') : user?.role === 'admin') ? (folderType === 'private') : true,
+          departmentName: (hasPermission ? hasPermission('system_settings') : user?.role === 'admin') ? (folderType === 'private' ? selectedDept : '') : user?.department,
           username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim()
         })
       });
@@ -267,7 +268,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user 
                 </div>
               </div>
 
-              {(user?.role === 'admin' || user?.role === 'moderator') && (
+              {(hasPermission ? (hasPermission('manage_users') || hasPermission('system_settings')) : (user?.role === 'admin' || user?.role === 'moderator')) && (
                 <div className="flex items-center gap-2 self-end sm:self-auto">
                   <button
                     onClick={(e) => handleOpenEdit(activeFolder, e)}
@@ -377,7 +378,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user 
                 />
               </div>
 
-              {(user?.role === 'admin' || user?.role === 'moderator') ? (
+              {(hasPermission ? (hasPermission('manage_users') || hasPermission('system_settings')) : (user?.role === 'admin' || user?.role === 'moderator')) ? (
                 <>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-[var(--text-secondary)]">ประเภทแฟ้มเอกสาร</label>
@@ -456,7 +457,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user 
                         <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-xl group-hover:scale-110 transition-transform">
                           <FolderIcon className="w-5 h-5 fill-amber-500/20" />
                         </div>
-                        {(user?.role === 'admin' || user?.role === 'moderator') && (
+                        {(hasPermission ? (hasPermission('manage_users') || hasPermission('system_settings')) : (user?.role === 'admin' || user?.role === 'moderator')) && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={(e) => handleOpenEdit(folder, e)}
