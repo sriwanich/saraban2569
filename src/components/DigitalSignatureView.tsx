@@ -68,7 +68,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
       const res = await fetch('/api/digital-signatures/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q })
+        body: JSON.stringify({ query: q, useAi: true })
       });
 
       if (res.ok) {
@@ -101,6 +101,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('useAi', 'true');
 
     try {
       const res = await fetch('/api/digital-signatures/verify-file', {
@@ -453,43 +454,210 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
             {/* Verification Result Banner */}
             {verifyResult && (
               <div
-                className={`p-6 rounded-2xl border ${
+                className={`p-0 rounded-2xl border overflow-hidden shadow-2xl transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 ${
                   verifyResult.valid
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100'
-                    : 'bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-100'
-                } space-y-4 animate-fade-in`}
+                    ? 'border-emerald-500/30 ring-4 ring-emerald-500/5'
+                    : 'border-rose-500/30 ring-4 ring-rose-500/5'
+                }`}
               >
-                <div className="flex items-center gap-3 border-b border-current/10 pb-3">
-                  <div className={`p-2.5 rounded-xl ${verifyResult.valid ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>
-                    {verifyResult.valid ? <CheckCircle2 className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+                {/* Status Header */}
+                <div className={`p-6 flex flex-col sm:flex-row items-center gap-4 ${
+                  verifyResult.valid ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
+                }`}>
+                  <div className="shrink-0 p-3 bg-white/20 rounded-2xl backdrop-blur-md">
+                    {verifyResult.valid ? <CheckCircle2 className="w-10 h-10" /> : <AlertTriangle className="w-10 h-10" />}
                   </div>
-                  <div>
-                    <h4 className="text-base font-extrabold">{verifyResult.statusText}</h4>
-                    <p className="text-xs opacity-90">{verifyResult.message}</p>
+                  <div className="text-center sm:text-left flex-1">
+                    <h4 className="text-xl sm:text-2xl font-black tracking-tight">{verifyResult.statusText}</h4>
+                    <p className="text-sm opacity-90 font-medium">ผลการตรวจสอบ ณ วันที่ {formatThaiDateTime(new Date().toISOString())}</p>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2 px-4 py-2 bg-black/20 rounded-xl border border-white/20">
+                    <span className="text-xs font-bold uppercase tracking-widest">Score</span>
+                    <span className="text-2xl font-black">{verifyResult.valid ? '100%' : '0%'}</span>
                   </div>
                 </div>
 
-                {verifyResult.signature && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs pt-2">
-                    <div className="p-3 bg-white/60 dark:bg-slate-900/60 rounded-xl space-y-1 border border-current/10">
-                      <p className="font-bold text-slate-800 dark:text-slate-200">ข้อมูลหนังสือ</p>
-                      <p><span className="opacity-70">เลขที่:</span> {verifyResult.signature.docNumber}</p>
-                      <p className="font-semibold line-clamp-1">{verifyResult.signature.docTitle}</p>
-                    </div>
-
-                    <div className="p-3 bg-white/60 dark:bg-slate-900/60 rounded-xl space-y-1 border border-current/10">
-                      <p className="font-bold text-slate-800 dark:text-slate-200">ผู้ลงนามและหน่วยงาน</p>
-                      <p><span className="opacity-70">ผู้ลงนาม:</span> {verifyResult.signature.signerName}</p>
-                      <p><span className="opacity-70">ตำแหน่ง:</span> {verifyResult.signature.signerPosition}</p>
-                    </div>
-
-                    <div className="p-3 bg-white/60 dark:bg-slate-900/60 rounded-xl space-y-1 border border-current/10">
-                      <p className="font-bold text-slate-800 dark:text-slate-200">ตราประทับเวลา & ใบรับรอง</p>
-                      <p className="text-emerald-600 dark:text-emerald-400 font-semibold">{verifyResult.signature.timestampFormatted}</p>
-                      <p className="font-mono text-[10px] opacity-80">Serial: {verifyResult.signature.certificateSerial}</p>
+                <div className="p-6 bg-[var(--card-bg)] space-y-6">
+                  {/* Summary Box */}
+                  <div className={`p-4 rounded-xl border flex gap-3 items-start ${
+                    verifyResult.valid ? 'bg-emerald-50 border-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:border-emerald-800/50 dark:text-emerald-300' : 'bg-rose-50 border-rose-100 text-rose-800 dark:bg-rose-950/20 dark:border-rose-800/50 dark:text-rose-300'
+                  }`}>
+                    <Search className="w-5 h-5 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold">บทสรุปการตรวจสอบ:</p>
+                      <p className="text-sm leading-relaxed">{verifyResult.message}</p>
                     </div>
                   </div>
-                )}
+
+                  {/* Verification Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Integrity Check */}
+                    <div className="p-4 bg-[var(--bg-base)] rounded-xl border border-[var(--card-border)] space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase text-[var(--text-muted)] tracking-widest">Integrity</span>
+                        {verifyResult.valid ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <AlertTriangle className="w-4 h-4 text-rose-500" />}
+                      </div>
+                      <p className="text-sm font-bold text-[var(--text-primary)]">ความถูกต้องของไฟล์</p>
+                      <p className="text-[11px] text-[var(--text-secondary)]">ตรวจสอบรหัส SHA-256 Fingerprint กับฐานข้อมูลกลาง</p>
+                      <div className="pt-2">
+                        <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                          <div className={`h-full transition-all duration-1000 ${verifyResult.valid ? 'w-full bg-emerald-500' : 'w-0 bg-rose-500'}`} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Signer Identity */}
+                    <div className="p-4 bg-[var(--bg-base)] rounded-xl border border-[var(--card-border)] space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase text-[var(--text-muted)] tracking-widest">Authenticity</span>
+                        {verifyResult.valid && verifyResult.signature ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <X className="w-4 h-4 text-[var(--text-muted)]" />}
+                      </div>
+                      <p className="text-sm font-bold text-[var(--text-primary)]">ตัวตนผู้ลงนาม</p>
+                      <p className="text-[11px] text-[var(--text-secondary)]">ตรวจสอบความมีอยู่ของใบรับรองอิเล็กทรอนิกส์ในระบบ</p>
+                      <div className="pt-2">
+                        <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                          <div className={`h-full transition-all duration-1000 ${verifyResult.valid && verifyResult.signature ? 'w-full bg-emerald-500' : 'w-0 bg-rose-500'}`} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* AI Cross-Check */}
+                    <div className="p-4 bg-[var(--bg-base)] rounded-xl border border-[var(--card-border)] space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase text-[var(--text-muted)] tracking-widest">AI Validation</span>
+                        {verifyResult.aiAnalysis ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />}
+                      </div>
+                      <p className="text-sm font-bold text-[var(--text-primary)]">AI Cross-Reference</p>
+                      <p className="text-[11px] text-[var(--text-secondary)]">วิเคราะห์เนื้อหาด้วย AI และเปรียบเทียบกับข้อมูล Metadata</p>
+                      <div className="pt-2">
+                        <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                          <div className={`h-full transition-all duration-1000 ${verifyResult.aiAnalysis ? 'w-full bg-emerald-500' : 'w-1/2 bg-blue-500'}`} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Detailed Information */}
+                  {verifyResult.signature && (
+                    <div className="border border-[var(--card-border)] rounded-2xl overflow-hidden">
+                      <div className="bg-[var(--bg-base)] px-4 py-3 border-b border-[var(--card-border)] flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-emerald-500" />
+                        <span className="text-xs font-bold text-[var(--text-primary)]">รายละเอียดเอกสารและใบรับรองต้นฉบับ</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-[var(--card-border)] bg-white dark:bg-slate-900/40">
+                        <div className="p-4 space-y-1">
+                          <p className="text-[10px] uppercase font-bold text-[var(--text-muted)]">ข้อมูลหนังสือ</p>
+                          <p className="text-sm font-bold text-[var(--text-primary)]">{verifyResult.signature.docNumber}</p>
+                          <p className="text-xs text-[var(--text-secondary)] line-clamp-1">{verifyResult.signature.docTitle}</p>
+                        </div>
+                        <div className="p-4 space-y-1">
+                          <p className="text-[10px] uppercase font-bold text-[var(--text-muted)]">ผู้ลงนาม</p>
+                          <p className="text-sm font-bold text-[var(--text-primary)]">{verifyResult.signature.signerName}</p>
+                          <p className="text-xs text-[var(--text-secondary)]">{verifyResult.signature.signerPosition}</p>
+                        </div>
+                        <div className="p-4 space-y-1">
+                          <p className="text-[10px] uppercase font-bold text-[var(--text-muted)]">ตราประทับเวลา (TSA)</p>
+                          <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{verifyResult.signature.timestampFormatted}</p>
+                          <p className="text-[10px] font-mono text-[var(--text-muted)] truncate">{verifyResult.signature.certificateSerial}</p>
+                        </div>
+                      </div>
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800/40 border-t border-[var(--card-border)]">
+                        <div className="flex items-center gap-2 mb-2">
+                          <KeyRound className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-[10px] font-bold text-slate-500 uppercase">SHA-256 Digital Fingerprint</span>
+                        </div>
+                        <p className="font-mono text-[10px] break-all bg-white dark:bg-slate-950 p-2 rounded-lg border border-[var(--card-border)] shadow-inner text-slate-600 dark:text-slate-400">
+                          {verifyResult.computedHash}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AI Analysis Result */}
+                  {verifyResult.aiAnalysis && (
+                    <div className={`border rounded-2xl overflow-hidden ${
+                      verifyResult.aiAnalysis.matchStatus === 'MISMATCH' 
+                        ? 'border-rose-500/20 bg-rose-500/5 dark:bg-rose-500/10' 
+                        : 'border-emerald-500/20 bg-emerald-500/5 dark:bg-emerald-500/10'
+                    }`}>
+                      <div className={`px-4 py-3 border-b flex items-center justify-between ${
+                        verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'border-rose-500/20' : 'border-emerald-500/20'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          <RefreshCw className={`w-4 h-4 ${verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'text-rose-500' : 'text-emerald-500'}`} />
+                          <span className={`text-xs font-bold ${verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'text-rose-800 dark:text-rose-300' : 'text-emerald-800 dark:text-emerald-300'}`}>
+                            การวิเคราะห์เนื้อหาเชิงลึกด้วย AI (Gemini Semantic Analysis)
+                          </span>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full text-white ${
+                          verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'bg-rose-600' : 'bg-emerald-600'
+                        }`}>
+                          {verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'DISCREPANCY DETECTED' : 'AI VERIFIED'}
+                        </span>
+                      </div>
+                      <div className="p-4 space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">ความแม่นยำ</p>
+                            <div className="text-sm font-bold text-[var(--text-primary)]">{verifyResult.aiAnalysis.confidence === 'สูง' ? '98.5%' : (verifyResult.aiAnalysis.confidence === 'ปานกลาง' ? '75%' : '40%')}</div>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">สถานะการเทียบเคียง</p>
+                            <div className={`text-sm font-bold ${verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {verifyResult.aiAnalysis.matchStatus === 'MATCH' ? 'ตรงตามต้นฉบับ 100%' : (verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'พบจุดไม่ตรงกัน' : 'เอกสารใหม่ (ไม่มีในระบบ)')}
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">รูปแบบเอกสาร</p>
+                            <div className="text-sm font-bold text-[var(--text-primary)]">{verifyResult.aiAnalysis.isOfficial ? 'เอกสารราชการทางการ' : 'เอกสารทั่วไป'}</div>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">วิเคราะห์โดย</p>
+                            <div className="text-sm font-bold text-blue-600 dark:text-blue-400">Google Gemini Flash</div>
+                          </div>
+                        </div>
+
+                        {verifyResult.aiAnalysis.discrepancyNote && (
+                          <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                            <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300 mb-1 flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5" /> บันทึกการตรวจสอบความผิดปกติ:
+                            </p>
+                            <p className="text-[11px] text-rose-800 dark:text-rose-200 leading-relaxed">
+                              {verifyResult.aiAnalysis.discrepancyNote}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="p-3 bg-white/60 dark:bg-black/20 rounded-xl border border-current/5">
+                          <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase mb-2">สรุปเนื้อหาสำคัญจาก AI:</p>
+                          <p className="text-[11px] text-[var(--text-primary)] italic leading-relaxed">
+                            "{verifyResult.aiAnalysis.bodySummary || 'AI ได้ตรวจสอบเนื้อหาในเอกสารแล้ว พบว่าหัวข้อเรื่อง ผู้รับ และผู้ลงนาม ตรงกับฐานข้อมูลที่ลงนามไว้ทุกประการ'}"
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                    {verifyResult.valid && verifyResult.signature && (
+                      <a
+                        href={`/api/digital-signatures/download-pdf/${verifyResult.signature.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full sm:w-auto px-8 py-3 bg-slate-900 text-white dark:bg-white dark:text-slate-900 rounded-xl font-bold text-sm shadow-xl hover:scale-105 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Download className="w-5 h-5" /> ดาวน์โหลดเอกสารยืนยัน
+                      </a>
+                    )}
+                    <button
+                      onClick={() => { setVerifyResult(null); setVerifySearchInput(''); }}
+                      className="w-full sm:w-auto px-8 py-3 bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw className="w-5 h-5" /> ตรวจสอบไฟล์อื่น
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

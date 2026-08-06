@@ -4013,7 +4013,14 @@ app.post("/api/digital-signatures/sign", async (req, res) => {
     // Generate Signed PDF File
     const pdfBuffer = await buildSignedPdfBuffer(doc, sigRecord, qrCodeDataUrl);
     const pdfFileName = `signed_${doc.id}_${sigId}.pdf`;
-    const pdfFilePath = path.join(process.cwd(), 'uploads', 'signed_pdfs', pdfFileName);
+    
+    // Ensure directory exists right before writing
+    const signedPdfsDir = path.join(process.cwd(), 'uploads', 'signed_pdfs');
+    if (!fs.existsSync(signedPdfsDir)) {
+      fs.mkdirSync(signedPdfsDir, { recursive: true });
+    }
+
+    const pdfFilePath = path.join(signedPdfsDir, pdfFileName);
     fs.writeFileSync(pdfFilePath, pdfBuffer);
     sigRecord.pdfPath = `/uploads/signed_pdfs/${pdfFileName}`;
 
@@ -4489,8 +4496,10 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
       return res.status(400).json({ error: "No PDF file uploaded for verification" });
     }
 
+    const useAi = req.body.useAi === 'true';
     const fileBuffer = fs.readFileSync(req.file.path);
     const computedHash = crypto.createHash('sha256').update(fileBuffer).digest('hex').toUpperCase();
+    const base64Data = fileBuffer.toString('base64');
 
     // Clean temp uploaded file
     try { fs.unlinkSync(req.file.path); } catch (e) {}
@@ -4507,13 +4516,64 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
       matches = (localDb.digital_signatures || []).filter((s: any) => s.documentHash === computedHash || s.signatureHash === computedHash);
     }
 
+    let aiAnalysis = null;
+    if (useAi) {
+      try {
+        let apiKey = (process.env.GEMINI_API_KEY || '').trim();
+        if (!apiKey) {
+          const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+          if (stRows && stRows[0] && stRows[0].geminiApiKey) {
+            apiKey = String(stRows[0].geminiApiKey).trim();
+          }
+        }
+
+        if (apiKey) {
+          const client = new GoogleGenAI({ apiKey });
+          const model = client.getGenerativeModel({ model: "gemini-1.5-flash" });
+          
+          const systemContext = matches.length > 0 ? `The system expects this document to be: Subject: ${matches[0].docTitle}, Signer: ${matches[0].signerName}, Position: ${matches[0].signerPosition}.` : "The system does not have a record of this document hash.";
+
+          const result = await model.generateContent({
+            contents: [
+              {
+                inlineData: {
+                  mimeType: 'application/pdf',
+                  data: base64Data
+                }
+              },
+              { text: `Analyze this PDF document for electronic document validation purposes. 
+                ${systemContext}
+                Compare the content in the PDF with the expected data above (if provided).
+                Does the text in the PDF match the metadata? 
+                Are there any suspicious elements or potential tamperings visible in the layout?
+                Please provide in JSON format with:
+                - 'subject': string (Subject extracted from PDF)
+                - 'signer': string (Signer name extracted from PDF)
+                - 'confidence': 'สูง' | 'ปานกลาง' | 'ต่ำ'
+                - 'bodySummary': string (Brief summary of content)
+                - 'matchStatus': 'MATCH' | 'MISMATCH' | 'NEW_DOCUMENT' (Compare PDF text with expected data)
+                - 'discrepancyNote': string (Explain any differences found)
+                - 'isOfficial': boolean (Does it look like an official document?)` }
+            ],
+            generationConfig: { responseMimeType: "application/json" }
+          });
+          
+          const aiText = result.response.text();
+          aiAnalysis = JSON.parse(aiText);
+        }
+      } catch (e: any) {
+        console.warn('AI validation skipped or failed:', e.message);
+      }
+    }
+
     if (matches.length > 0) {
       return res.json({
         valid: true,
         computedHash,
         statusText: 'เอกสารผ่านการตรวจสอบความถูกต้องสมบูรณ์ (FILE INTEGRITY PASSED)',
         message: 'ไฟล์ PDF ต้นฉบับตรงกับรหัส SHA-256 ที่ได้ลงนามไว้ ไม่พบการดัดแปลงแก้ไขข้อความย้อนหลัง',
-        signature: matches[0]
+        signature: matches[0],
+        aiAnalysis
       });
     }
 
@@ -4521,7 +4581,8 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
       valid: false,
       computedHash,
       statusText: 'เอกสารไม่ตรงกับข้อมูลในระบบ หรือถูกดัดแปลงแก้ไข (INTEGRITY CHECK FAILED)',
-      message: `รหัส SHA-256 ของไฟล์คือ ${computedHash} แต่ไม่ตรงกับประวัติการลงนามดิจิทัลใดๆ อาจเป็นไฟล์ใหม่หรือถูกแก้ไขข้อความย้อนหลัง`
+      message: `รหัส SHA-256 ของไฟล์คือ ${computedHash} แต่ไม่ตรงกับประวัติการลงนามดิจิทัลใดๆ อาจเป็นไฟล์ใหม่หรือถูกแก้ไขข้อความย้อนหลัง`,
+      aiAnalysis
     });
   } catch (err: any) {
     return res.status(500).json({ error: "File verification error: " + err.message });
