@@ -2282,47 +2282,49 @@ async function addSystemLog(action: string, details: string, username: string = 
 // 1. Settings API Endpoints
 app.get('/api/settings', async (req, res) => {
   try {
+      if (!isMysqlOnline) throw new Error("Database offline");
       const [rows]: any = await pool.query('SELECT * FROM settings LIMIT 1');
       if (rows.length > 0) {
         return res.json(rows[0]);
       } else {
-        return res.json({
-          currentYear: 2569,
-          startSequence: 1,
-          orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
-          headerOrgName: '',
-          logoUrl: '',
-          garuda15Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
-          garuda30Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
-          faviconUrl: '',
-          footerText: "© 2026 ระบบสารบรรณอิเล็กทรอนิกส์",
-          geminiApiKey: "",
-          smtpHost: "",
-          smtpPort: 587,
-          smtpUser: "",
-          smtpPassword: "",
-          smtpFrom: "",
-          enabledFeatures: JSON.stringify({
-            overview: true,
-            inbox: true,
-            outbox: true,
-            admin_docs: true,
-            draft_docs: true,
-            folders: true,
-            logs: true,
-            draft: true,
-            aiscan: true,
-            order: true,
-            customorder: true,
-            speech: true,
-            meeting: true,
-            summary: true,
-          })
-        });
+        throw new Error("No settings found");
       }
     } catch (error: any) {
-      console.error("Database error:", error.message);
-      return res.status(500).json({ error: "Database error" });
+      console.error("Database error in /api/settings:", error.message);
+      // Fallback
+      return res.json(localDb.settings[0] || {
+        currentYear: 2569,
+        startSequence: 1,
+        orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+        headerOrgName: '',
+        logoUrl: '',
+        garuda15Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
+        garuda30Url: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Garuda_Thailand.svg',
+        faviconUrl: '',
+        footerText: "© 2026 ระบบสารบรรณอิเล็กทรอนิกส์",
+        geminiApiKey: "",
+        smtpHost: "",
+        smtpPort: 587,
+        smtpUser: "",
+        smtpPassword: "",
+        smtpFrom: "",
+        enabledFeatures: JSON.stringify({
+          overview: true,
+          inbox: true,
+          outbox: true,
+          admin_docs: true,
+          draft_docs: true,
+          folders: true,
+          logs: true,
+          draft: true,
+          aiscan: true,
+          order: true,
+          customorder: true,
+          speech: true,
+          meeting: true,
+          summary: true,
+        })
+      });
     }
 });
 
@@ -2330,54 +2332,56 @@ app.put("/api/settings", async (req, res) => {
   const data = req.body;
   const ip = getClientIp(req);
   try {
-      let formattedFeatures = data.enabledFeatures;
-      if (formattedFeatures !== undefined && typeof formattedFeatures === 'object' && formattedFeatures !== null) {
-        formattedFeatures = JSON.stringify(formattedFeatures);
-      }
+    if (!isMysqlOnline) throw new Error("Database offline");
 
-      const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
-      if (rows.length > 0) {
-        let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
-        const params: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
-        
-        if (formattedFeatures !== undefined) {
-          query += ", enabledFeatures=?";
-          params.push(formattedFeatures);
-        }
-        
-        query += " WHERE id=?";
-        params.push(rows[0].id);
-        
-        await pool.query(query, params);
-      } else {
-        const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
-        const values: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
-        
-        if (formattedFeatures !== undefined) {
-          fields.push("enabledFeatures");
-          values.push(formattedFeatures);
-        }
-        
-        const placeholders = fields.map(() => "?").join(", ");
-        await pool.query(
-          `INSERT INTO settings (${fields.join(", ")}) VALUES (${placeholders})`,
-          values
-        );
-      }
-
-      if (localDb.settings && localDb.settings.length > 0) {
-        if (formattedFeatures !== undefined) {
-          localDb.settings[0].enabledFeatures = formattedFeatures;
-        }
-        saveLocalDb();
-      }
-
-      await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
-      return res.json({ success: true });
-    } catch (error: any) {
-      console.error("Database error:", error.message);
-      return res.status(500).json({ error: "Database error" });
+    let formattedFeatures = data.enabledFeatures;
+    if (formattedFeatures !== undefined && typeof formattedFeatures === 'object' && formattedFeatures !== null) {
+      formattedFeatures = JSON.stringify(formattedFeatures);
     }
+
+    const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
+    if (rows.length > 0) {
+      let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
+      const params: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+      
+      if (formattedFeatures !== undefined) {
+        query += ", enabledFeatures=?";
+        params.push(formattedFeatures);
+      }
+      
+      query += " WHERE id=?";
+      params.push(rows[0].id);
+      
+      await pool.query(query, params);
+    } else {
+      const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
+      const values: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+      
+      if (formattedFeatures !== undefined) {
+        fields.push("enabledFeatures");
+        values.push(formattedFeatures);
+      }
+      
+      const placeholders = fields.map(() => "?").join(", ");
+      await pool.query(
+        `INSERT INTO settings (${fields.join(", ")}) VALUES (${placeholders})`,
+        values
+      );
+    }
+
+    if (localDb.settings && localDb.settings.length > 0) {
+      if (formattedFeatures !== undefined) {
+        localDb.settings[0].enabledFeatures = formattedFeatures;
+      }
+      saveLocalDb();
+    }
+
+    await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error("Database error in /api/settings PUT:", error.message);
+    return res.status(500).json({ error: "ไม่สามารถบันทึกข้อมูลได้ เนื่องจากฐานข้อมูลออฟไลน์ หรือเกิดข้อผิดพลาด" });
+  }
 });
 
 app.put("/api/settings/features", async (req, res) => {

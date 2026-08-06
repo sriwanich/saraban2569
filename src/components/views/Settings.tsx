@@ -205,7 +205,7 @@ export default function Settings(props: SettingsProps) {
   const fetchRolePermissions = async () => {
     setIsLoadingPermissions(true);
     try {
-      const res = await fetch('/api/role-permissions');
+      const res = await fetch('/api/role-permissions', { cache: 'no-cache' });
       if (res.ok) {
         const data = await res.json();
         setRolePermissions(data);
@@ -218,8 +218,6 @@ export default function Settings(props: SettingsProps) {
   };
 
   const handleTogglePermission = async (role: string, permission_key: string, currentVal: number) => {
-    if (props.user?.role !== 'admin') return;
-    
     const nextVal = currentVal === 1 ? 0 : 1;
     const updateKey = `${role}-${permission_key}`;
     setIsUpdatingPermission(updateKey);
@@ -227,6 +225,7 @@ export default function Settings(props: SettingsProps) {
     try {
       const res = await fetch('/api/role-permissions', {
         method: 'PUT',
+        cache: 'no-cache',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           role,
@@ -419,7 +418,7 @@ export default function Settings(props: SettingsProps) {
 
   const fetchSystemSettings = async () => {
     try {
-      const res = await fetch('/api/settings');
+      const res = await fetch('/api/settings', { cache: 'no-cache' });
       if (res.ok) {
         const data = await res.json();
         if (data.currentYear) setCurrentYear(data.currentYear);
