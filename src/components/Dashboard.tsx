@@ -516,28 +516,33 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
-  const baseNavItems = [
+  const baseNavItems: { id: string; icon: any; label: string; permKey?: string }[] = [
     { id: 'overview', icon: Home, label: 'ภาพรวมระบบ' },
-    { id: 'ai_assistant', icon: Sparkles, label: 'ผู้ช่วย AI Smart' },
+    { id: 'ai_assistant', icon: Sparkles, label: 'ผู้ช่วย AI Smart', permKey: 'ai_assistant' },
     { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
     { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
-    { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ' },
-    { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics' },
+    { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ', permKey: 'admin_docs' },
+    { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
     { id: 'favorites', icon: Pin, label: 'เอกสารสำคัญปักหมุด' },
-    { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร' },
-    { id: 'workflow', icon: GitMerge, label: 'Workflow & SLA' },
-    { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล' },
-    { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)' },
-    { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ' },
-    { id: 'recycle_bin', icon: Trash2, label: 'ถังขยะเอกสาร' },
+    { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร', permKey: 'draft_docs' },
+    { id: 'workflow', icon: GitMerge, label: 'Workflow & SLA', permKey: 'workflow_sla' },
+    { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล', permKey: 'digital_folders' },
+    { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
+    { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
+    { id: 'recycle_bin', icon: Trash2, label: 'ถังขยะเอกสาร', permKey: 'recycle_bin' },
   ];
 
-  const navItems = baseNavItems.filter(item => enabledFeatures[item.id] !== false);
+  const navItems = baseNavItems.filter(item => {
+    if (enabledFeatures[item.id] === false) return false;
+    if (item.permKey && !hasPermission(item.permKey)) return false;
+    return true;
+  });
+
+  if (hasPermission('audit_logs') && enabledFeatures['logs'] !== false) {
+    navItems.push({ id: 'logs', icon: ShieldCheck, label: 'บันทึกประวัติระบบ' });
+  }
 
   if (currentUser?.role === 'admin') {
-    if (enabledFeatures['logs'] !== false) {
-      navItems.push({ id: 'logs', icon: ShieldCheck, label: 'บันทึกประวัติระบบ' });
-    }
     navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' });
   } else if (currentUser?.role === 'moderator') {
     navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่า & สิทธิ์การใช้งาน' });
