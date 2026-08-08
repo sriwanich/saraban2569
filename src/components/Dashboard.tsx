@@ -150,10 +150,17 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     // Fallbacks if not configured in DB yet
     if (currentUser.role === 'admin') return true;
     if (currentUser.role === 'moderator') {
-      return ['view_all_docs', 'create_docs', 'edit_all_docs', 'approve_docs'].includes(key);
+      return [
+        'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
+        'admin_docs', 'ai_assistant', 'infographics', 'draft_docs',
+        'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin', 'manage_users'
+      ].includes(key);
     }
     if (currentUser.role === 'user') {
-      return ['create_docs', 'view_all_docs'].includes(key);
+      return [
+        'create_docs', 'export_docs', 'ai_assistant', 'infographics',
+        'draft_docs', 'digital_folders', 'workflow_sla'
+      ].includes(key);
     }
     return false;
   };

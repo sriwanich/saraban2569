@@ -201,6 +201,7 @@ export default function Settings(props: SettingsProps) {
   const [rolePermissions, setRolePermissions] = useState<any[]>([]);
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
   const [isUpdatingPermission, setIsUpdatingPermission] = useState<string | null>(null);
+  const [permissionSearchTerm, setPermissionSearchTerm] = useState<string>('');
 
   const fetchRolePermissions = async () => {
     setIsLoadingPermissions(true);
@@ -236,12 +237,14 @@ export default function Settings(props: SettingsProps) {
       });
       
       if (res.ok) {
-        setRolePermissions(prev => prev.map(p => {
-          if (p.role === role && p.permission_key === permission_key) {
-            return { ...p, is_allowed: nextVal };
+        setRolePermissions(prev => {
+          const exists = prev.some(p => p.role === role && p.permission_key === permission_key);
+          if (exists) {
+            return prev.map(p => (p.role === role && p.permission_key === permission_key) ? { ...p, is_allowed: nextVal } : p);
+          } else {
+            return [...prev, { role, permission_key, is_allowed: nextVal }];
           }
-          return p;
-        }));
+        });
       } else {
         alert('ไม่สามารถอัปเดตสิทธิ์การใช้งานได้');
       }
@@ -250,6 +253,46 @@ export default function Settings(props: SettingsProps) {
       alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
     } finally {
       setIsUpdatingPermission(null);
+    }
+  };
+
+    const handleBatchToggleRole = async (targetRole: string, targetValue: number) => {
+    if (props.user?.role !== 'admin') return;
+    const actionText = targetValue === 1 ? 'เปิดใช้งานสิทธิ์ทั้งหมด' : 'ปิดใช้งานสิทธิ์ทั้งหมด';
+    const roleName = targetRole === 'admin' ? 'Admin' : targetRole === 'moderator' ? 'Moderator' : 'User';
+    if (!window.confirm(`คุณต้องการ${actionText} สำหรับบทบาท "${roleName}" ใช่หรือไม่?`)) return;
+
+    const allKeys = [
+      'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
+      'admin_docs', 'ai_assistant', 'infographics', 'draft_docs',
+      'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin',
+      'manage_users', 'system_settings', 'backup_restore', 'audit_logs'
+    ];
+
+    setIsLoadingPermissions(true);
+    try {
+      for (const key of allKeys) {
+        if (targetRole === 'admin' && (key === 'system_settings' || key === 'manage_users') && targetValue === 0) {
+          continue;
+        }
+        await fetch('/api/role-permissions', {
+          method: 'PUT',
+          cache: 'no-cache',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: targetRole,
+            permission_key: key,
+            is_allowed: targetValue,
+            username: `${props.user?.firstName || ''} ${props.user?.lastName || ''}`.trim() || props.user?.username
+          })
+        });
+      }
+      await fetchRolePermissions();
+    } catch (err) {
+      console.error('Batch permission toggle error:', err);
+      alert('เกิดข้อผิดพลาดในการอัปเดตสิทธิ์กลุ่ม');
+    } finally {
+      setIsLoadingPermissions(false);
     }
   };
 
@@ -2532,70 +2575,170 @@ export default function Settings(props: SettingsProps) {
         {activeTab === 'permissions' && (() => {
           const permissionsList = [
             {
-              section: '1. งานเอกสารและระบบสารบรรณ (Document Management)',
+              section: '1. งานสารบรรณหลัก และเอกสาร (Core Document Operations)',
               items: [
                 {
                   key: 'view_all_docs',
-                  title: 'ดูข้อมูลเอกสารสารบรรณ (View All Documents)',
-                  desc: 'สิทธิ์ในการสืบค้น ค้นหา และเปิดดูเอกสารราชการทั้งหมดในระบบสารบรรณ (หากปิด จะดูได้เฉพาะระดับฝ่ายงาน/ที่ได้รับมอบหมาย)',
+                  title: 'ดูข้อมูลเอกสารสารบรรณทั้งหมด (View All Documents)',
+                  desc: 'สิทธิ์ในการสืบค้น ค้นหา และเปิดดูเอกสารราชการทั้งหมดในระบบสารบรรณ (หากปิด จะดูได้เฉพาะระดับฝ่ายงานตนเอง)',
+                  note: 'ใช้ควบคุมความลับและการเข้าถึงเอกสารข้ามฝ่ายงาน'
                 },
                 {
                   key: 'create_docs',
                   title: 'เพิ่ม / ออกเลข / ลงทะเบียนหนังสือ (Create & Register Docs)',
-                  desc: 'สิทธิ์ในการออกเลขทะเบียนรับ-ส่ง สร้างหนังสือเวียน หรือลงทะเบียนรับหนังสือราชการเข้าระบบ',
+                  desc: 'สิทธิ์ในการออกเลขทะเบียนรับ-ส่ง ออกเลขคำสั่ง/ประกาศ หรือลงทะเบียนหนังสือราชการเข้าระบบ',
+                  note: 'ป้องกันการลงทะเบียนหนังสือซ้ำซ้อน'
                 },
                 {
                   key: 'edit_all_docs',
-                  title: 'แก้ไขข้อมูลเอกสาร (Edit Documents)',
-                  desc: 'สิทธิ์ในการแก้ไขรายละเอียด ฟิลด์ข้อมูล หรืออัปโหลดไฟล์แนบเพิ่มเติม (หากปิด จะแก้ไขได้เฉพาะเอกสารของตนเอง)',
+                  title: 'แก้ไขข้อมูลเอกสารของผู้อื่น (Edit All Documents)',
+                  desc: 'สิทธิ์ในการแก้ไขรายละเอียด ฟิลด์ข้อมูล หรืออัปโหลดไฟล์แนบเพิ่มเติมของเอกสารอื่น',
+                  note: 'หากปิด จะแก้ไขได้เฉพาะเอกสารที่ตนเองสร้างขึ้น'
                 },
                 {
                   key: 'delete_docs',
-                  title: 'ลบข้อมูลเอกสาร (Delete Documents)',
+                  title: 'ลบข้อมูลเอกสาร / ย้ายเข้าถังขยะ (Delete Documents)',
                   desc: 'สิทธิ์การส่งเอกสารไปที่ถังขยะ หรือลบรายการเอกสารที่ไม่ถูกต้องออกจากระบบสารบรรณ',
+                  note: 'แนะนำให้เปิดเฉพาะ Admin และ Moderator'
                 },
                 {
                   key: 'approve_docs',
-                  title: 'อนุมัติเอกสาร / ลงนามหนังสือ (Approve & Sign Docs)',
-                  desc: 'สิทธิ์สำหรับผู้บริหารและหัวหน้ากลุ่มงานในการอนุมัติขั้นตอน และลงลายมือชื่อดิจิทัล (Digital Signature)',
+                  title: 'อนุมัติเอกสาร / ลงนามดิจิทัล (Approve & Sign Docs)',
+                  desc: 'สิทธิ์สำหรับผู้บริหารและหัวหน้ากลุ่มงานในการอนุมัติขั้นตอน และลงลายมือชื่อดิจิทัล PKI',
+                  note: 'ต้องใช้ใบรับรองอิเล็กทรอนิกส์สำหรับลงนาม'
+                },
+                {
+                  key: 'export_docs',
+                  title: 'ส่งออกข้อมูลรายงานและเอกสาร (Export Reports & Data)',
+                  desc: 'สิทธิ์ในการดาวน์โหลดรายงานสารบรรณ สรุปสถิติ หรือส่งออกไฟล์เป็น Excel/PDF/ZIP',
+                  note: 'จำกัดสิทธิ์การนำข้อมูลภายนอกองค์กร'
                 }
               ]
             },
             {
-              section: '2. การจัดการบุคลากรและสิทธิ์ (User Management & Role)',
+              section: '2. ระบบงานธุรการ และผู้ช่วยดิจิทัล (Admin Tools, AI & Infographics)',
+              items: [
+                {
+                  key: 'admin_docs',
+                  title: 'ระบบงานธุรการและแบบฟอร์ม (Admin Forms & Orders)',
+                  desc: 'สิทธิ์เข้าถึงงานธุรการ คำสั่ง ประกาศ ขอซื้อขอจ้าง ขอใช้รถราชการ และจองห้องประชุม',
+                  note: 'ครอบคลุมงานสนับสนุนและธุรการกลาง'
+                },
+                {
+                  key: 'ai_assistant',
+                  title: 'ผู้ช่วย AI Smart สารบรรณ (AI Assistant & Auto Draft)',
+                  desc: 'สิทธิ์ใช้งาน AI ในการสรุปเนื้อหาหนังสือ ยกร่างหนังสือตอบกลับอัตโนมัติ และสืบค้นระเบียบ',
+                  note: 'ช่วยเพิ่มความเร็วและถูกต้องในการร่างหนังสือ'
+                },
+                {
+                  key: 'infographics',
+                  title: 'เครื่องมือออกแบบ Infographics (Infographics Editor)',
+                  desc: 'สิทธิ์ใช้งานสตูดิโอออกแบบสื่อประชาสัมพันธ์ สไลด์นำเสนอ และแผนภูมิสรุปผลงาน',
+                  note: 'รองรับการบันทึกโปรเจกต์และดาวน์โหลดภาพ high-res'
+                },
+                {
+                  key: 'draft_docs',
+                  title: 'ระบบร่างและจัดทำหนังสือ (Draft Documents Management)',
+                  desc: 'สิทธิ์ในการสร้าง บันทึกร่างหนังสือ ตรวจสอบร่าง และเสนอพิจารณาตามลำดับชั้น',
+                  note: 'ช่วยตรวจสอบก่อนลงรับหรือออกเลขจริง'
+                }
+              ]
+            },
+            {
+              section: '3. แฟ้มดิจิทัล กระบวนการทำงาน และความปลอดภัย (Folders, Workflow, Signatures & Bin)',
+              items: [
+                {
+                  key: 'digital_folders',
+                  title: 'แฟ้มเอกสารดิจิทัลและตู้ลับ (Digital Folders & Cabinet)',
+                  desc: 'สิทธิ์สร้าง จัดการ จัดหมวดหมู่ และจัดเก็บหนังสือลงแฟ้มฝ่ายงาน หรือตู้เอกสารควบคุมลับ',
+                  note: 'ควบคุมชั้นความลับของแฟ้มงาน'
+                },
+                {
+                  key: 'workflow_sla',
+                  title: 'ติดตามกระบวนการและ SLA (Workflow & SLA Tracking)',
+                  desc: 'สิทธิ์ตรวจสอบเส้นทางหนังสือ ระยะเวลาประมวลผล ความล่าช้า และกำหนดแจ้งเตือน SLA',
+                  note: 'ช่วยบริหารจัดการเวลาเสนอหนังสือ'
+                },
+                {
+                  key: 'digital_signatures',
+                  title: 'ศูนย์ลงนามดิจิทัล ETDA (Digital Signatures Hub)',
+                  desc: 'สิทธิ์เข้าถึงศูนย์ตรวจสอบและลงนามดิจิทัลตามมาตรฐาน ETDA Gateway',
+                  note: 'ตรวจสอบความถูกต้องของใบรับรองลายมือชื่อ'
+                },
+                {
+                  key: 'recycle_bin',
+                  title: 'ถังขยะเอกสารและการกู้คืน (Recycle Bin & Restore)',
+                  desc: 'สิทธิ์เข้าถึงถังขยะระบบ กู้คืนหนังสือที่ถูกลบ หรือทำลายเอกสารทิ้งถาวร',
+                  note: 'กู้คืนเอกสารที่ถูกลบโดยไม่ตั้งใจ'
+                }
+              ]
+            },
+            {
+              section: '4. การบริหารจัดการและตั้งค่าระบบ (User Management & System Settings)',
               items: [
                 {
                   key: 'manage_users',
-                  title: 'จัดการผู้ใช้งาน (User Management)',
-                  desc: 'สิทธิ์ในการเพิ่ม แก้ไข หรือลบข้อมูลผู้ใช้งานและผู้ปฏิบัติงานในระบบสารบรรณดิจิทัล',
-                }
-              ]
-            },
-            {
-              section: '3. แฟ้มดิจิทัล รายงาน และตั้งค่าระบบ (Folders & Settings)',
-              items: [
+                  title: 'จัดการผู้ใช้งานและบทบาท (User & Role Management)',
+                  desc: 'สิทธิ์ในการเพิ่ม แก้ไข กำหนดฝ่ายงาน หรือระงับบัญชีผู้ใช้งานในระบบ',
+                  note: 'สงวนสิทธิ์การเปลี่ยน Role ให้ Admin เท่านั้น'
+                },
                 {
                   key: 'system_settings',
-                  title: 'ตั้งค่าระบบ / เลขสารบรรณ / SMTP',
-                  desc: 'สิทธิ์การจัดการรูปแบบเลขสารบรรณ ข้อมูลสำนักงาน และการตั้งค่าเมลเซิร์ฟเวอร์หลัก',
+                  title: 'ตั้งค่าระบบและเลขสารบรรณ (System Settings & SMTP)',
+                  desc: 'สิทธิ์ตั้งค่ารูปแบบเลขสารบรรณ ข้อมูลสำนักงาน โครงสร้างฝ่ายงาน และเมลเซิร์ฟเวอร์',
+                  note: 'สิทธิ์ขั้นสูงระดับโครงสร้างระบบ'
                 },
                 {
                   key: 'backup_restore',
-                  title: 'Backup & Restore ข้อมูลระบบ',
-                  desc: 'สิทธิ์การดาวน์โหลดไฟล์ .tar สำรองข้อมูลระบบทั้งหมด หรือย้อนคืนฐานข้อมูล',
+                  title: 'สำรองและคืนค่าข้อมูลระบบ (Backup & Restore .tar)',
+                  desc: 'สิทธิ์ในการดาวน์โหลดไฟล์ .tar สำรองข้อมูลระบบทั้งหมด หรือสั่งคืนค่าฐานข้อมูล',
+                  note: 'ป้องกันความเสียหายของข้อมูลราชการ'
                 },
                 {
                   key: 'audit_logs',
-                  title: 'ดูประวัติระบบ (Audit History Logs)',
-                  desc: 'สิทธิ์การสืบค้นบันทึกการใช้งานเชิงลึก (Security Audit Trail) เพื่อตรวจสอบความปลอดภัย',
+                  title: 'ดูประวัติบันทึกระบบ (Security Audit History Logs)',
+                  desc: 'สิทธิ์ในการสืบค้นประวัติการเข้าใช้งาน การแก้ไข และกิจกรรมความปลอดภัยเชิงลึก',
+                  note: 'ใช้สำหรับการตรวจสอบเชิงกฎหมายและ IT Audit'
                 }
               ]
             }
           ];
 
+          // Calculate active permission count per role
+          const totalKeysCount = 18;
+          const getActiveCount = (role: string) => {
+            const rolePerms = rolePermissions.filter(p => p.role === role && p.is_allowed === 1);
+            return rolePerms.length;
+          };
+
+          const adminActiveCount = getActiveCount('admin');
+          const modActiveCount = getActiveCount('moderator');
+          const userActiveCount = getActiveCount('user');
+
+          // Filter by search term
+          const filteredSections = permissionsList.map(sec => {
+            if (!permissionSearchTerm.trim()) return sec;
+            const term = permissionSearchTerm.toLowerCase();
+            const matchedItems = sec.items.filter(item => 
+              item.title.toLowerCase().includes(term) ||
+              item.desc.toLowerCase().includes(term) ||
+              item.key.toLowerCase().includes(term)
+            );
+            return { ...sec, items: matchedItems };
+          }).filter(sec => sec.items.length > 0);
+
           const renderToggle = (role: string, key: string) => {
             const perm = rolePermissions.find(p => p.role === role && p.permission_key === key);
-            const isAllowed = perm ? (perm.is_allowed === 1) : false;
+            // Default fallbacks if not explicitly set
+            let isAllowed = false;
+            if (perm) {
+              isAllowed = perm.is_allowed === 1;
+            } else {
+              if (role === 'admin') isAllowed = true;
+              else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
+              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
+            }
+
             const updateKey = `${role}-${key}`;
             const isUpdating = isUpdatingPermission === updateKey;
             const isAdmin = props.user?.role === 'admin';
@@ -2604,24 +2747,24 @@ export default function Settings(props: SettingsProps) {
             const isProtected = role === 'admin' && (key === 'system_settings' || key === 'manage_users');
 
             return (
-              <div className="flex flex-col items-center justify-center gap-1">
+              <div className="flex flex-col items-center justify-center gap-1 py-1">
                 <button
                   disabled={!isAdmin || isProtected || isLoadingPermissions || isUpdating}
                   onClick={() => handleTogglePermission(role, key, isAllowed ? 1 : 0)}
-                  className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                     isAllowed 
                       ? (role === 'admin' ? 'bg-amber-500' : role === 'moderator' ? 'bg-indigo-600' : 'bg-emerald-500') 
                       : 'bg-slate-200 dark:bg-slate-700'
-                  } ${(!isAdmin || isProtected) ? 'opacity-60 cursor-not-allowed' : 'hover:scale-105 active:scale-95'}`}
-                  title={isProtected ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin' : !isAdmin ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้' : 'คลิกเพื่อเปลี่ยนสิทธิ์'}
+                  } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-sm'}`}
+                  title={isProtected ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin (ห้ามปิด)' : !isAdmin ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้' : 'คลิกเพื่อสลับสิทธิ์การใช้งาน'}
                 >
                   <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
                       isAllowed ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
-                <span className={`text-[10px] font-semibold tracking-wide ${isAllowed ? 'text-emerald-500 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                <span className={`text-[10px] font-bold tracking-tight ${isAllowed ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
                   {isUpdating ? 'บันทึก...' : isAllowed ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
                 </span>
               </div>
@@ -2631,197 +2774,303 @@ export default function Settings(props: SettingsProps) {
           return (
             <div className="space-y-6 animate-fade-in">
               {/* Header banner */}
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 text-white shadow-xl">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-6 h-6 text-indigo-400" />
-                      <h3 className="text-xl font-bold font-noto-serif-thai text-white">
+              <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 text-white shadow-xl">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-400/30">
+                        <Shield className="w-6 h-6 text-indigo-400" />
+                      </div>
+                      <h3 className="text-xl sm:text-2xl font-bold font-noto-serif-thai text-white">
                         การกำหนดสิทธิ์ผู้ใช้งาน (Role & Permission Control Hub)
                       </h3>
                     </div>
-                    <p className="text-sm text-slate-300 mt-1 leading-relaxed">
-                      ปรับปรุงและควบคุมสิทธิ์สำหรับบทบาทต่าง ๆ (Admin, Moderator, User) อย่างละเอียด ครอบคลุมทั้งโครงสร้างสารบรรณและการตั้งค่าระบบ
+                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-3xl pt-1">
+                      แผงควบคุมสิทธิ์ตามระดับผู้ใช้แบบโต้ตอบ (Interactive Matrix) ครอบคลุมทั้ง 18 ฟังก์ชันหลักในระบบสารบรรณอิเล็กทรอนิกส์
+                      สามารถปรับเปลี่ยนและมีผลใช้งานทันทีทั่วทั้งองค์กร
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0 bg-slate-950/40 p-1.5 rounded-xl border border-white/5">
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      Admin (ผู้ดูแลระบบ)
-                    </span>
-                    <span className="text-slate-400 text-xs">&gt;</span>
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                      Moderator (ผู้ตรวจสอบ/หัวหน้า)
-                    </span>
-                    <span className="text-slate-400 text-xs">&gt;</span>
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      User (ผู้ใช้งานทั่วไป)
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-white/10 shrink-0">
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold">
+                      <Crown className="w-3.5 h-3.5 text-amber-400" /> Admin ({adminActiveCount}/{totalKeysCount})
+                    </div>
+                    <span className="text-slate-500 text-xs">&gt;</span>
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold">
+                      <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" /> Moderator ({modActiveCount}/{totalKeysCount})
+                    </div>
+                    <span className="text-slate-500 text-xs">&gt;</span>
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">
+                      <UserIcon className="w-3.5 h-3.5 text-emerald-400" /> User ({userActiveCount}/{totalKeysCount})
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Role Hierarchy Cards */}
+              {/* Role Summary Cards with Quick Actions */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Admin Card */}
-                <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-amber-500/30 shadow-sm space-y-3 relative overflow-hidden">
+                <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-amber-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
                   <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-bl-full pointer-events-none" />
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 bg-amber-500/10 text-amber-500 rounded-lg">
-                        <Crown className="w-5 h-5" />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
+                          <Crown className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-[var(--text-primary)]">Admin (ผู้ดูแลระบบ)</h4>
+                          <span className="text-xs text-[var(--text-muted)]">สิทธิ์สูงสุดควบคุมโครงสร้างระบบ</span>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-bold text-[var(--text-primary)]">Admin</h4>
-                        <span className="text-xs text-[var(--text-muted)]">ผู้ดูแลระบบสารบรรณ</span>
-                      </div>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                        Level 1
+                      </span>
                     </div>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
-                      Level 1 (สูงสุด)
-                    </span>
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                      มีสิทธิ์จัดการระบบสารบรรณเต็มรูปแบบ จัดการบทบาทผู้ใช้ ตั้งค่าเลขสารบรรณ และสำรองข้อมูล
+                    </p>
                   </div>
-                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                    ผู้ดูแลระบบสารบรรณส่วนกลาง มีสิทธิ์จัดการระบบทั้งหมด กำหนดรูปแบบเลขหนังสือ ผู้ใช้ สิทธิ์ และสำรองข้อมูล
-                  </p>
-                  <div className="pt-2 border-t border-[var(--border-lighter)] text-xs text-[var(--text-muted)] space-y-1">
-                    <div className="flex items-center gap-1.5 text-emerald-500 font-medium">
-                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> สิทธิ์เข้าถึงและจัดการ 100%
+
+                  <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
+                    <div className="flex items-center justify-between text-xs font-semibold">
+                      <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
+                      <span className="text-amber-500">{adminActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <Key className="w-3.5 h-3.5 shrink-0 text-amber-500" /> เปลี่ยนสิทธิ์ผู้ใช้และตั้งค่าเชิงเทคนิค
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-amber-500 h-full transition-all duration-300" style={{ width: `${(adminActiveCount / totalKeysCount) * 100}%` }} />
                     </div>
                   </div>
                 </div>
 
                 {/* Moderator Card */}
-                <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-blue-500/30 shadow-sm space-y-3 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-bl-full pointer-events-none" />
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 bg-blue-500/10 text-blue-500 rounded-lg">
-                        <ShieldCheck className="w-5 h-5" />
+                <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-indigo-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-bl-full pointer-events-none" />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
+                          <ShieldCheck className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-[var(--text-primary)]">Moderator (ผู้ตรวจสอบ)</h4>
+                          <span className="text-xs text-[var(--text-muted)]">หัวหน้ากลุ่มงาน / เจ้าหน้าที่สารบรรณ</span>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-bold text-[var(--text-primary)]">Moderator</h4>
-                        <span className="text-xs text-[var(--text-muted)]">ผู้ตรวจสอบ / หัวหน้ากลุ่มงาน</span>
-                      </div>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/15 text-indigo-500 border border-indigo-500/30">
+                        Level 2
+                      </span>
                     </div>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/15 text-blue-500 border border-blue-500/30">
-                      Level 2
-                    </span>
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                      มีสิทธิ์ออกเลขสารบรรณ ตรวจสอบร่างหนังสือ อนุมัติเอกสาร ลงนามดิจิทัล และดูแลผู้ใช้ในฝ่าย
+                    </p>
                   </div>
-                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                    เจ้าหน้าที่รับ-ส่งหนังสือ หรือหัวหน้ากลุ่มงาน มีสิทธิ์ออกเลขทะเบียนรับ/ส่ง อนุมัติเอกสาร และจัดการบุคลากรในฝ่ายตนเอง
-                  </p>
-                  <div className="pt-2 border-t border-[var(--border-lighter)] text-xs text-[var(--text-muted)] space-y-1">
-                    <div className="flex items-center gap-1.5 text-emerald-500 font-medium">
-                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> รับ-ส่ง/ลงทะเบียน/อนุมัติเอกสาร
+
+                  <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
+                    <div className="flex items-center justify-between text-xs font-semibold">
+                      <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
+                      <span className="text-indigo-500">{modActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-amber-500 font-medium">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> จัดการบุคลากรในฝ่าย (ห้ามเปลี่ยน Role)
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${(modActiveCount / totalKeysCount) * 100}%` }} />
                     </div>
+                    {props.user?.role === 'admin' && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          onClick={() => handleBatchToggleRole('moderator', 1)}
+                          disabled={isLoadingPermissions}
+                          className="flex-1 py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-300 text-[11px] font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors"
+                        >
+                          เปิดสิทธิ์ทั้งหมด
+                        </button>
+                        <button
+                          onClick={() => handleBatchToggleRole('moderator', 0)}
+                          disabled={isLoadingPermissions}
+                          className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
+                        >
+                          ปิดสิทธิ์ทั้งหมด
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* User Card */}
-                <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-emerald-500/30 shadow-sm space-y-3 relative overflow-hidden">
+                <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-emerald-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
                   <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-bl-full pointer-events-none" />
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg">
-                        <UserIcon className="w-5 h-5" />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
+                          <UserIcon className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-[var(--text-primary)]">User (ผู้ใช้งานทั่วไป)</h4>
+                          <span className="text-xs text-[var(--text-muted)]">เจ้าหน้าที่ผู้ปฏิบัติงาน</span>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-bold text-[var(--text-primary)]">User</h4>
-                        <span className="text-xs text-[var(--text-muted)]">ผู้ใช้งานทั่วไป</span>
-                      </div>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                        Level 3
+                      </span>
                     </div>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
-                      Level 3
-                    </span>
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                      สร้างและแก้ไขเอกสารของตนเอง ใช้งาน AI สารบรรณ ออกแบบ Infographics และจัดเก็บลงแฟ้มงาน
+                    </p>
                   </div>
-                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                    เจ้าหน้าที่ผู้ปฏิบัติงาน สามารถยกร่างหนังสือ สร้างหนังสือส่ง ติดตามสถานะเอกสาร และแก้ไขเฉพาะเอกสารของตนเอง
-                  </p>
-                  <div className="pt-2 border-t border-[var(--border-lighter)] text-xs text-[var(--text-muted)] space-y-1">
-                    <div className="flex items-center gap-1.5 text-emerald-500 font-medium">
-                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> สร้างหนังสือ/แก้ไขเอกสารตนเอง
+
+                  <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
+                    <div className="flex items-center justify-between text-xs font-semibold">
+                      <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
+                      <span className="text-emerald-500">{userActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-red-400 font-medium">
-                      <X className="w-3.5 h-3.5 shrink-0" /> ห้ามลบเอกสาร/ห้ามตั้งค่าระบบ
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-emerald-500 h-full transition-all duration-300" style={{ width: `${(userActiveCount / totalKeysCount) * 100}%` }} />
                     </div>
+                    {props.user?.role === 'admin' && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          onClick={() => handleBatchToggleRole('user', 1)}
+                          disabled={isLoadingPermissions}
+                          className="flex-1 py-1 px-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-300 text-[11px] font-semibold border border-emerald-200 dark:border-emerald-800 transition-colors"
+                        >
+                          เปิดสิทธิ์ทั้งหมด
+                        </button>
+                        <button
+                          onClick={() => handleBatchToggleRole('user', 0)}
+                          disabled={isLoadingPermissions}
+                          className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
+                        >
+                          ปิดสิทธิ์ทั้งหมด
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Dynamic Control Panel */}
+              {/* Dynamic Search & Control Header */}
               <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl overflow-hidden shadow-sm">
-                <div className="p-4 bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] flex items-center justify-between">
+                <div className="p-4 bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Layers className="w-5 h-5 text-[var(--primary-color)]" />
                     <h4 className="font-bold text-[var(--text-primary)] text-sm sm:text-base font-noto-serif-thai">
-                      แผงควบคุมสิทธิ์ตามระดับผู้ใช้ (Interactive Role Permission Matrix)
+                      แผงตารางควบคุมสิทธิ์ทุกฟังก์ชัน (Role Permission Matrix)
                     </h4>
                   </div>
-                  {props.user?.role !== 'admin' && (
-                    <span className="text-xs text-rose-500 font-medium bg-rose-50 dark:bg-rose-950/20 px-2 py-1 rounded-lg border border-rose-200 dark:border-rose-900 flex items-center gap-1">
-                      <Lock className="w-3.5 h-3.5" /> อ่านอย่างเดียว (เฉพาะ Admin ที่สามารถแก้ไขได้)
-                    </span>
-                  )}
+
+                  {/* Search Bar & Refresh */}
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="relative flex-1 sm:w-64">
+                      <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="ค้นหาฟังก์ชันหรือสิทธิ์..."
+                        value={permissionSearchTerm}
+                        onChange={(e) => setPermissionSearchTerm(e.target.value)}
+                        className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl pl-9 pr-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                      />
+                      {permissionSearchTerm && (
+                        <button 
+                          onClick={() => setPermissionSearchTerm('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xs font-bold"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      onClick={fetchRolePermissions}
+                      disabled={isLoadingPermissions}
+                      className="p-2 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--primary-color)] transition-colors"
+                      title="โหลดข้อมูลสิทธิ์ใหม่"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isLoadingPermissions ? 'animate-spin text-[var(--primary-color)]' : ''}`} />
+                    </button>
+                  </div>
                 </div>
+
+                {props.user?.role !== 'admin' && (
+                  <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-700 dark:text-amber-300 font-medium flex items-center gap-2">
+                    <Lock className="w-4 h-4 shrink-0" />
+                    <span>คุณกำลังดูตารางสิทธิ์ในโหมดอ่านอย่างเดียว (Read-only) เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถสลับการเปิด/ปิดสิทธิ์ได้</span>
+                  </div>
+                )}
 
                 {isLoadingPermissions ? (
                   <div className="p-12 text-center space-y-3">
                     <RefreshCw className="w-8 h-8 animate-spin text-[var(--primary-color)] mx-auto" />
-                    <p className="text-sm text-[var(--text-muted)]">กำลังดึงข้อมูลการกำหนดสิทธิ์ของระบบ...</p>
+                    <p className="text-sm text-[var(--text-muted)]">กำลังอัปเดตและดึงข้อมูลกำหนดสิทธิ์จากเซิร์ฟเวอร์...</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left text-sm border-collapse min-w-[750px]">
+                    <table className="w-full text-left text-sm border-collapse min-w-[850px]">
                       <thead>
                         <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-lighter)] text-xs font-semibold text-[var(--text-secondary)]">
-                          <th className="p-3.5 w-2/5">ฟังก์ชันการทำงาน / สิทธิ์ที่เกี่ยวข้อง</th>
-                          <th className="p-3.5 text-center w-32 bg-amber-500/5 text-amber-500 font-bold">Admin</th>
-                          <th className="p-3.5 text-center w-32 bg-blue-500/5 text-blue-500 font-bold">Moderator</th>
-                          <th className="p-3.5 text-center w-32 bg-emerald-500/5 text-emerald-500 font-bold">User</th>
-                          <th className="p-3.5">รายละเอียดและข้อจำกัดของระบบ</th>
+                          <th className="p-4 w-2/5">ฟังก์ชันระบบ / รายการสิทธิ์การใช้งาน</th>
+                          <th className="p-4 text-center w-36 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold border-x border-[var(--border-lighter)]/40">
+                            <div className="flex items-center justify-center gap-1">
+                              <Crown className="w-3.5 h-3.5" /> Admin
+                            </div>
+                          </th>
+                          <th className="p-4 text-center w-36 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
+                            <div className="flex items-center justify-center gap-1">
+                              <ShieldCheck className="w-3.5 h-3.5" /> Moderator
+                            </div>
+                          </th>
+                          <th className="p-4 text-center w-36 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold border-x border-[var(--border-lighter)]/40">
+                            <div className="flex items-center justify-center gap-1">
+                              <UserIcon className="w-3.5 h-3.5" /> User
+                            </div>
+                          </th>
+                          <th className="p-4">ข้อแนะนำและผลกระทบเชิงความปลอดภัย</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border-lighter)] text-xs sm:text-sm">
-                        {permissionsList.map((sec, idx) => (
-                          <React.Fragment key={idx}>
-                            <tr className="bg-[var(--bg-elevated)]/50 font-bold text-[var(--primary-color)] text-xs">
-                              <td colSpan={5} className="py-2.5 px-3.5">{sec.section}</td>
-                            </tr>
-                            {sec.items.map((item) => (
-                              <tr key={item.key} className="hover:bg-[var(--border-lighter)]/20 transition-colors">
-                                <td className="p-3.5">
-                                  <div className="font-semibold text-[var(--text-primary)]">{item.title}</div>
-                                  <div className="text-[11px] text-[var(--text-muted)] mt-0.5 leading-relaxed">{item.desc}</div>
-                                </td>
-                                <td className="p-3.5 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40">
-                                  {renderToggle('admin', item.key)}
-                                </td>
-                                <td className="p-3.5 text-center bg-blue-500/5 border-x border-[var(--border-lighter)]/40">
-                                  {renderToggle('moderator', item.key)}
-                                </td>
-                                <td className="p-3.5 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40">
-                                  {renderToggle('user', item.key)}
-                                </td>
-                                <td className="p-3.5 text-[var(--text-muted)] text-xs leading-relaxed">
-                                  {item.key === 'view_all_docs' && 'หากปิดใช้งาน สมาชิกกลุ่มจะสามารถเห็นเฉพาะหนังสือที่สร้างเอง หรือจัดส่งเข้ามาเฉพาะกลุ่มงานตนเท่านั้น'}
-                                  {item.key === 'create_docs' && 'ใช้สำหรับงานจัดทำสารบรรณ ออกเลขสารบรรณประเภทต่าง ๆ เพื่อป้องกันเลขซ้ำ'}
-                                  {item.key === 'edit_all_docs' && 'หากปิดใช้งาน สมาชิกจะแก้ได้เฉพาะเรื่องที่ตนสร้างหรือส่งถึง เพื่อรักษาประวัติการแก้ไข'}
-                                  {item.key === 'delete_docs' && 'สิทธิ์การลบระดับถาวรสงวนไว้สำหรับผู้ดูแลระบบเท่านั้นเพื่อป้องกันหลักฐานราชการสูญหาย'}
-                                  {item.key === 'approve_docs' && 'สิทธิ์การกำกับดูแล/ลงนามอนุมัติด้วยระบบ PKI / ETDA Gateway'}
-                                  {item.key === 'manage_users' && 'ครอบคลุมการควบคุมรายชื่อบัญชี และระงับผู้ใช้งานที่ไม่พึงประสงค์'}
-                                  {item.key === 'system_settings' && 'เฉพาะบัญชี Admin หลักที่จะสามารถแก้ไขระบบตั้งค่าเชิงลึก'}
-                                  {item.key === 'backup_restore' && 'การดำเนินการที่มีความเสี่ยงสูงด้านความปลอดภัยของข้อมูลหลัก'}
-                                  {item.key === 'audit_logs' && 'บันทึกเชิงตรวจสอบประวัติความปลอดภัยของทุกบทบาทในองค์กร'}
+                        {filteredSections.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="p-8 text-center text-[var(--text-muted)]">
+                              ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredSections.map((sec, idx) => (
+                            <React.Fragment key={idx}>
+                              <tr className="bg-[var(--bg-canvas)]/80 font-bold text-[var(--primary-color)] text-xs border-y border-[var(--border-lighter)]">
+                                <td colSpan={5} className="py-3 px-4 flex items-center gap-2">
+                                  <span className="w-2 h-2 rounded-full bg-[var(--primary-color)] inline-block" />
+                                  {sec.section}
                                 </td>
                               </tr>
-                            ))}
-                          </React.Fragment>
-                        ))}
+                              {sec.items.map((item) => (
+                                <tr key={item.key} className="hover:bg-[var(--border-lighter)]/30 transition-colors">
+                                  <td className="p-4">
+                                    <div className="font-semibold text-[var(--text-primary)] text-sm">{item.title}</div>
+                                    <div className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">{item.desc}</div>
+                                    <div className="inline-block mt-1.5 px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-[var(--text-secondary)] border border-[var(--border-lighter)]">
+                                      key: {item.key}
+                                    </div>
+                                  </td>
+                                  <td className="p-4 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                    {renderToggle('admin', item.key)}
+                                  </td>
+                                  <td className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                    {renderToggle('moderator', item.key)}
+                                  </td>
+                                  <td className="p-4 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                    {renderToggle('user', item.key)}
+                                  </td>
+                                  <td className="p-4 text-[var(--text-secondary)] text-xs leading-relaxed align-middle">
+                                    <div className="p-2.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)] space-y-1">
+                                      <div className="font-semibold text-[var(--text-primary)]">{item.note}</div>
+                                      <div className="text-[11px] text-[var(--text-muted)]">
+                                        มีผลกับการเข้าถึงหน้าต่าง ย่อ/ขยายเมนู และปุ่มดำเนินการในระบบ
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>
