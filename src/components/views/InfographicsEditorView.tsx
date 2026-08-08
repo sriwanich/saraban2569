@@ -8,6 +8,7 @@ import {
 , Wrench, Settings, X } from 'lucide-react';
 
 import { InfographicsGalleryModal } from './InfographicsGalleryModal';
+import { FontSelector, ensureGoogleFontLoaded } from './FontSelector';
 import { PDFDocument } from 'pdf-lib';
 
 interface InfographicsEditorViewProps {
@@ -132,9 +133,13 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     };
   }, [canvas, backgroundColor]); // Rerun if these change so saveHistory has fresh closure
   
-  const handlePropertyChange = (property: string, value: any) => {
+  const handlePropertyChange = async (property: string, value: any) => {
     if (!canvas || !selectedObject) return;
     
+    if (property === 'fontFamily') {
+      await ensureGoogleFontLoaded(value);
+    }
+
     selectedObject.set(property, value);
     canvas.requestRenderAll();
     
@@ -554,6 +559,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         
         if (canvas && payload.canvas) {
           canvas.loadFromJSON(payload.canvas, () => {
+            const objs = canvas.getObjects();
+            objs.forEach(async (obj) => {
+              if ('fontFamily' in obj && obj.fontFamily) {
+                await ensureGoogleFontLoaded(obj.fontFamily as string);
+              }
+            });
             canvas.requestRenderAll();
           });
         }
@@ -1086,20 +1097,10 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               {(selectedObject.type === 'i-text' || selectedObject.type === 'textbox') && (
                 <div className="space-y-4 pt-4 border-t border-[var(--border-light)]">
                   <div>
-                    <label className="text-xs text-[var(--text-secondary)] mb-2 block flex items-center gap-1">
-                      <FontIcon className="w-3 h-3" /> ฟอนต์ (Font Family)
-                    </label>
-                    <select 
-                      value={fontFamily}
-                      onChange={(e) => handlePropertyChange('fontFamily', e.target.value)}
-                      className="w-full p-1.5 rounded border border-[var(--border-medium)] bg-[var(--bg-elevated)] text-[var(--text-primary)] text-sm"
-                    >
-                      <option value="Sarabun">Sarabun</option>
-                      <option value="Prompt">Prompt</option>
-                      <option value="Kanit">Kanit</option>
-                      <option value="Noto Sans Thai">Noto Sans Thai</option>
-                      <option value="Arial">Arial</option>
-                    </select>
+                    <FontSelector
+                      currentFont={fontFamily}
+                      onSelectFont={(newFont) => handlePropertyChange('fontFamily', newFont)}
+                    />
                   </div>
 
                   <div>
