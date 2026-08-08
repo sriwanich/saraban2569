@@ -16,6 +16,7 @@ export const DEFAULT_ENABLED_FEATURES: Record<string, boolean> = {
   summary: true,
   workflow: true,
   version_control: true,
+  qr_generator: true,
 };
 
 export function parseEnabledFeatures(data: any): Record<string, boolean> {

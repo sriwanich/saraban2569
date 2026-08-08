@@ -264,7 +264,7 @@ export default function Settings(props: SettingsProps) {
 
     const allKeys = [
       'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
-      'admin_docs', 'ai_assistant', 'infographics', 'draft_docs',
+      'admin_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
       'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin',
       'manage_users', 'system_settings', 'backup_restore', 'audit_logs'
     ];
@@ -2637,6 +2637,12 @@ export default function Settings(props: SettingsProps) {
                   note: 'รองรับการบันทึกโปรเจกต์และดาวน์โหลดภาพ high-res'
                 },
                 {
+                  key: 'qr_generator',
+                  title: 'เครื่องมือสร้าง QR Code สารบรรณ & สติ๊กเกอร์ (QR Code Studio & PDF Label)',
+                  desc: 'สิทธิ์ใช้งานเครื่องมือสร้าง QR Code เอกสารสารบรรณ แทรกใน PDF และจัดพิมพ์สติ๊กเกอร์บาร์โค้ด',
+                  note: 'ช่วยให้ประชาชนและเจ้าหน้าที่สแกนตรวจสอบสถานะหนังสือได้รวดเร็ว'
+                },
+                {
                   key: 'draft_docs',
                   title: 'ระบบร่างและจัดทำหนังสือ (Draft Documents Management)',
                   desc: 'สิทธิ์ในการสร้าง บันทึกร่างหนังสือ ตรวจสอบร่าง และเสนอพิจารณาตามลำดับชั้น',
@@ -2704,8 +2710,8 @@ export default function Settings(props: SettingsProps) {
             }
           ];
 
-          // Calculate active permission count per role
-          const totalKeysCount = 18;
+          // Calculate active permission count per role dynamically
+          const totalKeysCount = permissionsList.reduce((acc, sec) => acc + sec.items.length, 0);
           const getActiveCount = (role: string) => {
             const rolePerms = rolePermissions.filter(p => p.role === role && p.is_allowed === 1);
             return rolePerms.length;
@@ -2736,7 +2742,7 @@ export default function Settings(props: SettingsProps) {
             } else {
               if (role === 'admin') isAllowed = true;
               else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
-              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
+              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
             }
 
             const updateKey = `${role}-${key}`;

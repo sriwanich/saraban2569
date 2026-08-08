@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone, FileEdit, GitMerge, Sparkles, Pin } from 'lucide-react';
+import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, Smartphone, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock } from 'lucide-react';
 
 import { db } from '../firebase';
 import { DocumentItem, DocType } from '../types';
@@ -17,6 +17,7 @@ import SmartAiAssistantView from './views/SmartAiAssistantView';
 import DigitalSignatureView from './DigitalSignatureView';
 import RecycleBinView from './views/RecycleBinView';
 import InfographicsEditorView from './views/InfographicsEditorView';
+import QrGeneratorView from './views/QrGeneratorView';
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 
@@ -152,13 +153,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (currentUser.role === 'moderator') {
       return [
         'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
-        'admin_docs', 'ai_assistant', 'infographics', 'draft_docs',
+        'admin_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
         'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin', 'manage_users'
       ].includes(key);
     }
     if (currentUser.role === 'user') {
       return [
-        'create_docs', 'export_docs', 'ai_assistant', 'infographics',
+        'create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator',
         'draft_docs', 'digital_folders', 'workflow_sla'
       ].includes(key);
     }
@@ -527,6 +528,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 'workflow', icon: GitMerge, label: 'Workflow & SLA' },
     { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล' },
     { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)' },
+    { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ' },
     { id: 'recycle_bin', icon: Trash2, label: 'ถังขยะเอกสาร' },
   ];
 
@@ -554,17 +556,51 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
+  const renderGuardedView = (permKey: string, featureName: string, viewComponent: React.ReactNode) => {
+    if (!hasPermission(permKey)) {
+      return (
+        <div className="p-8 sm:p-12 bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl text-center space-y-4 max-w-2xl mx-auto my-12 shadow-sm animate-fade-in">
+          <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-xl font-bold font-noto-serif-thai text-[var(--text-primary)]">
+              ไม่มีสิทธิ์เข้าถึงฟังก์ชัน {featureName}
+            </h3>
+            <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+              บัญชีผู้ใช้งานของคุณ ({currentUser?.firstName || currentUser?.username} - {currentUser?.role === 'admin' ? 'ผู้ดูแลระบบ' : currentUser?.role === 'moderator' ? 'ผู้ตรวจสอบ' : 'ผู้ใช้งานทั่วไป'}) ไม่ได้รับอนุญาตให้ใช้งานในส่วนนี้ กรุณาติดต่อผู้ดูแลระบบ (Admin) เพื่อเปิดสิทธิ์ในแผงควบคุมสิทธิ์ (Interactive Role Permission Matrix)
+            </p>
+          </div>
+          <div className="p-3 bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-xl text-xs text-[var(--text-muted)] font-mono inline-block">
+            Required Permission Key: <span className="font-bold text-[var(--primary-color)]">{permKey}</span>
+          </div>
+          <div className="pt-2">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className="px-5 py-2.5 rounded-xl bg-[var(--primary-color)] text-white text-xs font-semibold hover:opacity-90 transition-opacity shadow-sm cursor-pointer"
+            >
+              กลับสู่หน้าภาพรวมระบบ
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return viewComponent;
+  };
+
   const renderContent = () => {
     switch(activeTab) {
       case 'overview':
         return <Overview documents={documents} user={currentUser} onCreateDoc={(type) => { setCreateDocType(type || 'inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} enabledFeatures={enabledFeatures} />;
       case 'ai_assistant':
-        return <SmartAiAssistantView 
-          user={currentUser} 
-          documents={documents} 
-          onViewDoc={handleViewDoc} 
-          onNavigateToDrafts={() => setActiveTab('draft_docs')}
-        />;
+        return renderGuardedView('ai_assistant', 'ผู้ช่วย AI Smart สารบรรณ', (
+          <SmartAiAssistantView 
+            user={currentUser} 
+            documents={documents} 
+            onViewDoc={handleViewDoc} 
+            onNavigateToDrafts={() => setActiveTab('draft_docs')}
+          />
+        ));
       case 'inbox':
         return <DocumentList 
           title="ทะเบียนหนังสือรับ" 
@@ -592,18 +628,22 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           hasPermission={hasPermission}
         />;
       case 'admin_docs':
-        return <AdminDocsView 
-          documents={documents} 
-          onViewDoc={setSelectedDoc}
-          onCreateDoc={() => { setCreateDocType('admin'); setIsCreateModalOpen(true); }}
-          onEditDoc={handleEditDoc}
-          onDeleteDoc={handleDeleteDoc}
-          user={currentUser}
-          favorites={favorites}
-          onToggleFavorite={handleToggleFavorite}
-        />;
+        return renderGuardedView('admin_docs', 'ระบบงานธุรการและแบบฟอร์ม', (
+          <AdminDocsView 
+            documents={documents} 
+            onViewDoc={setSelectedDoc}
+            onCreateDoc={() => { setCreateDocType('admin'); setIsCreateModalOpen(true); }}
+            onEditDoc={handleEditDoc}
+            onDeleteDoc={handleDeleteDoc}
+            user={currentUser}
+            favorites={favorites}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        ));
       case 'infographics':
-        return <InfographicsEditorView user={currentUser} />;
+        return renderGuardedView('infographics', 'เครื่องมือออกแบบ Infographics', (
+          <InfographicsEditorView user={currentUser} />
+        ));
       case 'favorites':
         return <DocumentList 
           title="เอกสารสำคัญปักหมุด" 
@@ -617,45 +657,62 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           hasPermission={hasPermission}
         />;
       case 'draft_docs':
-        return <DraftDocsView 
-          user={currentUser} 
-          enabledFeatures={enabledFeatures}
-          onSaveToRegistry={() => {
-            setCreateDocType('outbox');
-            setIsCreateModalOpen(true);
-          }}
-        />;
+        return renderGuardedView('draft_docs', 'ระบบร่างและจัดทำหนังสือ', (
+          <DraftDocsView 
+            user={currentUser} 
+            enabledFeatures={enabledFeatures}
+            onSaveToRegistry={() => {
+              setCreateDocType('outbox');
+              setIsCreateModalOpen(true);
+            }}
+          />
+        ));
       case 'workflow':
-        return <WorkflowSlaView 
-          documents={documents} 
-          user={currentUser} 
-          onViewDoc={setSelectedDoc} 
-        />;
+        return renderGuardedView('workflow_sla', 'ติดตามกระบวนการและ SLA', (
+          <WorkflowSlaView 
+            documents={documents} 
+            user={currentUser} 
+            onViewDoc={setSelectedDoc} 
+          />
+        ));
       case 'folders':
-        return <FoldersView 
-          documents={documents} 
-          onViewDoc={setSelectedDoc}
-          onRefreshDocs={refreshData}
-          user={currentUser}
-          hasPermission={hasPermission}
-        />;
+        return renderGuardedView('digital_folders', 'แฟ้มเอกสารดิจิทัล', (
+          <FoldersView 
+            documents={documents} 
+            onViewDoc={setSelectedDoc}
+            onRefreshDocs={refreshData}
+            user={currentUser}
+            hasPermission={hasPermission}
+          />
+        ));
       case 'digital_signatures':
-        return <DigitalSignatureView 
-          user={currentUser} 
-          documents={documents} 
-          onViewDoc={handleViewDoc} 
-          onRefreshData={refreshData} 
-        />;
+        return renderGuardedView('digital_signatures', 'ศูนย์ลงนามดิจิทัล ETDA', (
+          <DigitalSignatureView 
+            user={currentUser} 
+            documents={documents} 
+            onViewDoc={handleViewDoc} 
+            onRefreshData={refreshData} 
+          />
+        ));
+      case 'qr_generator':
+        return renderGuardedView('qr_generator', 'เครื่องมือสร้าง QR Code สารบรรณ', (
+          <QrGeneratorView 
+            user={currentUser} 
+            documents={documents} 
+            onViewDoc={handleViewDoc} 
+          />
+        ));
       case 'recycle_bin':
-        return <RecycleBinView 
-          user={currentUser} 
-          onRefreshMainData={refreshData} 
-        />;
+        return renderGuardedView('recycle_bin', 'ถังขยะเอกสารและการกู้คืน', (
+          <RecycleBinView 
+            user={currentUser} 
+            onRefreshMainData={refreshData} 
+          />
+        ));
       case 'logs':
-        if (currentUser?.role !== 'admin') {
-          return <Overview documents={documents} user={currentUser} onCreateDoc={(type) => { setCreateDocType(type || 'inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} enabledFeatures={enabledFeatures} />;
-        }
-        return <LogsView user={currentUser} />;
+        return renderGuardedView('audit_logs', 'บันทึกประวัติระบบ (Audit Logs)', (
+          <LogsView user={currentUser} />
+        ));
       case 'settings':
         return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} />;
       case 'notifications':
