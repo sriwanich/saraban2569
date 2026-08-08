@@ -5,7 +5,8 @@ import {
   Download, Trash2, Palette, Type as FontIcon, Bold, Italic, 
   AlignLeft, AlignCenter, AlignRight, BringToFront, SendToBack,
   Save, Undo, Redo, LayoutGrid, Underline, Copy, PenTool, FolderOpen, Minus
-, Wrench, Settings, X } from 'lucide-react';
+, Wrench, Settings, X, CheckCircle2, AlertCircle, RefreshCw, Layers, ShieldCheck
+} from 'lucide-react';
 
 import { InfographicsGalleryModal } from './InfographicsGalleryModal';
 import { FontSelector, ensureGoogleFontLoaded } from './FontSelector';
@@ -33,6 +34,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const [projectName, setProjectName] = useState('My Presentation');
   const [showGallery, setShowGallery] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveModalName, setSaveModalName] = useState('');
+  const [saveMode, setSaveMode] = useState<'overwrite' | 'copy'>('overwrite');
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+  const [saveToast, setSaveToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [mobileTab, setMobileTab] = useState<'canvas' | 'tools' | 'properties'>('canvas');
   const clipboardRef = useRef<any>(null);
   const historyRef = useRef<string[]>([]);
@@ -503,10 +509,19 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     }
   };
   
-  const saveProjectDB = async () => {
-    if (!canvas) return;
+  const handleOpenSaveModal = () => {
+    setSaveModalName(projectName || 'My Presentation');
+    setSaveMode(currentProjectId ? 'overwrite' : 'copy');
+    setShowSaveModal(true);
+  };
+
+  const saveProjectDB = async (overrideMode?: 'overwrite' | 'copy') => {
+    if (!canvas || isSaving) return;
     setIsSaving(true);
     
+    const effectiveMode = overrideMode || saveMode;
+    const targetName = saveModalName.trim() || projectName.trim() || 'My Presentation';
+
     // Generate Thumbnail
     const thumbnail = canvas.toDataURL({ format: 'jpeg', quality: 0.5, multiplier: 0.5 });
     
@@ -517,30 +532,43 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     };
 
     try {
-      if (currentProjectId) {
-        await fetch(`/api/infographics/${currentProjectId}`, {
+      if (currentProjectId && effectiveMode === 'overwrite') {
+        const res = await fetch(`/api/infographics/${currentProjectId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: projectName, data: JSON.stringify(payload), thumbnail })
+          body: JSON.stringify({ name: targetName, data: JSON.stringify(payload), thumbnail })
         });
-        alert('บันทึกสำเร็จ');
+
+        if (!res.ok) throw new Error('Failed to update project');
+
+        setProjectName(targetName);
+        const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        setLastSavedTime(nowStr);
+        setShowSaveModal(false);
+        setSaveToast({ message: `บันทึกอัปเดตโปรเจกต์ "${targetName}" เรียบร้อยแล้ว (เวลา ${nowStr} น.)`, type: 'success' });
       } else {
-        const name = prompt('กรุณาตั้งชื่อโปรเจกต์', projectName) || projectName;
-        setProjectName(name);
         const res = await fetch('/api/infographics', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, data: JSON.stringify(payload), thumbnail })
+          body: JSON.stringify({ name: targetName, data: JSON.stringify(payload), thumbnail })
         });
+
+        if (!res.ok) throw new Error('Failed to create project');
+
         const data = await res.json();
         setCurrentProjectId(data.id);
-        alert('สร้างโปรเจกต์และบันทึกสำเร็จ');
+        setProjectName(targetName);
+        const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        setLastSavedTime(nowStr);
+        setShowSaveModal(false);
+        setSaveToast({ message: `สร้างและบันทึกโปรเจกต์ใหม่ "${targetName}" เรียบร้อยแล้ว (เวลา ${nowStr} น.)`, type: 'success' });
       }
     } catch (err) {
       console.error(err);
-      alert('เกิดข้อผิดพลาดในการบันทึก');
+      setSaveToast({ message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง', type: 'error' });
     } finally {
       setIsSaving(false);
+      setTimeout(() => setSaveToast(null), 5000);
     }
   };
 
@@ -828,8 +856,19 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           <button onClick={() => setShowGallery(true)} className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-2 rounded-lg transition-colors flex items-center gap-1 text-sm border border-[var(--border-medium)]">
             <FolderOpen className="w-4 h-4" /> แกลลอรี่
           </button>
-          <button onClick={saveProjectDB} disabled={isSaving} className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-2 rounded-lg transition-colors flex items-center gap-1 text-sm border border-[var(--border-medium)]">
-            <Save className="w-4 h-4" /> {isSaving ? 'กำลังบันทึก...' : 'บันทึกโปรเจกต์'}
+          <button 
+            onClick={handleOpenSaveModal} 
+            disabled={isSaving} 
+            className="text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] p-2 rounded-lg transition-all flex items-center gap-1.5 text-sm font-semibold border border-[var(--border-medium)] bg-[var(--bg-surface)] shadow-sm active:scale-98"
+            title="บันทึกข้อมูลและป้องกันการบันทึกซ้ำ"
+          >
+            <Save className="w-4 h-4 text-emerald-500" />
+            <span>{isSaving ? 'กำลังบันทึก...' : 'บันทึกโปรเจกต์'}</span>
+            {lastSavedTime && (
+              <span className="hidden sm:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-normal">
+                {lastSavedTime} น.
+              </span>
+            )}
           </button>
           
           <div className="w-px h-6 bg-[var(--border-medium)] mx-1"></div>
@@ -1217,6 +1256,162 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           onClose={() => setShowGallery(false)} 
           onLoad={(id) => loadProjectDB(id)} 
         />
+      )}
+
+      {/* Toast Notification Banner */}
+      {saveToast && (
+        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-2xl shadow-2xl border flex items-center gap-3 animate-fade-in max-w-md w-11/12 ${
+          saveToast.type === 'success' 
+            ? 'bg-slate-900 text-white border-emerald-500/50 shadow-emerald-950/30' 
+            : 'bg-red-950 text-white border-red-500/50 shadow-red-950/30'
+        }`}>
+          {saveToast.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+          )}
+          <span className="text-xs sm:text-sm font-medium flex-1">{saveToast.message}</span>
+          <button onClick={() => setSaveToast(null)} className="p-1 text-slate-400 hover:text-white rounded-lg">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Save Project Protection Confirmation Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div 
+            className="w-full max-w-lg bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-500/20 rounded-xl border border-emerald-400/30">
+                  <ShieldCheck className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold font-noto-serif-thai text-white">
+                    ยืนยันการบันทึกโปรเจกต์ (Save Protection)
+                  </h3>
+                  <p className="text-xs text-emerald-200/80">
+                    ตรวจสอบชื่อโปรเจกต์และรูปแบบการบันทึกเพื่อป้องกันการบันทึกทับซ้ำโดยไม่ตั้งใจ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSaveModal(false)}
+                disabled={isSaving}
+                className="p-1.5 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 bg-[var(--bg-surface)]">
+              {/* Project Name Input */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-[var(--text-primary)] flex items-center justify-between">
+                  <span>ชื่อโปรเจกต์ (Project Title)</span>
+                  <span className="text-[11px] text-[var(--text-muted)] font-normal">แก้ไขชื่อได้ตามต้องการ</span>
+                </label>
+                <input
+                  type="text"
+                  value={saveModalName}
+                  onChange={(e) => setSaveModalName(e.target.value)}
+                  placeholder="พิมพ์ชื่อโปรเจกต์..."
+                  className="w-full p-2.5 text-sm font-semibold bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-xl text-[var(--text-primary)] focus:border-emerald-500 outline-none"
+                  autoFocus
+                />
+              </div>
+
+              {/* Status Info Box */}
+              {currentProjectId ? (
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200 space-y-2">
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>โปรเจกต์นี้มีข้อมูลในระบบอยู่แล้ว (ID: {currentProjectId})</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                    โปรดเลือกว่าต้องการ **บันทึกทับไฟล์เดิม** หรือ **สร้างเป็นสำเนาโปรเจกต์ใหม่** เพื่อป้องกันการสูญหายของงานเก่า
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>โปรเจกต์ใหม่ (ยังไม่เคยถูกบันทึกในฐานข้อมูล)</span>
+                </div>
+              )}
+
+              {/* Mode Options (If existing project) */}
+              {currentProjectId && (
+                <div className="space-y-2 pt-1">
+                  <div className="text-xs font-bold text-[var(--text-primary)]">เลือกรูปแบบการบันทึก:</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Option 1: Overwrite */}
+                    <div
+                      onClick={() => setSaveMode('overwrite')}
+                      className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col gap-1 ${
+                        saveMode === 'overwrite'
+                          ? 'bg-emerald-500/10 border-emerald-500 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/30'
+                          : 'bg-[var(--bg-canvas)] border-[var(--border-light)] hover:border-emerald-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-xs text-[var(--text-primary)]">
+                        <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>บันทึกทับโปรเจกต์เดิม</span>
+                      </div>
+                      <p className="text-[11px] text-[var(--text-muted)] leading-normal">
+                        อัปเดตไฟล์ ID {currentProjectId} โดยไม่สร้างรายการใหม่ในระบบ
+                      </p>
+                    </div>
+
+                    {/* Option 2: Save as Copy */}
+                    <div
+                      onClick={() => setSaveMode('copy')}
+                      className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col gap-1 ${
+                        saveMode === 'copy'
+                          ? 'bg-indigo-500/10 border-indigo-500 text-indigo-900 dark:text-indigo-200 ring-2 ring-indigo-500/30'
+                          : 'bg-[var(--bg-canvas)] border-[var(--border-light)] hover:border-indigo-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-xs text-[var(--text-primary)]">
+                        <Copy className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>บันทึกเป็นโปรเจกต์ใหม่</span>
+                      </div>
+                      <p className="text-[11px] text-[var(--text-muted)] leading-normal">
+                        สร้างโปรเจกต์ใหม่เป็นสำเนา โดยยังเก็บงานเดิมไว้
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-[var(--bg-elevated)] border-t border-[var(--border-lighter)] flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowSaveModal(false)}
+                disabled={isSaving}
+                className="px-4 py-2 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-medium)] hover:bg-[var(--border-light)] text-[var(--text-primary)] text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => saveProjectDB()}
+                disabled={isSaving || !saveModalName.trim()}
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs flex items-center gap-2 shadow-md transition-all active:scale-98 disabled:opacity-50"
+              >
+                <Save className={`w-4 h-4 ${isSaving ? 'animate-spin' : ''}`} />
+                <span>{isSaving ? 'กำลังบันทึก...' : 'ยืนยันบันทึกข้อมูล'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
