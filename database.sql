@@ -471,3 +471,12 @@ INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALU
 ('doc_002', 'inbox', 'ลงทะเบียน', 'ลงทะเบียนหนังสือรับจากเทศบาลนครระยอง', 'สมศรี รักษ์ดี'),
 ('doc_002', 'inbox', 'ส่งต่อกลุ่มงาน', 'ส่งเรื่องให้ฝ่ายป้องกันและปฏิบัติการพิจารณาจัดเตรียมทีมวิทยากร', 'สมศรี รักษ์ดี'),
 ('doc_002', 'inbox', 'เสร็จสิ้น', 'มอบหมาย นายปรีชา มั่นคง ออกปฏิบัติงานเป็นวิทยากรเรียบร้อย', 'สมชาย ใจดี');
+
+CREATE TABLE IF NOT EXISTS infographics (
+  id VARCHAR(36) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  data LONGTEXT,
+  thumbnail LONGTEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);

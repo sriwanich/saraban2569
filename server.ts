@@ -8386,7 +8386,73 @@ ${JSON.stringify(docsSummaryContext, null, 2)}
 });
 
 
+
 async function startServer() {
+
+// Infographics API
+app.get('/api/infographics', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT id, name, thumbnail, created_at, updated_at FROM infographics ORDER BY updated_at DESC');
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching infographics:', error);
+    res.status(500).json({ error: 'Failed to fetch infographics' });
+  }
+});
+
+app.get('/api/infographics/:id', async (req, res) => {
+  try {
+    const [rows]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error fetching infographic:', error);
+    res.status(500).json({ error: 'Failed to fetch infographic' });
+  }
+});
+
+app.post('/api/infographics', async (req, res) => {
+  try {
+    const { name, data, thumbnail } = req.body;
+    const id = `info_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    
+    await pool.query(
+      'INSERT INTO infographics (id, name, data, thumbnail) VALUES (?, ?, ?, ?)',
+      [id, name, data, thumbnail]
+    );
+    
+    res.json({ id, name, data, thumbnail });
+  } catch (error) {
+    console.error('Error creating infographic:', error);
+    res.status(500).json({ error: 'Failed to create infographic' });
+  }
+});
+
+app.put('/api/infographics/:id', async (req, res) => {
+  try {
+    const { name, data, thumbnail } = req.body;
+    
+    await pool.query(
+      'UPDATE infographics SET name = ?, data = ?, thumbnail = ? WHERE id = ?',
+      [name, data, thumbnail, req.params.id]
+    );
+    
+    res.json({ id: req.params.id, name, data, thumbnail });
+  } catch (error) {
+    console.error('Error updating infographic:', error);
+    res.status(500).json({ error: 'Failed to update infographic' });
+  }
+});
+
+app.delete('/api/infographics/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM infographics WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting infographic:', error);
+    res.status(500).json({ error: 'Failed to delete infographic' });
+  }
+});
   const PORT = 3000;
 
   if (process.env.NODE_ENV !== 'production') {

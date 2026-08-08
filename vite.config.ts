@@ -9,7 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico'],
       workbox: {
-        navigateFallbackDenylist: [/^\/api/]
+        navigateFallbackDenylist: [/^\/api/],
+        maximumFileSizeToCacheInBytes: 10000000
       },
       manifest: {
         name: 'ระบบงานสารบรรณอิเล็กทรอนิกส์',

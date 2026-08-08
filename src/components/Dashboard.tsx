@@ -16,6 +16,7 @@ import WorkflowSlaView from './views/WorkflowSlaView';
 import SmartAiAssistantView from './views/SmartAiAssistantView';
 import DigitalSignatureView from './DigitalSignatureView';
 import RecycleBinView from './views/RecycleBinView';
+import InfographicsEditorView from './views/InfographicsEditorView';
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 
@@ -513,6 +514,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
     { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
     { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ' },
+    { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics' },
     { id: 'favorites', icon: Pin, label: 'เอกสารสำคัญปักหมุด' },
     { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร' },
     { id: 'workflow', icon: GitMerge, label: 'Workflow & SLA' },
@@ -593,6 +595,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           favorites={favorites}
           onToggleFavorite={handleToggleFavorite}
         />;
+      case 'infographics':
+        return <InfographicsEditorView user={currentUser} />;
       case 'favorites':
         return <DocumentList 
           title="เอกสารสำคัญปักหมุด" 
