@@ -149,7 +149,6 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
-app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'); res.setHeader('Pragma', 'no-cache'); res.setHeader('Expires', '0'); next(); });
 
 // Secure file download helper that restores the original filename
 app.get('/api/files/download', async (req, res) => {
@@ -3291,118 +3290,6 @@ app.post('/api/reserved-numbers/use', async (req, res) => {
   }
 });
 
-app.delete('/api/reserved-numbers', async (req, res) => {
-  try {
-    localDb.reserved_numbers = [];
-    saveLocalDb();
-
-    if (pool && typeof pool.query === 'function') {
-      try {
-        await pool.query('DELETE FROM reserved_numbers WHERE id > 0');
-      } catch (dbErr: any) {
-        console.warn('MySQL clear failed, using localDb fallback:', dbErr.message || dbErr);
-      }
-    }
-    
-    try {
-      await addSystemLog("CLEAR_RESERVED_NUMBERS", `ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด`, "ผู้ดูแลระบบ", getClientIp(req));
-    } catch (logErr: any) {
-      console.warn('System log failed during clear:', logErr.message || logErr);
-    }
-    
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('Error clearing reserved numbers:', err);
-    return res.json({ success: true, errorFallback: err.message });
-  }
-});
-
-app.post('/api/reserved-numbers/clear-all', async (req, res) => {
-  try {
-    localDb.reserved_numbers = [];
-    saveLocalDb();
-
-    if (pool && typeof pool.query === 'function') {
-      try {
-        await pool.query('DELETE FROM reserved_numbers WHERE id > 0');
-      } catch (dbErr: any) {
-        console.warn('MySQL clear failed, using localDb fallback:', dbErr.message || dbErr);
-      }
-    }
-    
-    try {
-      await addSystemLog("CLEAR_RESERVED_NUMBERS", `ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด`, "ผู้ดูแลระบบ", getClientIp(req));
-    } catch (logErr: any) {
-      console.warn('System log failed during clear:', logErr.message || logErr);
-    }
-    
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('Error clearing reserved numbers via POST:', err);
-    return res.json({ success: true, errorFallback: err.message });
-  }
-});
-
-app.post('/api/reserved-numbers/delete-item/:id', async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!isNaN(id)) {
-      if (localDb.reserved_numbers) {
-        localDb.reserved_numbers = localDb.reserved_numbers.filter((r: any) => Number(r.id) !== id);
-        saveLocalDb();
-      }
-
-      if (pool && typeof pool.query === 'function') {
-        try {
-          await pool.query('DELETE FROM reserved_numbers WHERE id = ?', [id]);
-        } catch (dbErr: any) {
-          console.warn('MySQL delete failed, using localDb fallback:', dbErr.message || dbErr);
-        }
-      }
-      
-      try {
-        await addSystemLog("DELETE_RESERVED_NUMBER", `ลบเลขจอง/เลขสะสม/เลขคืน ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
-      } catch (logErr: any) {
-        console.warn('System log failed during delete:', logErr.message || logErr);
-      }
-    }
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('Error deleting reserved number via POST:', err);
-    return res.json({ success: true, errorFallback: err.message });
-  }
-});
-
-app.delete('/api/reserved-numbers/:id', async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!isNaN(id)) {
-      if (localDb.reserved_numbers) {
-        localDb.reserved_numbers = localDb.reserved_numbers.filter((r: any) => Number(r.id) !== id);
-        saveLocalDb();
-      }
-
-      if (pool && typeof pool.query === 'function') {
-        try {
-          await pool.query('DELETE FROM reserved_numbers WHERE id = ?', [id]);
-        } catch (dbErr: any) {
-          console.warn('MySQL delete failed, using localDb fallback:', dbErr.message || dbErr);
-        }
-      }
-      
-      try {
-        await addSystemLog("DELETE_RESERVED_NUMBER", `ลบเลขจอง/เลขสะสม/เลขคืน ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
-      } catch (logErr: any) {
-        console.warn('System log failed during delete:', logErr.message || logErr);
-      }
-    }
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('Error deleting reserved number:', err);
-    return res.json({ success: true, errorFallback: err.message });
-  }
-});
-
 app.post('/api/numbering/generate-next', async (req, res) => {
   try {
     const { department, docType, isCircular, category, year } = req.body;
@@ -4705,31 +4592,31 @@ app.get("/verify", async (req, res) => {
 
       <div class="border-t border-slate-100 pt-5 space-y-2">
         <span class="text-xs font-semibold text-slate-400 block">ชื่อเรื่อง (Title)</span>
-        <span class="text-sm sm:text-base font-bold text-slate-800 leading-relaxed block">\${doc.title}</span>
+        <span class="text-sm sm:text-base font-bold text-slate-800 leading-relaxed block">${doc.title || '-'}</span>
       </div>
 
-      \${doc.content ? \`
+      ${doc.content ? `
         <div class="border-t border-slate-100 pt-5 space-y-2">
           <span class="text-xs font-semibold text-slate-400 block">เนื้อหา / รายละเอียดเอกสาร (Summary Content)</span>
           <div class="text-xs text-slate-600 bg-slate-50 rounded-2xl p-4 border border-slate-100 leading-relaxed max-h-48 overflow-y-auto font-normal">
-            \${doc.content.replace(/\\n/g, '<br/>')}
+            ${doc.content.replace(/\n/g, '<br/>')}
           </div>
         </div>
-      \` : ''}
+      ` : ''}
     </div>
 
     <!-- Digital Signatures Section -->
-    \${isSigned ? \`
+    ${isSigned ? `
       <div class="space-y-4">
         <div class="flex items-center gap-2 pb-1">
           <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
           <span class="font-bold text-slate-700 text-sm">ลายมือชื่อดิจิทัลรับรองความปลอดภัย (Digital Certificates)</span>
         </div>
         <div class="space-y-4">
-          \${sigsHtml}
+          ${sigsHtml}
         </div>
       </div>
-    \` : ''}
+    ` : ''}
 
     <!-- Security Law Notice -->
     <div class="p-5 rounded-2xl bg-slate-100 text-[11px] text-slate-500 leading-relaxed space-y-1.5 border border-slate-200 font-medium">
@@ -4883,11 +4770,10 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
 
         if (apiKey) {
           const client = new GoogleGenAI({ apiKey });
-          const model = client.getGenerativeModel({ model: "gemini-1.5-flash" });
-          
           const systemContext = matches.length > 0 ? `The system expects this document to be: Subject: ${matches[0].docTitle}, Signer: ${matches[0].signerName}, Position: ${matches[0].signerPosition}.` : "The system does not have a record of this document hash.";
 
-          const result = await model.generateContent({
+          const result = await client.models.generateContent({
+            model: 'gemini-3.6-flash',
             contents: [
               {
                 inlineData: {
@@ -4909,10 +4795,10 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
                 - 'discrepancyNote': string (Explain any differences found)
                 - 'isOfficial': boolean (Does it look like an official document?)` }
             ],
-            generationConfig: { responseMimeType: "application/json" }
+            config: { responseMimeType: 'application/json' }
           });
           
-          const aiText = result.response.text();
+          const aiText = result.text || '';
           aiAnalysis = JSON.parse(aiText);
         }
       } catch (e: any) {
@@ -5198,17 +5084,21 @@ app.get("/qr/:slug", async (req, res) => {
 app.get("/api/qr-generator/dynamic", async (req, res) => {
   try {
     if (isMysqlOnline) {
-      const [rows]: any = await pool.query('SELECT * FROM enterprise_dynamic_qrs ORDER BY createdAt DESC');
-      return res.json(rows);
-    } else {
-      const list = localDb.enterprise_dynamic_qrs || [];
-      // Sort desc
-      const sorted = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      return res.json(sorted);
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM enterprise_dynamic_qrs ORDER BY createdAt DESC');
+        if (rows && Array.isArray(rows)) {
+          return res.json(rows);
+        }
+      } catch (e: any) {
+        console.warn('MySQL fetch dynamic QRs failed, falling back to localDb:', e.message);
+      }
     }
+    const list = localDb.enterprise_dynamic_qrs || [];
+    const sorted = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    return res.json(sorted);
   } catch (error: any) {
     console.error('Failed to fetch dynamic QRs:', error.message);
-    return res.status(500).json({ error: 'Database error' });
+    return res.status(500).json({ error: 'ไม่สามารถดึงข้อมูล Dynamic QR ได้' });
   }
 });
 
@@ -5219,37 +5109,45 @@ app.post("/api/qr-generator/dynamic", async (req, res) => {
   const createdAt = new Date().toISOString();
   const status = 'active';
 
+  const newQrItem = {
+    slug,
+    title: title || 'ไม่มีชื่อ',
+    originalUrl: originalUrl || '',
+    createdBy: createdBy || 'ผู้ใช้',
+    status,
+    type: type || 'url',
+    styleConfig: typeof styleConfig === 'object' ? JSON.stringify(styleConfig) : (styleConfig || '{}'),
+    createdAt,
+    updatedAt: createdAt
+  };
+
   try {
+    // Always insert into localDb for guaranteed persistence
+    if (!localDb.enterprise_dynamic_qrs) {
+      localDb.enterprise_dynamic_qrs = [];
+    }
+    localDb.enterprise_dynamic_qrs.unshift(newQrItem);
+    saveLocalDb();
+
+    // Try sync to MySQL if online
     if (isMysqlOnline) {
-      await pool.query(
-        'INSERT INTO enterprise_dynamic_qrs (slug, title, originalUrl, createdBy, status, type, styleConfig, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [slug, title || 'ไม่มีชื่อ', originalUrl, createdBy || 'ผู้ใช้', status, type || 'url', styleConfig || '{}', createdAt, createdAt]
-      );
-    } else {
-      if (!localDb.enterprise_dynamic_qrs) {
-        localDb.enterprise_dynamic_qrs = [];
+      try {
+        await pool.query(
+          'INSERT INTO enterprise_dynamic_qrs (slug, title, originalUrl, createdBy, status, type, styleConfig, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [slug, newQrItem.title, newQrItem.originalUrl, newQrItem.createdBy, status, newQrItem.type, newQrItem.styleConfig, createdAt, createdAt]
+        );
+      } catch (dbErr: any) {
+        console.warn('MySQL insert dynamic QR failed (saved to localDb):', dbErr.message);
       }
-      localDb.enterprise_dynamic_qrs.push({
-        slug,
-        title: title || 'ไม่มีชื่อ',
-        originalUrl,
-        createdBy: createdBy || 'ผู้ใช้',
-        status,
-        type: type || 'url',
-        styleConfig: styleConfig || '{}',
-        createdAt,
-        updatedAt: createdAt
-      });
-      saveLocalDb();
     }
 
     return res.json({
       success: true,
-      qr: { slug, title, originalUrl, createdBy, status, type, styleConfig, createdAt }
+      qr: newQrItem
     });
   } catch (error: any) {
     console.error('Failed to create dynamic QR:', error.message);
-    return res.status(500).json({ error: 'Database error' });
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการสร้าง Dynamic QR: ' + error.message });
   }
 });
 
@@ -5260,31 +5158,37 @@ app.put("/api/qr-generator/dynamic/:slug", async (req, res) => {
   const updatedAt = new Date().toISOString();
 
   try {
+    const serializedStyle = typeof styleConfig === 'object' ? JSON.stringify(styleConfig) : (styleConfig || '{}');
+
+    // Update in localDb
+    const idx = (localDb.enterprise_dynamic_qrs || []).findIndex((q: any) => q.slug === slug);
+    if (idx !== -1) {
+      localDb.enterprise_dynamic_qrs[idx] = {
+        ...localDb.enterprise_dynamic_qrs[idx],
+        title: title !== undefined ? title : localDb.enterprise_dynamic_qrs[idx].title,
+        originalUrl: originalUrl !== undefined ? originalUrl : localDb.enterprise_dynamic_qrs[idx].originalUrl,
+        status: status !== undefined ? status : localDb.enterprise_dynamic_qrs[idx].status,
+        styleConfig: serializedStyle,
+        updatedAt
+      };
+      saveLocalDb();
+    }
+
     if (isMysqlOnline) {
-      await pool.query(
-        'UPDATE enterprise_dynamic_qrs SET title = ?, originalUrl = ?, status = ?, styleConfig = ?, updatedAt = ? WHERE slug = ?',
-        [title, originalUrl, status, styleConfig, updatedAt, slug]
-      );
-    } else {
-      const idx = (localDb.enterprise_dynamic_qrs || []).findIndex((q: any) => q.slug === slug);
-      if (idx !== -1) {
-        localDb.enterprise_dynamic_qrs[idx] = {
-          ...localDb.enterprise_dynamic_qrs[idx],
-          title,
-          originalUrl,
-          status,
-          styleConfig,
-          updatedAt
-        };
-        saveLocalDb();
-      } else {
-        return res.status(404).json({ error: 'QR Code not found' });
+      try {
+        await pool.query(
+          'UPDATE enterprise_dynamic_qrs SET title = ?, originalUrl = ?, status = ?, styleConfig = ?, updatedAt = ? WHERE slug = ?',
+          [title, originalUrl, status, serializedStyle, updatedAt, slug]
+        );
+      } catch (dbErr: any) {
+        console.warn('MySQL update dynamic QR failed:', dbErr.message);
       }
     }
+
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Failed to update dynamic QR:', error.message);
-    return res.status(500).json({ error: 'Database error' });
+    return res.status(500).json({ error: 'ไม่สามารถอัปเดต Dynamic QR ได้: ' + error.message });
   }
 });
 
@@ -5293,18 +5197,23 @@ app.delete("/api/qr-generator/dynamic/:slug", async (req, res) => {
   const { slug } = req.params;
 
   try {
+    localDb.enterprise_dynamic_qrs = (localDb.enterprise_dynamic_qrs || []).filter((q: any) => q.slug !== slug);
+    localDb.enterprise_qr_scans = (localDb.enterprise_qr_scans || []).filter((s: any) => s.qrSlug !== slug);
+    saveLocalDb();
+
     if (isMysqlOnline) {
-      await pool.query('DELETE FROM enterprise_qr_scans WHERE qrSlug = ?', [slug]);
-      await pool.query('DELETE FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
-    } else {
-      localDb.enterprise_dynamic_qrs = (localDb.enterprise_dynamic_qrs || []).filter((q: any) => q.slug !== slug);
-      localDb.enterprise_qr_scans = (localDb.enterprise_qr_scans || []).filter((s: any) => s.qrSlug !== slug);
-      saveLocalDb();
+      try {
+        await pool.query('DELETE FROM enterprise_qr_scans WHERE qrSlug = ?', [slug]);
+        await pool.query('DELETE FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
+      } catch (dbErr: any) {
+        console.warn('MySQL delete dynamic QR failed:', dbErr.message);
+      }
     }
+
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Failed to delete dynamic QR:', error.message);
-    return res.status(500).json({ error: 'Database error' });
+    return res.status(500).json({ error: 'ไม่สามารถลบ Dynamic QR ได้' });
   }
 });
 
@@ -7112,7 +7021,7 @@ app.delete('/api/logs', async (req, res) => {
   const username = req.body?.username || req.query?.username || 'ผู้ดูแลระบบ';
 
   try {
-    await pool.query('DELETE FROM system_logs WHERE id > 0');
+    await pool.query('DELETE FROM system_logs');
     await addSystemLog('CLEAR_LOGS', 'ล้างประวัติการใช้งานระบบทั้งหมด', username, ip);
     return res.json({ success: true });
   } catch (error: any) {
@@ -7447,7 +7356,7 @@ app.post('/api/ai-scan', async (req, res) => {
 ${outputType && outputType !== 'auto' ? `ผู้ใช้ต้องการแปลงเป็นประเภท: ${outputType}` : 'ตรวจจับประเภทหนังสือจากเอกสารจริง'}
 ${hint ? 'คำแนะนำเพิ่มเติมจากผู้ใช้: ' + hint : ''}`;
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
     
     const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
     const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
@@ -7760,7 +7669,7 @@ ${JSON.stringify(candidates, null, 2)}
       rawOrigin
     ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
 
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
     let response: any = null;
 
     if (apiKey) {
@@ -7967,7 +7876,7 @@ ${body || '-'}
 - ผู้ลงนาม: ${signer || '-'}
 - ตำแหน่งผู้ลงนาม: ${signerPos || '-'}`;
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
     let auditResponse: any = null;
 
     const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
@@ -8619,7 +8528,7 @@ ${d.resultQl}
 - ตอบเฉพาะโค้ด HTML เท่านั้น โดยไม่ต้องมีคำอธิบาย หรือ Markdown code fence (\`\`\`html) หุ้ม`;
 
     const client = new GoogleGenAI({ apiKey });
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
     let responseText = '';
 
     for (const modelName of modelsToTry) {
@@ -8916,7 +8825,7 @@ app.post('/api/ai-assistant', async (req, res) => {
     let aiResponsePayload: any = null;
 
     if (apiKey) {
-      const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
       const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
       const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
       const refererCandidates = [
@@ -9171,7 +9080,7 @@ app.delete('/api/infographics/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete infographic' });
   }
 });
-  const PORT = 3000;
+  const listenPort = process.env.PORT || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -9182,21 +9091,23 @@ app.delete('/api/infographics/:id', async (req, res) => {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
-    });
-    app.use((req, res, next) => {
-      if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
-        return res.sendFile(path.join(distPath, 'index.html'));
-      }
-      next();
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    startScheduledReservationEngine();
-  });
+  if (typeof listenPort === 'string' && (listenPort.startsWith('/') || listenPort.startsWith('\\\\'))) {
+    app.listen(listenPort, () => {
+      console.log(`Server running on Passenger socket pipe: ${listenPort}`);
+      startScheduledReservationEngine();
+    });
+  } else {
+    const portNum = Number(listenPort) || 3000;
+    app.listen(portNum, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${portNum}`);
+      startScheduledReservationEngine();
+    });
+  }
 }
 
 startServer();

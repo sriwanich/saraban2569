@@ -361,244 +361,20 @@
   ],
   "system_logs": [
     {
-      "id": 1786435573949,
+      "id": 1786442661549,
+      "action": "DIGITAL_SIGNATURE",
+      "details": "ลงนามดิจิทัลสำเร็จ (SHA-256): รย 0017.3/ว 15694 โดย ผู้ดูแล ระบบ",
+      "username": "admin",
+      "ipAddress": "182.52.90.33",
+      "timestamp": "2026-08-11T10:04:21.521Z"
+    },
+    {
+      "id": 1786441526008,
       "action": "CLEAR_LOGS",
       "details": "ล้างประวัติการใช้งานระบบทั้งหมด",
       "username": "ผู้ดูแล ระบบ",
-      "ipAddress": "125.27.73.181",
-      "timestamp": "2026-08-11T08:06:13.920Z"
-    },
-    {
-      "id": 1786435565004,
-      "action": "UNPIN_DOCUMENT",
-      "details": "ยกเลิกปักหมุดเอกสาร ID: DOC-7916",
-      "username": "admin",
-      "ipAddress": "125.27.73.181",
-      "timestamp": "2026-08-11T08:06:04.975Z"
-    },
-    {
-      "id": 1786435033241,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:57:13.212Z"
-    },
-    {
-      "id": 1786434723624,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:52:03.595Z"
-    },
-    {
-      "id": 1786434515441,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 15 ฉบับ (หนังสือภายนอก)",
-      "username": "ผู้ดูแลระบบสารบรรณ",
-      "ipAddress": "125.27.73.181",
-      "timestamp": "2026-08-11T07:48:35.412Z"
-    },
-    {
-      "id": 1786434406263,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:46:46.233Z"
-    },
-    {
-      "id": 1786434333614,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:45:33.584Z"
-    },
-    {
-      "id": 1786434081828,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:41:21.800Z"
-    },
-    {
-      "id": 1786434069743,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบซิงค์",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:41:09.715Z"
-    },
-    {
-      "id": 1786433871414,
-      "action": "DELETE_RESERVED_NUMBER",
-      "details": "ลบเลขจอง/เลขสะสม/เลขคืน ID: 38",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:37:51.386Z"
-    },
-    {
-      "id": 1786433862662,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบซิงค์",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:37:42.634Z"
-    },
-    {
-      "id": 1786433845740,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:37:25.712Z"
-    },
-    {
-      "id": 1786433660273,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบซิงค์",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:34:20.244Z"
-    },
-    {
-      "id": 1786433650747,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:34:10.608Z"
-    },
-    {
-      "id": 1786432978393,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:22:58.364Z"
-    },
-    {
-      "id": 1786432968803,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบซิงค์",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:22:48.775Z"
-    },
-    {
-      "id": 1786432958703,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:22:38.675Z"
-    },
-    {
-      "id": 1786432952800,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:22:32.771Z"
-    },
-    {
-      "id": 1786432780380,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:19:40.352Z"
-    },
-    {
-      "id": 1786432774976,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบซิงค์",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T07:19:34.947Z"
-    },
-    {
-      "id": 1786427445635,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:50:45.456Z"
-    },
-    {
-      "id": 1786427134832,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:45:34.803Z"
-    },
-    {
-      "id": 1786427130276,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบล้าง",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:45:30.247Z"
-    },
-    {
-      "id": 1786427120102,
-      "action": "DELETE_RESERVED_NUMBER",
-      "details": "ลบเลขจอง/เลขสะสม/เลขคืน ID: 33",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:45:20.072Z"
-    },
-    {
-      "id": 1786427115014,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบใหม่",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:45:14.984Z"
-    },
-    {
-      "id": 1786426667136,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:37:47.107Z"
-    },
-    {
-      "id": 1786426555899,
-      "action": "DELETE_RESERVED_NUMBER",
-      "details": "ลบเลขจอง/เลขสะสม/เลขคืน ID: 32",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:35:55.871Z"
-    },
-    {
-      "id": 1786426550740,
-      "action": "RESERVE_NUMBER",
-      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
-      "username": "ทดสอบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:35:50.711Z"
-    },
-    {
-      "id": 1786426503050,
-      "action": "CLEAR_RESERVED_NUMBERS",
-      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
-      "username": "ผู้ดูแลระบบ",
-      "ipAddress": "127.0.0.1",
-      "timestamp": "2026-08-11T05:35:03.021Z"
-    },
-    {
-      "id": 1786414792149,
-      "action": "LOGIN_SUCCESS",
-      "details": "เข้าสู่ระบบสำเร็จ (ผู้ดูแล ระบบ) - ยืนยันรหัสผ่านด้วย Argon2id",
-      "username": "admin",
-      "ipAddress": "125.27.73.181",
-      "timestamp": "2026-08-11T02:19:52.012Z"
+      "ipAddress": "182.52.90.33",
+      "timestamp": "2026-08-11T09:45:25.981Z"
     },
     {
       "id": 1786001935393,
@@ -978,6 +754,29 @@
       "modifiedBy": "ณัฐพันธุ์ ศรีวนิช",
       "modifiedAt": "2026-07-25T10:16:46.914Z",
       "isCurrent": true
+    },
+    {
+      "id": "ver-DOC-26569-1",
+      "docId": "DOC-26569",
+      "docType": "inbox",
+      "versionNumber": 1,
+      "title": "การจัดพิธีทางศาสนาถวายเป็นพระราชกุศลแด่ สมเด็จพระเจ้าลูกเธอ เจ้าฟ้าพัชรกิติยาภา นเรนทิราเทพยวดี กรมหลวงราชสาริณีสิริพัชร มหาวัชรราชธิดา",
+      "docNumber": "รย 0017.3/ว 15694",
+      "from": "สำนักงานจังหวัดระยอง",
+      "to": "สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง",
+      "department": "ฝ่ายป้องกันและปฏิบัติการ",
+      "assignee": "นายเจษฏา สุนทรารชุน",
+      "priority": "ด่วนที่สุด",
+      "secrecy": "ปกติ",
+      "content": "",
+      "note": "",
+      "attachments": [
+        "/uploads/inbox/1785426160524-44905515-IMG_0861.jpeg"
+      ],
+      "changeSummary": "ลงทะเบียนหรือบันทึกข้อมูลเอกสารเริ่มต้น (Version 1)",
+      "modifiedBy": "นายเจษฏา สุนทรารชุน",
+      "modifiedAt": "2026-07-24T11:59:56.147Z",
+      "isCurrent": true
     }
   ],
   "numbering_rules": [
@@ -1138,7 +937,53 @@
       "description": "งานจัดซื้อจัดจ้าง พัสดุ คุรุภัณฑ์ และอาคารสถานที่"
     }
   ],
-  "reserved_numbers": [],
+  "reserved_numbers": [
+    {
+      "id": 1,
+      "ruleId": 1,
+      "docType": "หนังสือภายนอก",
+      "department": "ฝ่ายบริหารงานทั่วไป",
+      "numberString": "รย 0021/ว 124",
+      "seqNumber": 124,
+      "year": "2569",
+      "type": "reserved",
+      "status": "available",
+      "reservedBy": "สมศรี รักษ์ดี",
+      "reservedFor": "จองเลขหนังสือเวียนโครงการฝึกอบรมกู้ภัยทางน้ำช่วงเทศกาล",
+      "createdAt": "2026-08-01 09:30:00",
+      "expiresAt": "2026-08-15"
+    },
+    {
+      "id": 2,
+      "ruleId": 5,
+      "docType": "คำสั่ง",
+      "department": "ฝ่ายบริหารงานทั่วไป",
+      "numberString": "คำสั่ง 45/2569",
+      "seqNumber": 45,
+      "year": "2569",
+      "type": "reserved",
+      "status": "available",
+      "reservedBy": "สมชาย ใจดี",
+      "reservedFor": "จองเลขคำสั่งแต่งตั้งคณะทำงานเตรียมพร้อมรับมือฤดูฝน",
+      "createdAt": "2026-08-02 11:00:00",
+      "expiresAt": "2026-08-20"
+    },
+    {
+      "id": 3,
+      "ruleId": 2,
+      "docType": "หนังสือภายนอก",
+      "department": "ฝ่ายยุทธศาสตร์และการจัดการ",
+      "numberString": "รย 0021.1/46",
+      "seqNumber": 46,
+      "year": "2569",
+      "type": "reclaimed",
+      "status": "available",
+      "reservedBy": "ระบบสารบรรณ (เลขคืนจากเอกสารยกเลิก)",
+      "reservedFor": "คืนเลขเนื่องจากยกเลิกร่างหนังสือประสานงานเดิม",
+      "createdAt": "2026-08-02 14:20:00",
+      "expiresAt": "2026-12-31"
+    }
+  ],
   "scheduled_reservations": [
     {
       "id": 1,
@@ -1174,6 +1019,32 @@
     }
   ],
   "digital_signatures": [
+    {
+      "id": "sig-1786442660993-441",
+      "docId": "DOC-26569",
+      "docTitle": "การจัดพิธีทางศาสนาถวายเป็นพระราชกุศลแด่ สมเด็จพระเจ้าลูกเธอ เจ้าฟ้าพัชรกิติยาภา นเรนทิราเทพยวดี กรมหลวงราชสาริณีสิริพัชร มหาวัชรราชธิดา",
+      "docNumber": "รย 0017.3/ว 15694",
+      "docType": "inbox",
+      "signerName": "ผู้ดูแล ระบบ",
+      "signerPosition": "นายช่างเครื่องกลชำนาญงาน",
+      "signerDepartment": "ฝ่ายยุทธศาสตร์และการจัดการ",
+      "signerEmail": "admin@dpmpry.online",
+      "signatureType": "digital-signature",
+      "signatureDataUrl": "data:image/png;base64,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",
+      "certificateIssuer": "Rayong Provincial PA-PKI Certificate Authority (ETDA Compliant B.E. 2544 Sec. 26/3)",
+      "certificateSerial": "CERT-2026-145189",
+      "hashAlgorithm": "SHA-256",
+      "documentHash": "0A0209405B932CBAA87FF4EA83A4210B7C7A85DA0F17EE0545D8200883776B5E",
+      "signatureHash": "4434AD86D41CB328A22A559536646E9F9C1912E0A620CB41B712801D3DC2290D",
+      "timestampIso": "2026-08-11T10:04:20.993Z",
+      "timestampFormatted": "11 สิงหาคม พ.ศ. 2569 เวลา 10:04:20 น.",
+      "tsaToken": "2D148C29440215925D5125B628F67E5AB6D6ED38C82D362760FEC1916DDDB152",
+      "qrCodeDataUrl": "data:image/png;base64,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",
+      "verifyUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DOC-26569&hash=0A0209405B932CBAA87FF4EA83A4210B7C7A85DA0F17EE0545D8200883776B5E&sig=sig-1786442660993-441",
+      "ipAddress": "182.52.90.33",
+      "pdfPath": "/uploads/signed_pdfs/signed_DOC-26569_sig-1786442660993-441.pdf",
+      "status": "valid"
+    },
     {
       "id": "sig-1785992413690-102",
       "docId": "DOC-7916",
@@ -1364,6 +1235,95 @@
       "is_allowed": 0
     }
   ],
-  "enterprise_dynamic_qrs": [],
+  "enterprise_dynamic_qrs": [
+    {
+      "slug": "qr_vv2r1rth",
+      "title": "สแกนเพื่อตรวจสอบเอกสาร EDMS",
+      "originalUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DEMO-DOC-2569",
+      "createdBy": "admin",
+      "status": "active",
+      "type": "edms",
+      "styleConfig": "{\"fgColor\":\"#0f172a\",\"bgColor\":\"#ffffff\",\"transparentBg\":false,\"errorCorrection\":\"H\",\"qrMargin\":2,\"gradientType\":\"solid\",\"gradientColor2\":\"#2563eb\",\"gradientAngle\":45,\"logoType\":\"garuda\",\"customLogoUrl\":\"\",\"frameType\":\"top-bottom\",\"frameText\":\"สแกนเพื่อตรวจสอบเอกสาร EDMS\",\"frameColor\":\"#0f172a\",\"frameTextColor\":\"#ffffff\"}",
+      "createdAt": "2026-08-11T12:11:47.952Z",
+      "updatedAt": "2026-08-11T12:11:47.952Z"
+    },
+    {
+      "slug": "qr_wrmnqzss",
+      "title": "สแกนเพื่อตรวจสอบเอกสาร EDMS",
+      "originalUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DEMO-DOC-2569",
+      "createdBy": "admin",
+      "status": "active",
+      "type": "edms",
+      "styleConfig": "{\"fgColor\":\"#0f172a\",\"bgColor\":\"#ffffff\",\"transparentBg\":false,\"errorCorrection\":\"H\",\"qrMargin\":2,\"gradientType\":\"solid\",\"gradientColor2\":\"#2563eb\",\"gradientAngle\":45,\"logoType\":\"garuda\",\"customLogoUrl\":\"\",\"frameType\":\"top-bottom\",\"frameText\":\"สแกนเพื่อตรวจสอบเอกสาร EDMS\",\"frameColor\":\"#0f172a\",\"frameTextColor\":\"#ffffff\"}",
+      "createdAt": "2026-08-11T12:11:45.055Z",
+      "updatedAt": "2026-08-11T12:11:45.055Z"
+    },
+    {
+      "slug": "qr_niw3omjl",
+      "title": "สแกนเพื่อตรวจสอบเอกสาร EDMS",
+      "originalUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DEMO-DOC-2569",
+      "createdBy": "admin",
+      "status": "active",
+      "type": "edms",
+      "styleConfig": "{\"fgColor\":\"#0f172a\",\"bgColor\":\"#ffffff\",\"transparentBg\":false,\"errorCorrection\":\"H\",\"qrMargin\":2,\"gradientType\":\"solid\",\"gradientColor2\":\"#2563eb\",\"gradientAngle\":45,\"logoType\":\"garuda\",\"customLogoUrl\":\"\",\"frameType\":\"top-bottom\",\"frameText\":\"สแกนเพื่อตรวจสอบเอกสาร EDMS\",\"frameColor\":\"#0f172a\",\"frameTextColor\":\"#ffffff\"}",
+      "createdAt": "2026-08-11T12:11:42.387Z",
+      "updatedAt": "2026-08-11T12:11:42.387Z"
+    },
+    {
+      "slug": "qr_ftxfoa8q",
+      "title": "สแกนเพื่อตรวจสอบเอกสาร EDMS",
+      "originalUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DEMO-DOC-2569",
+      "createdBy": "admin",
+      "status": "active",
+      "type": "edms",
+      "styleConfig": "{\"fgColor\":\"#0f172a\",\"bgColor\":\"#ffffff\",\"transparentBg\":false,\"errorCorrection\":\"H\",\"qrMargin\":2,\"gradientType\":\"solid\",\"gradientColor2\":\"#2563eb\",\"gradientAngle\":45,\"logoType\":\"garuda\",\"customLogoUrl\":\"\",\"frameType\":\"top-bottom\",\"frameText\":\"สแกนเพื่อตรวจสอบเอกสาร EDMS\",\"frameColor\":\"#0f172a\",\"frameTextColor\":\"#ffffff\"}",
+      "createdAt": "2026-08-11T09:22:38.078Z",
+      "updatedAt": "2026-08-11T09:22:38.078Z"
+    },
+    {
+      "slug": "qr_ms2qk7p5",
+      "title": "สแกนเพื่อตรวจสอบเอกสาร EDMS",
+      "originalUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DEMO-DOC-2569",
+      "createdBy": "admin",
+      "status": "active",
+      "type": "edms",
+      "styleConfig": "{\"fgColor\":\"#0f172a\",\"bgColor\":\"#ffffff\",\"transparentBg\":false,\"errorCorrection\":\"H\",\"qrMargin\":2,\"gradientType\":\"solid\",\"gradientColor2\":\"#2563eb\",\"gradientAngle\":45,\"logoType\":\"garuda\",\"customLogoUrl\":\"\",\"frameType\":\"top-bottom\",\"frameText\":\"สแกนเพื่อตรวจสอบเอกสาร EDMS\",\"frameColor\":\"#0f172a\",\"frameTextColor\":\"#ffffff\"}",
+      "createdAt": "2026-08-11T09:22:34.266Z",
+      "updatedAt": "2026-08-11T09:22:34.266Z"
+    },
+    {
+      "slug": "qr_odxzv8uk",
+      "title": "สแกนเพื่อตรวจสอบเอกสาร EDMS",
+      "originalUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DEMO-DOC-2569",
+      "createdBy": "admin",
+      "status": "active",
+      "type": "edms",
+      "styleConfig": "{\"fgColor\":\"#0f172a\",\"bgColor\":\"#ffffff\",\"transparentBg\":false,\"errorCorrection\":\"H\",\"qrMargin\":2,\"gradientType\":\"solid\",\"gradientColor2\":\"#2563eb\",\"gradientAngle\":45,\"logoType\":\"garuda\",\"customLogoUrl\":\"\",\"frameType\":\"top-bottom\",\"frameText\":\"สแกนเพื่อตรวจสอบเอกสาร EDMS\",\"frameColor\":\"#0f172a\",\"frameTextColor\":\"#ffffff\"}",
+      "createdAt": "2026-08-11T09:19:34.782Z",
+      "updatedAt": "2026-08-11T09:19:34.782Z"
+    },
+    {
+      "slug": "qr_pvmqkcx3",
+      "title": "สแกนเพื่อตรวจสอบเอกสาร EDMS",
+      "originalUrl": "https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/verify?docId=DEMO-DOC-2569",
+      "createdBy": "admin",
+      "status": "active",
+      "type": "edms",
+      "styleConfig": "{\"fgColor\":\"#0f172a\",\"bgColor\":\"#ffffff\",\"transparentBg\":false,\"errorCorrection\":\"H\",\"qrMargin\":2,\"gradientType\":\"solid\",\"gradientColor2\":\"#2563eb\",\"gradientAngle\":45,\"logoType\":\"garuda\",\"customLogoUrl\":\"\",\"frameType\":\"top-bottom\",\"frameText\":\"สแกนเพื่อตรวจสอบเอกสาร EDMS\",\"frameColor\":\"#0f172a\",\"frameTextColor\":\"#ffffff\"}",
+      "createdAt": "2026-08-11T09:19:17.322Z",
+      "updatedAt": "2026-08-11T09:19:17.322Z"
+    },
+    {
+      "slug": "qr_fsvcpmtg",
+      "title": "Test Link",
+      "originalUrl": "https://google.com",
+      "createdBy": "test",
+      "status": "active",
+      "type": "url",
+      "styleConfig": "{}",
+      "createdAt": "2026-08-11T09:18:33.152Z",
+      "updatedAt": "2026-08-11T09:18:33.152Z"
+    }
+  ],
   "enterprise_qr_scans": []
 }

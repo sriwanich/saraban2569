@@ -146,7 +146,7 @@ export default function CustomNumberingSettings() {
   const fetchReservedNumbers = async () => {
     setLoadingReserved(true);
     try {
-      const res = await fetch(`/api/reserved-numbers?t=${Date.now()}`);
+      const res = await fetch('/api/reserved-numbers');
       if (res.ok) {
         const data = await res.json();
         setReservedNumbers(data);
@@ -341,36 +341,6 @@ export default function CustomNumberingSettings() {
       }
     } catch (err) {
       showNotification('error', 'เกิดข้อผิดพลาดในการจองเลข');
-    }
-  };
-
-  const handleDeleteReserved = async (id: number) => {
-    if (!window.confirm('คุณแน่ใจหรือไม่ว่าต้องการลบเลขจอง/เลขสำรองนี้ออกจากคลัง?')) return;
-    try {
-      const res = await fetch(`/api/reserved-numbers/delete-item/${id}`, { method: 'POST' });
-      if (res.ok) {
-        showNotification('success', 'ลบเลขจอง/เลขสำรองเรียบร้อยแล้ว');
-        fetchReservedNumbers();
-      } else {
-        showNotification('error', 'ไม่สามารถลบเลขจอง/เลขสำรองได้');
-      }
-    } catch (err) {
-      showNotification('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
-    }
-  };
-
-  const handleClearAllReserved = async () => {
-    if (!window.confirm('⚠️ คำเตือน: คุณต้องการลบเลขสำรอง เลขจอง และเลขคืนทั้งหมดในคลังใช่หรือไม่? การดำเนินการนี้ไม่สามารถย้อนคืนได้')) return;
-    try {
-      const res = await fetch('/api/reserved-numbers/clear-all', { method: 'POST' });
-      if (res.ok) {
-        showNotification('success', 'ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมดเรียบร้อยแล้ว');
-        fetchReservedNumbers();
-      } else {
-        showNotification('error', 'ไม่สามารถล้างคลังเลขสำรอง/เลขจองได้');
-      }
-    } catch (err) {
-      showNotification('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
     }
   };
 
@@ -899,23 +869,12 @@ export default function CustomNumberingSettings() {
               </select>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={fetchReservedNumbers}
-                className="px-3 py-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg hover:bg-[var(--border-lighter)] flex items-center gap-1 transition-colors"
-              >
-                <RefreshCw className="w-3.5 h-3.5" /> รีเฟรช
-              </button>
-              {reservedNumbers.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearAllReserved}
-                  className="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg flex items-center gap-1.5 transition-colors font-semibold"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> ลบทั้งหมด
-                </button>
-              )}
-            </div>
+            <button
+              onClick={fetchReservedNumbers}
+              className="px-3 py-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg hover:bg-[var(--border-lighter)] flex items-center gap-1"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> รีเฟรช
+            </button>
           </div>
 
           {/* Table */}
@@ -939,7 +898,6 @@ export default function CustomNumberingSettings() {
                       <th className="px-4 py-3">ผู้จอง / วัตถุประสงค์</th>
                       <th className="px-4 py-3">วันหมดอายุ</th>
                       <th className="px-4 py-3 text-center">สถานะ</th>
-                      <th className="px-4 py-3 text-center">จัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border-light)]">
@@ -980,16 +938,6 @@ export default function CustomNumberingSettings() {
                               <FileText className="w-3 h-3" /> ออกเอกสารแล้ว
                             </span>
                           )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteReserved(item.id)}
-                            className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors inline-flex items-center justify-center"
-                            title="ลบรายการนี้"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
                         </td>
                       </tr>
                     ))}

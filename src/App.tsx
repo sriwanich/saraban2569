@@ -24,7 +24,7 @@ export default function App() {
     const fetchGlobalSettings = async () => {
       try {
         const res = await fetch('/api/settings');
-        if (res.ok) {
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
           const data = await res.json();
           localStorage.setItem('moi_settings', JSON.stringify(data));
           if (data.logoUrl) {

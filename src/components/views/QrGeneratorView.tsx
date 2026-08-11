@@ -27,9 +27,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
   useEffect(() => {
     fetch('/api/settings')
-      .then(res => res.json())
+      .then(res => {
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          return res.json();
+        }
+        return null;
+      })
       .then(data => {
-        setSysSettings(data);
+        if (data) setSysSettings(data);
       })
       .catch(err => {
         console.error('Error fetching settings in QrGeneratorView:', err);
@@ -141,6 +146,16 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
   const [isRegisteringDynamic, setIsRegisteringDynamic] = useState(false);
+  
+  // Floating Toast Notification state
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
   
   // Inline edit states for Dynamic QRs
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
@@ -254,7 +269,44 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const registerDynamicQr = async (forceUrl?: string) => {
     setIsRegisteringDynamic(true);
     try {
-      const targetUrl = forceUrl || getComputedPayload();
+      let targetUrl = forceUrl;
+      if (!targetUrl) {
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'https://edms.go.th';
+        switch (qrType) {
+          case 'edms':
+            targetUrl = selectedDocId ? `${origin}/verify?docId=${selectedDocId}` : `${origin}/verify?docId=DEMO-DOC-2569`;
+            break;
+          case 'url':
+            let u = urlInput.trim();
+            if (u && !u.startsWith('http://') && !u.startsWith('https://')) {
+              u = 'https://' + u;
+            }
+            targetUrl = u || origin;
+            break;
+          case 'text':
+            targetUrl = textInput.trim() || origin;
+            break;
+          case 'vcard':
+            targetUrl = `BEGIN:VCARD\nVERSION:3.0\nN:${vcard.name}\nFN:${vcard.name}\nTITLE:${vcard.title}\nORG:${vcard.org}\nTEL;TYPE=WORK,VOICE:${vcard.phone}\nEMAIL:${vcard.email}\nADR;TYPE=WORK:;;${vcard.address}\nURL:${vcard.website}\nEND:VCARD`;
+            break;
+          case 'wifi':
+            targetUrl = `WIFI:S:${wifi.ssid};T:${wifi.encryption};P:${wifi.password};;`;
+            break;
+          case 'promptpay':
+            const cleanId = promptPay.id.replace(/[^0-9]/g, '');
+            targetUrl = `PROMPTPAY:${cleanId}:${promptPay.amount || '0'}`;
+            break;
+          default:
+            targetUrl = origin;
+        }
+      }
+
+      if (!targetUrl) {
+        showToast('error', 'กรุณาระบุข้อมูล URL หรือเนื้อหาที่ต้องการลงทะเบียนก่อน');
+        setIsRegisteringDynamic(false);
+        return null;
+      }
+
       const payloadStyle = {
         fgColor,
         bgColor,
@@ -276,7 +328,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: frameType !== 'none' ? frameText : `ลิ้งค์ตรวจสอบเอกสาร ${selectedDoc ? selectedDoc.docNumber : 'ทั่วไป'}`,
+          title: frameType !== 'none' && frameText ? frameText : `ลิ้งค์ตรวจสอบเอกสาร ${selectedDoc ? selectedDoc.docNumber : 'ทั่วไป'}`,
           originalUrl: targetUrl,
           createdBy: user?.username || 'ผู้ดูแลระบบ',
           type: qrType,
@@ -290,13 +342,25 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
           setRegisteredSlug(result.qr.slug);
           setGenerationMode('dynamic'); // Lock into dynamic representation
           fetchDynamicQrs(); // Update Dynamic list
-          alert(`✅ ลงทะเบียน Dynamic QR รหัส [ ${result.qr.slug} ] เรียบร้อยแล้ว!\nระบบได้เปลี่ยนเส้นทางเป้าหมายผ่าน Cloud Engine ของทางราชการเพื่อเก็บสถิติเรียบร้อย`);
+          showToast('success', `ลงทะเบียน Dynamic URL สั้น [ ${result.qr.slug} ] สำเร็จ!`);
+          
+          // Auto copy short url to clipboard
+          const shortUrl = `${window.location.origin}/qr/${result.qr.slug}`;
+          try {
+            await navigator.clipboard.writeText(shortUrl);
+          } catch (_) {}
+          
           return result.qr.slug;
+        } else {
+          showToast('error', 'เกิดข้อผิดพลาด: ' + (result.error || 'ไม่สามารถลงทะเบียน Dynamic QR ได้'));
         }
+      } else {
+        const errJson = await res.json().catch(() => null);
+        showToast('error', 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ' + (errJson?.error || res.statusText));
       }
     } catch (err: any) {
       console.error('Failed to register dynamic QR:', err);
-      alert('เกิดข้อผิดพลาดในการลงทะเบียน Dynamic QR: ' + err.message);
+      showToast('error', 'เกิดข้อผิดพลาดในการลงทะเบียน Dynamic QR: ' + err.message);
     } finally {
       setIsRegisteringDynamic(false);
     }
@@ -323,10 +387,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         if (analyticsSlug === slug) {
           loadAnalytics(slug);
         }
-        alert('แก้ไขข้อมูลเส้นทางสแกนสำเร็จ!');
+        showToast('success', 'แก้ไขข้อมูลเส้นทางสแกนสำเร็จ!');
+      } else {
+        showToast('error', 'ไม่สามารถบันทึกการแก้ไขได้');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update dynamic QR:', err);
+      showToast('error', 'เกิดข้อผิดพลาดในการบันทึก: ' + err.message);
     }
   };
 
@@ -350,9 +417,11 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         if (analyticsSlug === qr.slug) {
           loadAnalytics(qr.slug);
         }
+        showToast('info', `เปลี่ยนสถานะเป็น ${newStatus === 'active' ? 'เปิดใช้งาน' : 'ระงับชั่วคราว'} สำเร็จ`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      showToast('error', 'ไม่สามารถเปลี่ยนสถานะได้');
     }
   };
 
@@ -369,10 +438,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
           setAnalyticsData(null);
           setAnalyticsSlug('');
         }
-        alert('ลบข้อมูล Dynamic QR สำเร็จ!');
+        showToast('success', 'ลบข้อมูล Dynamic QR สำเร็จ!');
+      } else {
+        showToast('error', 'ล้มเหลวในการลบ Dynamic QR');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      showToast('error', 'เกิดข้อผิดพลาดในการลบ');
     }
   };
 
@@ -789,7 +861,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   // Save layout style to Saved Templates
   const handleSaveTemplate = () => {
     if (!newTemplateName.trim()) {
-      alert('กรุณากรอกชื่อเทมเพลต');
+      showToast('error', 'กรุณากรอกชื่อเทมเพลต');
       return;
     }
     const template = {
@@ -813,7 +885,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     setSavedTemplates(updated);
     localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
     setNewTemplateName('');
-    alert('บันทึกแม่แบบงานออกแบบสำเร็จ!');
+    showToast('success', 'บันทึกแม่แบบงานออกแบบสำเร็จ!');
   };
 
   // Load template styling
@@ -830,7 +902,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     setFrameColor(t.frameColor || '#0f172a');
     setFrameTextColor(t.frameTextColor || '#ffffff');
     if (t.qrMargin !== undefined) setQrMargin(t.qrMargin);
-    alert(`โหลดเทมเพลต "${t.name}" สำเร็จ!`);
+    showToast('success', `โหลดเทมเพลต "${t.name}" สำเร็จ!`);
   };
 
   // Delete template
@@ -916,7 +988,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       }
 
       if (inputs.length === 0) {
-        alert('ไม่มีรายการนำเข้าสำหรับสร้างแบบกลุ่ม');
+        showToast('error', 'ไม่มีรายการนำเข้าสำหรับสร้างแบบกลุ่ม');
         return;
       }
 
@@ -944,9 +1016,10 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       }
 
       setBulkGeneratedItems(generated);
-      alert(`สร้างคิวอาร์โค้ดแบบกลุ่มเรียบร้อย จำนวน ${generated.length} รายการ!`);
-    } catch (err) {
+      showToast('success', `สร้างคิวอาร์โค้ดแบบกลุ่มเรียบร้อย จำนวน ${generated.length} รายการ!`);
+    } catch (err: any) {
       console.error(err);
+      showToast('error', 'เกิดข้อผิดพลาดในการสร้าง QR แบบกลุ่ม');
     } finally {
       setIsGeneratingBulk(false);
     }
@@ -955,7 +1028,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   // Generate Multi-Label A4 Sticker PDF
   const handleDownloadBulkPDF = async () => {
     if (bulkGeneratedItems.length === 0) {
-      alert('กรุณาสร้างคิวอาร์โค้ดแบบกลุ่มก่อนทำการดาวน์โหลด PDF');
+      showToast('error', 'กรุณาสร้างคิวอาร์โค้ดแบบกลุ่มก่อนทำการดาวน์โหลด PDF');
       return;
     }
     try {
@@ -1018,9 +1091,10 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       link.click();
       document.body.removeChild(link);
       saveToHistory('BULK_PDF');
+      showToast('success', 'ดาวน์โหลดแผ่นสติกเกอร์ PDF เรียบร้อย!');
     } catch (err) {
       console.error(err);
-      alert('ล้มเหลวในการดาวน์โหลดแผ่นสติกเกอร์ PDF');
+      showToast('error', 'ล้มเหลวในการดาวน์โหลดแผ่นสติกเกอร์ PDF');
     }
   };
 
@@ -1046,12 +1120,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       if (response.ok) {
         setStampSuccess(true);
         setTimeout(() => setStampSuccess(false), 3000);
-        alert(`ประทับตรายืนยัน QR ในเอกสาร [${selectedDoc?.docNumber}] เรียบร้อยแล้ว!`);
+        showToast('success', `ประทับตรายืนยัน QR ในเอกสาร [${selectedDoc?.docNumber || ' EDMS '}] เรียบร้อยแล้ว!`);
       } else {
-        alert('ไม่สามารถบันทึกตราลงเอกสารได้');
+        showToast('error', 'ไม่สามารถบันทึกตราลงเอกสารได้');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      showToast('error', 'เกิดข้อผิดพลาดในการประทับตรา');
     } finally {
       setIsSavingToDoc(false);
     }
@@ -1070,11 +1145,26 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     setFgColor(preset.fg);
     setBgColor(preset.bg);
     setLogoType(preset.logo);
-    alert(`ใช้พรีเซต "${preset.name}" เรียบร้อย!`);
+    showToast('success', `ใช้พรีเซต "${preset.name}" เรียบร้อย!`);
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 py-2">
+    <div className="space-y-6 max-w-7xl mx-auto px-4 py-2 relative">
+      {/* Floating Toast Notification Banner */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-[9999] px-4 py-3 rounded-2xl shadow-2xl border flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 text-xs font-semibold max-w-md ${
+          toast.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500 shadow-emerald-900/20' :
+          toast.type === 'error' ? 'bg-rose-600 text-white border-rose-500 shadow-rose-900/20' :
+          'bg-blue-600 text-white border-blue-500 shadow-blue-900/20'
+        }`}>
+          {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-200" />}
+          {toast.type === 'error' && <AlertCircle className="w-5 h-5 shrink-0 text-rose-200" />}
+          {toast.type === 'info' && <Sparkles className="w-5 h-5 shrink-0 text-blue-200" />}
+          <span className="flex-1 break-words">{toast.message}</span>
+          <button onClick={() => setToast(null)} className="ml-2 text-white/80 hover:text-white font-bold text-sm">✕</button>
+        </div>
+      )}
+
       {/* Upper header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[var(--bg-surface)] p-6 rounded-2xl border border-[var(--border-light)] shadow-sm">
         <div className="space-y-1">
@@ -1161,7 +1251,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 >
                   <span className="font-bold text-xs text-blue-600 flex items-center gap-1">
                     <Sparkles className={`w-3.5 h-3.5 ${isRegisteringDynamic ? 'animate-spin' : ''}`} />
-                    <span>Dynamic Routing (แนะนำ) {isRegisteringDynamic && '(กำลังจอง...)'}</span>
+                    <span>Dynamic Routing (แนะนำ) {isRegisteringDynamic && '(กำลังลงทะเบียน...)'}</span>
                   </span>
                   <span className="text-[10px] text-slate-500 mt-1">สร้างลิงก์สั้นวิเคราะห์ข้อมูลสแกน เปลี่ยนลิงก์ปลายทางเมื่อใดก็ได้ ไม่ต้องปริ้นต์กระดาษใหม่</span>
                 </button>
@@ -1169,47 +1259,75 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
               {/* Dynamic QR registration status feedback card */}
               {generationMode === 'dynamic' && !registeredSlug && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl flex items-center justify-between text-xs text-amber-800 dark:text-amber-400">
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-                    ต้องการลงทะเบียน Dynamic Link บนเซิร์ฟเวอร์หรือไม่?
-                  </span>
+                <div className="p-3.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-800 dark:text-amber-400">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
+                    <div>
+                      <div className="font-bold text-amber-900 dark:text-amber-300">ต้องการลงทะเบียน Dynamic Link บนเซิร์ฟเวอร์หรือไม่?</div>
+                      <div className="text-[11px] text-amber-700 dark:text-amber-400">กดปุ่มลงทะเบียนเพื่อรับ URL สั้นสถิติสำหรับ QR Code นี้</div>
+                    </div>
+                  </div>
                   <button
                     type="button"
                     onClick={() => registerDynamicQr()}
                     disabled={isRegisteringDynamic}
-                    className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white font-bold text-[10px] rounded-lg shadow-sm transition-colors"
+                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 shrink-0 self-end sm:self-center"
                   >
-                    {isRegisteringDynamic ? 'กำลังลงทะเบียน...' : 'ลงทะเบียนเพื่อรับ URL สั้น'}
+                    {isRegisteringDynamic ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>กำลังลงทะเบียน...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>ลงทะเบียนเพื่อรับ URL สั้น</span>
+                      </>
+                    )}
                   </button>
-                </div>
-              )}
-
-              {generationMode === 'static' && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-xl flex items-center justify-between text-xs text-blue-800 dark:text-blue-300">
-                  <span className="flex items-center gap-1.5 font-semibold">
-                    <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                    เชื่อมโยงกับลิงก์ตรง (ลิงก์ไม่สั้น) สำเร็จ: รองรับ Dynamic Routing บน Plesk สมบูรณ์แบบ
-                  </span>
                 </div>
               )}
 
               {generationMode === 'dynamic' && registeredSlug && (
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-xl flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-400">
-                  <span className="flex items-center gap-1.5 font-semibold">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    เชื่อมโยงกับลิงก์สั้น Dynamic Link สำเร็จ: /qr/{registeredSlug}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRegisteredSlug('');
-                      setGenerationMode('static');
-                    }}
-                    className="text-[10px] text-slate-500 hover:text-rose-600 underline"
-                  >
-                    ยกเลิกลงทะเบียน
-                  </button>
+                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-emerald-800 dark:text-emerald-400">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-bold text-emerald-900 dark:text-emerald-300">เชื่อมโยงกับ Dynamic URL สั้นสำเร็จ!</div>
+                      <div className="font-mono text-[11px] text-emerald-700 dark:text-emerald-400 truncate">
+                        {window.location.origin}/qr/{registeredSlug}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const shortUrl = `${window.location.origin}/qr/${registeredSlug}`;
+                        try {
+                          await navigator.clipboard.writeText(shortUrl);
+                          showToast('success', 'คัดลอก URL สั้นเรียบร้อยแล้ว!');
+                        } catch (_) {
+                          showToast('info', `URL สั้น: ${shortUrl}`);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>คัดลอก URL สั้น</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRegisteredSlug('');
+                        setGenerationMode('static');
+                        showToast('info', 'ยกเลิกการลงทะเบียน Dynamic Link แล้ว');
+                      }}
+                      className="text-[11px] text-slate-500 hover:text-rose-600 underline"
+                    >
+                      ยกเลิกลงทะเบียน
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1710,21 +1828,22 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 </button>
               </div>
 
-              {generationMode === 'dynamic' && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/15 border border-blue-200 rounded-xl flex items-center gap-3">
-                  <div className="bg-blue-500 text-white p-1.5 rounded-lg">
+              {generationMode === 'dynamic' && registeredSlug && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800/60 rounded-xl flex items-center gap-3">
+                  <div className="bg-blue-500 text-white p-1.5 rounded-lg shrink-0">
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div className="flex-1 text-left min-w-0">
-                    <div className="font-bold text-xs text-blue-800 dark:text-blue-300">นี่คือ Dynamic QR ที่ลงทะเบียนแล้ว</div>
-                    <div className="text-[10px] text-blue-600 truncate">รหัสสล็อตสถิติ: /qr/{registeredSlug}</div>
+                    <div className="font-bold text-xs text-blue-800 dark:text-blue-300">Dynamic QR พร้อมใช้งาน</div>
+                    <div className="text-[10px] text-blue-600 dark:text-blue-400 truncate">URL สั้น: /qr/{registeredSlug}</div>
                   </div>
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(`${window.location.origin}/qr/${registeredSlug}`);
-                      alert('คัดลอกลิงก์สั้นสแกนสำเร็จ!');
+                      showToast('success', 'คัดลอกลิงก์สั้นสแกนสำเร็จ!');
                     }}
-                    className="p-1 text-blue-700 hover:bg-blue-200 rounded"
+                    className="p-1.5 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 rounded transition-colors shrink-0"
+                    title="คัดลอก URL สั้น"
                   >
                     <Copy className="w-4 h-4" />
                   </button>

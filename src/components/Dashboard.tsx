@@ -298,7 +298,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         role: currentUser?.role || ''
       });
       const res = await fetch(`/api/notifications?${params.toString()}`);
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
         const readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
         const updated = data.map((n: any) => ({
@@ -426,7 +426,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const fetchSettings = async () => {
     try {
       const res = await fetch('/api/settings');
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
         localStorage.setItem('moi_settings', JSON.stringify(data));
         if (data.orgName) setOrgName(data.orgName);

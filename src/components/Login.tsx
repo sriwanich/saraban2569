@@ -28,7 +28,7 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
     const fetchSettings = async () => {
       try {
         const response = await fetch('/api/settings');
-        if (response.ok) {
+        if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
           const data = await response.json();
           if (data.orgName) setOrgName(data.orgName);
           if (data.currentYear) setCurrentYear(String(data.currentYear));

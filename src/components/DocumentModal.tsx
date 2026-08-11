@@ -30,8 +30,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const fetchNumberingAndReserved = async () => {
     try {
       const [rulesRes, reservedRes] = await Promise.all([
-        fetch(`/api/numbering-rules?t=${Date.now()}`),
-        fetch(`/api/reserved-numbers?t=${Date.now()}`)
+        fetch('/api/numbering-rules'),
+        fetch('/api/reserved-numbers')
       ]);
       if (rulesRes.ok) {
         const rulesData = await rulesRes.json();
@@ -137,7 +137,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     const fetchSettings = async () => {
       try {
         const res = await fetch('/api/settings');
-        if (res.ok) {
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
           const data = await res.json();
           if (data.startSequence) setStartSequence(Number(data.startSequence));
         }

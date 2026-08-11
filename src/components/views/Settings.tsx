@@ -462,7 +462,7 @@ export default function Settings(props: SettingsProps) {
   const fetchSystemSettings = async () => {
     try {
       const res = await fetch('/api/settings', { cache: 'no-cache' });
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
         if (data.currentYear) setCurrentYear(data.currentYear);
         if (data.startSequence) setStartSequence(data.startSequence);

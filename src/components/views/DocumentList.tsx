@@ -23,10 +23,17 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
 
   useEffect(() => {
     fetch('/api/settings')
-      .then(res => res.json())
+      .then(res => {
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          return res.json();
+        }
+        return null;
+      })
       .then(data => {
-        if (data.orgName) setOrgName(data.orgName);
-        if (data.logoUrl) setLogoUrl(data.logoUrl);
+        if (data) {
+          if (data.orgName) setOrgName(data.orgName);
+          if (data.logoUrl) setLogoUrl(data.logoUrl);
+        }
       })
       .catch(() => {});
   }, []);
