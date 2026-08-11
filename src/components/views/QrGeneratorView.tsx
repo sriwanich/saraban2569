@@ -1185,11 +1185,20 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 </div>
               )}
 
+              {generationMode === 'static' && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-xl flex items-center justify-between text-xs text-blue-800 dark:text-blue-300">
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    เชื่อมโยงกับลิงก์ตรง (ลิงก์ไม่สั้น) สำเร็จ: รองรับ Dynamic Routing บน Plesk สมบูรณ์แบบ
+                  </span>
+                </div>
+              )}
+
               {generationMode === 'dynamic' && registeredSlug && (
                 <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-xl flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-400">
                   <span className="flex items-center gap-1.5 font-semibold">
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    เชื่อมโยงกับลิงก์สั้นสำเร็จ: /qr/{registeredSlug}
+                    เชื่อมโยงกับลิงก์สั้น Dynamic Link สำเร็จ: /qr/{registeredSlug}
                   </span>
                   <button
                     type="button"
