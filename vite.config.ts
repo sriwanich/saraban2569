@@ -38,5 +38,11 @@ export default defineConfig({
       }
     })
   ],
+  optimizeDeps: {
+    include: ['fabric', 'pdf-lib', 'qrcode']
+  },
+  build: {
+    chunkSizeWarningLimit: 3000
+  },
   server: { host: '0.0.0.0', port: 3000, allowedHosts: 'all' }
 });

@@ -361,6 +361,230 @@
   ],
   "system_logs": [
     {
+      "id": 1786435033241,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:57:13.212Z"
+    },
+    {
+      "id": 1786434723624,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:52:03.595Z"
+    },
+    {
+      "id": 1786434515441,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 15 ฉบับ (หนังสือภายนอก)",
+      "username": "ผู้ดูแลระบบสารบรรณ",
+      "ipAddress": "125.27.73.181",
+      "timestamp": "2026-08-11T07:48:35.412Z"
+    },
+    {
+      "id": 1786434406263,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:46:46.233Z"
+    },
+    {
+      "id": 1786434333614,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:45:33.584Z"
+    },
+    {
+      "id": 1786434081828,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:41:21.800Z"
+    },
+    {
+      "id": 1786434069743,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบซิงค์",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:41:09.715Z"
+    },
+    {
+      "id": 1786433871414,
+      "action": "DELETE_RESERVED_NUMBER",
+      "details": "ลบเลขจอง/เลขสะสม/เลขคืน ID: 38",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:37:51.386Z"
+    },
+    {
+      "id": 1786433862662,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบซิงค์",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:37:42.634Z"
+    },
+    {
+      "id": 1786433845740,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:37:25.712Z"
+    },
+    {
+      "id": 1786433660273,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบซิงค์",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:34:20.244Z"
+    },
+    {
+      "id": 1786433650747,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:34:10.608Z"
+    },
+    {
+      "id": 1786432978393,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:22:58.364Z"
+    },
+    {
+      "id": 1786432968803,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบซิงค์",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:22:48.775Z"
+    },
+    {
+      "id": 1786432958703,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:22:38.675Z"
+    },
+    {
+      "id": 1786432952800,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:22:32.771Z"
+    },
+    {
+      "id": 1786432780380,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:19:40.352Z"
+    },
+    {
+      "id": 1786432774976,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบซิงค์",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T07:19:34.947Z"
+    },
+    {
+      "id": 1786427445635,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:50:45.456Z"
+    },
+    {
+      "id": 1786427134832,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:45:34.803Z"
+    },
+    {
+      "id": 1786427130276,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบล้าง",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:45:30.247Z"
+    },
+    {
+      "id": 1786427120102,
+      "action": "DELETE_RESERVED_NUMBER",
+      "details": "ลบเลขจอง/เลขสะสม/เลขคืน ID: 33",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:45:20.072Z"
+    },
+    {
+      "id": 1786427115014,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบใหม่",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:45:14.984Z"
+    },
+    {
+      "id": 1786426667136,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:37:47.107Z"
+    },
+    {
+      "id": 1786426555899,
+      "action": "DELETE_RESERVED_NUMBER",
+      "details": "ลบเลขจอง/เลขสะสม/เลขคืน ID: 32",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:35:55.871Z"
+    },
+    {
+      "id": 1786426550740,
+      "action": "RESERVE_NUMBER",
+      "details": "จอง/สำรองเลขหนังสือ 1 ฉบับ (หนังสือภายนอก)",
+      "username": "ทดสอบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:35:50.711Z"
+    },
+    {
+      "id": 1786426503050,
+      "action": "CLEAR_RESERVED_NUMBERS",
+      "details": "ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด",
+      "username": "ผู้ดูแลระบบ",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-11T05:35:03.021Z"
+    },
+    {
+      "id": 1786414792149,
+      "action": "LOGIN_SUCCESS",
+      "details": "เข้าสู่ระบบสำเร็จ (ผู้ดูแล ระบบ) - ยืนยันรหัสผ่านด้วย Argon2id",
+      "username": "admin",
+      "ipAddress": "125.27.73.181",
+      "timestamp": "2026-08-11T02:19:52.012Z"
+    },
+    {
       "id": 1786001935393,
       "action": "CREATE_DRAFT",
       "details": "บันทึกร่างเอกสาร: เฝ้าระวังสถานการณ์ฝนตกหนัก น้ำป่าไหลหลาก น้ำท่วมฉับพลัน น้ำท่วมขัง ดินโคลนถล่ม และคลื่นลมแรง",
@@ -898,53 +1122,7 @@
       "description": "งานจัดซื้อจัดจ้าง พัสดุ คุรุภัณฑ์ และอาคารสถานที่"
     }
   ],
-  "reserved_numbers": [
-    {
-      "id": 1,
-      "ruleId": 1,
-      "docType": "หนังสือภายนอก",
-      "department": "ฝ่ายบริหารงานทั่วไป",
-      "numberString": "รย 0021/ว 124",
-      "seqNumber": 124,
-      "year": "2569",
-      "type": "reserved",
-      "status": "available",
-      "reservedBy": "สมศรี รักษ์ดี",
-      "reservedFor": "จองเลขหนังสือเวียนโครงการฝึกอบรมกู้ภัยทางน้ำช่วงเทศกาล",
-      "createdAt": "2026-08-01 09:30:00",
-      "expiresAt": "2026-08-15"
-    },
-    {
-      "id": 2,
-      "ruleId": 5,
-      "docType": "คำสั่ง",
-      "department": "ฝ่ายบริหารงานทั่วไป",
-      "numberString": "คำสั่ง 45/2569",
-      "seqNumber": 45,
-      "year": "2569",
-      "type": "reserved",
-      "status": "available",
-      "reservedBy": "สมชาย ใจดี",
-      "reservedFor": "จองเลขคำสั่งแต่งตั้งคณะทำงานเตรียมพร้อมรับมือฤดูฝน",
-      "createdAt": "2026-08-02 11:00:00",
-      "expiresAt": "2026-08-20"
-    },
-    {
-      "id": 3,
-      "ruleId": 2,
-      "docType": "หนังสือภายนอก",
-      "department": "ฝ่ายยุทธศาสตร์และการจัดการ",
-      "numberString": "รย 0021.1/46",
-      "seqNumber": 46,
-      "year": "2569",
-      "type": "reclaimed",
-      "status": "available",
-      "reservedBy": "ระบบสารบรรณ (เลขคืนจากเอกสารยกเลิก)",
-      "reservedFor": "คืนเลขเนื่องจากยกเลิกร่างหนังสือประสานงานเดิม",
-      "createdAt": "2026-08-02 14:20:00",
-      "expiresAt": "2026-12-31"
-    }
-  ],
+  "reserved_numbers": [],
   "scheduled_reservations": [
     {
       "id": 1,
@@ -1169,5 +1347,7 @@
       "permission_key": "audit_logs",
       "is_allowed": 0
     }
-  ]
+  ],
+  "enterprise_dynamic_qrs": [],
+  "enterprise_qr_scans": []
 }

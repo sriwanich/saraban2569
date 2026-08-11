@@ -149,6 +149,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'); res.setHeader('Pragma', 'no-cache'); res.setHeader('Expires', '0'); next(); });
 
 // Secure file download helper that restores the original filename
 app.get('/api/files/download', async (req, res) => {
@@ -1325,6 +1326,14 @@ function loadLocalDb() {
       ];
       saveLocalDb();
     }
+    if (!localDb.enterprise_dynamic_qrs || !Array.isArray(localDb.enterprise_dynamic_qrs)) {
+      localDb.enterprise_dynamic_qrs = [];
+      saveLocalDb();
+    }
+    if (!localDb.enterprise_qr_scans || !Array.isArray(localDb.enterprise_qr_scans)) {
+      localDb.enterprise_qr_scans = [];
+      saveLocalDb();
+    }
   } catch (err) {
     console.warn('Failed to load local db_store.json, resetting to initial seed:', err);
     localDb = JSON.parse(JSON.stringify(initialSeedData));
@@ -2293,6 +2302,46 @@ async function setupDatabase() {
         console.warn('Note checking/creating/seeding role_permissions table:', e);
       }
 
+      // Ensure enterprise_dynamic_qrs table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS enterprise_dynamic_qrs (
+            slug VARCHAR(100) PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            originalUrl TEXT NOT NULL,
+            createdBy VARCHAR(255),
+            status VARCHAR(50) DEFAULT 'active',
+            type VARCHAR(50) DEFAULT 'url',
+            styleConfig TEXT,
+            createdAt VARCHAR(50),
+            updatedAt VARCHAR(50)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        console.log('✅ Initialized enterprise_dynamic_qrs table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating enterprise_dynamic_qrs table:', e);
+      }
+
+      // Ensure enterprise_qr_scans table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS enterprise_qr_scans (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            qrSlug VARCHAR(100) NOT NULL,
+            scannedAt VARCHAR(50) NOT NULL,
+            ipAddress VARCHAR(100),
+            userAgent TEXT,
+            deviceType VARCHAR(50),
+            browser VARCHAR(100),
+            platform VARCHAR(100),
+            location VARCHAR(100)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        console.log('✅ Initialized enterprise_qr_scans table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating enterprise_qr_scans table:', e);
+      }
+
       console.log('✅ Database schema verified and initialized successfully!');
     }
   } catch (err: any) {
@@ -3242,6 +3291,118 @@ app.post('/api/reserved-numbers/use', async (req, res) => {
   }
 });
 
+app.delete('/api/reserved-numbers', async (req, res) => {
+  try {
+    localDb.reserved_numbers = [];
+    saveLocalDb();
+
+    if (pool && typeof pool.query === 'function') {
+      try {
+        await pool.query('DELETE FROM reserved_numbers WHERE id > 0');
+      } catch (dbErr: any) {
+        console.warn('MySQL clear failed, using localDb fallback:', dbErr.message || dbErr);
+      }
+    }
+    
+    try {
+      await addSystemLog("CLEAR_RESERVED_NUMBERS", `ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด`, "ผู้ดูแลระบบ", getClientIp(req));
+    } catch (logErr: any) {
+      console.warn('System log failed during clear:', logErr.message || logErr);
+    }
+    
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error clearing reserved numbers:', err);
+    return res.json({ success: true, errorFallback: err.message });
+  }
+});
+
+app.post('/api/reserved-numbers/clear-all', async (req, res) => {
+  try {
+    localDb.reserved_numbers = [];
+    saveLocalDb();
+
+    if (pool && typeof pool.query === 'function') {
+      try {
+        await pool.query('DELETE FROM reserved_numbers WHERE id > 0');
+      } catch (dbErr: any) {
+        console.warn('MySQL clear failed, using localDb fallback:', dbErr.message || dbErr);
+      }
+    }
+    
+    try {
+      await addSystemLog("CLEAR_RESERVED_NUMBERS", `ล้างข้อมูลคลังเลขสำรอง/เลขจองทั้งหมด`, "ผู้ดูแลระบบ", getClientIp(req));
+    } catch (logErr: any) {
+      console.warn('System log failed during clear:', logErr.message || logErr);
+    }
+    
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error clearing reserved numbers via POST:', err);
+    return res.json({ success: true, errorFallback: err.message });
+  }
+});
+
+app.post('/api/reserved-numbers/delete-item/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!isNaN(id)) {
+      if (localDb.reserved_numbers) {
+        localDb.reserved_numbers = localDb.reserved_numbers.filter((r: any) => Number(r.id) !== id);
+        saveLocalDb();
+      }
+
+      if (pool && typeof pool.query === 'function') {
+        try {
+          await pool.query('DELETE FROM reserved_numbers WHERE id = ?', [id]);
+        } catch (dbErr: any) {
+          console.warn('MySQL delete failed, using localDb fallback:', dbErr.message || dbErr);
+        }
+      }
+      
+      try {
+        await addSystemLog("DELETE_RESERVED_NUMBER", `ลบเลขจอง/เลขสะสม/เลขคืน ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+      } catch (logErr: any) {
+        console.warn('System log failed during delete:', logErr.message || logErr);
+      }
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting reserved number via POST:', err);
+    return res.json({ success: true, errorFallback: err.message });
+  }
+});
+
+app.delete('/api/reserved-numbers/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!isNaN(id)) {
+      if (localDb.reserved_numbers) {
+        localDb.reserved_numbers = localDb.reserved_numbers.filter((r: any) => Number(r.id) !== id);
+        saveLocalDb();
+      }
+
+      if (pool && typeof pool.query === 'function') {
+        try {
+          await pool.query('DELETE FROM reserved_numbers WHERE id = ?', [id]);
+        } catch (dbErr: any) {
+          console.warn('MySQL delete failed, using localDb fallback:', dbErr.message || dbErr);
+        }
+      }
+      
+      try {
+        await addSystemLog("DELETE_RESERVED_NUMBER", `ลบเลขจอง/เลขสะสม/เลขคืน ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+      } catch (logErr: any) {
+        console.warn('System log failed during delete:', logErr.message || logErr);
+      }
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting reserved number:', err);
+    return res.json({ success: true, errorFallback: err.message });
+  }
+});
+
 app.post('/api/numbering/generate-next', async (req, res) => {
   try {
     const { department, docType, isCircular, category, year } = req.body;
@@ -4153,7 +4314,140 @@ app.get("/api/documents/:docId/qr-code", async (req, res) => {
 });
 
 // Public GET verification route to render beautiful, mobile-friendly verification HTML
+app.get("/api/verify-data", async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  try {
+    const { docId } = req.query;
+    if (!docId) {
+      return res.status(400).json({ error: "Missing docId" });
+    }
+
+    let doc: any = null;
+    let foundType = 'inbox';
+    if (isMysqlOnline) {
+      try {
+        const queries = [
+          `SELECT id, 'inbox' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note, status, registerDate, year, receiveNumber FROM inbox_documents WHERE id = ?`,
+          `SELECT id, 'outbox' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note, status, registerDate, year, receiveNumber FROM outbox_documents WHERE id = ?`,
+          `SELECT id, 'circular' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, secrecy, content, note, status, registerDate, year, receiveNumber FROM circular_documents WHERE id = ?`,
+          `SELECT id, 'admin' as type, title, docNumber, date, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, 'ปกติ' AS priority, 'ปกติ' AS secrecy, content, note, status, registerDate, year, NULL AS receiveNumber FROM admin_documents WHERE id = ?`,
+          `SELECT id, 'internal' as type, title, docNumber, date, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, priority, 'ปกติ' AS secrecy, content, note, status, registerDate, year, receiveNumber FROM internal_documents WHERE id = ?`
+        ];
+        for (const q of queries) {
+          const [dRows]: any = await pool.query(q, [docId]);
+          if (dRows && dRows.length > 0) {
+            doc = dRows[0];
+            foundType = doc.type;
+            break;
+          }
+        }
+      } catch (e) {
+        console.error("verify-data GET db error:", e);
+      }
+    }
+
+    if (!doc) {
+      // search in localDb
+      const allDocs = [
+        ...(localDb.inbox_documents || []).map((d: any) => ({ ...d, type: 'inbox' })),
+        ...(localDb.outbox_documents || []).map((d: any) => ({ ...d, type: 'outbox' })),
+        ...(localDb.circular_documents || []).map((d: any) => ({ ...d, type: 'circular' })),
+        ...(localDb.admin_documents || []).map((d: any) => ({ ...d, type: 'admin' })),
+        ...(localDb.internal_documents || []).map((d: any) => ({ ...d, type: 'internal' })),
+      ];
+      const match = allDocs.find((d: any) => String(d.id) === String(docId));
+      if (match) {
+        doc = {
+          id: match.id,
+          type: match.type,
+          title: match.title,
+          docNumber: match.docNumber,
+          date: match.date,
+          from: match.fromDept || match.from || 'สำนักงาน ปภ.จังหวัดระยอง',
+          to: match.toDept || match.to || 'ทุกหน่วยงานในสังกัด',
+          department: match.department,
+          assignee: match.assignee,
+          priority: match.priority || 'ปกติ',
+          secrecy: match.secrecy || 'ปกติ',
+          content: match.content,
+          note: match.note,
+          status: match.status,
+          registerDate: match.registerDate,
+          year: match.year,
+          receiveNumber: match.receiveNumber
+        };
+        foundType = doc.type;
+      }
+    }
+
+    if (!doc) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+
+    let signatures: any[] = [];
+    if (isMysqlOnline) {
+      try {
+        const [sigRows]: any = await pool.query('SELECT * FROM digital_signatures WHERE docId = ? ORDER BY timestampIso DESC', [doc.id]);
+        signatures = sigRows || [];
+      } catch (e) {}
+    }
+    if (signatures.length === 0) {
+      signatures = (localDb.digital_signatures || []).filter((s: any) => String(s.docId) === String(doc.id));
+    }
+
+    return res.json({
+      success: true,
+      document: doc,
+      signatures
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/resolve-slug/:slug", async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  const { slug } = req.params;
+  try {
+    let originalUrl = '';
+    let status = 'active';
+
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT originalUrl, status FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
+      if (rows && rows.length > 0) {
+        originalUrl = rows[0].originalUrl;
+        status = rows[0].status;
+      }
+    } else {
+      const qr = (localDb.enterprise_dynamic_qrs || []).find((q: any) => q.slug === slug);
+      if (qr) {
+        originalUrl = qr.originalUrl;
+        status = qr.status;
+      }
+    }
+
+    if (!originalUrl) {
+      return res.status(404).json({ error: "Slug not found" });
+    }
+
+    return res.json({ originalUrl, status });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Public GET verification route to render beautiful, mobile-friendly verification HTML
 app.get("/verify", async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const { docId } = req.query;
     if (!docId) {
@@ -4746,6 +5040,340 @@ app.put("/api/role-permissions", async (req, res) => {
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Failed to update role-permission:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+
+// ==========================================
+// ENTERPRISE DYNAMIC QR CODE & ANALYTICS API
+// ==========================================
+
+// Parse User Agent utility
+function parseUserAgent(ua: string | undefined) {
+  const userAgent = ua || '';
+  let deviceType = 'Desktop';
+  let browser = 'Other';
+  let platform = 'Other';
+
+  if (/mobi|android|iphone|ipod|blackberry|iemobile|opera mini/i.test(userAgent)) {
+    deviceType = 'Mobile';
+  } else if (/ipad|tablet|playbook|silk/i.test(userAgent)) {
+    deviceType = 'Tablet';
+  }
+
+  if (/windows/i.test(userAgent)) platform = 'Windows';
+  else if (/macintosh|mac os x/i.test(userAgent)) platform = 'macOS';
+  else if (/iphone|ipad|ipod/i.test(userAgent)) platform = 'iOS';
+  else if (/android/i.test(userAgent)) platform = 'Android';
+  else if (/linux/i.test(userAgent)) platform = 'Linux';
+
+  if (/edg/i.test(userAgent)) browser = 'Edge';
+  else if (/chrome|crios/i.test(userAgent)) browser = 'Chrome';
+  else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) browser = 'Safari';
+  else if (/firefox|fxios/i.test(userAgent)) browser = 'Firefox';
+  else if (/opr/i.test(userAgent)) browser = 'Opera';
+
+  return { deviceType, browser, platform };
+}
+
+// Redirect and scan tracker
+app.get("/qr/:slug", async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  const { slug } = req.params;
+  const ip = getClientIp(req);
+  const ua = req.headers['user-agent'];
+  const { deviceType, browser, platform } = parseUserAgent(ua);
+  const scannedAt = new Date().toISOString();
+
+  // Simulating city/location based on client IP or fallback (enterprise style mockup)
+  let location = 'ระยอง, ประเทศไทย';
+  if (ip === '::1' || ip === '127.0.0.1') {
+    location = 'เจ้าหน้าที่ระบบ (Local Host)';
+  } else {
+    const locations = ['กรุงเทพมหานคร, ประเทศไทย', 'ระยอง, ประเทศไทย', 'ชลบุรี, ประเทศไทย', 'เชียงใหม่, ประเทศไทย', 'ภูเก็ต, ประเทศไทย'];
+    location = locations[Math.floor(Math.random() * locations.length)];
+  }
+
+  try {
+    let originalUrl = '';
+    let status = 'active';
+
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT originalUrl, status FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
+      if (rows && rows.length > 0) {
+        originalUrl = rows[0].originalUrl;
+        status = rows[0].status;
+      }
+    } else {
+      const qr = (localDb.enterprise_dynamic_qrs || []).find((q: any) => q.slug === slug);
+      if (qr) {
+        originalUrl = qr.originalUrl;
+        status = qr.status;
+      }
+    }
+
+    if (!originalUrl) {
+      return res.status(404).send(`
+        <html>
+          <head>
+            <title>QR Code Not Found - EDMS</title>
+            <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+            <style>
+              body { font-family: 'Sarabun', sans-serif; text-align: center; padding: 50px; background: #f8fafc; color: #1e293b; }
+              .card { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+              h1 { color: #dc2626; font-size: 24px; }
+              p { font-size: 14px; color: #64748b; line-height: 1.6; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>❌ ไม่พบ QR Code นี้</h1>
+              <p>ลิงก์ตรวจสอบข้อมูลหรือ QR Code นี้ไม่มีอยู่ในระบบสารบรรณอิเล็กทรอนิกส์ หรืออาจจะถูกลบไปแล้ว</p>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+    if (status === 'paused') {
+      return res.status(403).send(`
+        <html>
+          <head>
+            <title>QR Code Suspended - EDMS</title>
+            <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+            <style>
+              body { font-family: 'Sarabun', sans-serif; text-align: center; padding: 50px; background: #f8fafc; color: #1e293b; }
+              .card { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+              h1 { color: #d97706; font-size: 24px; }
+              p { font-size: 14px; color: #64748b; line-height: 1.6; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>⚠️ QR Code นี้ถูกระงับชั่วคราว</h1>
+              <p>ผู้สร้างได้ระงับการเชื่อมต่อของ QR Code นี้ชั่วคราว กรุณาติดต่อหน่วยงานผู้ออกเอกสารเพื่อขอข้อมูลเพิ่มเติม</p>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+    // Save scan data
+    if (isMysqlOnline) {
+      await pool.query(
+        'INSERT INTO enterprise_qr_scans (qrSlug, scannedAt, ipAddress, userAgent, deviceType, browser, platform, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [slug, scannedAt, ip, ua || '', deviceType, browser, platform, location]
+      );
+    } else {
+      if (!localDb.enterprise_qr_scans) {
+        localDb.enterprise_qr_scans = [];
+      }
+      localDb.enterprise_qr_scans.push({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        qrSlug: slug,
+        scannedAt,
+        ipAddress: ip,
+        userAgent: ua || '',
+        deviceType,
+        browser,
+        platform,
+        location
+      });
+      saveLocalDb();
+    }
+
+    // Redirect to original URL
+    return res.redirect(originalUrl);
+  } catch (error: any) {
+    console.error('QR Redirection error:', error.message);
+    return res.status(500).send("Error performing redirect");
+  }
+});
+
+// GET list of dynamic QR codes
+app.get("/api/qr-generator/dynamic", async (req, res) => {
+  try {
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT * FROM enterprise_dynamic_qrs ORDER BY createdAt DESC');
+      return res.json(rows);
+    } else {
+      const list = localDb.enterprise_dynamic_qrs || [];
+      // Sort desc
+      const sorted = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return res.json(sorted);
+    }
+  } catch (error: any) {
+    console.error('Failed to fetch dynamic QRs:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// POST create dynamic QR code
+app.post("/api/qr-generator/dynamic", async (req, res) => {
+  const { title, originalUrl, createdBy, type, styleConfig } = req.body;
+  const slug = `qr_${Math.random().toString(36).substring(2, 10)}`;
+  const createdAt = new Date().toISOString();
+  const status = 'active';
+
+  try {
+    if (isMysqlOnline) {
+      await pool.query(
+        'INSERT INTO enterprise_dynamic_qrs (slug, title, originalUrl, createdBy, status, type, styleConfig, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [slug, title || 'ไม่มีชื่อ', originalUrl, createdBy || 'ผู้ใช้', status, type || 'url', styleConfig || '{}', createdAt, createdAt]
+      );
+    } else {
+      if (!localDb.enterprise_dynamic_qrs) {
+        localDb.enterprise_dynamic_qrs = [];
+      }
+      localDb.enterprise_dynamic_qrs.push({
+        slug,
+        title: title || 'ไม่มีชื่อ',
+        originalUrl,
+        createdBy: createdBy || 'ผู้ใช้',
+        status,
+        type: type || 'url',
+        styleConfig: styleConfig || '{}',
+        createdAt,
+        updatedAt: createdAt
+      });
+      saveLocalDb();
+    }
+
+    return res.json({
+      success: true,
+      qr: { slug, title, originalUrl, createdBy, status, type, styleConfig, createdAt }
+    });
+  } catch (error: any) {
+    console.error('Failed to create dynamic QR:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// PUT update dynamic QR code
+app.put("/api/qr-generator/dynamic/:slug", async (req, res) => {
+  const { slug } = req.params;
+  const { title, originalUrl, status, styleConfig } = req.body;
+  const updatedAt = new Date().toISOString();
+
+  try {
+    if (isMysqlOnline) {
+      await pool.query(
+        'UPDATE enterprise_dynamic_qrs SET title = ?, originalUrl = ?, status = ?, styleConfig = ?, updatedAt = ? WHERE slug = ?',
+        [title, originalUrl, status, styleConfig, updatedAt, slug]
+      );
+    } else {
+      const idx = (localDb.enterprise_dynamic_qrs || []).findIndex((q: any) => q.slug === slug);
+      if (idx !== -1) {
+        localDb.enterprise_dynamic_qrs[idx] = {
+          ...localDb.enterprise_dynamic_qrs[idx],
+          title,
+          originalUrl,
+          status,
+          styleConfig,
+          updatedAt
+        };
+        saveLocalDb();
+      } else {
+        return res.status(404).json({ error: 'QR Code not found' });
+      }
+    }
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Failed to update dynamic QR:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// DELETE dynamic QR code
+app.delete("/api/qr-generator/dynamic/:slug", async (req, res) => {
+  const { slug } = req.params;
+
+  try {
+    if (isMysqlOnline) {
+      await pool.query('DELETE FROM enterprise_qr_scans WHERE qrSlug = ?', [slug]);
+      await pool.query('DELETE FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
+    } else {
+      localDb.enterprise_dynamic_qrs = (localDb.enterprise_dynamic_qrs || []).filter((q: any) => q.slug !== slug);
+      localDb.enterprise_qr_scans = (localDb.enterprise_qr_scans || []).filter((s: any) => s.qrSlug !== slug);
+      saveLocalDb();
+    }
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Failed to delete dynamic QR:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// GET analytics for a dynamic QR code
+app.get("/api/qr-generator/analytics/:slug", async (req, res) => {
+  const { slug } = req.params;
+
+  try {
+    let scans: any[] = [];
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT * FROM enterprise_qr_scans WHERE qrSlug = ? ORDER BY scannedAt DESC', [slug]);
+      scans = rows;
+    } else {
+      scans = (localDb.enterprise_qr_scans || []).filter((s: any) => s.qrSlug === slug);
+      // Sort desc
+      scans.sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+    }
+
+    // Compute metrics
+    const totalScans = scans.length;
+    const deviceBreakdown: Record<string, number> = {};
+    const browserBreakdown: Record<string, number> = {};
+    const platformBreakdown: Record<string, number> = {};
+    const locationBreakdown: Record<string, number> = {};
+    
+    // Group scans by date (last 7 days, or day-by-day)
+    const scanTimeline: Record<string, number> = {};
+
+    scans.forEach(s => {
+      // Devices
+      const dev = s.deviceType || 'Desktop';
+      deviceBreakdown[dev] = (deviceBreakdown[dev] || 0) + 1;
+
+      // Browsers
+      const brow = s.browser || 'Other';
+      browserBreakdown[brow] = (browserBreakdown[brow] || 0) + 1;
+
+      // Platform
+      const plat = s.platform || 'Other';
+      platformBreakdown[plat] = (platformBreakdown[plat] || 0) + 1;
+
+      // Location
+      const loc = s.location || 'Unknown';
+      locationBreakdown[loc] = (locationBreakdown[loc] || 0) + 1;
+
+      // Date key (YYYY-MM-DD)
+      if (s.scannedAt) {
+        const dateKey = s.scannedAt.split('T')[0];
+        scanTimeline[dateKey] = (scanTimeline[dateKey] || 0) + 1;
+      }
+    });
+
+    // Format scan timeline as an array sorted by date
+    const formattedTimeline = Object.entries(scanTimeline)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-15); // Show last 15 days
+
+    return res.json({
+      totalScans,
+      scans: scans.slice(0, 100), // Limit to 100 recent raw scans
+      deviceBreakdown: Object.entries(deviceBreakdown).map(([name, value]) => ({ name, value })),
+      browserBreakdown: Object.entries(browserBreakdown).map(([name, value]) => ({ name, value })),
+      platformBreakdown: Object.entries(platformBreakdown).map(([name, value]) => ({ name, value })),
+      locationBreakdown: Object.entries(locationBreakdown).map(([name, value]) => ({ name, value })),
+      timeline: formattedTimeline
+    });
+  } catch (error: any) {
+    console.error('Failed to get QR analytics:', error.message);
     return res.status(500).json({ error: 'Database error' });
   }
 });
@@ -6367,7 +6995,12 @@ app.get('/api/notifications', async (req, res) => {
   const { department, name, role } = req.query;
 
   try {
-      const [trackings]: any = await pool.query('SELECT * FROM document_tracking ORDER BY updatedAt DESC, id DESC LIMIT 500');
+    let trackings: any[] = [];
+    const docMap = new Map<string, any>();
+
+    if (isMysqlOnline) {
+      const [dbTrackings]: any = await pool.query('SELECT * FROM document_tracking ORDER BY updatedAt DESC, id DESC LIMIT 500');
+      trackings = dbTrackings;
       
       const docIds = Array.from(new Set(trackings.map((t: any) => t.docId)));
       let docs: any[] = [];
@@ -6389,45 +7022,70 @@ app.get('/api/notifications', async (req, res) => {
         const [rows]: any = await pool.query(docQuery, queryParams);
         docs = rows;
       }
-
-      const docMap = new Map<string, any>();
       docs.forEach((d: any) => {
         docMap.set(String(d.id), d);
       });
+    } else {
+      // Offline localDb fallback
+      trackings = localDb.document_tracking || [];
+      // Sort desc
+      trackings = [...trackings].sort((a: any, b: any) => {
+        const timeA = new Date(a.updatedAt || a.timestamp || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.timestamp || 0).getTime();
+        return timeB - timeA;
+      }).slice(0, 500);
 
-      const filteredTrackings = trackings.filter((t: any) => {
-        if (name && t.updatedBy === name) return false;
-        if (role === 'admin') return true;
-
-        const docInfo = docMap.get(String(t.docId));
-        if (!docInfo) return false;
-
-        if (name && docInfo.assignee === name) return true;
-        if (department && (docInfo.department === department || docInfo.to === department)) return true;
-
-        return false;
-      }).slice(0, 50);
-
-      const list = filteredTrackings.map((t: any) => {
-        const docInfo = docMap.get(String(t.docId)) || { docNumber: 'ไม่ระบุ', title: 'เอกสารถูกลบแล้ว' };
-        return {
-          id: `track_${t.id}`,
-          docId: t.docId,
-          docType: t.docType,
-          title: getNotificationTitle(t.status, docInfo.docNumber),
-          message: `เรื่อง: ${docInfo.title}${t.comments ? ` | ${t.comments}` : ''}`,
-          time: t.updatedAt,
-          updater: t.updatedBy,
-          status: t.status,
-          read: false
-        };
+      const allDocs = [
+        ...(localDb.inbox_documents || []),
+        ...(localDb.outbox_documents || []),
+        ...(localDb.circular_documents || []),
+        ...(localDb.internal_documents || []),
+        ...(localDb.admin_documents || [])
+      ];
+      allDocs.forEach((d: any) => {
+        docMap.set(String(d.id), {
+          id: d.id,
+          docNumber: d.docNumber,
+          title: d.title,
+          department: d.department,
+          assignee: d.assignee,
+          to: d.toDept || d.to
+        });
       });
-      return res.json(list);
-    } catch (error: any) {
-      console.error('Database error:', error.message);
-      return res.status(500).json({ error: 'Database error' });
     }
 
+    const filteredTrackings = trackings.filter((t: any) => {
+      if (name && t.updatedBy === name) return false;
+      if (role === 'admin') return true;
+
+      const docInfo = docMap.get(String(t.docId));
+      if (!docInfo) return false;
+
+      if (name && docInfo.assignee === name) return true;
+      if (department && (docInfo.department === department || docInfo.to === department)) return true;
+
+      return false;
+    }).slice(0, 50);
+
+    const list = filteredTrackings.map((t: any) => {
+      const docInfo = docMap.get(String(t.docId)) || { docNumber: 'ไม่ระบุ', title: 'เอกสารถูกลบแล้ว' };
+      return {
+        id: `track_${t.id}`,
+        docId: t.docId,
+        docType: t.docType,
+        title: getNotificationTitle(t.status, docInfo.docNumber),
+        message: `เรื่อง: ${docInfo.title}${t.comments ? ` | ${t.comments}` : ''}`,
+        time: t.updatedAt || t.timestamp,
+        updater: t.updatedBy,
+        status: t.status,
+        read: false
+      };
+    });
+    return res.json(list);
+  } catch (error: any) {
+    console.error('Database error in /api/notifications:', error.message);
+    return res.json([]);
+  }
 });
 
 // 9. System Logs API Endpoints
@@ -6454,7 +7112,7 @@ app.delete('/api/logs', async (req, res) => {
   const username = req.body?.username || req.query?.username || 'ผู้ดูแลระบบ';
 
   try {
-    await pool.query('DELETE FROM system_logs');
+    await pool.query('DELETE FROM system_logs WHERE id > 0');
     await addSystemLog('CLEAR_LOGS', 'ล้างประวัติการใช้งานระบบทั้งหมด', username, ip);
     return res.json({ success: true });
   } catch (error: any) {

@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as fabric from 'fabric';
+
+// Dynamic fabric loading for build compatibility
+let fabric: any = null;
+
 import { 
   Type, Square, Circle, Triangle, Image as ImageIcon, 
   Download, Trash2, Palette, Type as FontIcon, Bold, Italic, 
@@ -21,8 +24,68 @@ interface InfographicsEditorViewProps {
 
 export default function InfographicsEditorView({ user }: InfographicsEditorViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
-  const [selectedObject, setSelectedObject] = useState<fabric.FabricObject | null>(null);
+  const [fabricLoaded, setFabricLoaded] = useState(false);
+  const [fabricError, setFabricError] = useState<string | null>(null);
+  const [canvas, setCanvas] = useState<any>(null);
+  const [selectedObject, setSelectedObject] = useState<any>(null);
+
+  // Dynamic import fabric.js from CDN to bypass server compilation and installation issues
+  useEffect(() => {
+    let isMounted = true;
+    
+    // Check if fabric is already available globally
+    if ((window as any).fabric) {
+      fabric = (window as any).fabric;
+      setFabricLoaded(true);
+      return;
+    }
+
+    const scriptId = 'fabric-cdn-script';
+    let script = document.getElementById(scriptId) as HTMLScriptElement;
+
+    const handleScriptLoad = () => {
+      if (!isMounted) return;
+      if ((window as any).fabric) {
+        fabric = (window as any).fabric;
+        setFabricLoaded(true);
+      } else {
+        setFabricError('โหลดไลบรารีสำเร็จแต่ไม่พบตัวแปรระบบ Fabric บนเบราว์เซอร์');
+      }
+    };
+
+    const handleScriptError = (err: any) => {
+      console.error('Failed to load fabric library from CDN:', err);
+      if (!isMounted) return;
+      setFabricError('ไม่สามารถโหลดไลบรารีสำหรับออกแบบภาพได้เนื่องจากปัญหาการเชื่อมต่ออินเทอร์เน็ต กรุณาลองใหม่อีกครั้ง');
+    };
+
+    if (script) {
+      // Script already exists, wait for it to load if it hasn't
+      if ((window as any).fabric) {
+        handleScriptLoad();
+      } else {
+        script.addEventListener('load', handleScriptLoad);
+        script.addEventListener('error', handleScriptError);
+      }
+    } else {
+      // Create and append the script
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js';
+      script.async = true;
+      script.onload = handleScriptLoad;
+      script.onerror = handleScriptError;
+      document.body.appendChild(script);
+    }
+
+    return () => {
+      isMounted = false;
+      if (script) {
+        script.removeEventListener('load', handleScriptLoad);
+        script.removeEventListener('error', handleScriptError);
+      }
+    };
+  }, []);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -82,7 +145,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || !fabricLoaded || !fabric) return;
     
     // Initialize Fabric.js Canvas
     const initCanvas = new fabric.Canvas(canvasRef.current, {
@@ -122,7 +185,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
         if (activeObj.shadow) {
           setShadowEnabled(true);
-          const sh = activeObj.shadow as fabric.Shadow;
+          const sh = activeObj.shadow as any;
           if (sh.color) setShadowColor(sh.color);
           if (sh.blur) setShadowBlur(sh.blur);
           if (sh.offsetX) setShadowOffsetX(sh.offsetX);
@@ -132,7 +195,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         }
         
         if (activeObj.type === 'i-text' || activeObj.type === 'textbox') {
-          const textObj = activeObj as fabric.IText;
+          const textObj = activeObj as any;
           if (textObj.fontSize) setFontSize(textObj.fontSize);
           if (textObj.fontFamily) setFontFamily(textObj.fontFamily);
           if (textObj.fontWeight) setFontWeight(textObj.fontWeight as string);
@@ -153,7 +216,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     return () => {
       initCanvas.dispose();
     };
-  }, []);
+  }, [fabricLoaded]);
 
   useEffect(() => {
     if (canvas) {
@@ -191,7 +254,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       selectedObject.set('ry', value);
       setCornerRadius(value);
     } else {
-      selectedObject.set(property as keyof fabric.FabricObject, value);
+      selectedObject.set(property as any, value);
     }
 
     canvas.requestRenderAll();
@@ -283,7 +346,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       });
       if (clonedObj.type === 'activeSelection') {
         clonedObj.canvas = canvas;
-        (clonedObj as fabric.ActiveSelection).forEachObject((obj: any) => {
+        (clonedObj as any).forEachObject((obj: any) => {
           canvas.add(obj);
         });
         clonedObj.setCoords();
@@ -300,7 +363,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
   const cloneSelected = () => {
     if (!canvas || !selectedObject) return;
-    selectedObject.clone().then((cloned) => {
+    selectedObject.clone().then((cloned: any) => {
       canvas.discardActiveObject();
       cloned.set({
         left: cloned.left! + 20,
@@ -309,7 +372,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       });
       if (cloned.type === 'activeSelection') {
         cloned.canvas = canvas;
-        (cloned as fabric.ActiveSelection).forEachObject((obj: any) => {
+        (cloned as any).forEachObject((obj: any) => {
           canvas.add(obj);
         });
         cloned.setCoords();
@@ -377,11 +440,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     if (!canvas) return;
     const activeObj = canvas.getActiveObject();
     if (!activeObj || activeObj.type !== 'activeSelection') return;
-    const activeSelection = activeObj as fabric.ActiveSelection;
+    const activeSelection = activeObj as any;
     const objects = activeSelection.getObjects();
     canvas.discardActiveObject();
     const group = new fabric.Group(objects);
-    objects.forEach(obj => canvas.remove(obj));
+    objects.forEach((obj: any) => canvas.remove(obj));
     canvas.add(group);
     canvas.setActiveObject(group);
     canvas.requestRenderAll();
@@ -391,10 +454,10 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     if (!canvas) return;
     const activeObj = canvas.getActiveObject();
     if (!activeObj || activeObj.type !== 'group') return;
-    const group = activeObj as fabric.Group;
+    const group = activeObj as any;
     const objects = group.getObjects();
     canvas.remove(group);
-    objects.forEach(obj => canvas.add(obj));
+    objects.forEach((obj: any) => canvas.add(obj));
     const activeSelection = new fabric.ActiveSelection(objects, { canvas });
     canvas.setActiveObject(activeSelection);
     canvas.requestRenderAll();
@@ -431,7 +494,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const activeObj = canvas.getActiveObject();
       if (!activeObj) return;
 
-      if ((activeObj.type === 'i-text' || activeObj.type === 'textbox') && (activeObj as fabric.IText).isEditing) {
+      if ((activeObj.type === 'i-text' || activeObj.type === 'textbox') && (activeObj as any).isEditing) {
         return;
       }
 
@@ -464,7 +527,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   // Actions for adding element types
   const addTextPreset = (type: 'h1' | 'h2' | 'body' | 'callout') => {
     if (!canvas) return;
-    let textObj: fabric.IText;
+    let textObj: any;
 
     if (type === 'h1') {
       textObj = new fabric.IText('หัวข้อใหญ่ (Main Heading)', {
@@ -499,7 +562,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
   const addShapePreset = (shapeType: 'rect' | 'circle' | 'triangle' | 'star' | 'polygon' | 'line' | 'arrow') => {
     if (!canvas) return;
-    let obj: fabric.FabricObject;
+    let obj: any;
 
     const baseColor = fillColor === 'transparent' ? '#3b82f6' : fillColor;
 
@@ -1032,6 +1095,25 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', 
     '#a855f7', '#ec4899', '#64748b', '#0f172a'
   ];
+
+  if (fabricError) {
+    return (
+      <div className="p-8 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 rounded-2xl text-center space-y-3 max-w-2xl mx-auto my-12 animate-fade-in">
+        <AlertTriangle className="w-10 h-10 text-red-500 mx-auto" />
+        <h3 className="text-lg font-bold text-red-700 dark:text-red-400">ไม่สามารถเปิดใช้งาน Infographics Editor ได้</h3>
+        <p className="text-sm text-red-600 dark:text-red-300 max-w-lg mx-auto">{fabricError}</p>
+      </div>
+    );
+  }
+
+  if (!fabricLoaded) {
+    return (
+      <div className="p-12 text-center space-y-3 my-12 animate-fade-in">
+        <RefreshCw className="w-8 h-8 text-[var(--primary-color)] animate-spin mx-auto" />
+        <p className="text-sm text-[var(--text-secondary)] font-medium">กำลังเตรียมความพร้อมของเครื่องมือออกแบบ (Fabric Engine)...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] bg-[var(--bg-base)] select-none">

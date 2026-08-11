@@ -680,6 +680,34 @@ export default function Settings(props: SettingsProps) {
     }
   };
 
+  const [activeDragType, setActiveDragType] = useState<string | null>(null);
+
+  const handleDragOverType = (e: React.DragEvent, type: string) => {
+    e.preventDefault();
+    setActiveDragType(type);
+  };
+
+  const handleDragLeaveType = (e: React.DragEvent) => {
+    e.preventDefault();
+    setActiveDragType(null);
+  };
+
+  const handleDropType = async (e: React.DragEvent, type: 'logo' | 'favicon' | 'garuda15' | 'garuda30') => {
+    e.preventDefault();
+    setActiveDragType(null);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        const mockEvent = {
+          target: {
+            files: [file]
+          }
+        } as unknown as React.ChangeEvent<HTMLInputElement>;
+        await handleImageUpload(mockEvent, type);
+      }
+    }
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'favicon' | 'garuda15' | 'garuda30') => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -1156,7 +1184,16 @@ export default function Settings(props: SettingsProps) {
                 <div className="space-y-4">
                   <div className="flex items-start gap-4">
                     <div className="relative group">
-                      <div className="w-24 h-24 rounded-lg border-2 border-dashed border-[var(--border-medium)] bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative">
+                      <div 
+                        onDragOver={(e) => handleDragOverType(e, 'garuda15')}
+                        onDragLeave={handleDragLeaveType}
+                        onDrop={(e) => handleDropType(e, 'garuda15')}
+                        className={`w-24 h-24 rounded-lg border-2 border-dashed bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative transition-all duration-200 ${
+                          activeDragType === 'garuda15' 
+                            ? 'border-indigo-500 bg-indigo-50/10 scale-105 shadow-md' 
+                            : 'border-[var(--border-medium)]'
+                        }`}
+                      >
                         {garuda15Url ? (
                           <img src={garuda15Url} alt="Garuda 1.5cm" className="max-w-full max-h-full object-contain" />
                         ) : (
@@ -1204,7 +1241,16 @@ export default function Settings(props: SettingsProps) {
                 <div className="space-y-4">
                   <div className="flex items-start gap-4">
                     <div className="relative group">
-                      <div className="w-24 h-24 rounded-lg border-2 border-dashed border-[var(--border-medium)] bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative">
+                      <div 
+                        onDragOver={(e) => handleDragOverType(e, 'garuda30')}
+                        onDragLeave={handleDragLeaveType}
+                        onDrop={(e) => handleDropType(e, 'garuda30')}
+                        className={`w-24 h-24 rounded-lg border-2 border-dashed bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative transition-all duration-200 ${
+                          activeDragType === 'garuda30' 
+                            ? 'border-indigo-500 bg-indigo-50/10 scale-105 shadow-md' 
+                            : 'border-[var(--border-medium)]'
+                        }`}
+                      >
                         {garuda30Url ? (
                           <img src={garuda30Url} alt="Garuda 3.0cm" className="max-w-full max-h-full object-contain" />
                         ) : (
@@ -1254,7 +1300,16 @@ export default function Settings(props: SettingsProps) {
                 <div className="space-y-4">
                   <div className="flex items-start gap-4">
                     <div className="relative group">
-                      <div className="w-24 h-24 rounded-lg border-2 border-dashed border-[var(--border-medium)] bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative">
+                      <div 
+                        onDragOver={(e) => handleDragOverType(e, 'logo')}
+                        onDragLeave={handleDragLeaveType}
+                        onDrop={(e) => handleDropType(e, 'logo')}
+                        className={`w-24 h-24 rounded-lg border-2 border-dashed bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative transition-all duration-200 ${
+                          activeDragType === 'logo' 
+                            ? 'border-indigo-500 bg-indigo-50/10 scale-105 shadow-md' 
+                            : 'border-[var(--border-medium)]'
+                        }`}
+                      >
                         {logoUrl ? (
                           <img src={logoUrl} alt="Logo" className="max-w-full max-h-full object-contain" />
                         ) : (
@@ -1296,7 +1351,16 @@ export default function Settings(props: SettingsProps) {
                 <div className="space-y-4">
                   <div className="flex items-start gap-4">
                     <div className="relative group">
-                      <div className="w-24 h-24 rounded-lg border-2 border-dashed border-[var(--border-medium)] bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative">
+                      <div 
+                        onDragOver={(e) => handleDragOverType(e, 'favicon')}
+                        onDragLeave={handleDragLeaveType}
+                        onDrop={(e) => handleDropType(e, 'favicon')}
+                        className={`w-24 h-24 rounded-lg border-2 border-dashed bg-[var(--bg-overlay)] flex items-center justify-center overflow-hidden relative transition-all duration-200 ${
+                          activeDragType === 'favicon' 
+                            ? 'border-indigo-500 bg-indigo-50/10 scale-105 shadow-md' 
+                            : 'border-[var(--border-medium)]'
+                        }`}
+                      >
                         {faviconUrl ? (
                           <img src={faviconUrl} alt="Favicon" className="max-w-full max-h-full object-contain" />
                         ) : (

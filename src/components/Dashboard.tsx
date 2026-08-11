@@ -16,8 +16,9 @@ import WorkflowSlaView from './views/WorkflowSlaView';
 import SmartAiAssistantView from './views/SmartAiAssistantView';
 import DigitalSignatureView from './DigitalSignatureView';
 import RecycleBinView from './views/RecycleBinView';
-import InfographicsEditorView from './views/InfographicsEditorView';
 import QrGeneratorView from './views/QrGeneratorView';
+
+const InfographicsEditorView = React.lazy(() => import('./views/InfographicsEditorView'));
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 
@@ -647,7 +648,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         ));
       case 'infographics':
         return renderGuardedView('infographics', 'เครื่องมือออกแบบ Infographics', (
-          <InfographicsEditorView user={currentUser} />
+          <React.Suspense fallback={
+            <div className="p-12 text-center space-y-3 my-12">
+              <div className="w-8 h-8 border-3 border-[var(--primary-color)] border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-sm text-[var(--text-secondary)] font-medium">กำลังโหลดเครื่องมือออกแบบ Infographics...</p>
+            </div>
+          }>
+            <InfographicsEditorView user={currentUser} />
+          </React.Suspense>
         ));
       case 'favorites':
         return <DocumentList 

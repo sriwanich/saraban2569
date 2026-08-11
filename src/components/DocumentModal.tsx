@@ -30,8 +30,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const fetchNumberingAndReserved = async () => {
     try {
       const [rulesRes, reservedRes] = await Promise.all([
-        fetch('/api/numbering-rules'),
-        fetch('/api/reserved-numbers')
+        fetch(`/api/numbering-rules?t=${Date.now()}`),
+        fetch(`/api/reserved-numbers?t=${Date.now()}`)
       ]);
       if (rulesRes.ok) {
         const rulesData = await rulesRes.json();
