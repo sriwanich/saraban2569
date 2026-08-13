@@ -206,7 +206,7 @@ export default function Settings(props: SettingsProps) {
   const fetchRolePermissions = async () => {
     setIsLoadingPermissions(true);
     try {
-      const res = await fetch('/api/role-permissions', { cache: 'no-cache' });
+      const res = await fetch(`/api/role-permissions?t=${Date.now()}`, { cache: 'no-cache' });
       if (res.ok) {
         const data = await res.json();
         setRolePermissions(data);
@@ -245,6 +245,7 @@ export default function Settings(props: SettingsProps) {
             return [...prev, { role, permission_key, is_allowed: nextVal }];
           }
         });
+        props.onSettingsUpdated?.();
       } else {
         alert('ไม่สามารถอัปเดตสิทธิ์การใช้งานได้');
       }
@@ -288,6 +289,7 @@ export default function Settings(props: SettingsProps) {
         });
       }
       await fetchRolePermissions();
+      props.onSettingsUpdated?.();
     } catch (err) {
       console.error('Batch permission toggle error:', err);
       alert('เกิดข้อผิดพลาดในการอัปเดตสิทธิ์กลุ่ม');
@@ -712,12 +714,12 @@ export default function Settings(props: SettingsProps) {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       const formData = new FormData();
-      formData.append('files', file);
       formData.append('subfolder', 'system');
       formData.append('uploadedBy', 'admin');
+      formData.append('files', file);
 
       try {
-        const res = await fetch('/api/upload', {
+        const res = await fetch('/api/upload?subfolder=system&uploadedBy=admin', {
           method: 'POST',
           body: formData
         });
@@ -2797,12 +2799,12 @@ export default function Settings(props: SettingsProps) {
             return { ...sec, items: matchedItems };
           }).filter(sec => sec.items.length > 0);
 
-          const renderToggle = (role: string, key: string) => {
+          const renderToggle = (role: string, key: string, isMobileInline: boolean = false) => {
             const perm = rolePermissions.find(p => p.role === role && p.permission_key === key);
             // Default fallbacks if not explicitly set
             let isAllowed = false;
             if (perm) {
-              isAllowed = perm.is_allowed === 1;
+              isAllowed = perm.is_allowed === 1 || perm.is_allowed === true;
             } else {
               if (role === 'admin') isAllowed = true;
               else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
@@ -2815,6 +2817,32 @@ export default function Settings(props: SettingsProps) {
             
             // Protect Admin from self-lockout
             const isProtected = role === 'admin' && (key === 'system_settings' || key === 'manage_users');
+
+            if (isMobileInline) {
+              return (
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={!isAdmin || isProtected || isLoadingPermissions || isUpdating}
+                    onClick={() => handleTogglePermission(role, key, isAllowed ? 1 : 0)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isAllowed 
+                        ? (role === 'admin' ? 'bg-amber-500' : role === 'moderator' ? 'bg-indigo-600' : 'bg-emerald-500') 
+                        : 'bg-slate-300 dark:bg-slate-700'
+                    } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-xs'}`}
+                    title={isProtected ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin (ห้ามปิด)' : !isAdmin ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้' : 'คลิกเพื่อสลับสิทธิ์การใช้งาน'}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        isAllowed ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                  <span className={`text-[11px] font-bold tracking-tight ${isAllowed ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                    {isUpdating ? 'บันทึก...' : isAllowed ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                  </span>
+                </div>
+              );
+            }
 
             return (
               <div className="flex flex-col items-center justify-center gap-1 py-1">
@@ -3071,79 +3099,186 @@ export default function Settings(props: SettingsProps) {
                     <p className="text-sm text-[var(--text-muted)]">กำลังอัปเดตและดึงข้อมูลกำหนดสิทธิ์จากเซิร์ฟเวอร์...</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left text-sm border-collapse min-w-[850px]">
-                      <thead>
-                        <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-lighter)] text-xs font-semibold text-[var(--text-secondary)]">
-                          <th className="p-4 w-2/5">ฟังก์ชันระบบ / รายการสิทธิ์การใช้งาน</th>
-                          <th className="p-4 text-center w-36 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold border-x border-[var(--border-lighter)]/40">
-                            <div className="flex items-center justify-center gap-1">
-                              <Crown className="w-3.5 h-3.5" /> Admin
+                  <>
+                    {/* Mobile Card List View (< md) */}
+                    <div className="block md:hidden p-3 sm:p-4 space-y-4">
+                      {filteredSections.length === 0 ? (
+                        <div className="p-8 text-center text-[var(--text-muted)] bg-[var(--bg-canvas)] rounded-xl border border-[var(--border-lighter)]">
+                          ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
+                        </div>
+                      ) : (
+                        filteredSections.map((sec, idx) => (
+                          <div key={idx} className="space-y-3">
+                            {/* Section Header */}
+                            <div className="flex items-center gap-2 py-2 px-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-xs font-bold text-[var(--primary-color)]">
+                              <span className="w-2 h-2 rounded-full bg-[var(--primary-color)] shrink-0" />
+                              <span>{sec.section}</span>
                             </div>
-                          </th>
-                          <th className="p-4 text-center w-36 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
-                            <div className="flex items-center justify-center gap-1">
-                              <ShieldCheck className="w-3.5 h-3.5" /> Moderator
-                            </div>
-                          </th>
-                          <th className="p-4 text-center w-36 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold border-x border-[var(--border-lighter)]/40">
-                            <div className="flex items-center justify-center gap-1">
-                              <UserIcon className="w-3.5 h-3.5" /> User
-                            </div>
-                          </th>
-                          <th className="p-4">ข้อแนะนำและผลกระทบเชิงความปลอดภัย</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[var(--border-lighter)] text-xs sm:text-sm">
-                        {filteredSections.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="p-8 text-center text-[var(--text-muted)]">
-                              ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredSections.map((sec, idx) => (
-                            <React.Fragment key={idx}>
-                              <tr className="bg-[var(--bg-canvas)]/80 font-bold text-[var(--primary-color)] text-xs border-y border-[var(--border-lighter)]">
-                                <td colSpan={5} className="py-3 px-4 flex items-center gap-2">
-                                  <span className="w-2 h-2 rounded-full bg-[var(--primary-color)] inline-block" />
-                                  {sec.section}
-                                </td>
-                              </tr>
+
+                            {/* Section Permission Items */}
+                            <div className="space-y-3">
                               {sec.items.map((item) => (
-                                <tr key={item.key} className="hover:bg-[var(--border-lighter)]/30 transition-colors">
-                                  <td className="p-4">
-                                    <div className="font-semibold text-[var(--text-primary)] text-sm">{item.title}</div>
-                                    <div className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">{item.desc}</div>
-                                    <div className="inline-block mt-1.5 px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-[var(--text-secondary)] border border-[var(--border-lighter)]">
-                                      key: {item.key}
+                                <div
+                                  key={item.key}
+                                  className="p-3.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] shadow-xs space-y-3"
+                                >
+                                  {/* Header Info */}
+                                  <div className="space-y-1">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <h5 className="font-bold text-[var(--text-primary)] text-xs sm:text-sm leading-snug">
+                                        {item.title}
+                                      </h5>
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-[var(--text-secondary)] border border-[var(--border-lighter)] shrink-0">
+                                        {item.key}
+                                      </span>
                                     </div>
-                                  </td>
-                                  <td className="p-4 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                    {renderToggle('admin', item.key)}
-                                  </td>
-                                  <td className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                    {renderToggle('moderator', item.key)}
-                                  </td>
-                                  <td className="p-4 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                    {renderToggle('user', item.key)}
-                                  </td>
-                                  <td className="p-4 text-[var(--text-secondary)] text-xs leading-relaxed align-middle">
-                                    <div className="p-2.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)] space-y-1">
-                                      <div className="font-semibold text-[var(--text-primary)]">{item.note}</div>
-                                      <div className="text-[11px] text-[var(--text-muted)]">
-                                        มีผลกับการเข้าถึงหน้าต่าง ย่อ/ขยายเมนู และปุ่มดำเนินการในระบบ
+                                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                                      {item.desc}
+                                    </p>
+                                  </div>
+
+                                  {/* Security Note */}
+                                  <div className="p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-lighter)] text-[11px] text-[var(--text-muted)] flex items-start gap-1.5">
+                                    <Shield className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                                    <div>
+                                      <span className="font-semibold text-[var(--text-primary)] block">{item.note}</span>
+                                      <span className="text-[10px]">ควบคุมสิทธิ์การเข้าถึงและการมองเห็นในระบบ</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Roles Toggle Controls (Mobile Grid) */}
+                                  <div className="pt-2 border-t border-[var(--border-lighter)] space-y-2">
+                                    <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase">
+                                      สิทธิ์แยกตามระดับผู้ใช้งาน (Role Permissions)
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-2">
+                                      {/* Admin Row */}
+                                      <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                                            <Crown className="w-3.5 h-3.5" />
+                                          </div>
+                                          <div>
+                                            <span className="text-xs font-bold text-[var(--text-primary)]">Admin</span>
+                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ดูแลระบบ</span>
+                                          </div>
+                                        </div>
+                                        <div>{renderToggle('admin', item.key, true)}</div>
+                                      </div>
+
+                                      {/* Moderator Row */}
+                                      <div className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
+                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                          </div>
+                                          <div>
+                                            <span className="text-xs font-bold text-[var(--text-primary)]">Moderator</span>
+                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ตรวจสอบ/สารบรรณ</span>
+                                          </div>
+                                        </div>
+                                        <div>{renderToggle('moderator', item.key, true)}</div>
+                                      </div>
+
+                                      {/* User Row */}
+                                      <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
+                                            <UserIcon className="w-3.5 h-3.5" />
+                                          </div>
+                                          <div>
+                                            <span className="text-xs font-bold text-[var(--text-primary)]">User</span>
+                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ใช้งานทั่วไป</span>
+                                          </div>
+                                        </div>
+                                        <div>{renderToggle('user', item.key, true)}</div>
                                       </div>
                                     </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Desktop Table View (>= md) */}
+                    <div className="hidden md:block overflow-x-auto custom-scrollbar">
+                      <table className="w-full text-left text-sm border-collapse min-w-[850px]">
+                        <thead>
+                          <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-lighter)] text-xs font-semibold text-[var(--text-secondary)]">
+                            <th className="p-4 w-2/5">ฟังก์ชันระบบ / รายการสิทธิ์การใช้งาน</th>
+                            <th className="p-4 text-center w-36 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold border-x border-[var(--border-lighter)]/40">
+                              <div className="flex items-center justify-center gap-1">
+                                <Crown className="w-3.5 h-3.5" /> Admin
+                              </div>
+                            </th>
+                            <th className="p-4 text-center w-36 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
+                              <div className="flex items-center justify-center gap-1">
+                                <ShieldCheck className="w-3.5 h-3.5" /> Moderator
+                              </div>
+                            </th>
+                            <th className="p-4 text-center w-36 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold border-x border-[var(--border-lighter)]/40">
+                              <div className="flex items-center justify-center gap-1">
+                                <UserIcon className="w-3.5 h-3.5" /> User
+                              </div>
+                            </th>
+                            <th className="p-4">ข้อแนะนำและผลกระทบเชิงความปลอดภัย</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--border-lighter)] text-xs sm:text-sm">
+                          {filteredSections.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="p-8 text-center text-[var(--text-muted)]">
+                                ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredSections.map((sec, idx) => (
+                              <React.Fragment key={idx}>
+                                <tr className="bg-[var(--bg-canvas)]/80 font-bold text-[var(--primary-color)] text-xs border-y border-[var(--border-lighter)]">
+                                  <td colSpan={5} className="py-3 px-4 flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-[var(--primary-color)] inline-block" />
+                                    {sec.section}
                                   </td>
                                 </tr>
-                              ))}
-                            </React.Fragment>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                                {sec.items.map((item) => (
+                                  <tr key={item.key} className="hover:bg-[var(--border-lighter)]/30 transition-colors">
+                                    <td className="p-4">
+                                      <div className="font-semibold text-[var(--text-primary)] text-sm">{item.title}</div>
+                                      <div className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">{item.desc}</div>
+                                      <div className="inline-block mt-1.5 px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-[var(--text-secondary)] border border-[var(--border-lighter)]">
+                                        key: {item.key}
+                                      </div>
+                                    </td>
+                                    <td className="p-4 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                      {renderToggle('admin', item.key)}
+                                    </td>
+                                    <td className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                      {renderToggle('moderator', item.key)}
+                                    </td>
+                                    <td className="p-4 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                      {renderToggle('user', item.key)}
+                                    </td>
+                                    <td className="p-4 text-[var(--text-secondary)] text-xs leading-relaxed align-middle">
+                                      <div className="p-2.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)] space-y-1">
+                                        <div className="font-semibold text-[var(--text-primary)]">{item.note}</div>
+                                        <div className="text-[11px] text-[var(--text-muted)]">
+                                          มีผลกับการเข้าถึงหน้าต่าง ย่อ/ขยายเมนู และปุ่มดำเนินการในระบบ
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </React.Fragment>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 )}
               </div>
             </div>

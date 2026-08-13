@@ -7,6 +7,7 @@ import {
   Sparkles, AlertCircle, CheckCircle2, ChevronRight
 } from 'lucide-react';
 import { LETTER_TYPES, buildOfficialDoc, downloadAsDoc, thDate, DraftItem } from './draftData';
+import { parseDocNumberStructure, parseFileCodeFromDoc, DEFAULT_FILE_CODES } from '../../../lib/fileCodeUtils';
 
 interface Props {
   user: any;
@@ -412,14 +413,23 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
               {/* Form Metadata Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">เลขที่หนังสือ</label>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">เลขที่หนังสือ (ที่)</label>
                   <input
                     type="text"
                     value={docNum}
                     onChange={e => setDocNum(e.target.value)}
-                    placeholder="เช่น อด ๗๑๒๐๑/๑๒๓"
-                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    placeholder="เช่น รย 0021.1/123 หรือ คำสั่งจังหวัดระยอง ที่ 12/2569"
+                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none font-mono"
                   />
+                  {docNum && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {parseDocNumberStructure(docNum, docType).tags.map((tag, idx) => (
+                        <span key={idx} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-300 border border-blue-500/20">
+                          {tag.label}: <strong className="font-bold">{tag.value}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">ลงวันที่</label>

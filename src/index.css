@@ -50,8 +50,18 @@
     --danger: #EF4444;
   }
 
+  /* Touch target & mobile input optimization */
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+  }
+
+  .touch-target-min {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
   body {
-    @apply font-sarabun text-[var(--text-primary)] bg-[var(--bg-base)] min-h-screen relative overflow-x-hidden transition-colors duration-300;
+    @apply font-sarabun text-[var(--text-primary)] bg-[var(--bg-base)] min-h-screen relative overflow-x-hidden transition-colors duration-300 antialiased;
   }
 
   /* Override Webkit Autofill styling to prevent low contrast in light and dark mode */

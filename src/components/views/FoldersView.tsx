@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, Folder, formatThaiDateShort } from '../../types';
-import { FolderIcon, FolderPlus, Trash2, Calendar, FileText, ChevronRight, Eye, ChevronLeft, Info, HelpCircle, Pencil, X, AlertTriangle } from 'lucide-react';
+import { FolderIcon, FolderPlus, Trash2, Calendar, FileText, ChevronRight, Eye, ChevronLeft, Info, HelpCircle, Pencil, X, AlertTriangle, FileCode } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
+import { DEFAULT_FILE_CODES, parseFileCodeFromDoc } from '../../lib/fileCodeUtils';
 
 interface Props {
   documents: DocumentItem[];

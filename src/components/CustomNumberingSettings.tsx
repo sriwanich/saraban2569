@@ -425,15 +425,6 @@ export default function CustomNumberingSettings() {
             </button>
           )}
 
-          {activeSubTab === 'fileCodes' && (
-            <button
-              onClick={() => setShowFileCodeModal(true)}
-              className="px-4 py-2 bg-[var(--primary-color)] text-white text-xs font-semibold rounded-xl hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-sm"
-            >
-              <Plus className="w-4 h-4" /> เพิ่มรหัสหมวดแฟ้ม
-            </button>
-          )}
-
           {activeSubTab === 'reserved' && (
             <button
               onClick={() => setShowReserveModal(true)}
@@ -483,21 +474,6 @@ export default function CustomNumberingSettings() {
           กฎกำหนดเลขหนังสือตาม กอง/ฝ่าย
           <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeSubTab === 'rules' ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-muted)]'}`}>
             {rules.length}
-          </span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('fileCodes')}
-          className={`px-4 py-2.5 rounded-xl font-medium text-xs transition-all flex items-center gap-2 shrink-0 ${
-            activeSubTab === 'fileCodes'
-              ? 'bg-[var(--primary-color)] text-white shadow-sm'
-              : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)]'
-          }`}
-        >
-          <FolderCheck className="w-4 h-4" />
-          รหัสหมวดแฟ้มเอกสาร
-          <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeSubTab === 'fileCodes' ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-muted)]'}`}>
-            {fileCodes.length}
           </span>
         </button>
 
@@ -700,90 +676,6 @@ export default function CustomNumberingSettings() {
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ================= TAB 2: FILE CODES ================= */}
-      {activeSubTab === 'fileCodes' && (
-        <div className="space-y-6">
-          <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-start gap-3">
-            <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-            <div className="space-y-1 text-xs">
-              <h4 className="font-bold text-blue-900 dark:text-blue-200">เกี่ยวกับรหัสหมวดแฟ้มเอกสาร</h4>
-              <p className="text-blue-800 dark:text-blue-300">
-                รหัสหมวดแฟ้มช่วยจำแนกหมวดหมู่งานตามโครงสร้างการจัดเก็บเอกสารสารบรรณ เช่น <code className="font-mono bg-blue-200/50 dark:bg-blue-900/50 px-1 rounded">0021</code> (งานบริหารทั่วไป), <code className="font-mono bg-blue-200/50 dark:bg-blue-900/50 px-1 rounded">0021.1</code> (งานยุทธศาสตร์), <code className="font-mono bg-blue-200/50 dark:bg-blue-900/50 px-1 rounded">0021.2</code> (งานสงเคราะห์), <code className="font-mono bg-blue-200/50 dark:bg-blue-900/50 px-1 rounded">0021.3</code> (งานป้องกัน)
-              </p>
-            </div>
-          </div>
-
-          <div className="border border-[var(--border-light)] rounded-2xl overflow-hidden bg-[var(--bg-surface)]">
-            <div className="p-4 border-b border-[var(--border-light)] flex items-center justify-between bg-[var(--bg-canvas)]">
-              <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider flex items-center gap-2">
-                <FolderCheck className="w-4 h-4 text-[var(--primary-color)]" />
-                ตารางรหัสหมวดแฟ้มเอกสารทั้งหมด ({fileCodes.length})
-              </h3>
-              <button 
-                onClick={fetchFileCodes}
-                className="p-1.5 rounded-lg hover:bg-[var(--border-lighter)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {loadingFileCodes ? (
-              <div className="p-8 text-center text-xs text-[var(--text-muted)] flex items-center justify-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin text-[var(--primary-color)]" /> กำลังโหลดรหัสหมวดแฟ้ม...
-              </div>
-            ) : fileCodes.length === 0 ? (
-              <div className="p-8 text-center text-xs text-[var(--text-muted)]">
-                ยังไม่มีรหัสหมวดแฟ้มในระบบ
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-[var(--bg-canvas)] text-[var(--text-muted)] border-b border-[var(--border-light)] uppercase tracking-wider font-semibold">
-                    <tr>
-                      <th className="px-4 py-3">รหัสหมวดแฟ้ม</th>
-                      <th className="px-4 py-3">ชื่อหมวดงาน</th>
-                      <th className="px-4 py-3">ฝ่าย/กองที่รับผิดชอบ</th>
-                      <th className="px-4 py-3">คำอธิบายรายละเอียด</th>
-                      <th className="px-4 py-3 text-right">จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border-light)]">
-                    {fileCodes.map((item) => (
-                      <tr key={item.id} className="hover:bg-[var(--border-lighter)] transition-colors">
-                        <td className="px-4 py-3 font-mono font-bold text-amber-700 dark:text-amber-400">
-                          {item.code}
-                        </td>
-                        <td className="px-4 py-3 font-medium text-[var(--text-primary)]">
-                          {item.name}
-                        </td>
-                        <td className="px-4 py-3 text-[var(--text-secondary)]">
-                          <span className="inline-flex items-center gap-1 bg-[var(--bg-canvas)] px-2 py-0.5 rounded border border-[var(--border-light)] text-[11px]">
-                            <Building2 className="w-3 h-3 text-[var(--primary-color)]" />
-                            {item.department}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-[var(--text-muted)]">
-                          {item.description || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() => handleDeleteFileCode(item.id)}
-                            className="p-1.5 rounded-lg hover:bg-rose-500/10 text-rose-600 transition-colors"
-                            title="ลบรหัสหมวดแฟ้ม"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1300,96 +1192,7 @@ export default function CustomNumberingSettings() {
         </div>
       )}
 
-      {/* MODAL: ADD FILE CODE */}
-      {showFileCodeModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-scale-up">
-            <div className="p-4 border-b border-[var(--border-light)] flex items-center justify-between bg-[var(--bg-canvas)]">
-              <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
-                <FolderCheck className="w-4 h-4 text-[var(--primary-color)]" />
-                เพิ่มรหัสหมวดแฟ้มเอกสารใหม่
-              </h3>
-              <button
-                onClick={() => setShowFileCodeModal(false)}
-                className="p-1 rounded-lg hover:bg-[var(--border-lighter)] text-[var(--text-muted)]"
-              >
-                <XCircle className="w-5 h-5" />
-              </button>
-            </div>
 
-            <form onSubmit={handleSaveFileCode} className="p-5 space-y-4 text-xs">
-              <div>
-                <label className="font-semibold text-[var(--text-primary)] block mb-1">
-                  รหัสหมวดแฟ้ม <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={fileCodeFormData.code}
-                  onChange={(e) => setFileCodeFormData({ ...fileCodeFormData, code: e.target.value })}
-                  placeholder="เช่น 0021, 0021.1, 0022"
-                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none font-mono font-bold text-amber-700"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-[var(--text-primary)] block mb-1">
-                  ชื่อหมวดงาน <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={fileCodeFormData.name}
-                  onChange={(e) => setFileCodeFormData({ ...fileCodeFormData, name: e.target.value })}
-                  placeholder="เช่น งานยุทธศาสตร์และแผนงาน"
-                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-[var(--text-primary)] block mb-1">ฝ่าย/กองที่รับผิดชอบ:</label>
-                <select
-                  value={fileCodeFormData.department}
-                  onChange={(e) => setFileCodeFormData({ ...fileCodeFormData, department: e.target.value })}
-                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
-                >
-                  <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
-                  <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ</option>
-                  <option value="ฝ่ายสงเคราะห์ผู้ประสบภัย">ฝ่ายสงเคราะห์ผู้ประสบภัย</option>
-                  <option value="ฝ่ายป้องกันและปฏิบัติการ">ฝ่ายป้องกันและปฏิบัติการ</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="font-semibold text-[var(--text-primary)] block mb-1">รายละเอียดเพิ่มเติม:</label>
-                <textarea
-                  rows={2}
-                  value={fileCodeFormData.description}
-                  onChange={(e) => setFileCodeFormData({ ...fileCodeFormData, description: e.target.value })}
-                  placeholder="รายละเอียดเอกสารในหมวดนี้..."
-                  className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-4 border-t border-[var(--border-light)]">
-                <button
-                  type="button"
-                  onClick={() => setShowFileCodeModal(false)}
-                  className="px-4 py-2 rounded-xl border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)]"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-[var(--primary-color)] text-white font-semibold shadow-sm hover:opacity-90"
-                >
-                  เพิ่มรหัสหมวดแฟ้ม
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* MODAL: RESERVE NUMBERS */}
       {showReserveModal && (

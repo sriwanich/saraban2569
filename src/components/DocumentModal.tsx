@@ -3,9 +3,10 @@ import { DocumentItem, DocType, DocPriority, DocCategory, Folder as FolderType, 
 import { 
   X, Save, Paperclip, Upload, Trash2, FileText, Loader2, Folder, CheckCircle2, 
   Calendar, Lock, Sparkles, Bookmark, Search, Filter, Check, Hash, Building2, 
-  UserCheck, Tag, AlignLeft, Info, Layers, Inbox, Send, ShieldAlert, AlertCircle
+  UserCheck, Tag, AlignLeft, Info, Layers, Inbox, Send, ShieldAlert, AlertCircle, FileCode
 } from 'lucide-react';
 import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from './ai-cross-reference-panel';
+import { DEFAULT_FILE_CODES, parseFileCodeFromDoc, parseDocNumberStructure, FileCodeItem } from '../lib/fileCodeUtils';
 
 interface Props {
   initialData?: DocumentItem;
@@ -20,6 +21,7 @@ interface Props {
 export default function DocumentFormModal({ initialData, defaultType, documents, currentYear, user, onClose, onSave }: Props) {
   const [numberingRules, setNumberingRules] = useState<any[]>([]);
   const [reservedNumbers, setReservedNumbers] = useState<any[]>([]);
+  const [fileCodes, setFileCodes] = useState<FileCodeItem[]>(DEFAULT_FILE_CODES);
   const [showReservedModal, setShowReservedModal] = useState<boolean>(false);
   const [selectedReservedId, setSelectedReservedId] = useState<number | null>(null);
 
@@ -29,9 +31,10 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
 
   const fetchNumberingAndReserved = async () => {
     try {
-      const [rulesRes, reservedRes] = await Promise.all([
+      const [rulesRes, reservedRes, fileCodeRes] = await Promise.all([
         fetch('/api/numbering-rules'),
-        fetch('/api/reserved-numbers')
+        fetch('/api/reserved-numbers'),
+        fetch('/api/file-codes')
       ]);
       if (rulesRes.ok) {
         const rulesData = await rulesRes.json();
@@ -41,8 +44,14 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         const reservedData = await reservedRes.json();
         setReservedNumbers(reservedData);
       }
+      if (fileCodeRes.ok) {
+        const fcData = await fileCodeRes.json();
+        if (Array.isArray(fcData) && fcData.length > 0) {
+          setFileCodes(fcData);
+        }
+      }
     } catch (err) {
-      console.error('Error fetching numbering rules / reserved numbers:', err);
+      console.error('Error fetching numbering rules / reserved numbers / file codes:', err);
     }
   };
 
@@ -76,6 +85,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const [folders, setFolders] = useState<FolderType[]>([]);
   const [usersList, setUsersList] = useState<User[]>([]);
   const [startSequence, setStartSequence] = useState<number>(1);
+  const [systemOrgName, setSystemOrgName] = useState<string>('');
   const [organizations, setOrganizations] = useState<{id: number, name: string}[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -140,6 +150,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
           const data = await res.json();
           if (data.startSequence) setStartSequence(Number(data.startSequence));
+          if (data.headerOrgName) setSystemOrgName(data.headerOrgName);
+          else if (data.orgName) setSystemOrgName(data.orgName);
         }
       } catch (err) {
         console.error('Error fetching settings:', err);
@@ -523,42 +535,43 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-slide-up">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-0 sm:p-4 animate-fade-in">
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] sm:rounded-2xl rounded-none w-full max-w-4xl h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-slide-up">
         
         {/* Header */}
-        <div className="flex items-center justify-between p-5 lg:p-6 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]/50 relative overflow-hidden">
-          <div className="flex items-center gap-3 relative z-10">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--primary-color)] to-amber-600 flex items-center justify-center text-white shadow-md">
+        <div className="flex items-center justify-between p-3.5 sm:p-5 lg:p-6 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]/50 relative overflow-hidden shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 relative z-10 min-w-0 flex-1 mr-2">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-[var(--primary-color)] to-amber-600 flex items-center justify-center text-white shadow-md shrink-0">
               <FileText className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-xl font-bold font-noto-serif-thai text-[var(--text-primary)] flex items-center gap-2">
-                {initialData ? 'แก้ไขข้อมูลเอกสาร' : 'ลงทะเบียนและบันทึกเอกสาร'}
-                <span className="text-xs px-2.5 py-0.5 rounded-full font-sans font-medium bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base sm:text-xl font-bold font-noto-serif-thai text-[var(--text-primary)] flex items-center gap-1.5 sm:gap-2 flex-wrap leading-tight">
+                <span>{initialData ? 'แก้ไขข้อมูลเอกสาร' : 'ลงทะเบียนและบันทึกเอกสาร'}</span>
+                <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full font-sans font-medium bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20 whitespace-nowrap">
                   {formData.type === 'inbox' ? 'หนังสือรับ' : formData.type === 'outbox' ? 'หนังสือส่ง' : 'งานธุรการ'}
                 </span>
               </h2>
-              <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                ระบบงานธุรการและสารบรรณอิเล็กทรอนิกส์ สำนักงานจังหวัด
+              <p className="text-[11px] sm:text-xs text-[var(--text-secondary)] mt-0.5 truncate">
+                {systemOrgName || user?.agencyName || user?.department || ''}
               </p>
             </div>
           </div>
           <button 
             type="button"
             onClick={onClose}
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-2 hover:bg-[var(--border-lighter)] rounded-xl transition-colors cursor-pointer"
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-2 hover:bg-[var(--border-lighter)] rounded-xl transition-colors cursor-pointer shrink-0 active:scale-95 touch-target-min flex items-center justify-center"
+            aria-label="ปิดหน้าต่าง"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5 lg:p-6 custom-scrollbar bg-[var(--bg-surface)]">
-          <form id="doc-form" onSubmit={handleSubmit} className="space-y-6">
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 lg:p-6 custom-scrollbar bg-[var(--bg-surface)]">
+          <form id="doc-form" onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
 
             {/* Quick Type Selection Banner */}
-            <div className="p-1.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-2xl grid grid-cols-3 gap-1.5 shadow-inner">
+            <div className="p-1.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-2xl flex flex-col sm:grid sm:grid-cols-3 gap-1.5 shadow-inner">
               <button
                 type="button"
                 onClick={() => handleTypeChange('inbox')}
@@ -568,7 +581,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
                 }`}
               >
-                <Inbox className="w-4 h-4 text-blue-500" />
+                <Inbox className="w-4 h-4 text-blue-500 shrink-0" />
                 <span>1. หนังสือรับ</span>
               </button>
 
@@ -581,7 +594,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
                 }`}
               >
-                <Send className="w-4 h-4 text-emerald-500" />
+                <Send className="w-4 h-4 text-emerald-500 shrink-0" />
                 <span>2. หนังสือส่ง</span>
               </button>
 
@@ -594,7 +607,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
                 }`}
               >
-                <Layers className="w-4 h-4 text-purple-500" />
+                <Layers className="w-4 h-4 text-purple-500 shrink-0" />
                 <span>3. งานธุรการ (คำสั่ง/ประกาศ)</span>
               </button>
             </div>
@@ -708,9 +721,11 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
 
             {/* Section 2: เลขที่หนังสือ วันที่ ความเร่งด่วน และความลับ */}
             <div className="bg-[var(--bg-canvas)]/40 border border-[var(--border-light)] rounded-2xl p-4 sm:p-5 space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-[var(--border-light)] text-xs font-bold text-[var(--text-primary)]">
-                <Tag className="w-4 h-4 text-[var(--primary-color)]" />
-                <span>2. เลขที่หนังสือ วันที่ลงนาม และระดับความสำคัญ</span>
+              <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)] text-xs font-bold text-[var(--text-primary)]">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-[var(--primary-color)]" />
+                  <span>2. รูปแบบเลขหนังสือ และระดับความสำคัญ</span>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -742,6 +757,18 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     placeholder={formData.type === 'admin' ? 'เช่น คำสั่งที่ 12/2569' : formData.type === 'inbox' ? 'เช่น รย 0021/1234 (ระบุเลขที่หนังสือจากต้นทาง)' : 'เช่น รย 0021/1'}
                     className="w-full border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs font-mono outline-none transition-colors placeholder-[var(--text-muted)] bg-[var(--bg-overlay)] text-[var(--text-primary)] focus:border-[var(--primary-color)]"
                   />
+                  
+                  {/* Live Structure Tags */}
+                  {formData.docNumber && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {parseDocNumberStructure(formData.docNumber, formData.type, formData.category).tags.map((tag, idx) => (
+                        <span key={idx} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-300 border border-blue-500/20">
+                          {tag.label}: <strong className="font-bold">{tag.value}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   {formData.type !== 'inbox' && selectedReservedId && (
                     <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-[11px] text-amber-800 dark:text-amber-300">
                       <span className="font-semibold flex items-center gap-1.5 truncate">
@@ -1157,8 +1184,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       
       {/* MODAL: SELECT RESERVED / RECLAIMED NUMBER */}
       {showReservedModal && (
-        <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-scale-up">
+        <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 animate-fade-in">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] sm:rounded-2xl rounded-none w-full max-w-3xl h-full sm:h-auto max-h-[100dvh] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-scale-up">
             {/* Modal Header */}
             <div className="p-4 sm:p-5 border-b border-[var(--border-light)] bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-transparent flex items-center justify-between">
               <div className="flex items-center gap-2.5">

@@ -7,27 +7,33 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico'],
+      injectRegister: 'auto',
       workbox: {
-        navigateFallbackDenylist: [/^\/api/],
-        maximumFileSizeToCacheInBytes: 10000000
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // Prevent service worker from intercepting /api or /uploads requests and fallback to SPA
+        navigateFallbackDenylist: [/^\/api/, /^\/uploads/],
+        runtimeCaching: [
+          {
+            urlPattern: /^\/api\/.*/,
+            handler: 'NetworkOnly'
+          },
+          {
+            urlPattern: /^\/uploads\/.*/,
+            handler: 'NetworkOnly'
+          }
+        ]
       },
       manifest: {
-        name: 'ระบบงานสารบรรณอิเล็กทรอนิกส์',
-        short_name: 'EDMS',
-        description: 'ระบบงานสารบรรณอิเล็กทรอนิกส์ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
-        theme_color: '#2563eb',
-        background_color: '#0f172a',
+        name: 'e-Saraban PWA Enterprise',
+        short_name: 'e-Saraban',
+        description: 'Enterprise PWA Electronic Document Management System & QR Portal',
+        theme_color: '#1e3a8a',
+        background_color: '#f8fafc',
         display: 'standalone',
-        scope: '/',
+        orientation: 'portrait',
         start_url: '/',
+        scope: '/',
         icons: [
-          {
-            src: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any maskable'
-          },
           {
             src: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png',
             sizes: '512x512',

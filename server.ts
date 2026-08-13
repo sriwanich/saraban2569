@@ -21,7 +21,7 @@ dotenv.config();
 
 // Pre-create standard upload directories to avoid any folder-creation or write-permission issues
 const baseUploadsDir = path.join(process.cwd(), 'uploads');
-const standardFolders = ['inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'signed_pdfs'];
+const standardFolders = ['inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'signed_pdfs', 'system', 'avatars'];
 try {
   if (!fs.existsSync(baseUploadsDir)) {
     fs.mkdirSync(baseUploadsDir, { recursive: true });
@@ -40,11 +40,11 @@ try {
 // Multer storage configuration for attachments organized into subfolders by document type & category
 const uploadStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const docType = (req.body.docType || req.query.docType || 'inbox').toString();
+    const subfolderParam = (req.body.subfolder || req.query.subfolder || req.body.docType || req.query.docType || 'inbox').toString();
     const category = (req.body.category || req.query.category || '').toString();
 
-    let subfolder = docType;
-    if (docType === 'admin') {
+    let subfolder = subfolderParam;
+    if (subfolderParam === 'admin') {
       if (['order', 'announcement', 'circular'].includes(category)) {
         subfolder = `admin/${category}`;
       } else {
@@ -148,6 +148,10 @@ function getPublicBaseUrl(req: express.Request): string {
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use((req, res, next) => {
+  console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`);
+  next();
+});
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Secure file download helper that restores the original filename
@@ -291,13 +295,13 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
       return res.status(400).json({ error: 'ไม่พบไฟล์ที่อัปโหลด' });
     }
 
-    const docType = (req.body.docType || req.query.docType || 'inbox').toString();
+    const subfolderParam = (req.body.subfolder || req.query.subfolder || req.body.docType || req.query.docType || 'inbox').toString();
     const category = (req.body.category || req.query.category || '').toString();
     const uploadedBy = (req.body.uploadedBy || req.query.uploadedBy || 'ผู้ใช้งาน').toString();
     const ip = getClientIp(req);
 
-    let subfolder = docType;
-    if (docType === 'admin') {
+    let subfolder = subfolderParam;
+    if (subfolderParam === 'admin') {
       if (['order', 'announcement', 'circular'].includes(category)) {
         subfolder = `admin/${category}`;
       } else {
@@ -2225,76 +2229,110 @@ async function setupDatabase() {
             UNIQUE KEY role_perm_idx (role, permission_key)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `, []);
+
+        // Safely remove any duplicate rows that might have accumulated before the unique constraint was applied
+        try {
+          await pool.query(`
+            DELETE r1 FROM role_permissions r1
+            INNER JOIN role_permissions r2 
+            ON r1.role = r2.role 
+            AND r1.permission_key = r2.permission_key 
+            AND r1.id < r2.id
+          `, []);
+        } catch (cleanErr) {
+          console.warn('Note cleaning duplicate role_permissions:', cleanErr);
+        }
+
+        // Try adding unique index if it was not created because table existed already
+        try {
+          await pool.query(`
+            ALTER TABLE role_permissions ADD UNIQUE KEY role_perm_idx (role, permission_key)
+          `, []);
+          console.log('✅ Ensured unique index role_perm_idx exists on role_permissions');
+        } catch (altErr) {
+          // Unique key likely already exists, ignore
+        }
         
-        // Seed if empty
-        const [rows]: any = await pool.query('SELECT COUNT(*) as count FROM role_permissions', []);
-        if (rows && rows[0] && rows[0].count === 0) {
-          const defaultPerms = [
-            // admin
-            { role: 'admin', key: 'view_all_docs', val: 1 },
-            { role: 'admin', key: 'create_docs', val: 1 },
-            { role: 'admin', key: 'edit_all_docs', val: 1 },
-            { role: 'admin', key: 'delete_docs', val: 1 },
-            { role: 'admin', key: 'approve_docs', val: 1 },
-            { role: 'admin', key: 'export_docs', val: 1 },
-            { role: 'admin', key: 'admin_docs', val: 1 },
-            { role: 'admin', key: 'ai_assistant', val: 1 },
-            { role: 'admin', key: 'infographics', val: 1 },
-            { role: 'admin', key: 'qr_generator', val: 1 },
-            { role: 'admin', key: 'draft_docs', val: 1 },
-            { role: 'admin', key: 'digital_folders', val: 1 },
-            { role: 'admin', key: 'workflow_sla', val: 1 },
-            { role: 'admin', key: 'digital_signatures', val: 1 },
-            { role: 'admin', key: 'recycle_bin', val: 1 },
-            { role: 'admin', key: 'manage_users', val: 1 },
-            { role: 'admin', key: 'system_settings', val: 1 },
-            { role: 'admin', key: 'backup_restore', val: 1 },
-            { role: 'admin', key: 'audit_logs', val: 1 },
-            // moderator
-            { role: 'moderator', key: 'view_all_docs', val: 1 },
-            { role: 'moderator', key: 'create_docs', val: 1 },
-            { role: 'moderator', key: 'edit_all_docs', val: 1 },
-            { role: 'moderator', key: 'delete_docs', val: 1 },
-            { role: 'moderator', key: 'approve_docs', val: 1 },
-            { role: 'moderator', key: 'export_docs', val: 1 },
-            { role: 'moderator', key: 'admin_docs', val: 1 },
-            { role: 'moderator', key: 'ai_assistant', val: 1 },
-            { role: 'moderator', key: 'infographics', val: 1 },
-            { role: 'moderator', key: 'qr_generator', val: 1 },
-            { role: 'moderator', key: 'draft_docs', val: 1 },
-            { role: 'moderator', key: 'digital_folders', val: 1 },
-            { role: 'moderator', key: 'workflow_sla', val: 1 },
-            { role: 'moderator', key: 'digital_signatures', val: 1 },
-            { role: 'moderator', key: 'recycle_bin', val: 1 },
-            { role: 'moderator', key: 'manage_users', val: 1 },
-            { role: 'moderator', key: 'system_settings', val: 0 },
-            { role: 'moderator', key: 'backup_restore', val: 0 },
-            { role: 'moderator', key: 'audit_logs', val: 0 },
-            // user
-            { role: 'user', key: 'view_all_docs', val: 0 },
-            { role: 'user', key: 'create_docs', val: 1 },
-            { role: 'user', key: 'edit_all_docs', val: 0 },
-            { role: 'user', key: 'delete_docs', val: 0 },
-            { role: 'user', key: 'approve_docs', val: 0 },
-            { role: 'user', key: 'export_docs', val: 1 },
-            { role: 'user', key: 'admin_docs', val: 0 },
-            { role: 'user', key: 'ai_assistant', val: 1 },
-            { role: 'user', key: 'infographics', val: 1 },
-            { role: 'user', key: 'qr_generator', val: 1 },
-            { role: 'user', key: 'draft_docs', val: 1 },
-            { role: 'user', key: 'digital_folders', val: 1 },
-            { role: 'user', key: 'workflow_sla', val: 1 },
-            { role: 'user', key: 'digital_signatures', val: 0 },
-            { role: 'user', key: 'recycle_bin', val: 0 },
-            { role: 'user', key: 'manage_users', val: 0 },
-            { role: 'user', key: 'system_settings', val: 0 },
-            { role: 'user', key: 'backup_restore', val: 0 },
-            { role: 'user', key: 'audit_logs', val: 0 }
-          ];
-          for (const p of defaultPerms) {
-            await pool.query('INSERT INTO role_permissions (role, permission_key, is_allowed) VALUES (?, ?, ?)', [p.role, p.key, p.val]);
+        // Seed if empty or missing default permissions
+        const defaultPerms = [
+          // admin
+          { role: 'admin', key: 'view_all_docs', val: 1 },
+          { role: 'admin', key: 'create_docs', val: 1 },
+          { role: 'admin', key: 'edit_all_docs', val: 1 },
+          { role: 'admin', key: 'delete_docs', val: 1 },
+          { role: 'admin', key: 'approve_docs', val: 1 },
+          { role: 'admin', key: 'export_docs', val: 1 },
+          { role: 'admin', key: 'admin_docs', val: 1 },
+          { role: 'admin', key: 'ai_assistant', val: 1 },
+          { role: 'admin', key: 'infographics', val: 1 },
+          { role: 'admin', key: 'qr_generator', val: 1 },
+          { role: 'admin', key: 'draft_docs', val: 1 },
+          { role: 'admin', key: 'digital_folders', val: 1 },
+          { role: 'admin', key: 'workflow_sla', val: 1 },
+          { role: 'admin', key: 'digital_signatures', val: 1 },
+          { role: 'admin', key: 'recycle_bin', val: 1 },
+          { role: 'admin', key: 'manage_users', val: 1 },
+          { role: 'admin', key: 'system_settings', val: 1 },
+          { role: 'admin', key: 'backup_restore', val: 1 },
+          { role: 'admin', key: 'audit_logs', val: 1 },
+          // moderator
+          { role: 'moderator', key: 'view_all_docs', val: 1 },
+          { role: 'moderator', key: 'create_docs', val: 1 },
+          { role: 'moderator', key: 'edit_all_docs', val: 1 },
+          { role: 'moderator', key: 'delete_docs', val: 1 },
+          { role: 'moderator', key: 'approve_docs', val: 1 },
+          { role: 'moderator', key: 'export_docs', val: 1 },
+          { role: 'moderator', key: 'admin_docs', val: 1 },
+          { role: 'moderator', key: 'ai_assistant', val: 1 },
+          { role: 'moderator', key: 'infographics', val: 1 },
+          { role: 'moderator', key: 'qr_generator', val: 1 },
+          { role: 'moderator', key: 'draft_docs', val: 1 },
+          { role: 'moderator', key: 'digital_folders', val: 1 },
+          { role: 'moderator', key: 'workflow_sla', val: 1 },
+          { role: 'moderator', key: 'digital_signatures', val: 1 },
+          { role: 'moderator', key: 'recycle_bin', val: 1 },
+          { role: 'moderator', key: 'manage_users', val: 1 },
+          { role: 'moderator', key: 'system_settings', val: 0 },
+          { role: 'moderator', key: 'backup_restore', val: 0 },
+          { role: 'moderator', key: 'audit_logs', val: 0 },
+          // user
+          { role: 'user', key: 'view_all_docs', val: 0 },
+          { role: 'user', key: 'create_docs', val: 1 },
+          { role: 'user', key: 'edit_all_docs', val: 0 },
+          { role: 'user', key: 'delete_docs', val: 0 },
+          { role: 'user', key: 'approve_docs', val: 0 },
+          { role: 'user', key: 'export_docs', val: 1 },
+          { role: 'user', key: 'admin_docs', val: 0 },
+          { role: 'user', key: 'ai_assistant', val: 1 },
+          { role: 'user', key: 'infographics', val: 1 },
+          { role: 'user', key: 'qr_generator', val: 1 },
+          { role: 'user', key: 'draft_docs', val: 1 },
+          { role: 'user', key: 'digital_folders', val: 1 },
+          { role: 'user', key: 'workflow_sla', val: 1 },
+          { role: 'user', key: 'digital_signatures', val: 0 },
+          { role: 'user', key: 'recycle_bin', val: 0 },
+          { role: 'user', key: 'manage_users', val: 0 },
+          { role: 'user', key: 'system_settings', val: 0 },
+          { role: 'user', key: 'backup_restore', val: 0 },
+          { role: 'user', key: 'audit_logs', val: 0 }
+        ];
+        
+        let seedCount = 0;
+        for (const p of defaultPerms) {
+          try {
+            const [res]: any = await pool.query(
+              'INSERT IGNORE INTO role_permissions (role, permission_key, is_allowed) VALUES (?, ?, ?)',
+              [p.role, p.key, p.val]
+            );
+            if (res && res.affectedRows > 0) {
+              seedCount++;
+            }
+          } catch (insertErr) {
+            // Ignore insert ignore errors
           }
-          console.log('✅ Seeded default role_permissions in MySQL');
+        }
+        if (seedCount > 0) {
+          console.log(`✅ Seeded ${seedCount} missing default role_permissions in MySQL`);
         }
         console.log('✅ Initialized and verified role_permissions table in MySQL');
       } catch (e) {
@@ -2307,15 +2345,18 @@ async function setupDatabase() {
           CREATE TABLE IF NOT EXISTS enterprise_dynamic_qrs (
             slug VARCHAR(100) PRIMARY KEY,
             title VARCHAR(255) NOT NULL,
-            originalUrl TEXT NOT NULL,
+            originalUrl LONGTEXT NOT NULL,
             createdBy VARCHAR(255),
             status VARCHAR(50) DEFAULT 'active',
             type VARCHAR(50) DEFAULT 'url',
-            styleConfig TEXT,
+            styleConfig LONGTEXT,
             createdAt VARCHAR(50),
             updatedAt VARCHAR(50)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `, []);
+        try {
+          await pool.query('ALTER TABLE enterprise_dynamic_qrs MODIFY COLUMN styleConfig LONGTEXT, MODIFY COLUMN originalUrl LONGTEXT');
+        } catch (_) {}
         console.log('✅ Initialized enterprise_dynamic_qrs table in MySQL');
       } catch (e) {
         console.warn('Note checking/creating enterprise_dynamic_qrs table:', e);
@@ -3729,6 +3770,28 @@ app.post("/api/workflows/instances/:id/escalate", async (req, res) => {
   }
 });
 
+app.delete("/api/workflows/instances/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (localDb.workflow_instances) {
+      localDb.workflow_instances = localDb.workflow_instances.filter((i: any) => i.id !== id);
+      saveLocalDb();
+    }
+    if (isMysqlOnline) {
+      try {
+        await pool.query('DELETE FROM workflow_instances WHERE id = ?', [id]);
+      } catch (mysqlErr) {
+        console.warn("MySQL delete workflow instance failed:", mysqlErr);
+      }
+    }
+    const ip = getClientIp(req);
+    await addSystemLog("DELETE_WORKFLOW_INSTANCE", `ยกเลิกการเสนออนุมัติ Workflow: ${id}`, req.body?.user || "ผู้ดูแลระบบ", ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to delete workflow instance" });
+  }
+});
+
 // ==================== DIGITAL SIGNATURE & HASH VERIFICATION APIS ====================
 
 function formatThaiDateTimeStr(isoStr?: string): string {
@@ -4866,20 +4929,21 @@ app.get("/api/digital-signatures/download-pdf/:id", async (req, res) => {
 
 // Role & Permission API Endpoints
 app.get("/api/role-permissions", async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   try {
     if (isMysqlOnline) {
       const [rows]: any = await pool.query('SELECT role, permission_key, is_allowed FROM role_permissions');
       const formatted = rows.map((r: any) => ({
         role: r.role,
         permission_key: r.permission_key,
-        is_allowed: r.is_allowed === 1 || r.is_allowed === true ? 1 : 0
+        is_allowed: (r.is_allowed === 1 || r.is_allowed === true || String(r.is_allowed) === '1' || String(r.is_allowed) === 'true') ? 1 : 0
       }));
       return res.json(formatted);
     } else {
       const formatted = (localDb.role_permissions || []).map((r: any) => ({
         role: r.role,
         permission_key: r.permission_key,
-        is_allowed: r.is_allowed === 1 || r.is_allowed === true ? 1 : 0
+        is_allowed: (r.is_allowed === 1 || r.is_allowed === true || String(r.is_allowed) === '1' || String(r.is_allowed) === 'true') ? 1 : 0
       }));
       return res.json(formatted);
     }
@@ -5081,7 +5145,7 @@ app.get("/qr/:slug", async (req, res) => {
 });
 
 // GET list of dynamic QR codes
-app.get("/api/qr-generator/dynamic", async (req, res) => {
+app.get(["/api/qr-generator/dynamic", "/api/qr-generator/dynamic/"], async (req, res) => {
   try {
     if (isMysqlOnline) {
       try {
@@ -5103,7 +5167,7 @@ app.get("/api/qr-generator/dynamic", async (req, res) => {
 });
 
 // POST create dynamic QR code
-app.post("/api/qr-generator/dynamic", async (req, res) => {
+app.post(["/api/qr-generator/dynamic", "/api/qr-generator/dynamic/"], async (req, res) => {
   const { title, originalUrl, createdBy, type, styleConfig } = req.body;
   const slug = `qr_${Math.random().toString(36).substring(2, 10)}`;
   const createdAt = new Date().toISOString();
@@ -5326,32 +5390,49 @@ app.put('/api/users/:id', async (req, res) => {
   const data = req.body;
   const ip = getClientIp(req);
 
-  let newHashedPassword: string | null = null;
-  if (data.password && typeof data.password === 'string' && data.password.trim() !== '') {
-    const trimmed = data.password.trim();
-    if (!trimmed.startsWith('$argon2') && !trimmed.startsWith('$2a$') && !trimmed.startsWith('$2b$')) {
-      newHashedPassword = await hashPasswordArgon2(trimmed);
-    }
-  }
-
   try {
-      if (newHashedPassword) {
-        await pool.query(
-          'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, password=?, avatar=? WHERE id=?',
-          [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, newHashedPassword, data.avatar || null, id]
-        );
-      } else {
-        await pool.query(
-          'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, avatar=? WHERE id=?',
-          [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, data.avatar || null, id]
-        );
+    let newHashedPassword: string | null = null;
+    if (data.password && typeof data.password === 'string' && data.password.trim() !== '') {
+      if (data.currentPassword !== undefined || data.requireCurrentPassword) {
+        if (!data.currentPassword || typeof data.currentPassword !== 'string' || data.currentPassword.trim() === '') {
+          return res.status(400).json({ error: 'กรุณากรอกรหัสผ่านปัจจุบัน (รหัสผ่านเดิม)' });
+        }
+        const [userRows]: any = await pool.query('SELECT password FROM users WHERE id = ?', [id]);
+        if (userRows.length === 0) {
+          return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้นี้ในระบบ' });
+        }
+        const dbPass = userRows[0]?.password || '';
+        const isValid = await verifyPasswordArgon2(dbPass, data.currentPassword.trim());
+        if (!isValid) {
+          return res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง' });
+        }
       }
-      await addSystemLog('UPDATE_USER', `แก้ไขข้อมูลเจ้าหน้าที่ ID: ${id} (${data.firstName} ${data.lastName}, ฝ่าย: ${data.department || 'ไม่ระบุ'}, สิทธิ์: ${data.role})${newHashedPassword ? ' [อัปเดตรหัสผ่านใหม่]' : ''}`, data.updatedBy || 'ผู้ดูแลระบบ', ip);
-      return res.json({ success: true });
-    } catch (error: any) {
-      console.error('Database error:', error.message);
-      return res.status(500).json({ error: 'Database error' });
+
+      const trimmed = data.password.trim();
+      if (!trimmed.startsWith('$argon2') && !trimmed.startsWith('$2a$') && !trimmed.startsWith('$2b$')) {
+        newHashedPassword = await hashPasswordArgon2(trimmed);
+      } else {
+        newHashedPassword = trimmed;
+      }
     }
+
+    if (newHashedPassword) {
+      await pool.query(
+        'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, password=?, avatar=? WHERE id=?',
+        [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, newHashedPassword, data.avatar || null, id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, avatar=? WHERE id=?',
+        [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, data.avatar || null, id]
+      );
+    }
+    await addSystemLog('UPDATE_USER', `แก้ไขข้อมูลเจ้าหน้าที่ ID: ${id} (${data.firstName} ${data.lastName}, ฝ่าย: ${data.department || 'ไม่ระบุ'}, สิทธิ์: ${data.role})${newHashedPassword ? ' [อัปเดตรหัสผ่านใหม่]' : ''}`, data.updatedBy || 'ผู้ดูแลระบบ', ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Database error:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
 });
 app.delete('/api/users/:id', async (req, res) => {
   const { id } = req.params;
@@ -8233,7 +8314,7 @@ app.get('/api/documents/:docId/reads', async (req, res) => {
   const { docId } = req.params;
   try {
     // Fetch all users
-    const [allUsers]: any = await pool.query('SELECT username, firstName, lastName, department, position, role FROM users');
+    const [allUsers]: any = await pool.query('SELECT username, firstName, lastName, department, position, role, avatar FROM users');
     
     // Fetch reads for this document
     const [readRows]: any = await pool.query('SELECT username, fullName, status, readAt FROM document_reads WHERE docId = ?', [docId]);
@@ -8253,6 +8334,7 @@ app.get('/api/documents/:docId/reads', async (req, res) => {
         fullName: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username,
         department: u.department || '',
         position: u.position || '',
+        avatar: u.avatar || null,
         status: readRecord ? readRecord.status : 'sent',
         readAt: readRecord ? readRecord.readAt : null
       };
@@ -8279,6 +8361,7 @@ app.get('/api/documents/:docId/reads', async (req, res) => {
         fullName: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username,
         department: u.department || '',
         position: u.position || '',
+        avatar: u.avatar || null,
         status: readRecord ? readRecord.status : 'sent',
         readAt: readRecord ? readRecord.readAt : null
       };

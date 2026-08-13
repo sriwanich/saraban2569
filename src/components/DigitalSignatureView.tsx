@@ -748,59 +748,63 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
 
       {/* Signature Certificate Details Popup */}
       {selectedSigModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-[0_0_50px_-12px_rgba(16,185,129,0.3)] w-full max-w-2xl max-h-[95vh] flex flex-col overflow-hidden my-4 relative">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-2 sm:p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-[0_0_50px_-12px_rgba(16,185,129,0.3)] w-full max-w-2xl h-full max-h-[92dvh] sm:max-h-[90vh] flex flex-col overflow-hidden my-auto relative">
             <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
             <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
             
-            <div className="relative z-10 flex flex-col h-full max-h-full">
+            <div className="relative z-10 flex flex-col flex-1 min-h-0 h-full overflow-hidden">
               {/* Header */}
-              <div className="shrink-0 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-5 flex flex-col items-center justify-center relative overflow-hidden border-b border-emerald-500/30">
+              <div className="shrink-0 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-4 sm:p-5 flex flex-col items-center justify-center relative overflow-hidden border-b border-emerald-500/30">
                 <div className="absolute inset-0 opacity-10 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-400 via-transparent to-transparent"></div>
-                <button onClick={() => setSelectedSigModal(null)} className="absolute top-3 right-3 text-slate-400 hover:text-white transition-colors bg-white/10 p-1.5 rounded-full hover:bg-white/20 z-10">
+                <button
+                  onClick={() => setSelectedSigModal(null)}
+                  className="absolute top-3 right-3 text-slate-400 hover:text-white transition-colors bg-white/10 p-1.5 rounded-full hover:bg-white/20 z-10"
+                  title="ปิด"
+                >
                   <X className="w-5 h-5" />
                 </button>
-                <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-500/40 mb-2 shadow-[0_0_15px_rgba(16,185,129,0.5)]">
-                  <ShieldCheck className="w-6 h-6 text-emerald-400" />
+                <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-500/40 mb-1.5 shadow-[0_0_15px_rgba(16,185,129,0.5)]">
+                  <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
                 </div>
-                <h3 className="font-extrabold text-lg text-white tracking-wide text-center">
+                <h3 className="font-extrabold text-base sm:text-lg text-white tracking-wide text-center">
                   ใบรับรองลายมือชื่อดิจิทัลและตราประทับ
                 </h3>
                 <p className="text-emerald-400 text-[10px] mt-0.5 font-mono tracking-widest uppercase">
-                  Digital Signature Certificate
+                  Digital Signature Certificate & ETDA Standard
                 </p>
               </div>
 
-              {/* Content */}
-              <div className="p-4 sm:p-6 space-y-5 overflow-y-auto overflow-x-hidden custom-scrollbar flex-1">
-                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+              {/* Scrollable Content */}
+              <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto custom-scrollbar flex-1 min-h-0 overscroll-contain">
+                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-5">
                   <div className="shrink-0 relative group">
                     <div className="absolute inset-0 bg-emerald-500 blur-md opacity-20 rounded-xl group-hover:opacity-40 transition-opacity duration-500"></div>
                     <div className="relative bg-white p-2.5 rounded-xl border border-slate-200 shadow-xl">
                       {selectedSigModal.qrCodeDataUrl ? (
-                        <img src={selectedSigModal.qrCodeDataUrl} alt="QR Code" className="w-28 h-28 object-contain" />
+                        <img src={selectedSigModal.qrCodeDataUrl} alt="QR Code" className="w-24 h-24 sm:w-28 sm:h-28 object-contain" />
                       ) : (
-                        <div className="w-28 h-28 flex items-center justify-center bg-slate-50 border border-slate-100 rounded-xl">
+                        <div className="w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center bg-slate-50 border border-slate-100 rounded-xl">
                           <QrCode className="w-8 h-8 text-slate-300" />
                         </div>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex-1 space-y-4 w-full text-center sm:text-left">
+                  <div className="flex-1 space-y-3 sm:space-y-4 w-full text-center sm:text-left">
                     <div className="space-y-0.5">
                       <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">ลงนามโดย (Signed By)</div>
-                      <div className="text-xl font-bold text-slate-800 dark:text-slate-100">{selectedSigModal.signerName}</div>
+                      <div className="text-lg sm:text-xl font-bold text-slate-800 dark:text-slate-100">{selectedSigModal.signerName}</div>
                       <div className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">{selectedSigModal.signerPosition}</div>
                     </div>
                     
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
-                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider mb-1">ตราประทับเวลา (TSA)</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div className="p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
+                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">ตราประทับเวลา (TSA)</div>
                         <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">{selectedSigModal.timestampFormatted}</div>
                       </div>
-                      <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
-                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider mb-1">สถานะ (Status)</div>
+                      <div className="p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
+                        <div className="text-[9px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">สถานะ (Status)</div>
                         <div className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 flex items-center justify-center sm:justify-start gap-1">
                           <CheckCircle2 className="w-3.5 h-3.5" /> VALID & VERIFIED
                         </div>
@@ -809,8 +813,8 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
                   </div>
                 </div>
 
-                <div className="space-y-2 p-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-200 dark:border-slate-700/50">
-                  <div className="flex flex-col sm:flex-row justify-between pb-2 border-b border-slate-200 dark:border-slate-700 gap-2">
+                <div className="space-y-2 p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-200 dark:border-slate-700/50">
+                  <div className="flex flex-col sm:flex-row justify-between pb-2 border-b border-slate-200 dark:border-slate-700 gap-1.5 sm:gap-2">
                     <div className="space-y-0.5">
                       <span className="text-[9px] uppercase font-bold text-slate-500">เลขที่หนังสือ</span>
                       <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">{selectedSigModal.docNumber}</div>
@@ -833,24 +837,37 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
 
                   <div className="space-y-1 pt-1">
                     <span className="text-[9px] uppercase font-bold text-slate-500 flex items-center gap-1">
-                      <KeyRound className="w-3 h-3" /> Digital Fingerprint (SHA-256)
+                      <KeyRound className="w-3 h-3 text-emerald-500" /> Digital Fingerprint (SHA-256)
                     </span>
-                    <div className="font-mono text-[10px] text-slate-600 dark:text-slate-400 break-all bg-slate-100 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-inner">
+                    <div className="font-mono text-[9px] sm:text-[10px] text-slate-600 dark:text-slate-400 break-all bg-slate-100 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-inner">
                       {selectedSigModal.documentHash}
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-center pt-1 shrink-0 pb-2">
-                  <a
-                    href={`/api/digital-signatures/download-pdf/${selectedSigModal.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-6 py-2.5 text-xs font-bold rounded-xl bg-slate-900 text-white dark:bg-emerald-600 hover:bg-slate-800 dark:hover:bg-emerald-500 shadow hover:shadow-md transition-all flex items-center gap-2 w-full sm:w-auto justify-center"
-                  >
-                    <Download className="w-4 h-4" /> ดาวน์โหลดเอกสาร (PDF) พร้อมตราประทับ
-                  </a>
+                <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex items-start gap-2 text-[11px] text-emerald-800 dark:text-emerald-300">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <span>เอกสารฉบับนี้ได้รับการลงนามดิจิทัลพร้อมตราประทับเวลาระดับสูง ตรวจสอบความถูกต้องและป้องกันการดัดแปลงแก้ไขตามมาตรฐานสากล</span>
                 </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-800 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedSigModal(null)}
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors order-2 sm:order-1"
+                >
+                  ปิดหน้าต่าง
+                </button>
+                <a
+                  href={`/api/digital-signatures/download-pdf/${selectedSigModal.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 order-1 sm:order-2"
+                >
+                  <Download className="w-4 h-4" /> ดาวน์โหลดเอกสาร (PDF) พร้อมตราประทับ
+                </a>
               </div>
             </div>
           </div>

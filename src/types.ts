@@ -9,6 +9,7 @@ export interface Folder {
   description?: string;
   departmentId?: number | null;
   departmentName?: string | null;
+  fileCode?: string | null; // รหัสแฟ้มเอกสารสารบรรณ เช่น 0021, 0021.1
   createdAt?: string;
 }
 
@@ -42,6 +43,8 @@ export interface DocumentItem {
   title: string; // เรื่อง
   department: string; // กลุ่มปฏิบัติ
   assignee: string; // บุคคลปฏิบัติ
+  fileCode?: string; // รหัสแฟ้มเอกสารสารบรรณ เช่น 0021, 0021.1
+  fileCodeName?: string; // ชื่อหมวดแฟ้มเอกสาร
   note: string; // หมายเหตุ
   registerDate: string; // วันลงทะเบียน
   type: DocType;

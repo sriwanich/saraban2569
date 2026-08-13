@@ -317,7 +317,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         gradientColor2,
         gradientAngle,
         logoType,
-        customLogoUrl,
+        customLogoUrl: customLogoUrl && customLogoUrl.length > 50000 ? '' : customLogoUrl,
         frameType,
         frameText,
         frameColor,
@@ -337,8 +337,8 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       });
 
       if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.qr) {
+        const result = await res.json().catch(() => null);
+        if (result && result.success && result.qr) {
           setRegisteredSlug(result.qr.slug);
           setGenerationMode('dynamic'); // Lock into dynamic representation
           fetchDynamicQrs(); // Update Dynamic list
@@ -352,11 +352,12 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
           
           return result.qr.slug;
         } else {
-          showToast('error', 'เกิดข้อผิดพลาด: ' + (result.error || 'ไม่สามารถลงทะเบียน Dynamic QR ได้'));
+          showToast('error', 'เกิดข้อผิดพลาด: ' + (result?.error || 'ไม่สามารถลงทะเบียน Dynamic QR ได้'));
         }
       } else {
         const errJson = await res.json().catch(() => null);
-        showToast('error', 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ' + (errJson?.error || res.statusText));
+        const errMsg = errJson?.error || (res.status ? `(HTTP ${res.status}) ${res.statusText || 'ไม่ทราบสาเหตุ'}` : 'การเชื่อมต่อกับเซิร์ฟเวอร์ขัดข้อง');
+        showToast('error', 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ' + errMsg);
       }
     } catch (err: any) {
       console.error('Failed to register dynamic QR:', err);

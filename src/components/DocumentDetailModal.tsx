@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, TrackingLog, Folder, DigitalSignatureRecord, formatThaiDate, formatThaiDateFull, formatThaiDateTime } from '../types';
-import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode } from 'lucide-react';
+import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode, FileCode, Tag } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import AiCrossReferencePanel, { DetectionResult } from './ai-cross-reference-panel';
 import VersionControlPanel from './VersionControlPanel';
 import DigitalSignatureModal from './DigitalSignatureModal';
+import { parseFileCodeFromDoc, parseDocNumberStructure } from '../lib/fileCodeUtils';
 
 interface Props {
   doc: DocumentItem;
@@ -107,6 +108,118 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   const [docQrCode, setDocQrCode] = useState<string>('');
   const [docVerifyUrl, setDocVerifyUrl] = useState<string>('');
 
+  // Workflow & SLA State
+  const [docWorkflow, setDocWorkflow] = useState<any | null>(null);
+  const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
+  const [selectedWorkflowTplId, setSelectedWorkflowTplId] = useState<string>('');
+  const [isAssigningWorkflowDoc, setIsAssigningWorkflowDoc] = useState(false);
+  const [wfActionNote, setWfActionNote] = useState('');
+  const [isSubmittingWfAction, setIsSubmittingWfAction] = useState(false);
+
+  const fetchDocWorkflow = async () => {
+    try {
+      const [resInst, resTpl] = await Promise.all([
+        fetch('/api/workflows/instances').then(r => r.json()).catch(() => []),
+        fetch('/api/workflows/templates').then(r => r.json()).catch(() => [])
+      ]);
+      if (Array.isArray(resTpl)) setWorkflowTemplates(resTpl);
+      if (Array.isArray(resInst)) {
+        const found = resInst.find((i: any) => String(i.docId) === String(doc.id) || i.docNumber === doc.docNumber);
+        setDocWorkflow(found || null);
+      }
+    } catch (err) {
+      console.error('Error fetching doc workflow:', err);
+    }
+  };
+
+  const handleProgressDocWorkflow = async (action: 'approve' | 'reject' | 'escalate') => {
+    if (!docWorkflow) return;
+    setIsSubmittingWfAction(true);
+    try {
+      const updaterName = user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ';
+      if (action === 'escalate') {
+        await fetch(`/api/workflows/instances/${docWorkflow.id}/escalate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            note: wfActionNote || 'แจ้งเตือนเร่งรัดหนังสือค้างโต๊ะ ตามกำหนด SLA',
+            user: updaterName
+          })
+        });
+      } else {
+        await fetch(`/api/workflows/instances/${docWorkflow.id}/step`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            note: wfActionNote,
+            user: updaterName
+          })
+        });
+      }
+
+      // Sync tracking history
+      await fetch('/api/tracking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docId: doc.id,
+          docType: doc.type,
+          status: action === 'approve' ? 'อนุมัติ/ส่งต่อ' : action === 'reject' ? 'ตีกลับเรื่อง' : 'เร่งรัด SLA',
+          comments: `[Workflow SLA] ${wfActionNote || (action === 'approve' ? 'ผ่านการพิจารณาขั้นตอนเสนอเรื่อง' : action === 'reject' ? 'ตีกลับแก้ไขหนังสือ' : 'แจ้งเตือนเร่งรัดค้างโต๊ะตาม SLA')}`,
+          updatedBy: updaterName
+        })
+      });
+
+      setWfActionNote('');
+      await fetchDocWorkflow();
+      await fetchTracking();
+      if (onStatusUpdated) onStatusUpdated();
+    } catch (err) {
+      console.error('Error progressing doc workflow:', err);
+    } finally {
+      setIsSubmittingWfAction(false);
+    }
+  };
+
+  const handleAssignDocWorkflow = async () => {
+    if (!selectedWorkflowTplId) return;
+    setIsAssigningWorkflowDoc(true);
+    try {
+      const updaterName = user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ';
+      const res = await fetch('/api/workflows/instances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docId: doc.id,
+          templateId: selectedWorkflowTplId,
+          user: updaterName
+        })
+      });
+      if (res.ok) {
+        const tpl = workflowTemplates.find(t => t.id === selectedWorkflowTplId);
+        await fetch('/api/tracking', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            docId: doc.id,
+            docType: doc.type,
+            status: 'เริ่ม Workflow',
+            comments: `[Workflow SLA] เริ่มต้นเส้นทางเสนออนุมัติ: ${tpl?.name || 'Workflow มาตรฐาน'}`,
+            updatedBy: updaterName
+          })
+        });
+        await fetchDocWorkflow();
+        await fetchTracking();
+        if (onStatusUpdated) onStatusUpdated();
+      }
+    } catch (err) {
+      console.error('Error assigning doc workflow:', err);
+    } finally {
+      setIsAssigningWorkflowDoc(false);
+    }
+  };
+
   const fetchDocQrCode = async () => {
     try {
       const res = await fetch(`/api/documents/${doc.id}/qr-code`);
@@ -174,6 +287,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
     fetchTracking();
     fetchDocSignatures();
     fetchDocQrCode();
+    fetchDocWorkflow();
     handleRunAiCrossRef();
   }, [doc.id]);
 
@@ -458,8 +572,8 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   }[doc.type] || 'เอกสารทั่วไป';
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-5xl h-[92vh] max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-slide-up">
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100] flex items-center justify-center p-0 sm:p-4 animate-fade-in">
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] sm:rounded-2xl rounded-none w-full max-w-5xl h-full sm:h-[92vh] max-h-[100dvh] sm:max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-slide-up">
         
         {/* Header Actions */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--border-light)] bg-gradient-to-b from-white/[0.02] to-transparent shrink-0">
@@ -712,9 +826,17 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                     return (
                       <div key={reader.username} className="p-3.5 sm:px-6 flex items-center justify-between gap-4 hover:bg-[var(--border-lighter)]/20 transition-colors">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center font-bold text-xs shrink-0 border border-[var(--primary-color)]/20">
-                            {initials}
-                          </div>
+                          {reader.avatar ? (
+                            <img
+                              src={reader.avatar}
+                              alt={reader.fullName}
+                              className="w-9 h-9 rounded-full object-cover shrink-0 border border-[var(--primary-color)]/30 shadow-xs"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center font-bold text-xs shrink-0 border border-[var(--primary-color)]/20 shadow-xs">
+                              {initials}
+                            </div>
+                          )}
                           
                           <div className="min-w-0">
                             <div className="font-semibold text-xs sm:text-sm text-[var(--text-primary)] truncate flex items-center gap-1.5">
@@ -795,7 +917,20 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                 {detailRow('แฟ้มจัดเก็บดิจิทัล :', <span className="font-medium text-[#cfa851]">{getFolderLabel()}</span>)}
                 {detailRow('ปีงบประมาณ :', doc.year)}
                 {detailRow('วันลงทะเบียนในระบบ :', formattedRegDate())}
-                {detailRow('เลขที่หนังสือ (ที่) :', <span className="font-mono font-medium text-[var(--text-primary)]">{doc.docNumber}</span>)}
+                {detailRow('เลขที่หนังสือ (ที่) :', (
+                  <div className="space-y-1.5">
+                    <span className="font-mono font-bold text-sm text-[var(--text-primary)]">{doc.docNumber || '-'}</span>
+                    {doc.docNumber && (
+                      <div className="flex flex-wrap gap-1">
+                        {parseDocNumberStructure(doc.docNumber, doc.type, doc.category).tags.map((tag, idx) => (
+                          <span key={idx} className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-300 border border-blue-500/20">
+                            {tag.label}: <strong className="font-bold">{tag.value}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
                 {detailRow('ลงวันที่ :', formattedDocDate())}
                 {doc.type !== 'admin' && detailRow('ต้นทาง (จาก) :', doc.from)}
                 {doc.type !== 'admin' && detailRow('ปลายทาง (ถึง) :', doc.to)}
@@ -1085,6 +1220,127 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                     </div>
                   </div>
                 ))}
+
+                {detailRow('สถานะการเสนออนุมัติ & SLA :', (
+                  <div className="space-y-3 w-full">
+                    {docWorkflow ? (
+                      <div className="p-4 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/20 dark:bg-blue-950/20 space-y-3 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200 dark:border-blue-900 pb-2">
+                          <div className="flex items-center gap-2">
+                            <GitBranch className="w-4 h-4 text-[var(--primary-color)]" />
+                            <span className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+                              {docWorkflow.templateName || 'Workflow มาตรฐาน'}
+                            </span>
+                          </div>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                            docWorkflow.slaStatus === 'OVERDUE' ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 animate-pulse' :
+                            docWorkflow.slaStatus === 'WARNING' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' :
+                            'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          }`}>
+                            {docWorkflow.slaStatus === 'OVERDUE' ? '🔴 เกินกำหนด SLA (ค้างโต๊ะ)' :
+                             docWorkflow.slaStatus === 'WARNING' ? '🟡 ใกล้ครบกำหนด SLA' : '🟢 ดำเนินการตามปกติ'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-600 dark:text-slate-300 font-mono">
+                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">กำหนดส่งตาม SLA</p>
+                            <p className="font-semibold text-blue-600 dark:text-blue-400">{formatThaiDateTime(docWorkflow.dueAt)}</p>
+                          </div>
+                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">ผู้พิจารณาปัจจุบัน</p>
+                            <p className="font-semibold text-slate-800 dark:text-slate-200">
+                              {docWorkflow.steps[docWorkflow.currentStepIndex]?.title || 'ส่งมอบแล้ว'} ({docWorkflow.assignee})
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Steps overview */}
+                        <div className="space-y-1.5 pt-1">
+                          <p className="font-bold text-slate-700 dark:text-slate-300 text-[11px]">ลำดับการเสนออนุมัติ:</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            {docWorkflow.steps.map((st: any, idx: number) => {
+                              const isCurrent = idx === docWorkflow.currentStepIndex && docWorkflow.status === 'active';
+                              const isDone = idx < docWorkflow.currentStepIndex || docWorkflow.status === 'completed';
+                              return (
+                                <div key={idx} className={`p-2 rounded-lg border text-[11px] ${
+                                  isCurrent ? 'bg-blue-100/70 border-blue-400 text-blue-900 dark:bg-blue-900/60 dark:text-blue-200 font-bold ring-1 ring-blue-400' :
+                                  isDone ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' :
+                                  'bg-slate-100 border-slate-200 text-slate-400 dark:bg-slate-900 dark:border-slate-800'
+                                }`}>
+                                  <div className="flex items-center justify-between">
+                                    <span>ขั้นที่ {st.stepNumber}: {st.title}</span>
+                                    {isDone && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                                  </div>
+                                  <div className="text-[10px] opacity-80 mt-0.5">{st.assignedRole}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Inline progress action */}
+                        {docWorkflow.status === 'active' && (
+                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                            <input
+                              type="text"
+                              placeholder="ระบุข้อความสั่งการ/ความเห็นอนุมัติ..."
+                              value={wfActionNote}
+                              onChange={e => setWfActionNote(e.target.value)}
+                              className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-slate-800 dark:text-slate-100"
+                            />
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleProgressDocWorkflow('escalate')}
+                                disabled={isSubmittingWfAction}
+                                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer"
+                              >
+                                <Clock className="w-3.5 h-3.5" /> เร่งรัด SLA
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleProgressDocWorkflow('approve')}
+                                disabled={isSubmittingWfAction}
+                                className="px-4 py-1.5 rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> อนุมัติ / ส่งต่อขั้นตอน
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/20 text-center space-y-3">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 italic">
+                          ยังไม่ได้มอบหมายเส้นทางเสนออนุมัติ (Workflow) ให้หนังสือฉบับนี้
+                        </p>
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-2 max-w-md mx-auto">
+                          <select
+                            value={selectedWorkflowTplId}
+                            onChange={e => setSelectedWorkflowTplId(e.target.value)}
+                            className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-slate-800 dark:text-slate-100"
+                          >
+                            <option value="">-- เลือกแม่แบบ Workflow --</option>
+                            {workflowTemplates.map(t => (
+                              <option key={t.id} value={t.id}>
+                                {t.name} ({t.steps.length} ขั้นตอน)
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={handleAssignDocWorkflow}
+                            disabled={!selectedWorkflowTplId || isAssigningWorkflowDoc}
+                            className="w-full sm:w-auto px-4 py-2 text-xs font-bold rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white shadow-md transition-all shrink-0 cursor-pointer disabled:opacity-50"
+                          >
+                            {isAssigningWorkflowDoc ? 'กำลังมอบหมาย...' : 'เริ่ม Workflow'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -1101,24 +1357,137 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
           {/* Column 2: Status Tracking timeline & Update action */}
           <div className={`w-full md:w-[380px] shrink-0 min-h-0 h-full max-h-full bg-[var(--bg-elevated)]/30 overflow-y-auto p-4 sm:p-6 pb-12 flex flex-col justify-between border-t md:border-t-0 custom-scrollbar ${activeTab === 'details' ? 'hidden md:block' : ''}`}>
-            <div className="space-y-6 shrink-0">
+            <div className="space-y-5 shrink-0">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--text-primary)] font-noto-serif-thai border-b border-[var(--border-light)] pb-2 mb-3">
-                  เส้นทางเดินหนังสือและการติดตามสถานะ
+                <h3 className="text-sm font-semibold text-[var(--text-primary)] font-noto-serif-thai border-b border-[var(--border-light)] pb-2 mb-3 flex items-center justify-between">
+                  <span>เส้นทางเดินหนังสือและการติดตามสถานะ</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-[var(--primary-color)]">
+                    {trackingLogs.length} รายการ
+                  </span>
                 </h3>
+
+                {/* Workflow & SLA Live Card in Tracking Panel */}
+                {docWorkflow ? (
+                  <div className="mb-4 p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/80 bg-blue-50/40 dark:bg-blue-950/30 space-y-2.5 text-xs shadow-xs">
+                    <div className="flex items-center justify-between gap-1 border-b border-blue-200/80 dark:border-blue-900/80 pb-2">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-100">
+                        <GitBranch className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
+                        <span className="line-clamp-1">{docWorkflow.templateName || 'Workflow SLA'}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                        docWorkflow.slaStatus === 'OVERDUE' ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 animate-pulse' :
+                        docWorkflow.slaStatus === 'WARNING' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' :
+                        'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                      }`}>
+                        {docWorkflow.slaStatus === 'OVERDUE' ? '🔴 เกินกำหนด SLA' :
+                         docWorkflow.slaStatus === 'WARNING' ? '🟡 ใกล้ครบกำหนด' : '🟢 ดำเนินการตามปกติ'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300">
+                        <span className="text-slate-400 font-medium">เวลาคงเหลือ SLA:</span>
+                        {(() => {
+                          const due = new Date(docWorkflow.dueAt).getTime();
+                          const now = new Date().getTime();
+                          const diffMs = due - now;
+                          if (docWorkflow.status === 'completed') {
+                            return <span className="font-bold text-emerald-600">เสร็จสิ้นแล้ว</span>;
+                          }
+                          if (diffMs < 0) {
+                            const hours = Math.floor(Math.abs(diffMs) / (1000 * 60 * 60));
+                            return <span className="font-bold text-red-600 dark:text-red-400">ช้าเกิน {hours} ชม.</span>;
+                          }
+                          const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                          return <span className="font-bold text-blue-600 dark:text-blue-400">เหลือ {hours} ชม.</span>;
+                        })()}
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-0.5">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">ขั้นตอนปัจจุบัน</div>
+                        <div className="font-semibold text-slate-800 dark:text-slate-200 text-xs">
+                          {docWorkflow.steps[docWorkflow.currentStepIndex]?.title || 'ส่งมอบแล้ว'} ({docWorkflow.assignee})
+                        </div>
+                      </div>
+                    </div>
+
+                    {docWorkflow.status === 'active' && (
+                      <div className="pt-2 border-t border-blue-200/60 dark:border-blue-900/60 space-y-2">
+                        <input
+                          type="text"
+                          placeholder="ข้อความสั่งการ/ความเห็นอนุมัติ..."
+                          value={wfActionNote}
+                          onChange={e => setWfActionNote(e.target.value)}
+                          className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-slate-800 dark:text-slate-100"
+                        />
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleProgressDocWorkflow('escalate')}
+                            disabled={isSubmittingWfAction}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-semibold text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
+                          >
+                            <Clock className="w-3.5 h-3.5" /> เร่งรัด SLA
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleProgressDocWorkflow('approve')}
+                            disabled={isSubmittingWfAction}
+                            className="px-3 py-1.5 rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white font-semibold text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" /> อนุมัติ / ส่งต่อ
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mb-4 p-3 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 text-center space-y-2">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                      ยังไม่ได้ผูก Workflow ให้หนังสือเรื่องนี้
+                    </p>
+                    <div className="flex items-center gap-1.5 justify-center">
+                      <select
+                        value={selectedWorkflowTplId}
+                        onChange={e => setSelectedWorkflowTplId(e.target.value)}
+                        className="text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1.5 text-slate-800 dark:text-slate-100 max-w-[180px]"
+                      >
+                        <option value="">-- เลือก Workflow --</option>
+                        {workflowTemplates.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleAssignDocWorkflow}
+                        disabled={!selectedWorkflowTplId || isAssigningWorkflowDoc}
+                        className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        เริ่ม
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Timeline display */}
                 <div className="relative pl-5 border-l-2 border-[var(--border-lighter)] space-y-4 mt-2">
                   {trackingLogs.map((log, index) => {
                     const isLast = index === trackingLogs.length - 1;
+                    const isWfLog = log.comments?.includes('[Workflow') || log.status?.includes('Workflow') || log.status?.includes('อนุมัติ');
                     return (
                       <div key={log.id || index} className="relative group">
                         {/* Dot */}
-                        <div className={`absolute -left-[26px] top-1 w-3.5 h-3.5 rounded-full border-2 bg-[var(--bg-surface)] transition-colors ${isLast ? 'border-green-400 ring-4 ring-green-400/10' : 'border-[var(--border-medium)]'}`} />
+                        <div className={`absolute -left-[26px] top-1 w-3.5 h-3.5 rounded-full border-2 bg-[var(--bg-surface)] transition-colors ${
+                          isWfLog ? 'border-blue-500 bg-blue-100 dark:bg-blue-900' :
+                          isLast ? 'border-green-400 ring-4 ring-green-400/10' : 'border-[var(--border-medium)]'
+                        }`} />
                         
                         <div className="space-y-1">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className={`px-1.5 py-0.5 rounded text-[0.68rem] font-medium border ${getStatusBadgeColor(log.status)}`}>
+                          <div className="flex items-center justify-between text-xs flex-wrap gap-1">
+                            <span className={`px-1.5 py-0.5 rounded text-[0.68rem] font-medium border ${
+                              isWfLog ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300' :
+                              getStatusBadgeColor(log.status)
+                            }`}>
                               {log.status}
                             </span>
                             <span className="text-[10px] text-[var(--text-muted)] font-mono">
@@ -1127,7 +1496,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                           </div>
                           <p className="text-xs text-[var(--text-primary)] font-medium leading-normal">{log.comments}</p>
                           <div className="flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
-                            <User className="w-3 h-3 opacity-60" />
+                            <User className="w-3 h-3 opacity-60 shrink-0" />
                             <span>โดย: {log.updatedBy}</span>
                           </div>
                         </div>
@@ -1196,8 +1565,8 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
       {/* Modal Forwarding to Department */}
       {isForwardModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl w-full max-w-lg shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-0 sm:p-4 animate-fade-in">
+          <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] sm:rounded-2xl rounded-none w-full max-w-lg h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-purple-500/10">
               <h3 className="font-noto-serif-thai font-semibold text-base sm:text-lg text-purple-300 flex items-center gap-2">
                 <Send className="w-5 h-5 text-purple-400" /> ส่งต่อหนังสือให้ฝ่าย / กลุ่มงาน

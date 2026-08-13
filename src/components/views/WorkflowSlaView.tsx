@@ -3,7 +3,7 @@ import {
   GitMerge, Clock, AlertTriangle, CheckCircle2, AlertCircle, ArrowRight, 
   Plus, Search, Filter, Send, User, Building2, BarChart2, ChevronRight, 
   Sparkles, TrendingUp, RefreshCw, Eye, Check, RotateCcw, Bell, ShieldAlert, 
-  Layers, Edit, Trash2, Sliders, Calendar, Zap
+  Layers, Edit, Trash2, Sliders, Calendar, Zap, Printer, FileText, X, CheckSquare, CornerUpLeft
 } from 'lucide-react';
 import { 
   DocumentItem, WorkflowTemplate, WorkflowInstance, WorkflowStep, 
@@ -26,6 +26,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
   const [selectedDept, setSelectedDept] = useState<string>('all');
   const [selectedSlaStatus, setSelectedSlaStatus] = useState<string>('all');
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('active'); // active | completed | all
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals
@@ -40,6 +41,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignDocId, setAssignDocId] = useState('');
   const [assignTemplateId, setAssignTemplateId] = useState('');
+  const [assignSearch, setAssignSearch] = useState('');
 
   // Notification Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
 
   const slaSuccessRate = completedTasks.length > 0 
     ? Math.round((completedOnTime.length / completedTasks.length) * 100) 
-    : 88; // Default initial metric preview
+    : 88;
 
   // Department Breakdown
   const depts = [
@@ -109,6 +111,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
 
   // Filtered Instances
   const filteredInstances = workflowInstances.filter(inst => {
+    if (selectedStatus !== 'all' && inst.status !== selectedStatus) return false;
     if (selectedDept !== 'all' && inst.department !== selectedDept) return false;
     if (selectedSlaStatus !== 'all' && inst.slaStatus !== selectedSlaStatus) return false;
     if (selectedPriority !== 'all' && inst.priority !== selectedPriority) return false;
@@ -123,6 +126,73 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
     return true;
   });
 
+  // Helper SLA Time Remaining calculation
+  const getTimeRemainingInfo = (dueAtStr: string, status: string) => {
+    if (status === 'completed') return { text: 'เสร็จสิ้นสมบูรณ์', color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/50' };
+    if (status === 'rejected') return { text: 'ถูกตีกลับเอกสาร', color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-50 dark:bg-rose-950/50' };
+    
+    const due = new Date(dueAtStr).getTime();
+    const now = Date.now();
+    const diffMs = due - now;
+
+    if (diffMs < 0) {
+      const overdueMs = Math.abs(diffMs);
+      const overdueDays = Math.floor(overdueMs / (1000 * 3600 * 24));
+      const overdueHours = Math.floor((overdueMs % (1000 * 3600 * 24)) / (1000 * 3600));
+      const label = overdueDays > 0 ? `ช้าเกิน SLA ${overdueDays} วัน ${overdueHours} ชม.` : `ช้าเกิน SLA ${overdueHours} ชม.`;
+      return { text: label, color: 'text-red-700 dark:text-red-300 font-bold', bg: 'bg-red-100 dark:bg-red-950/80 border border-red-300 dark:border-red-800' };
+    } else {
+      const remainingDays = Math.floor(diffMs / (1000 * 3600 * 24));
+      const remainingHours = Math.floor((diffMs % (1000 * 3600 * 24)) / (1000 * 3600));
+      const label = remainingDays > 0 ? `เหลือ ${remainingDays} วัน ${remainingHours} ชม.` : `เหลือ ${remainingHours} ชม.`;
+      return {
+        text: label,
+        color: diffMs <= 24 * 3600 * 1000 ? 'text-amber-800 dark:text-amber-300 font-bold' : 'text-emerald-700 dark:text-emerald-300 font-semibold',
+        bg: diffMs <= 24 * 3600 * 1000 ? 'bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-800' : 'bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800'
+      };
+    }
+  };
+
+  // Handle open document detail view
+  const handleOpenDocDetail = (inst: WorkflowInstance) => {
+    if (!onViewDoc) return;
+    const matched = documents.find(d => String(d.id) === String(inst.docId) || d.docNumber === inst.docNumber);
+    if (matched) {
+      onViewDoc(matched);
+    } else {
+      onViewDoc({
+        id: inst.docId || inst.id,
+        docNumber: inst.docNumber,
+        title: inst.docTitle,
+        type: inst.docType || 'inbox',
+        category: 'หนังสือเข้า',
+        date: inst.startedAt,
+        department: inst.department,
+        assignee: inst.assignee,
+        priority: inst.priority,
+        status: inst.status === 'completed' ? 'อนุมัติแล้ว' : 'อยู่ระหว่างดำเนินการ'
+      } as any);
+    }
+  };
+
+  // Delete/Cancel Workflow Instance
+  const handleDeleteInstance = async (id: string, docNumber: string) => {
+    if (!confirm(`คุณต้องการยกเลิกเส้นทาง Workflow ของหนังสือเลขที่ "${docNumber}" ใช่หรือไม่?`)) return;
+    try {
+      const res = await fetch(`/api/workflows/instances/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ' })
+      });
+      if (res.ok) {
+        showToast('🗑️ ยกเลิกการเสนออนุมัติ Workflow เรียบร้อยแล้ว');
+        fetchData();
+      }
+    } catch (e) {
+      console.error('Error deleting workflow instance:', e);
+    }
+  };
+
   // Progress Workflow Step Action
   const handleProgressStep = async (action: 'approve' | 'reject' | 'escalate') => {
     if (!selectedInstance) return;
@@ -133,7 +203,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            note: actionNote || 'แจ้งเตือนเร่งรัดเอกสารใกล้ครบกำหนด SLA',
+            note: actionNote || 'แจ้งเตือนเร่งรัดเอกสารเกินกำหนดเวลา SLA สารบรรณ',
             user: user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ'
           })
         });
@@ -152,7 +222,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
           })
         });
         if (res.ok) {
-          showToast(action === 'approve' ? '✅ ดำเนินการอนุมัติ/ส่งต่อขั้นตอนถัดไปสำเร็จ' : '⛔ ตีกลับเอกสารสำเร็จ');
+          showToast(action === 'approve' ? '✅ อนุมัติและส่งต่อขั้นตอนถัดไปเรียบร้อยแล้ว' : '⛔ ตีกลับเอกสารเรียบร้อยแล้ว');
           fetchData();
         }
       }
@@ -198,39 +268,39 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
   };
 
   // Helper SLA badge render
-  const renderSlaBadge = (status: SLAStatus, dueAt?: string) => {
+  const renderSlaBadge = (status: SLAStatus) => {
     switch (status) {
       case 'OVERDUE':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-800 animate-pulse">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-950/80 dark:text-red-300 border border-red-200 dark:border-red-800 animate-pulse">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             เกินกำหนด SLA (ค้างโต๊ะ)
           </span>
         );
       case 'WARNING':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
             <Clock className="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
             ใกล้ครบกำหนด (&lt;24 ชม.)
           </span>
         );
       case 'NORMAL':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
             ปกติ (ตรงเวลา)
           </span>
         );
       case 'COMPLETED_ON_TIME':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-blue-600" />
             เสร็จสิ้นทันเวลา
           </span>
         );
       case 'COMPLETED_LATE':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
             <Clock className="w-3.5 h-3.5 shrink-0" />
             เสร็จสิ้นล่าช้า
           </span>
@@ -240,8 +310,15 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
     }
   };
 
+  // Documents available for assign modal
+  const assignableDocs = documents.filter(d => {
+    if (!assignSearch.trim()) return true;
+    const q = assignSearch.toLowerCase();
+    return d.docNumber.toLowerCase().includes(q) || d.title.toLowerCase().includes(q) || (d.department && d.department.toLowerCase().includes(q));
+  });
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print:space-y-4">
       {/* Toast Alert */}
       {toastMessage && (
         <div className="fixed top-5 right-5 z-50 bg-gray-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-gray-700 animate-in fade-in slide-in-from-top-2">
@@ -251,7 +328,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
       )}
 
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-[var(--primary-color)] via-blue-900 to-slate-900 text-white rounded-2xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+      <div className="bg-gradient-to-r from-[var(--primary-color)] via-blue-900 to-slate-900 text-white rounded-2xl p-6 sm:p-8 shadow-xl relative overflow-hidden print:hidden">
         <div className="absolute right-0 top-0 bottom-0 opacity-10 pointer-events-none flex items-center pr-8">
           <GitMerge className="w-64 h-64 text-white" />
         </div>
@@ -265,7 +342,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
           </h1>
           <p className="text-sm sm:text-base text-blue-100/90 leading-relaxed">
             ติดตามและควบคุมระยะเวลาการดำเนินงานสารบรรณ (Service Level Agreement) ลดปัญหาหนังสือค้างโต๊ะ
-            พร้อมวิเคราะห์ KPI ผลงานรายบุคคลและรายฝ่าย
+            พร้อมเชื่อมโยงข้อมูลทะเบียนหนังสือจริงและประวัติการสั่งการ
           </p>
 
           <div className="flex flex-wrap items-center gap-3 mt-6">
@@ -283,12 +360,19 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               <span>รีเฟรชข้อมูล</span>
             </button>
+            <button
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition-all border border-white/20 active:scale-95 cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              <span>พิมพ์รายงานสรุป SLA</span>
+            </button>
           </div>
         </div>
       </div>
 
       {/* SLA Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 print:grid-cols-5">
         <div className="bg-[var(--bg-surface)] p-4 rounded-xl border border-[var(--border-lighter)] shadow-xs">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-[var(--text-secondary)]">งานค้างทั้งหมด</span>
@@ -348,41 +432,41 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
       </div>
 
       {/* View Switcher Tabs */}
-      <div className="flex border-b border-[var(--border-lighter)] space-x-1 sm:space-x-4">
+      <div className="flex border-b border-[var(--border-lighter)] space-x-1 sm:space-x-4 overflow-x-auto pb-0.5 print:hidden no-scrollbar">
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 py-3 px-3 sm:px-4 font-medium text-xs sm:text-sm border-b-2 transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'dashboard'
               ? 'border-[var(--primary-color)] text-[var(--primary-color)] font-semibold'
               : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
         >
-          <BarChart2 className="w-4 h-4" />
+          <BarChart2 className="w-4 h-4 shrink-0" />
           <span>Dashboard งานค้าง &amp; KPI รายฝ่าย</span>
         </button>
 
         <button
           onClick={() => setActiveTab('designer')}
-          className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 py-3 px-3 sm:px-4 font-medium text-xs sm:text-sm border-b-2 transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'designer'
               ? 'border-[var(--primary-color)] text-[var(--primary-color)] font-semibold'
               : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
         >
-          <GitMerge className="w-4 h-4" />
+          <GitMerge className="w-4 h-4 shrink-0" />
           <span>กำหนดเส้นทางเอกสาร (Workflow Designer)</span>
         </button>
 
         <button
           onClick={() => setActiveTab('tracking')}
-          className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 py-3 px-3 sm:px-4 font-medium text-xs sm:text-sm border-b-2 transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'tracking'
               ? 'border-[var(--primary-color)] text-[var(--primary-color)] font-semibold'
               : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
         >
-          <Clock className="w-4 h-4" />
-          <span>รายการติดตาม &amp; เร่งรัดงาน ({activeTasks.length})</span>
+          <Clock className="w-4 h-4 shrink-0" />
+          <span>รายการติดตาม &amp; ไทม์ไลน์ ({totalTasks})</span>
         </button>
       </div>
 
@@ -390,15 +474,29 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
           {/* Filters Bar */}
-          <div className="bg-[var(--bg-surface)] p-4 rounded-xl border border-[var(--border-lighter)] flex flex-wrap items-center gap-3 justify-between">
-            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+          <div className="bg-[var(--bg-surface)] p-3 sm:p-4 rounded-xl border border-[var(--border-lighter)] flex flex-col md:flex-row md:items-center gap-3 justify-between print:hidden">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap items-center gap-2 sm:gap-3 w-full md:w-auto">
+              {/* Active/Completed filter */}
+              <div className="flex items-center gap-2 min-w-0">
+                <Layers className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
+                <select
+                  value={selectedStatus}
+                  onChange={e => setSelectedStatus(e.target.value)}
+                  className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg px-2.5 py-2 text-[var(--text-primary)] focus:outline-none"
+                >
+                  <option value="active">งานค้างอยู่ระหว่างดำเนินการ</option>
+                  <option value="completed">งานที่เสร็จสิ้นแล้ว</option>
+                  <option value="all">-- ทั้งหมดทุกสถานะ --</option>
+                </select>
+              </div>
+
               {/* Dept filter */}
-              <div className="flex items-center gap-2 min-w-[180px]">
+              <div className="flex items-center gap-2 min-w-0">
                 <Building2 className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
                 <select
                   value={selectedDept}
                   onChange={e => setSelectedDept(e.target.value)}
-                  className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none"
+                  className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg px-2.5 py-2 text-[var(--text-primary)] focus:outline-none"
                 >
                   <option value="all">-- ทุกฝ่ายงาน --</option>
                   {depts.map(d => (
@@ -408,12 +506,12 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
               </div>
 
               {/* SLA status filter */}
-              <div className="flex items-center gap-2 min-w-[160px]">
+              <div className="flex items-center gap-2 min-w-0">
                 <Clock className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
                 <select
                   value={selectedSlaStatus}
                   onChange={e => setSelectedSlaStatus(e.target.value)}
-                  className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none"
+                  className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg px-2.5 py-2 text-[var(--text-primary)] focus:outline-none"
                 >
                   <option value="all">-- ทุกสถานะ SLA --</option>
                   <option value="OVERDUE">🔴 เกินกำหนด SLA</option>
@@ -424,12 +522,12 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
               </div>
 
               {/* Priority filter */}
-              <div className="flex items-center gap-2 min-w-[140px]">
+              <div className="flex items-center gap-2 min-w-0">
                 <Filter className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
                 <select
                   value={selectedPriority}
                   onChange={e => setSelectedPriority(e.target.value)}
-                  className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none"
+                  className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg px-2.5 py-2 text-[var(--text-primary)] focus:outline-none"
                 >
                   <option value="all">-- ทุกความเร่งด่วน --</option>
                   <option value="ปกติ">ปกติ</option>
@@ -441,7 +539,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
             </div>
 
             {/* Search */}
-            <div className="relative w-full sm:w-64">
+            <div className="relative w-full md:w-64">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
               <input
                 type="text"
@@ -454,34 +552,34 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
           </div>
 
           {/* Department Breakdown Visual Card */}
-          <div className="bg-[var(--bg-surface)] p-6 rounded-xl border border-[var(--border-lighter)] shadow-xs">
-            <h3 className="text-base font-bold text-[var(--text-primary)] mb-4 flex items-center gap-2">
+          <div className="bg-[var(--bg-surface)] p-4 sm:p-6 rounded-xl border border-[var(--border-lighter)] shadow-xs">
+            <h3 className="text-sm sm:text-base font-bold text-[var(--text-primary)] mb-4 flex items-center gap-2">
               <Building2 className="w-5 h-5 text-[var(--primary-color)]" />
               <span>สรุปภาพรวมงานค้างและ SLA แยกรายฝ่าย</span>
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {deptStats.map(ds => (
-                <div key={ds.name} className="p-4 rounded-xl border border-[var(--border-lighter)] bg-[var(--bg-primary)] space-y-3">
-                  <div className="flex items-start justify-between">
+                <div key={ds.name} className="p-3.5 sm:p-4 rounded-xl border border-[var(--border-lighter)] bg-[var(--bg-primary)] space-y-3">
+                  <div className="flex items-start justify-between gap-2">
                     <div>
                       <h4 className="text-xs font-bold text-[var(--text-primary)] line-clamp-1">{ds.name}</h4>
                       <p className="text-[11px] text-[var(--text-secondary)]">งานค้างสะสม: {ds.total} เรื่อง</p>
                     </div>
                     {ds.overdue > 0 ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300">
-                        เกินกำหนด {ds.overdue}
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 shrink-0">
+                        เกิน {ds.overdue}
                       </span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                        ไม่พบงานค้างช้า
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 shrink-0">
+                        ไม่ค้างช้า
                       </span>
                     )}
                   </div>
 
                   {/* Progress Breakdown */}
                   <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
+                    <div className="flex justify-between text-[10px] sm:text-[11px]">
                       <span className="text-emerald-600 font-medium">ปกติ ({ds.normal})</span>
                       <span className="text-amber-600 font-medium">ใกล้ครบ ({ds.warning})</span>
                       <span className="text-red-600 font-bold">เกิน SLA ({ds.overdue})</span>
@@ -497,16 +595,16 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
             </div>
           </div>
 
-          {/* Pending Tasks Table */}
+          {/* Tasks Container */}
           <div className="bg-[var(--bg-surface)] rounded-xl border border-[var(--border-lighter)] overflow-hidden shadow-xs">
-            <div className="p-4 sm:p-6 border-b border-[var(--border-lighter)] flex flex-wrap items-center justify-between gap-3">
+            <div className="p-4 sm:p-6 border-b border-[var(--border-lighter)] flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
                   <User className="w-5 h-5 text-[var(--primary-color)]" />
-                  <span>ตารางติดตามงานค้างรายบุคคลและขั้นตอนดำเนินงาน</span>
+                  <span>ตารางติดตามงานและเวลาคงเหลือตาม SLA สารบรรณ</span>
                 </h3>
                 <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                  แสดงรายการหนังสือที่อยู่ระหว่างดำเนินการและระยะเวลา SLA คงเหลือ
+                  แสดงรายการหนังสือที่เชื่อมโยงกับทะเบียนจริง พร้อมระยะเวลา SLA คงเหลือ
                 </p>
               </div>
 
@@ -515,14 +613,148 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
               </span>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Mobile Card List View (< md) */}
+            <div className="block md:hidden divide-y divide-[var(--border-lighter)]">
+              {filteredInstances.length === 0 ? (
+                <div className="p-8 text-center text-[var(--text-secondary)]">
+                  <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-500 opacity-60" />
+                  <p className="text-xs">ไม่พบรายการหนังสือค้างตามเงื่อนไขที่เลือก</p>
+                </div>
+              ) : (
+                filteredInstances.map(inst => {
+                  const currentStep = inst.steps[inst.currentStepIndex] || inst.steps[0];
+                  const timeInfo = getTimeRemainingInfo(inst.dueAt, inst.status);
+                  return (
+                    <div key={inst.id} className="p-4 space-y-3 bg-[var(--bg-surface)] hover:bg-[var(--bg-primary)] transition-colors">
+                      {/* Top Bar: Priority & Doc Number & Actions */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-bold text-[var(--primary-color)] bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                            {inst.docNumber}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                            inst.priority === 'ด่วนที่สุด' ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300' :
+                            inst.priority === 'ด่วนมาก' ? 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300' :
+                            inst.priority === 'ด่วน' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' :
+                            'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                          }`}>
+                            {inst.priority}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleOpenDocDetail(inst)}
+                            title="เปิดดูรายละเอียดหนังสือฉบับเต็ม"
+                            className="p-1.5 rounded-lg text-gray-500 hover:text-[var(--primary-color)] hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteInstance(inst.id, inst.docNumber)}
+                            title="ยกเลิก Workflow"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Doc Title & Workflow Template */}
+                      <div>
+                        <button
+                          onClick={() => handleOpenDocDetail(inst)}
+                          className="text-xs sm:text-sm text-[var(--text-primary)] font-bold hover:underline text-left cursor-pointer leading-snug block"
+                        >
+                          {inst.docTitle}
+                        </button>
+                        <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                          {inst.templateName || 'Workflow มาตรฐาน'}
+                        </div>
+                      </div>
+
+                      {/* SLA Status Card */}
+                      <div className="p-2.5 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-lighter)] space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div>{renderSlaBadge(inst.slaStatus)}</div>
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] ${timeInfo.bg} ${timeInfo.color}`}>
+                            <Clock className="w-3 h-3 shrink-0" />
+                            <span>{timeInfo.text}</span>
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[var(--text-secondary)] flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-[var(--text-secondary)] shrink-0" />
+                          <span>กำหนดส่ง: {formatThaiDateTime(inst.dueAt)}</span>
+                        </div>
+                      </div>
+
+                      {/* Current Step & Assignee Grid */}
+                      <div className="grid grid-cols-1 gap-2 text-xs">
+                        <div className="p-2 rounded-lg bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900">
+                          <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase">ขั้นตอนปัจจุบัน</div>
+                          <div className="font-semibold text-indigo-900 dark:text-indigo-200 mt-0.5">
+                            ขั้นที่ {inst.currentStepIndex + 1}/{inst.steps.length}: {currentStep?.title}
+                          </div>
+                          <div className="text-[11px] text-indigo-700/80 dark:text-indigo-300/80 mt-0.5">
+                            ผู้พิจารณา: {currentStep?.assignedRole}
+                          </div>
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                          <div>
+                            <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase">ผู้รับผิดชอบงาน</div>
+                            <div className="font-semibold text-[var(--text-primary)]">{inst.assignee}</div>
+                          </div>
+                          <div className="text-right text-[11px] text-[var(--text-secondary)] font-medium">
+                            {inst.department}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="pt-1 flex items-center gap-2">
+                        {inst.status === 'active' && (
+                          <button
+                            onClick={() => {
+                              setSelectedInstance(inst);
+                              setIsProgressModalOpen(true);
+                            }}
+                            className="flex-1 py-2 px-3 rounded-xl bg-[var(--primary-color)] text-white text-xs font-semibold hover:opacity-90 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>อนุมัติ / ส่งต่อ</span>
+                          </button>
+                        )}
+
+                        {inst.slaStatus === 'OVERDUE' && inst.status === 'active' && (
+                          <button
+                            onClick={() => {
+                              setSelectedInstance(inst);
+                              setActionNote('หนังสือเกินกำหนดเวลา SLA กรุณาดำเนินการโดยด่วนที่สุด');
+                              handleProgressStep('escalate');
+                            }}
+                            className="py-2 px-3 rounded-xl bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950 dark:text-red-300 text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-1 border border-red-200 dark:border-red-800"
+                          >
+                            <Bell className="w-4 h-4" />
+                            <span>เร่งรัด SLA</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop Table View (>= md) */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-[var(--bg-primary)] border-b border-[var(--border-lighter)] text-[11px] sm:text-xs text-[var(--text-secondary)] uppercase font-semibold">
-                    <th className="py-3 px-4">เลขที่ / เรื่อง</th>
+                    <th className="py-3 px-4">เลขที่ / เรื่องหนังสือ</th>
                     <th className="py-3 px-4">ฝ่าย / ผู้รับผิดชอบ</th>
                     <th className="py-3 px-4">ขั้นตอนปัจจุบัน</th>
-                    <th className="py-3 px-4">สถานะ SLA &amp; กำหนดส่ง</th>
+                    <th className="py-3 px-4">สถานะ SLA &amp; เวลาคงเหลือ</th>
                     <th className="py-3 px-4 text-center">ความเร่งด่วน</th>
                     <th className="py-3 px-4 text-right">การจัดการ</th>
                   </tr>
@@ -538,13 +770,26 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
                   ) : (
                     filteredInstances.map(inst => {
                       const currentStep = inst.steps[inst.currentStepIndex] || inst.steps[0];
+                      const timeInfo = getTimeRemainingInfo(inst.dueAt, inst.status);
                       return (
                         <tr key={inst.id} className="hover:bg-[var(--bg-primary)] transition-colors">
                           <td className="py-3.5 px-4 font-medium max-w-xs">
-                            <div className="text-xs font-bold text-[var(--primary-color)]">{inst.docNumber}</div>
-                            <div className="text-xs sm:text-sm text-[var(--text-primary)] font-semibold line-clamp-1 mt-0.5">
-                              {inst.docTitle}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-[var(--primary-color)]">{inst.docNumber}</span>
+                              <button
+                                onClick={() => handleOpenDocDetail(inst)}
+                                title="เปิดดูรายละเอียดหนังสือฉบับเต็ม"
+                                className="p-1 rounded text-gray-400 hover:text-[var(--primary-color)] hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
                             </div>
+                            <button
+                              onClick={() => handleOpenDocDetail(inst)}
+                              className="text-xs sm:text-sm text-[var(--text-primary)] font-semibold line-clamp-1 mt-0.5 hover:underline text-left cursor-pointer"
+                            >
+                              {inst.docTitle}
+                            </button>
                             <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
                               {inst.templateName || 'Workflow มาตรฐาน'}
                             </div>
@@ -567,9 +812,14 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
 
                           <td className="py-3.5 px-4">
                             <div>{renderSlaBadge(inst.slaStatus)}</div>
-                            <div className="text-[11px] text-[var(--text-secondary)] mt-1 flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />
-                              <span>กำหนด: {formatThaiDateTime(inst.dueAt)}</span>
+                            <div className="mt-1">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] ${timeInfo.bg} ${timeInfo.color}`}>
+                                <Clock className="w-3 h-3" />
+                                <span>{timeInfo.text}</span>
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-[var(--text-secondary)] mt-1">
+                              กำหนดส่ง: {formatThaiDateTime(inst.dueAt)}
                             </div>
                           </td>
 
@@ -585,14 +835,14 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
                           </td>
 
                           <td className="py-3.5 px-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1.5">
                               {inst.status === 'active' && (
                                 <button
                                   onClick={() => {
                                     setSelectedInstance(inst);
                                     setIsProgressModalOpen(true);
                                   }}
-                                  className="px-2.5 py-1.5 rounded-lg bg-[var(--primary-color)] text-white text-xs font-medium hover:opacity-90 active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+                                  className="px-2.5 py-1.5 rounded-lg bg-[var(--primary-color)] text-white text-xs font-medium hover:opacity-90 active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-xs"
                                 >
                                   <Check className="w-3.5 h-3.5" />
                                   <span>อนุมัติ/ส่งต่อ</span>
@@ -612,6 +862,14 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
                                   <Bell className="w-4 h-4" />
                                 </button>
                               )}
+
+                              <button
+                                onClick={() => handleDeleteInstance(inst.id, inst.docNumber)}
+                                title="ยกเลิก Workflow เรื่องนี้"
+                                className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 dark:hover:bg-red-950 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -701,16 +959,34 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
                   <span className="text-[11px] text-[var(--text-secondary)]">
                     รวม SLA: {tpl.steps.reduce((acc, curr) => acc + (curr.slaHours || 0), 0)} ชั่วโมง
                   </span>
-                  <button
-                    onClick={() => {
-                      setEditingTemplate(tpl);
-                      setIsTemplateModalOpen(true);
-                    }}
-                    className="text-[var(--primary-color)] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    <span>แก้ไขแม่แบบ</span>
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        setEditingTemplate(tpl);
+                        setIsTemplateModalOpen(true);
+                      }}
+                      className="text-[var(--primary-color)] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>แก้ไข</span>
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`ลบแม่แบบ "${tpl.name}" ใช่หรือไม่?`)) return;
+                        try {
+                          await fetch(`/api/workflows/templates/${tpl.id}`, { method: 'DELETE' });
+                          showToast('ลบแม่แบบเรียบร้อยแล้ว');
+                          fetchData();
+                        } catch (e) {
+                          console.error(e);
+                        }
+                      }}
+                      className="text-red-500 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>ลบ</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -724,21 +1000,22 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
           <div className="bg-[var(--bg-surface)] p-6 rounded-xl border border-[var(--border-lighter)]">
             <h3 className="text-base font-bold text-[var(--text-primary)] mb-2 flex items-center gap-2">
               <Clock className="w-5 h-5 text-[var(--primary-color)]" />
-              <span>รายการติดตามความคืบหน้า และแจ้งเตือนเร่งรัด SLA</span>
+              <span>รายการติดตามความคืบหน้า และไทม์ไลน์การดำเนินงาน</span>
             </h3>
             <p className="text-xs text-[var(--text-secondary)] mb-6">
-              แสดงสถานะไทม์ไลน์จริงของเอกสารแต่ละเรื่อง พร้อมบันทึกประวัติและปุ่มส่งการแจ้งเตือนเร่งรัด
+              แสดงสถานะไทม์ไลน์จริงของเอกสารแต่ละเรื่อง พร้อมบันทึกประวัติการสั่งการ และปุ่มส่งการแจ้งเตือนเร่งรัด
             </p>
 
             <div className="space-y-4">
-              {activeTasks.length === 0 ? (
+              {filteredInstances.length === 0 ? (
                 <div className="py-12 text-center text-[var(--text-secondary)]">
                   <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500 mb-2 opacity-60" />
-                  <p>ไม่มีงานค้างอยู่ในขณะนี้ ระบบทำงานเสร็จสิ้นทันเวลาทั้งหมด</p>
+                  <p>ไม่พบรายการติดตามที่ตรงกับเงื่อนไข</p>
                 </div>
               ) : (
-                activeTasks.map(inst => {
+                filteredInstances.map(inst => {
                   const currentStep = inst.steps[inst.currentStepIndex] || inst.steps[0];
+                  const timeInfo = getTimeRemainingInfo(inst.dueAt, inst.status);
                   return (
                     <div
                       key={inst.id}
@@ -752,11 +1029,19 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-bold text-[var(--primary-color)]">{inst.docNumber}</span>
                             {renderSlaBadge(inst.slaStatus)}
+                            <span className={`text-[11px] px-2 py-0.5 rounded ${timeInfo.bg} ${timeInfo.color}`}>
+                              {timeInfo.text}
+                            </span>
                           </div>
-                          <h4 className="text-base font-bold text-[var(--text-primary)] mt-1">{inst.docTitle}</h4>
+                          <button
+                            onClick={() => handleOpenDocDetail(inst)}
+                            className="text-base font-bold text-[var(--text-primary)] mt-1 hover:underline text-left cursor-pointer block"
+                          >
+                            {inst.docTitle}
+                          </button>
                           <p className="text-xs text-[var(--text-secondary)] mt-0.5">
                             ผู้รับผิดชอบ: <span className="font-semibold text-[var(--text-primary)]">{inst.assignee}</span> ({inst.department})
                           </p>
@@ -764,15 +1049,26 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
 
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => {
-                              setSelectedInstance(inst);
-                              setIsProgressModalOpen(true);
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-[var(--primary-color)] text-white text-xs font-semibold hover:opacity-90 transition-all cursor-pointer"
+                            onClick={() => handleOpenDocDetail(inst)}
+                            className="px-3 py-1.5 rounded-lg border border-[var(--border-lighter)] text-xs font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-all cursor-pointer flex items-center gap-1"
                           >
-                            อนุมัติ / ส่งต่อ
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>ดูฉบับเต็ม</span>
                           </button>
-                          {inst.slaStatus === 'OVERDUE' && (
+
+                          {inst.status === 'active' && (
+                            <button
+                              onClick={() => {
+                                setSelectedInstance(inst);
+                                setIsProgressModalOpen(true);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-[var(--primary-color)] text-white text-xs font-semibold hover:opacity-90 transition-all cursor-pointer"
+                            >
+                              อนุมัติ / ส่งต่อ
+                            </button>
+                          )}
+
+                          {inst.slaStatus === 'OVERDUE' && inst.status === 'active' && (
                             <button
                               onClick={() => {
                                 setSelectedInstance(inst);
@@ -790,11 +1086,11 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
 
                       {/* Step Progress Timeline */}
                       <div className="relative border-t border-[var(--border-lighter)] pt-4 mt-2">
-                        <div className="text-xs font-semibold text-[var(--text-secondary)] mb-3">ไทม์ไลน์การดำเนินงาน:</div>
+                        <div className="text-xs font-semibold text-[var(--text-secondary)] mb-3">ไทม์ไลน์การเสนออนุมัติ:</div>
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                           {inst.steps.map((st, idx) => {
-                            const isCurrent = idx === inst.currentStepIndex;
-                            const isPassed = idx < inst.currentStepIndex;
+                            const isCurrent = idx === inst.currentStepIndex && inst.status === 'active';
+                            const isPassed = idx < inst.currentStepIndex || inst.status === 'completed';
                             return (
                               <div
                                 key={idx}
@@ -817,9 +1113,14 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
                                   ) : null}
                                 </div>
                                 <div className="text-[11px] text-[var(--text-secondary)]">{st.assignedRole}</div>
-                                {st.actionAt && (
+                                {st.actionBy && (
                                   <div className="text-[10px] text-emerald-700 dark:text-emerald-400 mt-1">
-                                    อนุมัติเมื่อ: {formatThaiDateMedium(st.actionAt)}
+                                    อนุมัติโดย: {st.actionBy} ({formatThaiDateMedium(st.actionAt)})
+                                  </div>
+                                )}
+                                {st.actionNote && (
+                                  <div className="text-[10px] text-[var(--text-muted)] italic mt-0.5 line-clamp-1">
+                                    "{st.actionNote}"
                                   </div>
                                 )}
                               </div>
@@ -856,15 +1157,25 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-[var(--text-primary)] mb-1">
-                  1. เลือกหนังสือจากทะเบียน:
+                  1. เลือกหนังสือจากทะเบียน ({assignableDocs.length} เรื่อง):
                 </label>
+                <div className="relative mb-2">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="พิมพ์ค้นหาเลขที่หนังสือ หรือ ชื่อเรื่อง..."
+                    value={assignSearch}
+                    onChange={e => setAssignSearch(e.target.value)}
+                    className="w-full text-xs bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-lg pl-8 pr-3 py-1.5 text-[var(--text-primary)] focus:outline-none"
+                  />
+                </div>
                 <select
                   value={assignDocId}
                   onChange={e => setAssignDocId(e.target.value)}
                   className="w-full text-xs sm:text-sm bg-[var(--bg-primary)] border border-[var(--border-lighter)] rounded-xl p-3 text-[var(--text-primary)] focus:outline-none"
                 >
                   <option value="">-- เลือกรายการหนังสือ --</option>
-                  {documents.map(d => (
+                  {assignableDocs.map(d => (
                     <option key={d.id} value={d.id}>
                       {d.docNumber} - {d.title} ({d.department || 'ไม่ระบุฝ่าย'})
                     </option>
