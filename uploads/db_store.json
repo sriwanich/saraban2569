@@ -361,6 +361,46 @@
   ],
   "system_logs": [
     {
+      "id": 1786685746626,
+      "action": "UPLOAD_INFOGRAPHIC_IMAGE",
+      "details": "อัปโหลดรูปภาพ Infographics: Layer 3 copy.png",
+      "username": "Infographics Studio",
+      "ipAddress": "180.180.212.1",
+      "timestamp": "2026-08-14T05:35:46.598Z"
+    },
+    {
+      "id": 1786683961514,
+      "action": "UPLOAD_INFOGRAPHIC_IMAGE",
+      "details": "อัปโหลดรูปภาพ Infographics: test.png",
+      "username": "Infographics Studio",
+      "ipAddress": "127.0.0.1",
+      "timestamp": "2026-08-14T05:06:01.485Z"
+    },
+    {
+      "id": 1786683209533,
+      "action": "UPLOAD_FILE",
+      "details": "อัปโหลด/แนบไฟล์แนบ (system): S__7929908.jpg",
+      "username": "Infographics Studio",
+      "ipAddress": "180.180.212.1",
+      "timestamp": "2026-08-14T04:53:29.506Z"
+    },
+    {
+      "id": 1786683085809,
+      "action": "UPLOAD_FILE",
+      "details": "อัปโหลด/แนบไฟล์แนบ (system): Layer 3 copy.png",
+      "username": "Infographics Studio",
+      "ipAddress": "180.180.212.1",
+      "timestamp": "2026-08-14T04:51:25.782Z"
+    },
+    {
+      "id": 1786678233145,
+      "action": "LOGIN_SUCCESS",
+      "details": "เข้าสู่ระบบสำเร็จ (ผู้ดูแล ระบบ) - ยืนยันรหัสผ่านด้วย Argon2id",
+      "username": "admin",
+      "ipAddress": "180.180.212.1",
+      "timestamp": "2026-08-14T03:30:33.117Z"
+    },
+    {
       "id": 1786442661549,
       "action": "DIGITAL_SIGNATURE",
       "details": "ลงนามดิจิทัลสำเร็จ (SHA-256): รย 0017.3/ว 15694 โดย ผู้ดูแล ระบบ",

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { LETTER_TYPES, buildOfficialDoc, downloadAsDoc, thDate, DraftItem } from './draftData';
 import { parseDocNumberStructure, parseFileCodeFromDoc, DEFAULT_FILE_CODES } from '../../../lib/fileCodeUtils';
+import { useRealtimeSync } from '../../../utils/realtimeSync';
 
 interface Props {
   user: any;
@@ -94,7 +95,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
     }
   };
 
-  useEffect(() => {
+  const loadDrafts = () => {
     fetch('/api/drafts')
       .then(res => res.json())
       .then(data => {
@@ -115,7 +116,15 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
           } catch (err) {}
         }
       });
+  };
+
+  useEffect(() => {
+    loadDrafts();
   }, []);
+
+  useRealtimeSync(['DRAFTS_UPDATED', 'DOCUMENTS_UPDATED', 'TAB_FOCUSED', 'DATA_UPDATED'], () => {
+    loadDrafts();
+  });
 
   // Handle prefill if passed from AI Scan
   useEffect(() => {

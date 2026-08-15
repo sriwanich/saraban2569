@@ -4,6 +4,7 @@ import { FolderIcon, FolderPlus, Trash2, Calendar, FileText, ChevronRight, Eye, 
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { DEFAULT_FILE_CODES, parseFileCodeFromDoc } from '../../lib/fileCodeUtils';
+import { useRealtimeSync } from '../../utils/realtimeSync';
 
 interface Props {
   documents: DocumentItem[];
@@ -63,6 +64,11 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
   };
 
   useEffect(() => {
+    fetchFolders();
+    fetchDepartments();
+  }, [user]);
+
+  useRealtimeSync(['FOLDERS_UPDATED', 'DOCUMENTS_UPDATED', 'SETTINGS_UPDATED', 'TAB_FOCUSED', 'DATA_UPDATED'], () => {
     fetchFolders();
     fetchDepartments();
   }, [user]);

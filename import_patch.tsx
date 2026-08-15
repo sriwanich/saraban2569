@@ -1,1 +1,0 @@
-import { InfographicsGalleryModal } from './InfographicsGalleryModal';

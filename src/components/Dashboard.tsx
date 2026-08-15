@@ -21,6 +21,7 @@ import QrGeneratorView from './views/QrGeneratorView';
 const InfographicsEditorView = React.lazy(() => import('./views/InfographicsEditorView'));
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
+import { useRealtimeSync } from '../utils/realtimeSync';
 
 export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDark }: { onLogout: () => void, theme: ThemeMode, setTheme: (mode: ThemeMode) => void, user: any, isSystemDark?: boolean }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -95,21 +96,22 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     });
   }, [user]);
 
+  const fetchMeta = async () => {
+    try {
+      const [posRes, deptRes, permRes] = await Promise.all([
+        fetch('/api/positions'),
+        fetch('/api/departments'),
+        fetch(`/api/role-permissions?t=${Date.now()}`, { cache: 'no-store' })
+      ]);
+      if (posRes.ok && posRes.headers.get('content-type')?.includes('application/json')) setPositionsList(await posRes.json());
+      if (deptRes.ok && deptRes.headers.get('content-type')?.includes('application/json')) setDepartmentsList(await deptRes.json());
+      if (permRes.ok && permRes.headers.get('content-type')?.includes('application/json')) setRolePermissions(await permRes.json());
+    } catch (err) {
+      console.error('Error fetching meta lists:', err);
+    }
+  };
+
   useEffect(() => {
-    const fetchMeta = async () => {
-      try {
-        const [posRes, deptRes, permRes] = await Promise.all([
-          fetch('/api/positions'),
-          fetch('/api/departments'),
-          fetch(`/api/role-permissions?t=${Date.now()}`, { cache: 'no-cache' })
-        ]);
-        if (posRes.ok) setPositionsList(await posRes.json());
-        if (deptRes.ok) setDepartmentsList(await deptRes.json());
-        if (permRes.ok) setRolePermissions(await permRes.json());
-      } catch (err) {
-        console.error('Error fetching meta lists:', err);
-      }
-    };
     fetchMeta();
   }, []);
 
@@ -417,8 +419,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const fetchRolePermissions = async () => {
     try {
       const permRes = await fetch(`/api/role-permissions?t=${Date.now()}`, { cache: 'no-cache' });
-      if (permRes.ok) {
+      if (permRes.ok && permRes.headers.get('content-type')?.includes('application/json')) {
         setRolePermissions(await permRes.json());
+      } else if (permRes.ok) {
+        console.warn('Received non-JSON response for role-permissions');
       }
     } catch (err) {
       console.error('Error fetching role-permissions:', err);
@@ -446,13 +450,38 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
+  // Real-time synchronization hooks: updates UI instantly across all tabs & users without Ctrl+F5
+  useRealtimeSync(
+    ['DOCUMENTS_UPDATED', 'RECYCLE_UPDATED', 'WORKFLOW_UPDATED', 'FAVORITES_UPDATED', 'DRAFTS_UPDATED', 'TAB_FOCUSED', 'DATA_UPDATED'],
+    () => {
+      refreshData();
+    },
+    [currentUser]
+  );
+
+  useRealtimeSync(
+    ['NOTIFICATIONS_UPDATED'],
+    () => {
+      fetchNotifications();
+    },
+    [currentUser]
+  );
+
+  useRealtimeSync(
+    ['SETTINGS_UPDATED', 'USERS_UPDATED', 'TAB_FOCUSED'],
+    () => {
+      fetchSettings();
+      fetchMeta();
+    }
+  );
+
   useEffect(() => {
     refreshData();
     fetchSettings();
     const interval = setInterval(() => {
       fetchNotifications();
       fetchSettings();
-    }, 30000);
+    }, 10000); // 10s fallback interval
     return () => clearInterval(interval);
   }, [currentUser]);
 

@@ -27,7 +27,8 @@
     "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-image-crop": "^11.1.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
@@ -40,6 +41,7 @@
     "autoprefixer": "^10.4.19",
     "esbuild": "^0.28.1",
     "postcss": "^8.4.38",
+    "puppeteer": "^25.7.0",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.1",
     "typescript": "^5.2.2",

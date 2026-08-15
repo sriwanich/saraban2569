@@ -7,9 +7,9 @@ import { registerSW } from 'virtual:pwa-register'
 // Register the PWA service worker with automatic update trigger
 const updateSW = registerSW({
   onNeedRefresh() {
-    console.log('New update available for e-Saraban Enterprise PWA. Refreshing...');
-    // Force immediate update and page reload
-    updateSW(true);
+    console.log('New update available for e-Saraban Enterprise PWA.');
+    // To prevent auto-refreshing which resets user canvas data:
+    // updateSW(true); 
   },
   onOfflineReady() {
     console.log('e-Saraban PWA is ready for offline operation.');

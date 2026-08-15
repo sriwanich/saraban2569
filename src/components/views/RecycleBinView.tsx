@@ -3,6 +3,7 @@ import {
   Trash2, Search, RefreshCw, Undo, ShieldAlert, AlertTriangle, 
   Clock, User, FileText, ChevronLeft, ChevronRight, CheckCircle2, X 
 } from 'lucide-react';
+import { useRealtimeSync } from '../../utils/realtimeSync';
 
 interface RecycleBinItem {
   id: number;
@@ -46,6 +47,10 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
   useEffect(() => {
     fetchRecycleBin();
   }, []);
+
+  useRealtimeSync(['RECYCLE_UPDATED', 'DOCUMENTS_UPDATED', 'TAB_FOCUSED', 'DATA_UPDATED'], () => {
+    fetchRecycleBin();
+  });
 
   const showToast = (type: 'success' | 'error', text: string) => {
     setToastMessage({ type, text });

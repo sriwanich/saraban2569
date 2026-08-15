@@ -6,7 +6,8 @@ import {
   User, Wifi, CreditCard, Sparkles, ShieldCheck, Palette, Image as ImageIcon, 
   Layers, CheckCircle2, AlertCircle, Building2, Sliders, Eye, Share2, 
   FolderOpen, Bookmark, Save, Trash2, ArrowRight, ExternalLink, Hash, Calendar, Send,
-  Plus, Edit, Pause, Play, CheckSquare, Square, BarChart2, MapPin, Laptop, Smartphone, HelpCircle, LayoutGrid
+  Plus, Edit, Pause, Play, CheckSquare, Square, BarChart2, MapPin, Laptop, Smartphone, HelpCircle, LayoutGrid,
+  Star, Upload, FileDown, CopyPlus, CheckCheck, Search, Tag, SlidersHorizontal, RotateCcw, Info
 } from 'lucide-react';
 import { DocumentItem } from '../../types';
 
@@ -175,7 +176,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const [bulkGeneratedItems, setBulkGeneratedItems] = useState<any[]>([]);
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
 
-  // Saved Templates State
+  // Saved Templates State (Full Options Support)
   const [savedTemplates, setSavedTemplates] = useState<any[]>(() => {
     try {
       const saved = localStorage.getItem('enterprise_qr_templates');
@@ -184,7 +185,21 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       return [];
     }
   });
-  const [newTemplateName, setNewTemplateName] = useState('');
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateCategoryFilter, setTemplateCategoryFilter] = useState('all');
+
+  // Modal states for Save / Edit Full Template
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [showEditTemplateModal, setShowEditTemplateModal] = useState(false);
+  const [modalTplId, setModalTplId] = useState('');
+  const [modalTplName, setModalTplName] = useState('');
+  const [modalTplCategory, setModalTplCategory] = useState('official');
+  const [modalTplDescription, setModalTplDescription] = useState('');
+  const [modalTplDefaultQrType, setModalTplDefaultQrType] = useState('edms');
+  const [modalTplIsDefault, setModalTplIsDefault] = useState(false);
+  const jsonImportInputRef = useRef<HTMLInputElement>(null);
 
   // Classic history
   const [history, setHistory] = useState<any[]>(() => {
@@ -859,58 +874,374 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     }
   };
 
-  // Save layout style to Saved Templates
-  const handleSaveTemplate = () => {
-    if (!newTemplateName.trim()) {
-      showToast('error', 'กรุณากรอกชื่อเทมเพลต');
+  // Fetch Templates from Backend API
+  const fetchTemplates = async () => {
+    setIsLoadingTemplates(true);
+    try {
+      const res = await fetch('/api/qr-generator/templates');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setSavedTemplates(data);
+          localStorage.setItem('enterprise_qr_templates', JSON.stringify(data));
+          return data;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load QR templates from server:', err);
+    } finally {
+      setIsLoadingTemplates(false);
+    }
+    return null;
+  };
+
+  // Load templates on component mount and auto-apply default template if present
+  useEffect(() => {
+    fetchTemplates().then((templatesList) => {
+      const list = templatesList || savedTemplates;
+      if (Array.isArray(list) && list.length > 0) {
+        const defaultTpl = list.find((t: any) => t.isDefault);
+        if (defaultTpl && !selectedTemplateId) {
+          handleApplyTemplate(defaultTpl, false);
+        }
+      }
+    });
+  }, []);
+
+  // Open Save Full Template Modal
+  const handleOpenSaveModal = () => {
+    setModalTplName(frameType !== 'none' && frameText ? frameText : `แม่แบบเอกสาร ${new Date().toLocaleDateString('th-TH')}`);
+    setModalTplCategory('official');
+    setModalTplDescription('');
+    setModalTplDefaultQrType(qrType);
+    setModalTplIsDefault(false);
+    setShowSaveTemplateModal(true);
+  };
+
+  // Open Edit Template Modal
+  const handleOpenEditModal = (t: any) => {
+    setModalTplId(t.id);
+    setModalTplName(t.name || '');
+    setModalTplCategory(t.category || 'official');
+    setModalTplDescription(t.description || '');
+    setModalTplDefaultQrType(t.defaultQrType || 'edms');
+    setModalTplIsDefault(Boolean(t.isDefault));
+    setShowEditTemplateModal(true);
+  };
+
+  // Save Full Options Template to Backend & Local
+  const handleSaveFullTemplate = async () => {
+    if (!modalTplName.trim()) {
+      showToast('error', 'กรุณากรอกชื่อแม่แบบ (Template Name)');
       return;
     }
-    const template = {
-      id: Date.now().toString(),
-      name: newTemplateName.trim(),
+
+    const newTpl = {
+      id: `tpl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: modalTplName.trim(),
+      category: modalTplCategory || 'official',
+      description: modalTplDescription || '',
+      isDefault: modalTplIsDefault,
+      defaultQrType: modalTplDefaultQrType || qrType,
       fgColor,
       bgColor,
       transparentBg,
+      qrMargin,
+      errorCorrection,
       gradientType,
       gradientColor2,
       gradientAngle,
       logoType,
+      customLogoUrl,
+      logoScale,
       frameType,
       frameText,
       frameColor,
       frameTextColor,
-      qrMargin
+      previewDataUrl: generatedDataUrl || '',
+      createdBy: user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : (user?.username || 'ผู้ใช้'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
-    const updated = [...savedTemplates, template];
-    setSavedTemplates(updated);
-    localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
-    setNewTemplateName('');
-    showToast('success', 'บันทึกแม่แบบงานออกแบบสำเร็จ!');
+    try {
+      const res = await fetch('/api/qr-generator/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTpl)
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const created = json.template || newTpl;
+        let updated = [created, ...savedTemplates.filter((t: any) => t.id !== created.id)];
+        if (created.isDefault) {
+          updated = updated.map((t: any) => t.id === created.id ? { ...t, isDefault: true } : { ...t, isDefault: false });
+        }
+        setSavedTemplates(updated);
+        localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+        setSelectedTemplateId(created.id);
+        setShowSaveTemplateModal(false);
+        showToast('success', `บันทึกแม่แบบ "${created.name}" สำเร็จครบถ้วนทุกออปชัน!`);
+      } else {
+        const err = await res.json().catch(() => null);
+        showToast('error', 'ไม่สามารถบันทึกแม่แบบไปยังเซิร์ฟเวอร์ได้: ' + (err?.error || ''));
+      }
+    } catch (e: any) {
+      console.error('Error saving template:', e);
+      let updated = [newTpl, ...savedTemplates];
+      if (newTpl.isDefault) {
+        updated = updated.map((t: any) => t.id === newTpl.id ? { ...t, isDefault: true } : { ...t, isDefault: false });
+      }
+      setSavedTemplates(updated);
+      localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+      setSelectedTemplateId(newTpl.id);
+      setShowSaveTemplateModal(false);
+      showToast('success', `บันทึกแม่แบบ "${newTpl.name}" ลงในหน่วยความจำเรียบร้อย!`);
+    }
   };
 
-  // Load template styling
-  const handleLoadTemplate = (t: any) => {
-    setFgColor(t.fgColor);
+  // Update Template Meta Info
+  const handleUpdateTemplateMeta = async () => {
+    if (!modalTplName.trim()) {
+      showToast('error', 'กรุณากรอกชื่อแม่แบบ');
+      return;
+    }
+    try {
+      await fetch(`/api/qr-generator/templates/${modalTplId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: modalTplName.trim(),
+          category: modalTplCategory,
+          description: modalTplDescription,
+          isDefault: modalTplIsDefault,
+          defaultQrType: modalTplDefaultQrType
+        })
+      });
+
+      let updated = savedTemplates.map((t: any) => {
+        if (t.id === modalTplId) {
+          return {
+            ...t,
+            name: modalTplName.trim(),
+            category: modalTplCategory,
+            description: modalTplDescription,
+            isDefault: modalTplIsDefault,
+            defaultQrType: modalTplDefaultQrType,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return modalTplIsDefault ? { ...t, isDefault: false } : t;
+      });
+
+      setSavedTemplates(updated);
+      localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+      setShowEditTemplateModal(false);
+      showToast('success', `อัปเดตข้อมูลแม่แบบ "${modalTplName}" สำเร็จ!`);
+    } catch (e: any) {
+      showToast('error', 'เกิดข้อผิดพลาดในการอัปเดตแม่แบบ');
+    }
+  };
+
+  // Overwrite Template Style with Current Canvas Design
+  const handleOverwriteTemplateStyle = async (tpl: any) => {
+    if (!confirm(`ยืนยันการบันทึกสไตล์และดีไซน์ปัจจุบันทับลงในแม่แบบ "${tpl.name}" ใช่หรือไม่?`)) return;
+    try {
+      const updatedStyle = {
+        fgColor,
+        bgColor,
+        transparentBg,
+        qrMargin,
+        errorCorrection,
+        gradientType,
+        gradientColor2,
+        gradientAngle,
+        logoType,
+        customLogoUrl,
+        logoScale,
+        frameType,
+        frameText,
+        frameColor,
+        frameTextColor,
+        previewDataUrl: generatedDataUrl || '',
+        updatedAt: new Date().toISOString()
+      };
+
+      await fetch(`/api/qr-generator/templates/${tpl.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedStyle)
+      });
+
+      const updated = savedTemplates.map((t: any) => t.id === tpl.id ? { ...t, ...updatedStyle } : t);
+      setSavedTemplates(updated);
+      localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+      showToast('success', `อัปเดตสไตล์ของแม่แบบ "${tpl.name}" ด้วยดีไซน์ปัจจุบันเรียบร้อย!`);
+    } catch (e: any) {
+      showToast('error', 'เกิดข้อผิดพลาดในการอัปเดตสไตล์แม่แบบ');
+    }
+  };
+
+  // Load & Apply Full Template styling
+  const handleApplyTemplate = (t: any, switchToCreateTab = false) => {
+    setFgColor(t.fgColor || '#0f172a');
     setBgColor(t.bgColor || '#ffffff');
-    setTransparentBg(t.transparentBg || false);
+    setTransparentBg(Boolean(t.transparentBg));
+    setQrMargin(t.qrMargin !== undefined ? Number(t.qrMargin) : 2);
+    setErrorCorrection(t.errorCorrection || 'H');
     setGradientType(t.gradientType || 'solid');
     setGradientColor2(t.gradientColor2 || '#2563eb');
-    setGradientAngle(t.gradientAngle || 45);
+    setGradientAngle(t.gradientAngle !== undefined ? Number(t.gradientAngle) : 45);
     setLogoType(t.logoType || 'none');
+    setCustomLogoUrl(t.customLogoUrl || '');
+    setLogoScale(t.logoScale !== undefined ? Number(t.logoScale) : 0.22);
     setFrameType(t.frameType || 'none');
     setFrameText(t.frameText || '');
     setFrameColor(t.frameColor || '#0f172a');
     setFrameTextColor(t.frameTextColor || '#ffffff');
-    if (t.qrMargin !== undefined) setQrMargin(t.qrMargin);
-    showToast('success', `โหลดเทมเพลต "${t.name}" สำเร็จ!`);
+
+    // Optionally switch content type if defaultQrType specified and no document is locked
+    if (t.defaultQrType && ['edms', 'url', 'text', 'vcard', 'wifi', 'promptpay'].includes(t.defaultQrType)) {
+      if (!selectedDocId || t.defaultQrType === 'edms') {
+        setQrType(t.defaultQrType);
+      }
+    }
+
+    setSelectedTemplateId(t.id);
+    if (switchToCreateTab) {
+      setActiveTab('create');
+    }
+    showToast('success', `ปรับใช้แม่แบบ "${t.name}" ครบถ้วนทุกตัวเลือก 100%!`);
+  };
+
+  // Set Template as Default
+  const handleSetDefaultTemplate = async (tplId: string) => {
+    try {
+      await fetch(`/api/qr-generator/templates/${tplId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isDefault: true })
+      });
+      const updated = savedTemplates.map((t: any) => ({
+        ...t,
+        isDefault: t.id === tplId
+      }));
+      setSavedTemplates(updated);
+      localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+      showToast('success', 'ตั้งเป็นแม่แบบเริ่มต้นของระบบเรียบร้อย!');
+    } catch (e: any) {
+      showToast('error', 'ไม่สามารถตั้งเป็นแม่แบบเริ่มต้นได้');
+    }
+  };
+
+  // Duplicate Template
+  const handleDuplicateTemplate = async (t: any) => {
+    const newTpl = {
+      ...t,
+      id: `tpl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: `${t.name} (สำเนา)`,
+      isDefault: false,
+      createdBy: user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : (user?.username || 'ผู้ใช้'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await fetch('/api/qr-generator/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTpl)
+      });
+      const updated = [newTpl, ...savedTemplates];
+      setSavedTemplates(updated);
+      localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+      showToast('success', `สร้างสำเนาแม่แบบ "${newTpl.name}" สำเร็จ!`);
+    } catch (e: any) {
+      showToast('error', 'เกิดข้อผิดพลาดในการสร้างสำเนาแม่แบบ');
+    }
   };
 
   // Delete template
-  const handleDeleteTemplate = (id: string) => {
-    const updated = savedTemplates.filter(t => t.id !== id);
-    setSavedTemplates(updated);
-    localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+  const handleDeleteTemplate = async (id: string, name?: string) => {
+    if (!confirm(`ยืนยันการลบแม่แบบ "${name || 'นี้'}" ออกจากระบบถาวรหรือไม่?`)) return;
+    try {
+      await fetch(`/api/qr-generator/templates/${id}`, { method: 'DELETE' });
+      const updated = savedTemplates.filter((t: any) => t.id !== id);
+      setSavedTemplates(updated);
+      localStorage.setItem('enterprise_qr_templates', JSON.stringify(updated));
+      if (selectedTemplateId === id) setSelectedTemplateId(null);
+      showToast('success', `ลบแม่แบบ "${name || id}" เรียบร้อยแล้ว!`);
+    } catch (e: any) {
+      showToast('error', 'ไม่สามารถลบแม่แบบได้');
+    }
+  };
+
+  // Export Templates to JSON File
+  const handleExportTemplatesJSON = () => {
+    try {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(savedTemplates, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `EDMS_QR_Templates_${Date.now()}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast('success', `ส่งออกไฟล์แม่แบบทั้งหมด (${savedTemplates.length} รายการ) สำเร็จ!`);
+    } catch (err: any) {
+      showToast('error', 'ล้มเหลวในการส่งออกไฟล์ JSON: ' + err.message);
+    }
+  };
+
+  // Import Templates from JSON File
+  const handleImportTemplatesJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        try {
+          const parsed = JSON.parse(ev.target?.result as string);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            for (const item of parsed) {
+              await fetch('/api/qr-generator/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ...item,
+                  id: `tpl_imp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                  isDefault: false
+                })
+              }).catch(() => {});
+            }
+            await fetchTemplates();
+            showToast('success', `นำเข้าแม่แบบสำเร็จ จำนวน ${parsed.length} รายการ!`);
+          } else {
+            showToast('error', 'รูปแบบไฟล์ JSON ไม่ถูกต้องหรือไม่พบรายการแม่แบบ');
+          }
+        } catch (err: any) {
+          showToast('error', 'เกิดข้อผิดพลาดในการอ่านไฟล์ JSON: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    }
+  };
+
+  // Reset / Restore Official Government Presets
+  const handleResetOfficialTemplates = async () => {
+    if (!confirm('ยืนยันที่จะคืนค่าแม่แบบมาตรฐานของทางราชการทั้งหมดใช่หรือไม่?')) return;
+    try {
+      const res = await fetch('/api/qr-generator/templates/reset', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setSavedTemplates(data.templates || []);
+        localStorage.setItem('enterprise_qr_templates', JSON.stringify(data.templates || []));
+        showToast('success', 'คืนค่าแม่แบบมาตรฐานราชการสำเร็จ 100%!');
+      } else {
+        showToast('error', 'ไม่สามารถคืนค่าแม่แบบมาตรฐานได้');
+      }
+    } catch (e: any) {
+      showToast('error', 'เกิดข้อผิดพลาดในการคืนค่าแม่แบบ');
+    }
   };
 
   // Save export actions to history log
@@ -1333,22 +1664,62 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               )}
             </div>
 
-            {/* Quick Presets */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                <LayoutGrid className="w-4 h-4 text-blue-500" />
-                <span>พรีเซตงานตามหน้าที่ (Quick Layout Presets)</span>
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {docPresets.map((preset, i) => (
+            {/* Quick Templates & Presets Bar */}
+            <div className="p-4 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50 dark:from-slate-900 dark:to-slate-900/60 rounded-2xl border border-blue-100 dark:border-blue-900/40 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Bookmark className="w-4 h-4 text-blue-600" />
+                  <span>แม่แบบสไตล์ (QR Templates):</span>
+                  {selectedTemplateId && (
+                    <span className="text-[10px] px-2 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-semibold rounded-full flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>{savedTemplates.find((t: any) => t.id === selectedTemplateId)?.name || 'แม่แบบที่เลือก'}</span>
+                    </span>
+                  )}
+                </span>
+                
+                <div className="flex items-center gap-2 shrink-0">
                   <button
-                    key={i}
-                    onClick={() => handleApplyPreset(preset)}
-                    className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300 rounded-lg transition-all"
+                    type="button"
+                    onClick={handleOpenSaveModal}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
+                    title="บันทึกการตั้งค่าสี โลโก้ และกรอบปัจจุบันเป็นแม่แบบใหม่"
                   >
-                    {preset.name}
+                    <Save className="w-3.5 h-3.5" />
+                    <span>บันทึกเป็นแม่แบบ</span>
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('templates')}
+                    className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-all flex items-center gap-1"
+                    title="จัดการแม่แบบทั้งหมดในไลบรารี"
+                  >
+                    <span>คลังแม่แบบ ({savedTemplates.length})</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Template chips */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {savedTemplates.slice(0, 7).map((t: any) => {
+                  const isSelected = selectedTemplateId === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => handleApplyTemplate(t, false)}
+                      className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all flex items-center gap-1.5 ${
+                        isSelected 
+                          ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-400/40' 
+                          : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      {t.isDefault && <Star className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />}
+                      <span className="truncate max-w-[140px]">{t.name}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -2326,83 +2697,351 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         </div>
       )}
 
-      {/* Tab 4: Save Templates Studio */}
+      {/* Tab 4: Save Templates Studio (Full Options Support) */}
       {activeTab === 'templates' && (
         <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6">
-          <div className="border-b pb-4 text-left">
-            <h2 className="text-xl font-bold font-noto-serif-thai text-slate-800">
-              ไลบรารีแม่แบบงานเอกสารสารบรรณ (Corporate QR Styles Library)
-            </h2>
-            <p className="text-xs text-slate-500">
-              บันทึกการจัดรูปแบบ แถบหัวกระดาษ โลโก้ และสีเฉดสีของหน่วยงานคุณ เพื่อใช้ทันทีในอนาคตโดยไม่ต้องตั้งค่าใหม่
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Create / Save current style form */}
-            <div className="p-5 border rounded-2xl text-xs text-left space-y-4">
-              <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
-                <Save className="w-4 h-4 text-blue-500" />
-                <span>บันทึกดีไซน์ปัจจุบันเป็นแม่แบบใหม่</span>
-              </h3>
-              <p className="text-slate-500 text-[11px]">การตั้งค่าสไตล์การไล่สี กรอบ ข้อความเฟรม และสเกลทั้งหมดที่คุณเพิ่งจัดทำเสร็จจะถูกเก็บรักษากลุ่มข้อมูลไว้</p>
-              
-              <div className="space-y-2">
-                <label className="font-semibold block text-slate-600">ตั้งชื่อเทมเพลตของคุณ (Template Name):</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newTemplateName}
-                    onChange={(e) => setNewTemplateName(e.target.value)}
-                    placeholder="เช่น ตราครุฑกรม ปภ. จังหวัดระยอง"
-                    className="w-full px-3 py-2 border rounded-lg"
-                  />
-                  <button
-                    onClick={handleSaveTemplate}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shrink-0"
-                  >
-                    บันทึกสไตล์นี้
-                  </button>
-                </div>
+          {/* Header & Stats Banner */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--border-lighter)] pb-5 text-left">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Bookmark className="w-6 h-6 text-blue-600" />
+                <h2 className="text-xl font-bold font-noto-serif-thai text-slate-800 dark:text-slate-100">
+                  ไลบรารีแม่แบบงานเอกสารสารบรรณ (Full Options QR Templates)
+                </h2>
               </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                จัดการและบันทึกการตั้งค่าสี การไล่เฉด โลโก้ตราครุฑ กรอบข้อความ และระดับความละเอียดครบวงจร เพื่อเรียกใช้งานได้ทันที 100%
+              </p>
             </div>
 
-            {/* List of custom saved templates */}
-            <div className="p-5 border rounded-2xl text-xs text-left space-y-4">
-              <h3 className="font-bold text-slate-800">เทมเพลตของคุณที่บันทึกแล้ว ({savedTemplates.length})</h3>
-              
-              {savedTemplates.length === 0 ? (
-                <div className="py-8 text-center text-slate-400 italic">ยังไม่มีการบันทึกเทมเพลตแบบแมนนวลของคุณ</div>
-              ) : (
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {savedTemplates.map((t) => (
-                    <div key={t.id} className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-bold text-slate-800 truncate">{t.name}</div>
-                        <div className="text-[9px] text-slate-400">กรอบ: {t.frameType} • สี: {t.fgColor} • ขอบข้าม: {t.gradientType}</div>
-                      </div>
-                      <div className="flex gap-1.5 shrink-0">
-                        <button
-                          onClick={() => handleLoadTemplate(t)}
-                          className="px-2.5 py-1 bg-blue-100 text-blue-700 font-semibold rounded-lg hover:bg-blue-200 transition-colors"
-                        >
-                          ใช้แม่แบบนี้
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTemplate(t.id)}
-                          className="p-1 text-red-500 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            {/* Quick Action Toolbar */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleOpenSaveModal}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>บันทึกดีไซน์ปัจจุบันเป็นแม่แบบ</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportTemplatesJSON}
+                className="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+                title="ส่งออกไฟล์ JSON เพื่อสำรองหรือแชร์แม่แบบ"
+              >
+                <FileDown className="w-4 h-4 text-emerald-600" />
+                <span>ส่งออก JSON</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => jsonImportInputRef.current?.click()}
+                className="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+                title="นำเข้าไฟล์แม่แบบจาก JSON"
+              >
+                <Upload className="w-4 h-4 text-indigo-600" />
+                <span>นำเข้า JSON</span>
+              </button>
+              <input
+                ref={jsonImportInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportTemplatesJSON}
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                onClick={handleResetOfficialTemplates}
+                className="px-3 py-2 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
+                title="คืนค่าแม่แบบทางการและมาตรฐานภาครัฐทั้งหมด"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>คืนค่ามาตรฐาน</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Filters and Search Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs text-left">
+            {/* Category Chips */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: 'all', label: 'ทั้งหมด', icon: null },
+                { id: 'official', label: '🏛️ ทางการ/สารบรรณ', icon: null },
+                { id: 'urgent', label: '🚨 ด่วนที่สุด', icon: null },
+                { id: 'public', label: '📢 ประชาสัมพันธ์', icon: null },
+                { id: 'vcard', label: '💼 นามบัตร/ติดต่อ', icon: null },
+                { id: 'wifi', label: '📶 Wi-Fi องค์กร', icon: null },
+                { id: 'finance', label: '💳 การเงิน/พร้อมเพย์', icon: null },
+                { id: 'custom', label: '⭐ กำหนดเอง', icon: null },
+              ].map((cat) => {
+                const count = cat.id === 'all' 
+                  ? savedTemplates.length 
+                  : savedTemplates.filter((t: any) => t.category === cat.id).length;
+                const isSelected = templateCategoryFilter === cat.id;
+
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setTemplateCategoryFilter(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl font-semibold transition-all flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <span>{cat.label}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                      isSelected
+                        ? 'bg-white/20 text-white dark:bg-black/20 dark:text-slate-900'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Search Input */}
+            <div className="relative min-w-[240px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={templateSearch}
+                onChange={(e) => setTemplateSearch(e.target.value)}
+                placeholder="ค้นหาแม่แบบด้วยชื่อหรือรายละเอียด..."
+                className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              {templateSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTemplateSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                >
+                  ✕
+                </button>
               )}
             </div>
-
           </div>
+
+          {/* Template Cards Grid */}
+          {isLoadingTemplates ? (
+            <div className="py-16 text-center text-slate-400 space-y-3">
+              <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto" />
+              <p className="font-semibold text-xs">กำลังโหลดไลบรารีแม่แบบจากระบบ...</p>
+            </div>
+          ) : (
+            (() => {
+              const filtered = savedTemplates.filter((t: any) => {
+                const matchCat = templateCategoryFilter === 'all' || (t.category || 'official') === templateCategoryFilter;
+                const matchSearch = !templateSearch.trim() || 
+                  (t.name && t.name.toLowerCase().includes(templateSearch.toLowerCase())) ||
+                  (t.description && t.description.toLowerCase().includes(templateSearch.toLowerCase())) ||
+                  (t.frameText && t.frameText.toLowerCase().includes(templateSearch.toLowerCase()));
+                return matchCat && matchSearch;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="py-16 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl text-center space-y-3 text-slate-400">
+                    <Bookmark className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700" />
+                    <div className="font-bold text-sm text-slate-600 dark:text-slate-400">ไม่พบแม่แบบที่ตรงกับเงื่อนไข</div>
+                    <p className="text-xs max-w-sm mx-auto">
+                      ลองเปลี่ยนหมวดหมู่ ค้นหาคำอื่น หรือคลิกปุ่ม &quot;บันทึกดีไซน์ปัจจุบันเป็นแม่แบบ&quot; เพื่อสร้างแม่แบบของคุณเอง
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleResetOfficialTemplates}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all inline-flex items-center gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>โหลดแม่แบบมาตรฐานราชการ</span>
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {filtered.map((t: any) => {
+                    const isSelected = selectedTemplateId === t.id;
+                    const catLabels: Record<string, { label: string; color: string }> = {
+                      official: { label: '🏛️ ทางการ/สารบรรณ', color: 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300' },
+                      urgent: { label: '🚨 ด่วนที่สุด', color: 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300' },
+                      public: { label: '📢 ประชาสัมพันธ์', color: 'bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300' },
+                      vcard: { label: '💼 นามบัตร/ติดต่อ', color: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' },
+                      wifi: { label: '📶 Wi-Fi องค์กร', color: 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300' },
+                      finance: { label: '💳 การเงิน/พร้อมเพย์', color: 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300' },
+                      custom: { label: '⭐ กำหนดเอง', color: 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300' },
+                    };
+                    const catInfo = catLabels[t.category || 'official'] || catLabels.official;
+
+                    return (
+                      <div
+                        key={t.id}
+                        className={`rounded-2xl border bg-white dark:bg-slate-900 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between text-left relative ${
+                          isSelected
+                            ? 'border-blue-500 ring-2 ring-blue-500/20'
+                            : 'border-slate-200 dark:border-slate-800'
+                        }`}
+                      >
+                        {/* Top Header & Badges */}
+                        <div className="p-4 space-y-3 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${catInfo.color}`}>
+                              {catInfo.label}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {t.isDefault && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 rounded-full flex items-center gap-1">
+                                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                                  <span>ค่าเริ่มต้น</span>
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(t)}
+                                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                title="แก้ไขข้อมูลแม่แบบ"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDuplicateTemplate(t)}
+                                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                title="สร้างสำเนาแม่แบบ"
+                              >
+                                <CopyPlus className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTemplate(t.id, t.name)}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                                title="ลบแม่แบบนี้"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Thumbnail and Title */}
+                          <div className="flex items-start gap-3">
+                            {/* Visual QR Snapshot or Color box */}
+                            <div className="w-16 h-16 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 flex items-center justify-center shrink-0 overflow-hidden relative group">
+                              {t.previewDataUrl ? (
+                                <img
+                                  src={t.previewDataUrl}
+                                  alt={t.name}
+                                  className="w-full h-full object-contain p-1"
+                                />
+                              ) : (
+                                <div
+                                  className="w-12 h-12 rounded-lg flex items-center justify-center text-white shadow-inner"
+                                  style={{
+                                    backgroundColor: t.fgColor || '#0f172a',
+                                    backgroundImage: t.gradientType === 'linear' 
+                                      ? `linear-gradient(45deg, ${t.fgColor}, ${t.gradientColor2 || '#2563eb'})` 
+                                      : 'none'
+                                  }}
+                                >
+                                  <QrCode className="w-6 h-6 text-white" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 leading-snug line-clamp-2">
+                                {t.name}
+                              </h3>
+                              {t.description && (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                                  {t.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Design Spec Parameter Pills */}
+                          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-1.5 text-[10px]">
+                            {/* Color Swatch */}
+                            <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0"
+                                style={{ backgroundColor: t.fgColor || '#0f172a' }}
+                              />
+                              <span>{t.fgColor}</span>
+                            </div>
+
+                            {/* Gradient mode */}
+                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              {t.gradientType === 'linear' ? '🌈 ไล่สี Linear' : t.gradientType === 'radial' ? '⭕ ไล่สีวงกลม' : '⬛ สีเดี่ยว'}
+                            </span>
+
+                            {/* Logo Type */}
+                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              {t.logoType === 'garuda' ? '🦅 ตราครุฑ' : t.logoType === 'ddpm' || t.logoType === 'province' ? '🏢 ตรา ปภ./จังหวัด' : t.logoType === 'custom' ? '🖼️ โลโก้กำหนดเอง' : 'ไร้โลโก้'}
+                            </span>
+
+                            {/* Frame Type */}
+                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              {t.frameType === 'top-bottom' ? '📑 กรอบ บน-ล่าง' : t.frameType === 'card' ? '📇 กรอบการ์ด' : t.frameType === 'badge' ? '🏷️ ป้าย Badge' : 'ไร้กรอบ'}
+                            </span>
+
+                            {/* Error Correction */}
+                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              ระดับ {t.errorCorrection || 'H'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Card Bottom Action Bar */}
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            {!t.isDefault && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetDefaultTemplate(t.id)}
+                                className="px-2 py-1 bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-slate-200 dark:border-slate-700 rounded-lg text-[10px] font-semibold transition-colors flex items-center gap-1"
+                                title="กำหนดให้เป็นแม่แบบเริ่มต้นเมื่อเปิดระบบ"
+                              >
+                                <Star className="w-3 h-3" />
+                                <span>ตั้งเป็นเริ่มต้น</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleOverwriteTemplateStyle(t)}
+                              className="px-2 py-1 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-[10px] font-semibold transition-colors flex items-center gap-1"
+                              title="อัปเดตสไตล์ของแม่แบบนี้ด้วยการตั้งค่าบนหน้าจอปัจจุบัน"
+                            >
+                              <Save className="w-3 h-3 text-blue-500" />
+                              <span>ทับด้วยดีไซน์ปัจจุบัน</span>
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleApplyTemplate(t, true)}
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 ml-auto"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>ใช้งานแม่แบบนี้</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()
+          )}
         </div>
       )}
 
@@ -2850,6 +3489,275 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Save Full Options Template */}
+      {showSaveTemplateModal && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full overflow-hidden text-left flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Bookmark className="w-5 h-5" />
+                <h3 className="font-bold text-base font-noto-serif-thai">
+                  บันทึกแม่แบบงานออกแบบ (Save as Template)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSaveTemplateModal(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4 overflow-y-auto text-xs flex-1">
+              {/* Design Snapshot Preview */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-3">
+                <div className="w-14 h-14 rounded-xl bg-white dark:bg-slate-900 border flex items-center justify-center overflow-hidden shrink-0">
+                  {generatedDataUrl ? (
+                    <img src={generatedDataUrl} alt="Preview" className="w-full h-full object-contain p-1" />
+                  ) : (
+                    <QrCode className="w-8 h-8 text-blue-500" />
+                  )}
+                </div>
+                <div className="space-y-0.5 text-[11px]">
+                  <div className="font-bold text-slate-800 dark:text-slate-200">
+                    บันทึกตัวเลือกครบถ้วน 100%
+                  </div>
+                  <div className="text-slate-500 dark:text-slate-400">
+                    สี: {fgColor} • พื้นหลัง: {transparentBg ? 'โปร่งใส' : bgColor} • กรอบ: {frameType} • โลโก้: {logoType}
+                  </div>
+                </div>
+              </div>
+
+              {/* Template Name */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  ชื่อแม่แบบ (Template Name) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={modalTplName}
+                  onChange={(e) => setModalTplName(e.target.value)}
+                  placeholder="เช่น สติกเกอร์เอกสารสำคัญตราครุฑ ปภ."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {/* Category Selection */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  หมวดหมู่แม่แบบ (Category)
+                </label>
+                <select
+                  value={modalTplCategory}
+                  onChange={(e) => setModalTplCategory(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="official">🏛️ ทางการ / งานสารบรรณ</option>
+                  <option value="urgent">🚨 ด่วนที่สุด / ตรวจสอบเร่งด่วน</option>
+                  <option value="public">📢 สื่อประชาสัมพันธ์ / ดาวน์โหลด</option>
+                  <option value="vcard">💼 นามบัตรข้าราชการ / ผู้บริหาร</option>
+                  <option value="wifi">📶 Wi-Fi องค์กร / ห้องประชุม</option>
+                  <option value="finance">💳 การเงิน / พร้อมเพย์</option>
+                  <option value="custom">⭐ แม่แบบกำหนดเอง (Custom)</option>
+                </select>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  คำอธิบายหรือหมายเหตุ (Description)
+                </label>
+                <textarea
+                  value={modalTplDescription}
+                  onChange={(e) => setModalTplDescription(e.target.value)}
+                  rows={2}
+                  placeholder="เช่น ใช้สำหรับติดหนังสือคำสั่งหรือประกาศของกองอำนวยการ..."
+                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {/* Default QR Payload Type */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  ประเภทเนื้อหาเริ่มต้น (Default Content Type)
+                </label>
+                <select
+                  value={modalTplDefaultQrType}
+                  onChange={(e) => setModalTplDefaultQrType(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="edms">เอกสารสารบรรณ EDMS</option>
+                  <option value="url">เว็บไซต์ (URL Link)</option>
+                  <option value="text">ข้อความทั่วไป</option>
+                  <option value="vcard">นามบัตรข้าราชการ (vCard)</option>
+                  <option value="wifi">รหัสผ่าน Wi-Fi</option>
+                  <option value="promptpay">พร้อมเพย์ ปภ.</option>
+                </select>
+              </div>
+
+              {/* Is Default Checkbox */}
+              <label className="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={modalTplIsDefault}
+                  onChange={(e) => setModalTplIsDefault(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded"
+                />
+                <div className="space-y-0.5">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                    ตั้งเป็นแม่แบบเริ่มต้นของระบบ (Default Template)
+                  </span>
+                  <span className="text-[10px] text-slate-500 block">
+                    เมื่อเข้าหน้าระบบสร้าง QR Studio สไตล์นี้จะถูกเรียกใช้งานทันทีโดยอัตโนมัติ
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSaveTemplateModal(false)}
+                className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-300 transition-colors"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveFullTemplate}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
+              >
+                <Save className="w-4 h-4" />
+                <span>บันทึกแม่แบบ</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Template Meta */}
+      {showEditTemplateModal && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full overflow-hidden text-left flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Edit className="w-5 h-5 text-blue-400" />
+                <h3 className="font-bold text-base font-noto-serif-thai">
+                  แก้ไขข้อมูลแม่แบบ (Edit Template)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditTemplateModal(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4 overflow-y-auto text-xs flex-1">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  ชื่อแม่แบบ <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={modalTplName}
+                  onChange={(e) => setModalTplName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  หมวดหมู่
+                </label>
+                <select
+                  value={modalTplCategory}
+                  onChange={(e) => setModalTplCategory(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="official">🏛️ ทางการ / งานสารบรรณ</option>
+                  <option value="urgent">🚨 ด่วนที่สุด / ตรวจสอบเร่งด่วน</option>
+                  <option value="public">📢 สื่อประชาสัมพันธ์ / ดาวน์โหลด</option>
+                  <option value="vcard">💼 นามบัตรข้าราชการ / ผู้บริหาร</option>
+                  <option value="wifi">📶 Wi-Fi องค์กร / ห้องประชุม</option>
+                  <option value="finance">💳 การเงิน / พร้อมเพย์</option>
+                  <option value="custom">⭐ แม่แบบกำหนดเอง (Custom)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  คำอธิบายหรือหมายเหตุ
+                </label>
+                <textarea
+                  value={modalTplDescription}
+                  onChange={(e) => setModalTplDescription(e.target.value)}
+                  rows={2}
+                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  ประเภทเนื้อหาเริ่มต้น
+                </label>
+                <select
+                  value={modalTplDefaultQrType}
+                  onChange={(e) => setModalTplDefaultQrType(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="edms">เอกสารสารบรรณ EDMS</option>
+                  <option value="url">เว็บไซต์ (URL Link)</option>
+                  <option value="text">ข้อความทั่วไป</option>
+                  <option value="vcard">นามบัตรข้าราชการ (vCard)</option>
+                  <option value="wifi">รหัสผ่าน Wi-Fi</option>
+                  <option value="promptpay">พร้อมเพย์ ปภ.</option>
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={modalTplIsDefault}
+                  onChange={(e) => setModalTplIsDefault(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded"
+                />
+                <span className="font-bold text-slate-800 dark:text-slate-200">
+                  ตั้งเป็นแม่แบบเริ่มต้นของระบบ (Default Template)
+                </span>
+              </label>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowEditTemplateModal(false)}
+                className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-300 transition-colors"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleUpdateTemplateMeta}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5"
+              >
+                <Save className="w-4 h-4" />
+                <span>บันทึกการแก้ไข</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

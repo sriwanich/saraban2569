@@ -21,7 +21,10 @@ dotenv.config();
 
 // Pre-create standard upload directories to avoid any folder-creation or write-permission issues
 const baseUploadsDir = path.join(process.cwd(), 'uploads');
-const standardFolders = ['inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'signed_pdfs', 'system', 'avatars'];
+const standardFolders = [
+  'inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 
+  'signed_pdfs', 'system', 'avatars', 'infographics', 'infographics/assets', 'infographics/images'
+];
 try {
   if (!fs.existsSync(baseUploadsDir)) {
     fs.mkdirSync(baseUploadsDir, { recursive: true });
@@ -40,8 +43,17 @@ try {
 // Multer storage configuration for attachments organized into subfolders by document type & category
 const uploadStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const subfolderParam = (req.body.subfolder || req.query.subfolder || req.body.docType || req.query.docType || 'inbox').toString();
-    const category = (req.body.category || req.query.category || '').toString();
+    const isInfographics = req.originalUrl?.includes('infographics') || req.baseUrl?.includes('infographics');
+    const subfolderParam = (
+      req.query.subfolder || 
+      req.body?.subfolder || 
+      req.query.folder ||
+      req.body?.folder ||
+      req.query.docType || 
+      req.body?.docType || 
+      (isInfographics ? 'infographics' : 'inbox')
+    ).toString();
+    const category = (req.body?.category || req.query?.category || '').toString();
 
     let subfolder = subfolderParam;
     if (subfolderParam === 'admin') {
@@ -50,6 +62,8 @@ const uploadStorage = multer.diskStorage({
       } else {
         subfolder = 'admin';
       }
+    } else if (subfolderParam === 'infographics' || isInfographics) {
+      subfolder = 'infographics';
     }
 
     const uploadDir = path.join(process.cwd(), 'uploads', subfolder);
@@ -148,6 +162,106 @@ function getPublicBaseUrl(req: express.Request): string {
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Real-time Event Stream (SSE) for zero-latency live sync without Ctrl+F5
+const sseClients = new Set<express.Response>();
+
+export function broadcastRealtimeEvent(eventType: string, data: any = {}) {
+  const payload = JSON.stringify({ event: eventType, data, timestamp: Date.now() });
+  const sseMessage = `event: message\ndata: ${payload}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(sseMessage);
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// 1. Zero-Cache Middleware for ALL /api routes: Ensures browsers never serve stale responses
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
+// 2. Real-time Auto-Broadcast Middleware on all successful API mutations (POST, PUT, DELETE, PATCH)
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method) && req.path.startsWith('/api')) {
+    const originalJson = res.json.bind(res);
+    const originalSend = res.send.bind(res);
+
+    let broadcasted = false;
+    const triggerBroadcast = () => {
+      if (broadcasted) return;
+      broadcasted = true;
+      if (res.statusCode < 400) {
+        let eventCategory = 'DATA_UPDATED';
+        const p = req.path;
+        if (p.includes('/api/documents')) eventCategory = 'DOCUMENTS_UPDATED';
+        else if (p.includes('/api/infographics')) eventCategory = 'INFOGRAPHICS_UPDATED';
+        else if (p.includes('/api/notifications')) eventCategory = 'NOTIFICATIONS_UPDATED';
+        else if (p.includes('/api/settings') || p.includes('/api/role-permissions') || p.includes('/api/departments') || p.includes('/api/positions')) eventCategory = 'SETTINGS_UPDATED';
+        else if (p.includes('/api/users')) eventCategory = 'USERS_UPDATED';
+        else if (p.includes('/api/folders')) eventCategory = 'FOLDERS_UPDATED';
+        else if (p.includes('/api/recycle-bin')) eventCategory = 'RECYCLE_UPDATED';
+        else if (p.includes('/api/favorites')) eventCategory = 'FAVORITES_UPDATED';
+        else if (p.includes('/api/drafts')) eventCategory = 'DRAFTS_UPDATED';
+        else if (p.includes('/api/logs')) eventCategory = 'LOGS_UPDATED';
+
+        broadcastRealtimeEvent(eventCategory, {
+          method: req.method,
+          path: req.path,
+          timestamp: Date.now()
+        });
+      }
+    };
+
+    res.json = (body: any) => {
+      triggerBroadcast();
+      return originalJson(body);
+    };
+
+    res.send = (body: any) => {
+      triggerBroadcast();
+      return originalSend(body);
+    };
+  }
+  next();
+});
+
+// 3. Real-time Server-Sent Events (SSE) Endpoint
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof (res as any).flushHeaders === 'function') {
+    (res as any).flushHeaders();
+  }
+
+  sseClients.add(res);
+
+  // Send initial connect handshake
+  res.write(`event: connected\ndata: ${JSON.stringify({ time: Date.now(), msg: 'Connected to EDMS Realtime Stream' })}\n\n`);
+
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch (e) {
+      clearInterval(keepAlive);
+      sseClients.delete(res);
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+    sseClients.delete(res);
+  });
+});
+
 app.use((req, res, next) => {
   console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`);
   next();
@@ -175,7 +289,7 @@ app.get('/api/files/download', async (req, res) => {
     if (!filePath.startsWith(uploadsBase) || !fs.existsSync(filePath)) {
       const baseName = path.basename(fileUrl);
       let foundPath = '';
-      const searchSubdirs = ['', 'inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'admin/certificate'];
+      const searchSubdirs = ['', 'infographics', 'infographics/assets', 'infographics/images', 'inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'admin/certificate', 'system', 'avatars'];
       for (const sub of searchSubdirs) {
         const p = path.join(uploadsBase, sub, baseName);
         if (fs.existsSync(p)) {
@@ -230,7 +344,7 @@ app.get('/api/files/view', async (req, res) => {
     if (!filePath.startsWith(uploadsBase) || !fs.existsSync(filePath)) {
       const baseName = path.basename(fileUrl);
       let foundPath = '';
-      const searchSubdirs = ['', 'inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'admin/certificate'];
+      const searchSubdirs = ['', 'infographics', 'infographics/assets', 'infographics/images', 'inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 'admin/certificate', 'system', 'avatars'];
       for (const sub of searchSubdirs) {
         const p = path.join(uploadsBase, sub, baseName);
         if (fs.existsSync(p)) {
@@ -371,9 +485,81 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
   }
 });
 
-// ==========================================
-// File Deduplication Engine (Single-Instance Storage & Pointer Links)
-// ==========================================
+app.post('/api/ai-design-assist', upload.single('image'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'ไม่พบไฟล์ที่อัปโหลด' });
+  }
+
+  try {
+    const imagePath = req.file.path;
+    const imageBuffer = fs.readFileSync(imagePath);
+    const base64Image = imageBuffer.toString('base64');
+    
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+    
+    const prompt = "Analyze this infographic design and provide suggestions for layout, typography, color palette, and content hierarchy. Keep it brief and constructive.";
+    
+    const response = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: {
+            parts: [
+                {
+                    inlineData: {
+                        mimeType: req.file.mimetype,
+                        data: base64Image,
+                    },
+                },
+                { text: prompt },
+            ],
+        },
+    });
+    
+    res.json({ suggestions: response.text });
+  } catch (err: any) {
+    console.error('AI Analysis Error:', err.message, err.stack);
+    res.status(500).json({ error: 'วิเคราะห์ล้มเหลว: ' + (err.message || 'Unknown error') + ' (Details: ' + (err.stack?.substring(0, 100) || 'No stack') + ')' });
+  }
+});
+app.get('/api/digital-signatures', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM digital_signatures ORDER BY timestampIso DESC');
+    res.json(rows);
+  } catch (error: any) {
+    console.error('MySQL Digital Signatures Fetch error:', error.message);
+    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงประวัติ Digital TSA' });
+  }
+});
+
+app.delete('/api/digital-signatures', async (req, res) => {
+  const ip = getClientIp(req);
+  const username = req.body?.username || req.query?.username || 'ผู้ดูแลระบบ';
+
+  try {
+    await pool.query('DELETE FROM digital_signatures');
+    await addSystemLog('CLEAR_TSA_LOGS', 'ล้างประวัติ Digital TSA Logs ทั้งหมด', username, ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('MySQL Digital Signatures Clear error:', error.message);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการล้างประวัติ Digital TSA' });
+  }
+});
+
+
+app.delete('/api/digital-signatures/:id', async (req, res) => {
+  const ip = getClientIp(req);
+  const username = req.body?.username || req.query?.username || 'ผู้ดูแลระบบ';
+  const logId = req.params.id;
+
+  try {
+    await pool.query('DELETE FROM digital_signatures WHERE id = ?', [logId]);
+    await addSystemLog('DELETE_TSA_LOG', `ลบรายการ Digital TSA Log ID: ${logId}`, username, ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('MySQL Digital Signatures Delete specific error:', error.message);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการลบรายการ Digital TSA' });
+  }
+});
+
 
 const dedupIndexPath = path.join(process.cwd(), 'uploads', 'dedup_index.json');
 let autoDedupOnUpload = true;
@@ -1337,6 +1523,193 @@ function loadLocalDb() {
       localDb.enterprise_qr_scans = [];
       saveLocalDb();
     }
+    if (!localDb.enterprise_qr_templates || !Array.isArray(localDb.enterprise_qr_templates) || localDb.enterprise_qr_templates.length === 0) {
+      localDb.enterprise_qr_templates = [
+        {
+          id: 'tpl_official_garuda',
+          name: 'ตราครุฑทางการ - กรม ปภ.',
+          category: 'official',
+          description: 'แม่แบบมาตรฐานหนังสือราชการ กรมป้องกันและบรรเทาสาธารณภัย สีกรมท่าทางการ พร้อมกรอบหัว-ท้าย',
+          isDefault: true,
+          defaultQrType: 'edms',
+          fgColor: '#0f172a',
+          bgColor: '#ffffff',
+          transparentBg: false,
+          qrMargin: 2,
+          errorCorrection: 'H',
+          gradientType: 'solid',
+          gradientColor2: '#2563eb',
+          gradientAngle: 45,
+          logoType: 'garuda',
+          customLogoUrl: '',
+          logoScale: 0.22,
+          frameType: 'top-bottom',
+          frameText: 'สแกนเพื่อตรวจสอบเอกสาร EDMS',
+          frameColor: '#0f172a',
+          frameTextColor: '#ffffff',
+          createdBy: 'ระบบมาตรฐาน',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'tpl_urgent_red',
+          name: 'ด่วนที่สุด - ระเบียบ ปภ.',
+          category: 'urgent',
+          description: 'แม่แบบเอกสารด่วนที่สุด / หนังสือเวียนเร่งด่วน กรอบสีแดงเด่นชัด ตราครุฑกลาง',
+          isDefault: false,
+          defaultQrType: 'edms',
+          fgColor: '#991b1b',
+          bgColor: '#fef2f2',
+          transparentBg: false,
+          qrMargin: 2,
+          errorCorrection: 'H',
+          gradientType: 'solid',
+          gradientColor2: '#ef4444',
+          gradientAngle: 45,
+          logoType: 'garuda',
+          customLogoUrl: '',
+          logoScale: 0.24,
+          frameType: 'top-bottom',
+          frameText: 'หนังสือราชการด่วนที่สุด - สแกนอ่านฉบับเต็ม',
+          frameColor: '#dc2626',
+          frameTextColor: '#ffffff',
+          createdBy: 'ระบบมาตรฐาน',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'tpl_public_relations',
+          name: 'ประชาสัมพันธ์และสื่อดิจิทัล',
+          category: 'public',
+          description: 'แม่แบบไล่เฉดสีฟ้าคราม เหมาะสำหรับโปสเตอร์ ประชาสัมพันธ์ข่าวสาร และสื่อสังคมออนไลน์',
+          isDefault: false,
+          defaultQrType: 'url',
+          fgColor: '#075985',
+          bgColor: '#f0f9ff',
+          transparentBg: false,
+          qrMargin: 2,
+          errorCorrection: 'Q',
+          gradientType: 'linear',
+          gradientColor2: '#06b6d4',
+          gradientAngle: 45,
+          logoType: 'province',
+          customLogoUrl: '',
+          logoScale: 0.22,
+          frameType: 'card',
+          frameText: 'สแกนรับข้อมูลข่าวสารสำนักงาน ปภ.',
+          frameColor: '#0284c7',
+          frameTextColor: '#ffffff',
+          createdBy: 'ระบบมาตรฐาน',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'tpl_vcard_officer',
+          name: 'นามบัตรข้าราชการมาตรฐาน (vCard)',
+          category: 'vcard',
+          description: 'แม่แบบนามบัตรข้าราชการ โทนสีเขียวมรกตราชการ สแกนแล้วบันทึก Contact เข้ามือถือทันที',
+          isDefault: false,
+          defaultQrType: 'vcard',
+          fgColor: '#064e3b',
+          bgColor: '#f0fdf4',
+          transparentBg: false,
+          qrMargin: 2,
+          errorCorrection: 'H',
+          gradientType: 'linear',
+          gradientColor2: '#10b981',
+          gradientAngle: 60,
+          logoType: 'ddpm',
+          customLogoUrl: '',
+          logoScale: 0.22,
+          frameType: 'badge',
+          frameText: 'สแกนบันทึกข้อมูลติดต่อข้าราชการ',
+          frameColor: '#059669',
+          frameTextColor: '#ffffff',
+          createdBy: 'ระบบมาตรฐาน',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'tpl_wifi_guest',
+          name: 'สติกเกอร์ Wi-Fi ผู้มาติดต่อราชการ',
+          category: 'wifi',
+          description: 'แม่แบบจุดบริการ Wi-Fi ประชาชน และผู้มาติดต่อ สแกนเชื่อมต่ออินเทอร์เน็ตอัตโนมัติ',
+          isDefault: false,
+          defaultQrType: 'wifi',
+          fgColor: '#1e3a8a',
+          bgColor: '#eff6ff',
+          transparentBg: false,
+          qrMargin: 2,
+          errorCorrection: 'M',
+          gradientType: 'solid',
+          gradientColor2: '#3b82f6',
+          gradientAngle: 45,
+          logoType: 'none',
+          customLogoUrl: '',
+          logoScale: 0.2,
+          frameType: 'badge',
+          frameText: 'สแกนเชื่อมต่อ Wi-Fi สำนักงาน',
+          frameColor: '#2563eb',
+          frameTextColor: '#ffffff',
+          createdBy: 'ระบบมาตรฐาน',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'tpl_finance_promptpay',
+          name: 'พร้อมเพย์รับชำระค่าธรรมเนียม',
+          category: 'finance',
+          description: 'แม่แบบชำระค่าธรรมเนียมราชการ ค่าบริการ และงานการเงินภาครัฐด้วย PromptPay QR',
+          isDefault: false,
+          defaultQrType: 'promptpay',
+          fgColor: '#002d62',
+          bgColor: '#ffffff',
+          transparentBg: false,
+          qrMargin: 2,
+          errorCorrection: 'Q',
+          gradientType: 'solid',
+          gradientColor2: '#0284c7',
+          gradientAngle: 45,
+          logoType: 'none',
+          customLogoUrl: '',
+          logoScale: 0.2,
+          frameType: 'card',
+          frameText: 'สแกนชำระเงินผ่าน PromptPay',
+          frameColor: '#002d62',
+          frameTextColor: '#ffffff',
+          createdBy: 'ระบบมาตรฐาน',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'tpl_minimal_clean',
+          name: 'มินิมอล โมเดิร์น คมชัดสูง',
+          category: 'custom',
+          description: 'แม่แบบคลีนมินิมอล ไร้กรอบ ขอบชิด เหมาะสำหรับแปะลงเอกสารทุกประเภท',
+          isDefault: false,
+          defaultQrType: 'edms',
+          fgColor: '#000000',
+          bgColor: '#ffffff',
+          transparentBg: false,
+          qrMargin: 1,
+          errorCorrection: 'M',
+          gradientType: 'solid',
+          gradientColor2: '#3f3f46',
+          gradientAngle: 0,
+          logoType: 'garuda',
+          customLogoUrl: '',
+          logoScale: 0.2,
+          frameType: 'none',
+          frameText: '',
+          frameColor: '#000000',
+          frameTextColor: '#ffffff',
+          createdBy: 'ระบบมาตรฐาน',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ];
+      saveLocalDb();
+    }
   } catch (err) {
     console.warn('Failed to load local db_store.json, resetting to initial seed:', err);
     localDb = JSON.parse(JSON.stringify(initialSeedData));
@@ -1637,42 +2010,8 @@ async function handleLocalDbQuery(sql: string, params: any[] = []): Promise<[any
 
 const originalPoolQuery = pool.query.bind(pool);
 (pool as any).query = async (sql: string, params: any[] = []) => {
-  if (isMysqlOnline) {
-    try {
-      return await originalPoolQuery(sql, params);
-    } catch (err: any) {
-      if (err.code === 'ECONNREFUSED' || err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ETIMEDOUT' || err.message?.includes('ECONNREFUSED')) {
-        isMysqlOnline = false;
-        console.warn('⚠️ MySQL connection lost/failed, switching to local DB fallback:', err.message);
-        return await handleLocalDbQuery(sql, params);
-      } else {
-        const isDuplicateOrSchemaError = 
-          err.code === 'ER_DUP_FIELDNAME' || 
-          err.code === 'ER_DUP_KEYNAME' || 
-          err.code === 'ER_TABLE_EXISTS_ERROR' || 
-          err.code === 'ER_CANT_DROP_FIELD_OR_KEY' || 
-          err.code === 'ER_DUP_ENTRY' ||
-          err.errno === 1060 || err.errno === 1061 || err.errno === 1050 || err.errno === 1091 ||
-          (err.message && (
-            err.message.includes('Duplicate column') ||
-            err.message.includes('already exists') ||
-            err.message.includes('Duplicate key')
-          ));
-
-        if (isDuplicateOrSchemaError) {
-          throw err;
-        }
-
-        console.warn('⚠️ MySQL query error, trying local DB fallback:', err.message);
-        try {
-          return await handleLocalDbQuery(sql, params);
-        } catch (fallbackErr) {
-          throw err;
-        }
-      }
-    }
-  }
-  return await handleLocalDbQuery(sql, params);
+  // Directly forward queries to MySQL pool. Local JSON database fallback is disabled.
+  return await originalPoolQuery(sql, params);
 };
 
 // Also wrap execute if called anywhere
@@ -2382,6 +2721,94 @@ async function setupDatabase() {
         console.warn('Note checking/creating enterprise_qr_scans table:', e);
       }
 
+      // Ensure enterprise_qr_templates table exists
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS enterprise_qr_templates (
+            id VARCHAR(100) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            category VARCHAR(50) DEFAULT 'official',
+            description TEXT,
+            isDefault TINYINT(1) DEFAULT 0,
+            defaultQrType VARCHAR(50) DEFAULT 'edms',
+            fgColor VARCHAR(50) DEFAULT '#0f172a',
+            bgColor VARCHAR(50) DEFAULT '#ffffff',
+            transparentBg TINYINT(1) DEFAULT 0,
+            qrMargin INT DEFAULT 2,
+            errorCorrection VARCHAR(10) DEFAULT 'H',
+            gradientType VARCHAR(50) DEFAULT 'solid',
+            gradientColor2 VARCHAR(50) DEFAULT '#2563eb',
+            gradientAngle INT DEFAULT 45,
+            logoType VARCHAR(50) DEFAULT 'garuda',
+            customLogoUrl LONGTEXT,
+            logoScale FLOAT DEFAULT 0.22,
+            frameType VARCHAR(50) DEFAULT 'top-bottom',
+            frameText VARCHAR(255) DEFAULT 'สแกนเพื่อตรวจสอบเอกสาร EDMS',
+            frameColor VARCHAR(50) DEFAULT '#0f172a',
+            frameTextColor VARCHAR(50) DEFAULT '#ffffff',
+            previewDataUrl LONGTEXT,
+            createdBy VARCHAR(255) DEFAULT 'ระบบมาตรฐาน',
+            createdAt VARCHAR(50),
+            updatedAt VARCHAR(50)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+        console.log('✅ Initialized enterprise_qr_templates table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating enterprise_qr_templates table:', e);
+      }
+
+      // Ensure infographics table exists with complete schema
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS infographics (
+            id VARCHAR(100) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            data LONGTEXT,
+            thumbnail LONGTEXT,
+            isPublic TINYINT(1) DEFAULT 1,
+            allowEmbed TINYINT(1) DEFAULT 1,
+            allowDownload TINYINT(1) DEFAULT 1,
+            accessPassword VARCHAR(255) DEFAULT NULL,
+            authorName VARCHAR(255) DEFAULT NULL,
+            authorDepartment VARCHAR(255) DEFAULT NULL,
+            description TEXT DEFAULT NULL,
+            tags VARCHAR(255) DEFAULT NULL,
+            viewCount INT DEFAULT 0,
+            downloadCount INT DEFAULT 0,
+            embedCount INT DEFAULT 0,
+            created_at VARCHAR(50),
+            updated_at VARCHAR(50)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+
+        // Migrate columns safely if table previously existed with basic columns
+        const colMigrations = [
+          'ALTER TABLE infographics ADD COLUMN isPublic TINYINT(1) DEFAULT 1',
+          'ALTER TABLE infographics ADD COLUMN allowEmbed TINYINT(1) DEFAULT 1',
+          'ALTER TABLE infographics ADD COLUMN allowDownload TINYINT(1) DEFAULT 1',
+          'ALTER TABLE infographics ADD COLUMN accessPassword VARCHAR(255) DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN authorName VARCHAR(255) DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN authorDepartment VARCHAR(255) DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN description TEXT DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN tags VARCHAR(255) DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN viewCount INT DEFAULT 0',
+          'ALTER TABLE infographics ADD COLUMN downloadCount INT DEFAULT 0',
+          'ALTER TABLE infographics ADD COLUMN embedCount INT DEFAULT 0',
+          'ALTER TABLE infographics MODIFY COLUMN data LONGTEXT',
+          'ALTER TABLE infographics MODIFY COLUMN thumbnail LONGTEXT'
+        ];
+        for (const sql of colMigrations) {
+          try {
+            await pool.query(sql);
+          } catch (_) {
+            // Column already exists or modified
+          }
+        }
+        console.log('✅ Initialized and verified infographics table in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating infographics table:', e);
+      }
+
       console.log('✅ Database schema verified and initialized successfully!');
     }
   } catch (err: any) {
@@ -2389,7 +2816,7 @@ async function setupDatabase() {
   }
 }
 
-// Check MySQL connection asynchronously at startup
+// Check MySQL connection asynchronously at startup. Enforce MySQL-only mode.
 pool.getConnection()
   .then((conn) => {
     conn.release();
@@ -2399,7 +2826,8 @@ pool.getConnection()
   })
   .catch((err) => {
     isMysqlOnline = false;
-    console.warn('⚠️ MySQL Connection Offline/Unavailable. Running application in robust standalone mode.', err.message);
+    console.error('❌ FATAL ERROR: MySQL Connection Offline/Unavailable! Local JSON database fallback is disabled. The application requires a working MySQL database to start.', err.message);
+    process.exit(1); // Enforce MySQL-only mode by exiting immediately
   });
 
 // System Logging Utility Function (MySQL + Local Fallback)
@@ -5351,6 +5779,420 @@ app.get("/api/qr-generator/analytics/:slug", async (req, res) => {
   }
 });
 
+// QR Templates API Endpoints (Full Options Support)
+app.get(["/api/qr-generator/templates", "/api/qr-generator/templates/"], async (req, res) => {
+  try {
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM enterprise_qr_templates ORDER BY isDefault DESC, createdAt DESC');
+        if (rows && Array.isArray(rows) && rows.length > 0) {
+          const parsed = rows.map((r: any) => ({
+            ...r,
+            isDefault: Boolean(r.isDefault),
+            transparentBg: Boolean(r.transparentBg)
+          }));
+          return res.json(parsed);
+        }
+      } catch (e: any) {
+        console.warn('MySQL fetch qr templates failed, falling back to localDb:', e.message);
+      }
+    }
+    const list = localDb.enterprise_qr_templates || [];
+    return res.json(list);
+  } catch (error: any) {
+    console.error('Failed to fetch QR templates:', error.message);
+    return res.status(500).json({ error: 'ไม่สามารถดึงข้อมูลแม่แบบ QR ได้' });
+  }
+});
+
+app.post(["/api/qr-generator/templates", "/api/qr-generator/templates/"], async (req, res) => {
+  try {
+    const tpl = req.body;
+    if (!tpl.name || !tpl.name.trim()) {
+      return res.status(400).json({ error: 'กรุณาระบุชื่อแม่แบบ' });
+    }
+    const id = tpl.id || `tpl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+
+    const newTemplate = {
+      id,
+      name: tpl.name.trim(),
+      category: tpl.category || 'official',
+      description: tpl.description || '',
+      isDefault: Boolean(tpl.isDefault),
+      defaultQrType: tpl.defaultQrType || 'edms',
+      fgColor: tpl.fgColor || '#0f172a',
+      bgColor: tpl.bgColor || '#ffffff',
+      transparentBg: Boolean(tpl.transparentBg),
+      qrMargin: Number(tpl.qrMargin ?? 2),
+      errorCorrection: tpl.errorCorrection || 'H',
+      gradientType: tpl.gradientType || 'solid',
+      gradientColor2: tpl.gradientColor2 || '#2563eb',
+      gradientAngle: Number(tpl.gradientAngle ?? 45),
+      logoType: tpl.logoType || 'none',
+      customLogoUrl: tpl.customLogoUrl || '',
+      logoScale: Number(tpl.logoScale ?? 0.22),
+      frameType: tpl.frameType || 'none',
+      frameText: tpl.frameText || '',
+      frameColor: tpl.frameColor || '#0f172a',
+      frameTextColor: tpl.frameTextColor || '#ffffff',
+      previewDataUrl: tpl.previewDataUrl || '',
+      createdBy: tpl.createdBy || 'ผู้ใช้',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    if (!localDb.enterprise_qr_templates) {
+      localDb.enterprise_qr_templates = [];
+    }
+
+    // If new template is marked default, unmark others
+    if (newTemplate.isDefault) {
+      localDb.enterprise_qr_templates.forEach((t: any) => { t.isDefault = false; });
+      if (isMysqlOnline) {
+        try {
+          await pool.query('UPDATE enterprise_qr_templates SET isDefault = 0');
+        } catch (_) {}
+      }
+    }
+
+    localDb.enterprise_qr_templates.unshift(newTemplate);
+    saveLocalDb();
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query(`
+          INSERT INTO enterprise_qr_templates 
+          (id, name, category, description, isDefault, defaultQrType, fgColor, bgColor, transparentBg, qrMargin, errorCorrection, gradientType, gradientColor2, gradientAngle, logoType, customLogoUrl, logoScale, frameType, frameText, frameColor, frameTextColor, previewDataUrl, createdBy, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          newTemplate.id, newTemplate.name, newTemplate.category, newTemplate.description, newTemplate.isDefault ? 1 : 0, newTemplate.defaultQrType,
+          newTemplate.fgColor, newTemplate.bgColor, newTemplate.transparentBg ? 1 : 0, newTemplate.qrMargin, newTemplate.errorCorrection,
+          newTemplate.gradientType, newTemplate.gradientColor2, newTemplate.gradientAngle, newTemplate.logoType, newTemplate.customLogoUrl,
+          newTemplate.logoScale, newTemplate.frameType, newTemplate.frameText, newTemplate.frameColor, newTemplate.frameTextColor,
+          newTemplate.previewDataUrl, newTemplate.createdBy, newTemplate.createdAt, newTemplate.updatedAt
+        ]);
+      } catch (err: any) {
+        console.warn('MySQL insert template error:', err.message);
+      }
+    }
+
+    return res.json({ success: true, template: newTemplate });
+  } catch (error: any) {
+    console.error('Failed to create QR template:', error.message);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกแม่แบบ: ' + error.message });
+  }
+});
+
+app.put("/api/qr-generator/templates/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const tpl = req.body;
+    const updatedAt = new Date().toISOString();
+
+    const idx = (localDb.enterprise_qr_templates || []).findIndex((t: any) => t.id === id);
+    if (idx !== -1) {
+      if (tpl.isDefault) {
+        localDb.enterprise_qr_templates.forEach((t: any) => { t.isDefault = false; });
+      }
+      localDb.enterprise_qr_templates[idx] = {
+        ...localDb.enterprise_qr_templates[idx],
+        ...tpl,
+        id,
+        updatedAt
+      };
+      saveLocalDb();
+    }
+
+    if (isMysqlOnline) {
+      try {
+        if (tpl.isDefault) {
+          await pool.query('UPDATE enterprise_qr_templates SET isDefault = 0');
+        }
+        await pool.query(`
+          UPDATE enterprise_qr_templates SET
+            name = COALESCE(?, name),
+            category = COALESCE(?, category),
+            description = COALESCE(?, description),
+            isDefault = COALESCE(?, isDefault),
+            defaultQrType = COALESCE(?, defaultQrType),
+            fgColor = COALESCE(?, fgColor),
+            bgColor = COALESCE(?, bgColor),
+            transparentBg = COALESCE(?, transparentBg),
+            qrMargin = COALESCE(?, qrMargin),
+            errorCorrection = COALESCE(?, errorCorrection),
+            gradientType = COALESCE(?, gradientType),
+            gradientColor2 = COALESCE(?, gradientColor2),
+            gradientAngle = COALESCE(?, gradientAngle),
+            logoType = COALESCE(?, logoType),
+            customLogoUrl = COALESCE(?, customLogoUrl),
+            logoScale = COALESCE(?, logoScale),
+            frameType = COALESCE(?, frameType),
+            frameText = COALESCE(?, frameText),
+            frameColor = COALESCE(?, frameColor),
+            frameTextColor = COALESCE(?, frameTextColor),
+            previewDataUrl = COALESCE(?, previewDataUrl),
+            updatedAt = ?
+          WHERE id = ?
+        `, [
+          tpl.name, tpl.category, tpl.description, tpl.isDefault !== undefined ? (tpl.isDefault ? 1 : 0) : null,
+          tpl.defaultQrType, tpl.fgColor, tpl.bgColor, tpl.transparentBg !== undefined ? (tpl.transparentBg ? 1 : 0) : null,
+          tpl.qrMargin, tpl.errorCorrection, tpl.gradientType, tpl.gradientColor2, tpl.gradientAngle,
+          tpl.logoType, tpl.customLogoUrl, tpl.logoScale, tpl.frameType, tpl.frameText, tpl.frameColor,
+          tpl.frameTextColor, tpl.previewDataUrl, updatedAt, id
+        ]);
+      } catch (err: any) {
+        console.warn('MySQL update template error:', err.message);
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Failed to update QR template:', error.message);
+    return res.status(500).json({ error: 'ไม่สามารถอัปเดตแม่แบบได้' });
+  }
+});
+
+app.delete("/api/qr-generator/templates/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    localDb.enterprise_qr_templates = (localDb.enterprise_qr_templates || []).filter((t: any) => t.id !== id);
+    saveLocalDb();
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query('DELETE FROM enterprise_qr_templates WHERE id = ?', [id]);
+      } catch (err: any) {
+        console.warn('MySQL delete template error:', err.message);
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Failed to delete QR template:', error.message);
+    return res.status(500).json({ error: 'ไม่สามารถลบแม่แบบได้' });
+  }
+});
+
+// Reset / Seed Official Presets
+app.post("/api/qr-generator/templates/reset", async (req, res) => {
+  try {
+    const defaultTemplates = [
+      {
+        id: 'tpl_official_garuda',
+        name: 'ตราครุฑทางการ - กรม ปภ.',
+        category: 'official',
+        description: 'แม่แบบมาตรฐานหนังสือราชการ กรมป้องกันและบรรเทาสาธารณภัย สีกรมท่าทางการ พร้อมกรอบหัว-ท้าย',
+        isDefault: true,
+        defaultQrType: 'edms',
+        fgColor: '#0f172a',
+        bgColor: '#ffffff',
+        transparentBg: false,
+        qrMargin: 2,
+        errorCorrection: 'H',
+        gradientType: 'solid',
+        gradientColor2: '#2563eb',
+        gradientAngle: 45,
+        logoType: 'garuda',
+        customLogoUrl: '',
+        logoScale: 0.22,
+        frameType: 'top-bottom',
+        frameText: 'สแกนเพื่อตรวจสอบเอกสาร EDMS',
+        frameColor: '#0f172a',
+        frameTextColor: '#ffffff',
+        createdBy: 'ระบบมาตรฐาน',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tpl_urgent_red',
+        name: 'ด่วนที่สุด - ระเบียบ ปภ.',
+        category: 'urgent',
+        description: 'แม่แบบเอกสารด่วนที่สุด / หนังสือเวียนเร่งด่วน กรอบสีแดงเด่นชัด ตราครุฑกลาง',
+        isDefault: false,
+        defaultQrType: 'edms',
+        fgColor: '#991b1b',
+        bgColor: '#fef2f2',
+        transparentBg: false,
+        qrMargin: 2,
+        errorCorrection: 'H',
+        gradientType: 'solid',
+        gradientColor2: '#ef4444',
+        gradientAngle: 45,
+        logoType: 'garuda',
+        customLogoUrl: '',
+        logoScale: 0.24,
+        frameType: 'top-bottom',
+        frameText: 'หนังสือราชการด่วนที่สุด - สแกนอ่านฉบับเต็ม',
+        frameColor: '#dc2626',
+        frameTextColor: '#ffffff',
+        createdBy: 'ระบบมาตรฐาน',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tpl_public_relations',
+        name: 'ประชาสัมพันธ์และสื่อดิจิทัล',
+        category: 'public',
+        description: 'แม่แบบไล่เฉดสีฟ้าคราม เหมาะสำหรับโปสเตอร์ ประชาสัมพันธ์ข่าวสาร และสื่อสังคมออนไลน์',
+        isDefault: false,
+        defaultQrType: 'url',
+        fgColor: '#075985',
+        bgColor: '#f0f9ff',
+        transparentBg: false,
+        qrMargin: 2,
+        errorCorrection: 'Q',
+        gradientType: 'linear',
+        gradientColor2: '#06b6d4',
+        gradientAngle: 45,
+        logoType: 'province',
+        customLogoUrl: '',
+        logoScale: 0.22,
+        frameType: 'card',
+        frameText: 'สแกนรับข้อมูลข่าวสารสำนักงาน ปภ.',
+        frameColor: '#0284c7',
+        frameTextColor: '#ffffff',
+        createdBy: 'ระบบมาตรฐาน',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tpl_vcard_officer',
+        name: 'นามบัตรข้าราชการมาตรฐาน (vCard)',
+        category: 'vcard',
+        description: 'แม่แบบนามบัตรข้าราชการ โทนสีเขียวมรกตราชการ สแกนแล้วบันทึก Contact เข้ามือถือทันที',
+        isDefault: false,
+        defaultQrType: 'vcard',
+        fgColor: '#064e3b',
+        bgColor: '#f0fdf4',
+        transparentBg: false,
+        qrMargin: 2,
+        errorCorrection: 'H',
+        gradientType: 'linear',
+        gradientColor2: '#10b981',
+        gradientAngle: 60,
+        logoType: 'ddpm',
+        customLogoUrl: '',
+        logoScale: 0.22,
+        frameType: 'badge',
+        frameText: 'สแกนบันทึกข้อมูลติดต่อข้าราชการ',
+        frameColor: '#059669',
+        frameTextColor: '#ffffff',
+        createdBy: 'ระบบมาตรฐาน',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tpl_wifi_guest',
+        name: 'สติกเกอร์ Wi-Fi ผู้มาติดต่อราชการ',
+        category: 'wifi',
+        description: 'แม่แบบจุดบริการ Wi-Fi ประชาชน และผู้มาติดต่อ สแกนเชื่อมต่ออินเทอร์เน็ตอัตโนมัติ',
+        isDefault: false,
+        defaultQrType: 'wifi',
+        fgColor: '#1e3a8a',
+        bgColor: '#eff6ff',
+        transparentBg: false,
+        qrMargin: 2,
+        errorCorrection: 'M',
+        gradientType: 'solid',
+        gradientColor2: '#3b82f6',
+        gradientAngle: 45,
+        logoType: 'none',
+        customLogoUrl: '',
+        logoScale: 0.2,
+        frameType: 'badge',
+        frameText: 'สแกนเชื่อมต่อ Wi-Fi สำนักงาน',
+        frameColor: '#2563eb',
+        frameTextColor: '#ffffff',
+        createdBy: 'ระบบมาตรฐาน',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tpl_finance_promptpay',
+        name: 'พร้อมเพย์รับชำระค่าธรรมเนียม',
+        category: 'finance',
+        description: 'แม่แบบชำระค่าธรรมเนียมราชการ ค่าบริการ และงานการเงินภาครัฐด้วย PromptPay QR',
+        isDefault: false,
+        defaultQrType: 'promptpay',
+        fgColor: '#002d62',
+        bgColor: '#ffffff',
+        transparentBg: false,
+        qrMargin: 2,
+        errorCorrection: 'Q',
+        gradientType: 'solid',
+        gradientColor2: '#0284c7',
+        gradientAngle: 45,
+        logoType: 'none',
+        customLogoUrl: '',
+        logoScale: 0.2,
+        frameType: 'card',
+        frameText: 'สแกนชำระเงินผ่าน PromptPay',
+        frameColor: '#002d62',
+        frameTextColor: '#ffffff',
+        createdBy: 'ระบบมาตรฐาน',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 'tpl_minimal_clean',
+        name: 'มินิมอล โมเดิร์น คมชัดสูง',
+        category: 'custom',
+        description: 'แม่แบบคลีนมินิมอล ไร้กรอบ ขอบชิด เหมาะสำหรับแปะลงเอกสารทุกประเภท',
+        isDefault: false,
+        defaultQrType: 'edms',
+        fgColor: '#000000',
+        bgColor: '#ffffff',
+        transparentBg: false,
+        qrMargin: 1,
+        errorCorrection: 'M',
+        gradientType: 'solid',
+        gradientColor2: '#3f3f46',
+        gradientAngle: 0,
+        logoType: 'garuda',
+        customLogoUrl: '',
+        logoScale: 0.2,
+        frameType: 'none',
+        frameText: '',
+        frameColor: '#000000',
+        frameTextColor: '#ffffff',
+        createdBy: 'ระบบมาตรฐาน',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ];
+
+    localDb.enterprise_qr_templates = defaultTemplates;
+    saveLocalDb();
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query('DELETE FROM enterprise_qr_templates');
+        for (const t of defaultTemplates) {
+          await pool.query(`
+            INSERT INTO enterprise_qr_templates 
+            (id, name, category, description, isDefault, defaultQrType, fgColor, bgColor, transparentBg, qrMargin, errorCorrection, gradientType, gradientColor2, gradientAngle, logoType, customLogoUrl, logoScale, frameType, frameText, frameColor, frameTextColor, previewDataUrl, createdBy, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            t.id, t.name, t.category, t.description, t.isDefault ? 1 : 0, t.defaultQrType,
+            t.fgColor, t.bgColor, t.transparentBg ? 1 : 0, t.qrMargin, t.errorCorrection,
+            t.gradientType, t.gradientColor2, t.gradientAngle, t.logoType, t.customLogoUrl,
+            t.logoScale, t.frameType, t.frameText, t.frameColor, t.frameTextColor,
+            '', t.createdBy, t.createdAt, t.updatedAt
+          ]);
+        }
+      } catch (err: any) {
+        console.warn('MySQL reset templates error:', err.message);
+      }
+    }
+
+    return res.json({ success: true, templates: defaultTemplates });
+  } catch (error: any) {
+    console.error('Failed to reset templates:', error.message);
+    return res.status(500).json({ error: 'ไม่สามารถรีเซ็ตแม่แบบได้' });
+  }
+});
+
 
 // 2. Users API Endpoints
 app.get("/api/users", async (req, res) => {
@@ -7097,6 +7939,8 @@ app.post('/api/logs', async (req, res) => {
   res.json({ success: true });
 });
 
+
+
 app.delete('/api/logs', async (req, res) => {
   const ip = getClientIp(req);
   const username = req.body?.username || req.query?.username || 'ผู้ดูแลระบบ';
@@ -7115,6 +7959,21 @@ app.delete('/api/logs', async (req, res) => {
       console.error('MySQL Logs Clear error (TRUNCATE):', err.message);
       return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการล้างประวัติระบบ' });
     }
+  }
+});
+
+app.delete('/api/logs/:id', async (req, res) => {
+  const ip = getClientIp(req);
+  const username = req.body?.username || req.query?.username || 'ผู้ดูแลระบบ';
+  const logId = req.params.id;
+
+  try {
+    await pool.query('DELETE FROM system_logs WHERE id = ?', [logId]);
+    await addSystemLog('DELETE_LOG', `ลบรายการประวัติการใช้งานระบบ ID: ${logId}`, username, ip);
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('MySQL Logs Delete specific error:', error.message);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการลบรายการประวัติ' });
   }
 });
 
@@ -9099,11 +9958,19 @@ ${JSON.stringify(docsSummaryContext, null, 2)}
 
 async function startServer() {
 
-// Infographics API
+// Infographics API (Enterprise & Public Delivery Engine)
 app.get('/api/infographics', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT id, name, thumbnail, created_at, updated_at FROM infographics ORDER BY updated_at DESC');
-    res.json(rows);
+    const [rows]: any = await pool.query(`
+      SELECT 
+        id, name, thumbnail, isPublic, allowEmbed, allowDownload, 
+        CASE WHEN accessPassword IS NOT NULL AND accessPassword != '' THEN 1 ELSE 0 END AS isProtected,
+        authorName, authorDepartment, description, tags, viewCount, downloadCount, embedCount, 
+        created_at, updated_at 
+      FROM infographics 
+      ORDER BY updated_at DESC, created_at DESC
+    `);
+    res.json(rows || []);
   } catch (error) {
     console.error('Error fetching infographics:', error);
     res.status(500).json({ error: 'Failed to fetch infographics' });
@@ -9113,8 +9980,15 @@ app.get('/api/infographics', async (req, res) => {
 app.get('/api/infographics/:id', async (req, res) => {
   try {
     const [rows]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json(rows[0]);
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const row = rows[0];
+    res.json({
+      ...row,
+      isPublic: Boolean(row.isPublic),
+      allowEmbed: Boolean(row.allowEmbed),
+      allowDownload: Boolean(row.allowDownload),
+      isProtected: Boolean(row.accessPassword && row.accessPassword.trim())
+    });
   } catch (error) {
     console.error('Error fetching infographic:', error);
     res.status(500).json({ error: 'Failed to fetch infographic' });
@@ -9123,15 +9997,37 @@ app.get('/api/infographics/:id', async (req, res) => {
 
 app.post('/api/infographics', async (req, res) => {
   try {
-    const { name, data, thumbnail } = req.body;
+    const { 
+      name, data, thumbnail, 
+      isPublic = 1, allowEmbed = 1, allowDownload = 1, 
+      accessPassword = null, authorName = null, authorDepartment = null, 
+      description = null, tags = null 
+    } = req.body;
+    
     const id = `info_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const nowIso = new Date().toISOString();
     
     await pool.query(
-      'INSERT INTO infographics (id, name, data, thumbnail) VALUES (?, ?, ?, ?)',
-      [id, name, data, thumbnail]
+      `INSERT INTO infographics (
+        id, name, data, thumbnail, isPublic, allowEmbed, allowDownload, 
+        accessPassword, authorName, authorDepartment, description, tags, 
+        viewCount, downloadCount, embedCount, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
+      [
+        id, name || 'Infographic', data, thumbnail, 
+        isPublic ? 1 : 0, allowEmbed ? 1 : 0, allowDownload ? 1 : 0,
+        accessPassword || null, authorName || null, authorDepartment || null,
+        description || null, tags || null, nowIso, nowIso
+      ]
     );
     
-    res.json({ id, name, data, thumbnail });
+    res.json({ 
+      id, name, thumbnail, 
+      isPublic: Boolean(isPublic), allowEmbed: Boolean(allowEmbed), allowDownload: Boolean(allowDownload),
+      isProtected: Boolean(accessPassword && accessPassword.trim()),
+      authorName, authorDepartment, description, tags,
+      created_at: nowIso, updated_at: nowIso 
+    });
   } catch (error) {
     console.error('Error creating infographic:', error);
     res.status(500).json({ error: 'Failed to create infographic' });
@@ -9140,14 +10036,63 @@ app.post('/api/infographics', async (req, res) => {
 
 app.put('/api/infographics/:id', async (req, res) => {
   try {
-    const { name, data, thumbnail } = req.body;
+    const { 
+      name, data, thumbnail, 
+      isPublic, allowEmbed, allowDownload, 
+      accessPassword, authorName, authorDepartment, 
+      description, tags 
+    } = req.body;
     
+    const nowIso = new Date().toISOString();
+
+    // Check existing
+    const [existing]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [req.params.id]);
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const current = existing[0];
+    const finalName = name !== undefined ? name : current.name;
+    const finalData = data !== undefined ? data : current.data;
+    const finalThumbnail = thumbnail !== undefined ? thumbnail : current.thumbnail;
+    const finalIsPublic = isPublic !== undefined ? (isPublic ? 1 : 0) : current.isPublic;
+    const finalAllowEmbed = allowEmbed !== undefined ? (allowEmbed ? 1 : 0) : current.allowEmbed;
+    const finalAllowDownload = allowDownload !== undefined ? (allowDownload ? 1 : 0) : current.allowDownload;
+    const finalAccessPassword = accessPassword !== undefined ? (accessPassword ? String(accessPassword).trim() : null) : current.accessPassword;
+    const finalAuthorName = authorName !== undefined ? authorName : current.authorName;
+    const finalAuthorDepartment = authorDepartment !== undefined ? authorDepartment : current.authorDepartment;
+    const finalDescription = description !== undefined ? description : current.description;
+    const finalTags = tags !== undefined ? tags : current.tags;
+
     await pool.query(
-      'UPDATE infographics SET name = ?, data = ?, thumbnail = ? WHERE id = ?',
-      [name, data, thumbnail, req.params.id]
+      `UPDATE infographics SET 
+        name = ?, data = ?, thumbnail = ?, 
+        isPublic = ?, allowEmbed = ?, allowDownload = ?, 
+        accessPassword = ?, authorName = ?, authorDepartment = ?, 
+        description = ?, tags = ?, updated_at = ? 
+      WHERE id = ?`,
+      [
+        finalName, finalData, finalThumbnail, 
+        finalIsPublic, finalAllowEmbed, finalAllowDownload, 
+        finalAccessPassword, finalAuthorName, finalAuthorDepartment, 
+        finalDescription, finalTags, nowIso, req.params.id
+      ]
     );
     
-    res.json({ id: req.params.id, name, data, thumbnail });
+    res.json({ 
+      id: req.params.id, 
+      name: finalName, 
+      thumbnail: finalThumbnail,
+      isPublic: Boolean(finalIsPublic), 
+      allowEmbed: Boolean(finalAllowEmbed), 
+      allowDownload: Boolean(finalAllowDownload),
+      isProtected: Boolean(finalAccessPassword && finalAccessPassword.trim()),
+      authorName: finalAuthorName, 
+      authorDepartment: finalAuthorDepartment,
+      description: finalDescription, 
+      tags: finalTags,
+      updated_at: nowIso
+    });
   } catch (error) {
     console.error('Error updating infographic:', error);
     res.status(500).json({ error: 'Failed to update infographic' });
@@ -9163,6 +10108,678 @@ app.delete('/api/infographics/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete infographic' });
   }
 });
+
+// Public Infographics Delivery Endpoints
+app.get('/api/public/infographics/:id', async (req, res) => {
+  try {
+    const rawId = req.params.id || '';
+    const id = decodeURIComponent(rawId).trim().replace(/\.json$/i, '');
+    
+    if (!id) {
+      return res.status(400).json({ error: 'กรุณาระบุรหัสสื่อ Infographic' });
+    }
+
+    // 1. First try exact match by id
+    let [rows]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [id]);
+    
+    // 2. If not found, try fuzzy match
+    if (!rows || rows.length === 0) {
+      const [fuzzyRows]: any = await pool.query('SELECT * FROM infographics WHERE id LIKE ? OR id LIKE ? LIMIT 1', [`%${id}%`, `${id}%`]);
+      if (fuzzyRows && fuzzyRows.length > 0) {
+        rows = fuzzyRows;
+      }
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ 
+        error: 'ไม่พบสื่อ Infographic นี้ในระบบ หรืออาจยังไม่ได้เปิดเผยแพร่แบบสาธารณะ กรุณาตรวจสอบรหัสหรือเปิดแชร์ใหม่จากหน้าออกแบบ' 
+      });
+    }
+
+    const row = rows[0];
+
+    // Check if public access is enabled (0 or false means explicitly private)
+    if (row.isPublic === 0 || row.isPublic === false) {
+      return res.status(403).json({ 
+        error: 'สื่อ Infographic นี้ถูกปิดการเข้าถึงสาธารณะโดยเจ้าของเอกสาร กรุณาติดต่อผู้จัดทำเพื่อเปิดสิทธิ์การเข้าชม' 
+      });
+    }
+
+    // Increment view count asynchronously
+    pool.query('UPDATE infographics SET viewCount = COALESCE(viewCount, 0) + 1 WHERE id = ?', [row.id]).catch(() => {});
+
+    // Check password protection
+    const hasPassword = Boolean(row.accessPassword && row.accessPassword.trim());
+    const providedPass = req.headers['x-infographic-password'] || req.query.passcode;
+
+    if (hasPassword && (!providedPass || String(providedPass).trim() !== String(row.accessPassword).trim())) {
+      // Protected: return metadata only without full design data
+      return res.json({
+        id: row.id,
+        name: row.name,
+        thumbnail: row.thumbnail, // Thumbnail may be shown or blurred
+        isProtected: true,
+        isPublic: true,
+        allowEmbed: Boolean(row.allowEmbed),
+        allowDownload: Boolean(row.allowDownload),
+        authorName: row.authorName,
+        authorDepartment: row.authorDepartment,
+        description: row.description,
+        tags: row.tags,
+        viewCount: (row.viewCount || 0) + 1,
+        downloadCount: row.downloadCount || 0,
+        embedCount: row.embedCount || 0,
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      });
+    }
+
+    // Unlocked or public
+    return res.json({
+      id: row.id,
+      name: row.name,
+      data: row.data,
+      thumbnail: row.thumbnail,
+      isProtected: false,
+      isPublic: true,
+      allowEmbed: Boolean(row.allowEmbed),
+      allowDownload: Boolean(row.allowDownload),
+      authorName: row.authorName,
+      authorDepartment: row.authorDepartment,
+      description: row.description,
+      tags: row.tags,
+      viewCount: (row.viewCount || 0) + 1,
+      downloadCount: row.downloadCount || 0,
+      embedCount: row.embedCount || 0,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    });
+  } catch (error: any) {
+    console.error('Error in public infographic endpoint:', error);
+    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการโหลดข้อมูล Infographic กรุณาลองใหม่อีกครั้ง' });
+  }
+});
+
+// Verify Passcode for Protected Infographic
+app.post('/api/public/infographics/:id/verify-passcode', async (req, res) => {
+  try {
+    const rawId = req.params.id || '';
+    const id = decodeURIComponent(rawId).trim().replace(/\.json$/i, '');
+    const { passcode } = req.body;
+
+    let [rows]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [id]);
+    if (!rows || rows.length === 0) {
+      const [fuzzyRows]: any = await pool.query('SELECT * FROM infographics WHERE id LIKE ? LIMIT 1', [`%${id}%`]);
+      if (fuzzyRows && fuzzyRows.length > 0) rows = fuzzyRows;
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'ไม่พบสื่อ Infographic ในระบบ' });
+    }
+
+    const row = rows[0];
+    if (!row.accessPassword || !row.accessPassword.trim()) {
+      return res.json({ success: true, data: row.data });
+    }
+
+    if (String(passcode || '').trim() === String(row.accessPassword).trim()) {
+      return res.json({ 
+        success: true, 
+        data: row.data,
+        message: 'ปลดล็อกการเข้าถึงสำเร็จ' 
+      });
+    } else {
+      return res.status(401).json({ success: false, error: 'รหัสผ่าน (Passcode) ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง' });
+    }
+  } catch (error: any) {
+    console.error('Error verifying infographic passcode:', error);
+    res.status(500).json({ success: false, error: 'เกิดข้อผิดพลาดในการตรวจสอบรหัสผ่าน' });
+  }
+});
+
+// Track Embed Impression
+app.post('/api/public/infographics/:id/track-embed', async (req, res) => {
+  try {
+    await pool.query('UPDATE infographics SET embedCount = COALESCE(embedCount, 0) + 1 WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (_) {
+    res.json({ success: false });
+  }
+});
+
+// Track Download Count
+app.post('/api/public/infographics/:id/track-download', async (req, res) => {
+  try {
+    await pool.query('UPDATE infographics SET downloadCount = COALESCE(downloadCount, 0) + 1 WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (_) {
+    res.json({ success: false });
+  }
+});
+
+// Direct Image Output Endpoint
+app.get('/api/public/infographics/:id/image', async (req, res) => {
+  try {
+    const [rows]: any = await pool.query('SELECT thumbnail, name, isPublic, accessPassword FROM infographics WHERE id = ?', [req.params.id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).send('Not Found');
+    }
+
+    const row = rows[0];
+    if (row.isPublic === 0) {
+      return res.status(403).send('Forbidden: Public access is disabled');
+    }
+
+    if (row.accessPassword && row.accessPassword.trim()) {
+      const pass = req.query.passcode || req.headers['x-infographic-password'];
+      if (String(pass || '').trim() !== String(row.accessPassword).trim()) {
+        return res.status(401).send('Unauthorized: Password protected');
+      }
+    }
+
+    if (!row.thumbnail || !row.thumbnail.startsWith('data:image/')) {
+      return res.status(404).send('Image data not found');
+    }
+
+    const matches = row.thumbnail.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      return res.status(400).send('Invalid image format');
+    }
+
+    const mimeType = matches[1];
+    const imageBuffer = Buffer.from(matches[2], 'base64');
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Length', imageBuffer.length);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.end(imageBuffer);
+  } catch (err: any) {
+    console.error('Error serving infographic image:', err);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+// Standalone Interactive HTML Export Endpoint
+app.get('/api/public/infographics/:id/export-html', async (req, res) => {
+  try {
+    const [rows]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [req.params.id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).send('Not Found');
+    }
+
+    const item = rows[0];
+    const safeTitle = (item.name || 'Infographic').replace(/[<>&"]/g, '');
+    const imgData = item.thumbnail || '';
+    const author = item.authorName || 'หน่วยงานราชการ';
+    const dept = item.authorDepartment || 'ระบบสารบรรณอิเล็กทรอนิกส์';
+    const desc = item.description || '';
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${safeTitle} - Infographic Presentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&family=Noto+Serif+Thai:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans Thai', sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+    header {
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .badge {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    h1 { font-family: 'Noto Serif Thai', serif; font-size: 16px; font-weight: 700; color: #fff; }
+    .author-info { font-size: 12px; color: #94a3b8; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    button {
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    button:hover { background: #334155; border-color: rgba(255, 255, 255, 0.3); }
+    button.primary { background: #2563eb; color: #fff; border-color: #3b82f6; }
+    button.primary:hover { background: #1d4ed8; }
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      position: relative;
+    }
+    .image-container {
+      position: relative;
+      max-width: 96%;
+      max-height: calc(100vh - 140px);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #020617;
+      transition: transform 0.2s ease-out;
+      cursor: grab;
+    }
+    .image-container:active { cursor: grabbing; }
+    .image-container img {
+      display: block;
+      max-width: 100%;
+      max-height: calc(100vh - 140px);
+      object-contain: contain;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    .floating-controls {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 9999px;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      z-index: 40;
+    }
+    .floating-controls button { border-radius: 9999px; padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <span class="badge">EDMS Infographics</span>
+      <div>
+        <h1>${safeTitle}</h1>
+        <div class="author-info">${author} • ${dept}</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button onclick="window.print()">🖨️ พิมพ์</button>
+      <button class="primary" onclick="downloadImage()">⬇️ ดาวน์โหลดรูปภาพ</button>
+    </div>
+  </header>
+  <main>
+    <div class="image-container" id="container">
+      <img src="${imgData}" id="mainImg" alt="${safeTitle}">
+    </div>
+    <div class="floating-controls">
+      <button onclick="zoomOut()">🔍 - ย่อ</button>
+      <button onclick="resetZoom()" id="zoomLabel">100%</button>
+      <button onclick="zoomIn()">🔍 + ขยาย</button>
+      <button onclick="toggleFullscreen()">⛶ เต็มจอ</button>
+    </div>
+  </main>
+  <script>
+    let scale = 1;
+    const container = document.getElementById('container');
+    const zoomLabel = document.getElementById('zoomLabel');
+    function updateZoom() {
+      container.style.transform = 'scale(' + scale + ')';
+      zoomLabel.textContent = Math.round(scale * 100) + '%';
+    }
+    function zoomIn() { scale = Math.min(scale + 0.2, 3); updateZoom(); }
+    function zoomOut() { scale = Math.max(scale - 0.2, 0.4); updateZoom(); }
+    function resetZoom() { scale = 1; updateZoom(); }
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) { document.documentElement.requestFullscreen(); }
+      else { document.exitFullscreen(); }
+    }
+    function downloadImage() {
+      const a = document.createElement('a');
+      a.href = '${imgData}';
+      a.download = '${safeTitle.replace(/[/\\?%*:|"<>]/g, '_')}.png';
+      a.click();
+    }
+  </script>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeTitle)}.html"`);
+    return res.send(htmlContent);
+  } catch (err: any) {
+    console.error('Error exporting standalone HTML:', err);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+app.post('/api/ai/infographics', async (req, res) => {
+  try {
+    const { prompt, user } = req.body;
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json({ success: false, error: 'กรุณาระบุหัวข้อที่ต้องการให้ออกแบบ' });
+    }
+
+    const cleanPrompt = prompt.trim();
+
+    // Fetch Gemini API Key
+    let apiKey = '';
+    try {
+      const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+      if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+        apiKey = String(stRows[0].geminiApiKey).trim();
+      }
+    } catch (e) {
+      // ignore
+    }
+    if (!apiKey && typeof localDb !== 'undefined' && localDb && localDb.settings && localDb.settings[0] && localDb.settings[0].geminiApiKey) {
+      apiKey = String(localDb.settings[0].geminiApiKey).trim();
+    }
+    if (!apiKey) {
+      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'ไม่พบรหัสคีย์ (Gemini API Key) กรุณาตั้งค่ารหัสคีย์ในเมนู "ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน" หรือตั้งค่าในระบบก่อน' 
+      });
+    }
+
+    const modelsToTry = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
+    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
+    const refererCandidates = [
+      '',
+      'https://aistudio.google.com/',
+      'https://ai.studio/',
+      'https://google.com/',
+      'https://developer.google.com/',
+      rawReferer,
+      rawOrigin
+    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
+
+    let generatedData = null;
+
+    refLoop: for (const refHeader of refererCandidates) {
+      const headersConfig: Record<string, string> = {
+        'User-Agent': 'aistudio-build'
+      };
+      if (refHeader) {
+        headersConfig['Referer'] = refHeader;
+        headersConfig['Referrer'] = refHeader;
+      }
+
+      const client = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: headersConfig }
+      });
+
+      for (const modelName of modelsToTry) {
+        try {
+          const response = await client.models.generateContent({
+            model: modelName,
+            contents: `กรุณาออกแบบเนื้อหา โครงสร้างคู่สี และข้อมูลสถิติของภาพ Infographic ในหัวข้อ: "${cleanPrompt}"
+ให้ออกมาเป็นโครงสร้างภาษาไทยที่สวยงาม กระชับ และเหมาะสมกับหน่วยงานราชการหรือหัวข้อดังกล่าว`,
+            config: {
+              systemInstruction: `คุณคือ "Infographic AI Design Assistant" ที่ช่วยคิดเนื้อหาและคู่สีสำหรับการออกแบบภาพอินโฟกราฟิก
+กรุณาตอบกลับในรูปแบบ JSON ตามโครงสร้าง (responseSchema) ที่กำหนดให้เท่านั้น ห้ามมีคำเกริ่นนำหรือ markdown ล้อมรอบนอกเหนือจากโครงสร้าง JSON`,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING, description: 'หัวข้อหลักสั้นๆ เด่นๆ (Main Title)' },
+                  subtitle: { type: Type.STRING, description: 'คำโปรยย่อยหรือคำอธิบายประกอบหัวข้อหลัก (Subtitle)' },
+                  designAdvice: { type: Type.STRING, description: 'คำแนะนำสั้นๆ ในการออกแบบภาพ เช่น รูปแบบ ฟอนต์ หรืออารมณ์ของภาพ' },
+                  colors: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: 'คู่สีที่แนะนำ 4-5 สี (HEX Codes เช่น #1e3a8a, #3b82f6) ที่เข้ากับหัวข้อดังกล่าวอย่างโดดเด่นและสบายตา'
+                  },
+                  textSections: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        heading: { type: Type.STRING, description: 'หัวข้อย่อยสั้นกระชับ (เช่น "ขั้นตอนที่ 1", "การเตรียมพร้อม")' },
+                        body: { type: Type.STRING, description: 'รายละเอียดเนื้อหาที่กระชับ ไม่เกิน 1-2 ประโยค เพื่อให้อ่านง่ายบนภาพ' }
+                      },
+                      required: ['heading', 'body']
+                    },
+                    description: 'หัวข้อย่อยและเนื้อหาประกอบ 3-4 ส่วน'
+                  },
+                  stats: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        value: { type: Type.STRING, description: 'ตัวเลขสถิติหรือหน่วยเปอร์เซ็นต์เด่นๆ (เช่น "95%", "24 ชม.", "1,200 ราย")' },
+                        label: { type: Type.STRING, description: 'คำอธิบายสถิติดังกล่าว (เช่น "ความพึงพอใจ", "ระยะเวลาดำเนินการ")' },
+                        color: { type: Type.STRING, description: 'รหัสสีที่แนะนำสำหรับการเน้นตัวเลขสถิตินี้ เช่น #ef4444' }
+                      },
+                      required: ['value', 'label', 'color']
+                    },
+                    description: 'ตัวเลขสถิติหรือดัชนีชี้วัดเด่นๆ 2-3 ค่า'
+                  }
+                },
+                required: ['title', 'subtitle', 'colors', 'textSections', 'stats', 'designAdvice']
+              }
+            }
+          });
+
+          if (response && response.text) {
+            generatedData = JSON.parse(response.text.trim());
+            break refLoop;
+          }
+        } catch (err: any) {
+          console.warn(`Error generating infographics with model ${modelName} using referer ${refHeader}:`, err.message);
+        }
+      }
+    }
+
+    if (!generatedData) {
+      throw new Error('ระบบ AI ไม่สามารถประมวลผลคำขอได้ในขณะนี้ กรุณาตรวจสอบการตั้งค่าคีย์หรือลองใหม่อีกครั้ง');
+    }
+
+    return res.json({ success: true, data: generatedData });
+  } catch (err: any) {
+    console.error('AI Infographics Gen Error:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการประมวลผลด้วย AI' });
+  }
+});
+
+// Fallback for missing ID in public infographics API
+app.get('/api/public/infographics', (req, res) => {
+  res.status(400).json({ error: 'กรุณาระบุรหัสสื่อ Infographic' });
+});
+
+// Infographics Uploaded Images & Assets Library API
+app.post('/api/infographics/upload', upload.array('files', 10), async (req, res) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      return res.status(400).json({ success: false, error: 'ไม่พบไฟล์รูปภาพที่อัปโหลด' });
+    }
+
+    const uploadedBy = (req.body?.uploadedBy || req.query?.uploadedBy || 'Infographics Studio').toString();
+    const ip = getClientIp(req);
+    const uploadsBase = path.resolve(process.cwd(), 'uploads');
+    const infographicsDir = path.join(uploadsBase, 'infographics');
+    if (!fs.existsSync(infographicsDir)) {
+      fs.mkdirSync(infographicsDir, { recursive: true });
+    }
+
+    const uploadedFiles: any[] = [];
+    for (const file of files) {
+      // If file was placed in another directory by default, ensure it is in infographics
+      let finalFilename = file.filename;
+      let finalPath = file.path;
+      const targetPath = path.join(infographicsDir, finalFilename);
+
+      if (path.resolve(finalPath) !== path.resolve(targetPath)) {
+        try {
+          if (fs.existsSync(finalPath)) {
+            fs.copyFileSync(finalPath, targetPath);
+            fs.unlinkSync(finalPath);
+            finalPath = targetPath;
+          }
+        } catch (moveErr) {
+          console.warn('Could not relocate file to infographics directory:', moveErr);
+        }
+      }
+
+      const stat = fs.existsSync(finalPath) ? fs.statSync(finalPath) : { size: file.size };
+
+      uploadedFiles.push({
+        id: `img_infographics_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        originalName: file.originalname,
+        filename: finalFilename,
+        size: stat.size,
+        mimetype: file.mimetype,
+        url: `/uploads/infographics/${finalFilename}`,
+        folder: 'infographics',
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    const fileNames = files.map(f => f.originalname).join(', ');
+    await addSystemLog('UPLOAD_INFOGRAPHIC_IMAGE', `อัปโหลดรูปภาพ Infographics: ${fileNames}`, uploadedBy, ip);
+
+    return res.json({ success: true, files: uploadedFiles });
+  } catch (err: any) {
+    console.error('Infographics Upload Error:', err);
+    return res.status(500).json({ success: false, error: err.message || 'การอัปโหลดรูปภาพล้มเหลว' });
+  }
+});
+
+// Infographics Uploaded Images & Assets Library List API
+app.get('/api/infographics-assets/images', async (req, res) => {
+  try {
+    const uploadsBase = path.resolve(process.cwd(), 'uploads');
+    const infographicsDir = path.join(uploadsBase, 'infographics');
+    if (!fs.existsSync(infographicsDir)) {
+      fs.mkdirSync(infographicsDir, { recursive: true });
+    }
+
+    const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.bmp']);
+    const imageList: Array<{
+      id: string;
+      filename: string;
+      originalName: string;
+      url: string;
+      folder: string;
+      size: number;
+      createdAt: string;
+    }> = [];
+
+    function scanFolder(dirPath: string, relativeSubfolder: string) {
+      if (!fs.existsSync(dirPath)) return;
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          const nextSub = relativeSubfolder ? `${relativeSubfolder}/${entry.name}` : entry.name;
+          scanFolder(fullPath, nextSub);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (imageExts.has(ext)) {
+            try {
+              const stat = fs.statSync(fullPath);
+              const nameParts = entry.name.split('-');
+              let originalName = entry.name;
+              if (nameParts.length > 2) {
+                originalName = nameParts.slice(2).join('-');
+              }
+              const webSub = relativeSubfolder ? `/${relativeSubfolder.replace(/\\/g, '/')}` : '';
+              const url = `/uploads${webSub}/${entry.name}`;
+              imageList.push({
+                id: `img_${Buffer.from(fullPath).toString('base64').substring(0, 16)}_${stat.mtimeMs}`,
+                filename: entry.name,
+                originalName,
+                url,
+                folder: relativeSubfolder || 'root',
+                size: stat.size,
+                createdAt: stat.mtime.toISOString(),
+              });
+            } catch (statErr) {
+              // ignore unreadable file
+            }
+          }
+        }
+      }
+    }
+
+    scanFolder(infographicsDir, 'infographics');
+
+    // Sort by newest first
+    imageList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return res.json({ success: true, images: imageList });
+  } catch (err: any) {
+    console.error('Error fetching uploaded images:', err);
+    return res.status(500).json({ success: false, error: 'เกิดข้อผิดพลาดในการโหลดรูปภาพ' });
+  }
+});
+
+// Delete uploaded image from Infographics folder
+app.delete('/api/infographics-assets/images', async (req, res) => {
+  try {
+    const fileUrl = (req.query.url || req.body?.url || '').toString();
+    if (!fileUrl) {
+      return res.status(400).json({ success: false, error: 'ไม่ระบุ URL ของรูปภาพ' });
+    }
+
+    let cleanUrl = fileUrl.trim();
+    if (cleanUrl.startsWith('/uploads/')) cleanUrl = cleanUrl.substring(9);
+    else if (cleanUrl.startsWith('uploads/')) cleanUrl = cleanUrl.substring(8);
+    else if (cleanUrl.startsWith('/')) cleanUrl = cleanUrl.substring(1);
+
+    const uploadsBase = path.resolve(process.cwd(), 'uploads');
+    const filePath = path.resolve(uploadsBase, cleanUrl);
+
+    if (filePath.startsWith(uploadsBase) && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return res.json({ success: true, message: 'ลบรูปภาพเรียบร้อยแล้ว' });
+    }
+
+    return res.status(404).json({ success: false, error: 'ไม่พบไฟล์รูปภาพที่ต้องการลบ' });
+  } catch (err: any) {
+    console.error('Delete image error:', err);
+    return res.status(500).json({ success: false, error: 'เกิดข้อผิดพลาดในการลบรูปภาพ' });
+  }
+});
   const listenPort = process.env.PORT || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
@@ -9173,8 +10790,19 @@ app.delete('/api/infographics/:id', async (req, res) => {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      }
+    }));
     app.get('*all', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

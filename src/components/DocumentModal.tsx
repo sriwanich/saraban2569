@@ -546,7 +546,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
             </div>
             <div className="min-w-0 flex-1">
               <h2 className="text-base sm:text-xl font-bold font-noto-serif-thai text-[var(--text-primary)] flex items-center gap-1.5 sm:gap-2 flex-wrap leading-tight">
-                <span>{initialData ? 'แก้ไขข้อมูลเอกสาร' : 'ลงทะเบียนและบันทึกเอกสาร'}</span>
+                <span>{initialData ? 'แก้ไขข้อมูลเอกสาร' : `ลงทะเบียนและบันทึกเอกสาร ${user && (user.role === 'admin' || user.role === 'moderator') ? '' : (formData.department ? `(${formData.department})` : '')}`}</span>
                 <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full font-sans font-medium bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20 whitespace-nowrap">
                   {formData.type === 'inbox' ? 'หนังสือรับ' : formData.type === 'outbox' ? 'หนังสือส่ง' : 'งานธุรการ'}
                 </span>
@@ -732,7 +732,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 <div className="space-y-1.5 lg:col-span-1 sm:col-span-2">
                   <div className="flex items-center justify-between flex-wrap gap-1">
                     <label className="text-xs font-semibold text-[var(--text-secondary)]">
-                      {formData.type === 'admin' ? 'เลขที่ประกาศ/คำสั่ง' : 'ที่หนังสือ'} <span className="text-rose-500">*</span>
+                      {formData.type === 'admin' ? 'เลขที่' : 'ที่หนังสือ'} <span className="text-rose-500">*</span>
                     </label>
                     {formData.type !== 'inbox' && (
                       <button
@@ -742,10 +742,10 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                           setShowReservedModal(true);
                         }}
                         className="text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 px-2 py-0.5 rounded-lg border border-amber-500/30 flex items-center gap-1 transition-all cursor-pointer"
-                        title="เลือกเลขจากคลังจองล่วงหน้า หรือเลขที่คืนเข้าคลัง"
+                        title="เลือกเลขจากคลังจองล่วงหน้า"
                       >
                         <Sparkles className="w-3 h-3 text-amber-600 animate-pulse" />
-                        เลือกจากเลขจอง/เลขคืน
+                        เลือกจากเลขจอง
                       </button>
                     )}
                   </div>
@@ -757,17 +757,6 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     placeholder={formData.type === 'admin' ? 'เช่น คำสั่งที่ 12/2569' : formData.type === 'inbox' ? 'เช่น รย 0021/1234 (ระบุเลขที่หนังสือจากต้นทาง)' : 'เช่น รย 0021/1'}
                     className="w-full border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs font-mono outline-none transition-colors placeholder-[var(--text-muted)] bg-[var(--bg-overlay)] text-[var(--text-primary)] focus:border-[var(--primary-color)]"
                   />
-                  
-                  {/* Live Structure Tags */}
-                  {formData.docNumber && (
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {parseDocNumberStructure(formData.docNumber, formData.type, formData.category).tags.map((tag, idx) => (
-                        <span key={idx} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-300 border border-blue-500/20">
-                          {tag.label}: <strong className="font-bold">{tag.value}</strong>
-                        </span>
-                      ))}
-                    </div>
-                  )}
 
                   {formData.type !== 'inbox' && selectedReservedId && (
                     <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-[11px] text-amber-800 dark:text-amber-300">
@@ -1194,13 +1183,13 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 </div>
                 <div>
                   <h3 className="font-bold text-base text-[var(--text-primary)] flex items-center gap-2">
-                    เลือกเลขหนังสือจากคลังจองล่วงหน้า / เลขคืน
+                    เลือกเลขหนังสือจากคลังจองล่วงหน้า
                     <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold">
                       {reservedNumbers.filter(r => r.status === 'available').length} เลขพร้อมใช้
                     </span>
                   </h3>
                   <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                    เลือกเลขหนังสือที่ได้ทำการจองล่วงหน้า หรือเลขที่เคยยกเลิกคืนเข้าคลัง เพื่อนำมาใช้ออกหนังสือฉบับนี้
+                    เลือกเลขหนังสือที่ได้ทำการจองล่วงหน้า เพื่อนำมาใช้ออกหนังสือฉบับนี้
                   </p>
                 </div>
               </div>
@@ -1283,7 +1272,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                   return (
                     <div className="p-8 text-center text-[var(--text-muted)] space-y-2">
                       <Bookmark className="w-10 h-10 mx-auto opacity-40 text-amber-500" />
-                      <p className="font-semibold text-sm text-[var(--text-primary)]">ไม่พบรายการเลขจอง/เลขคืนตรงตามเงื่อนไข</p>
+                      <p className="font-semibold text-sm text-[var(--text-primary)]">ไม่พบรายการเลขจองตรงตามเงื่อนไข</p>
                       <p className="text-xs">สามารถไปตั้งเวลาจอง หรือกดจองเลขล่วงหน้าได้ที่เมนู "ตั้งค่าระบบ &gt; กำหนดโครงสร้างเลขหนังสือสารบรรณ"</p>
                     </div>
                   );

@@ -1,0 +1,113 @@
+import React, { useState, useEffect } from 'react';
+import { Trash2, RefreshCw, ShieldCheck, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+
+export default function DigitalSignaturesLogView({ user }: { user?: any }) {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+  const fetchLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/digital-signatures');
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data);
+      }
+    } catch (err) {
+      console.error('Error fetching digital signatures:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, []);
+
+  const deleteLog = async (id: string) => {
+    if (!confirm('ยืนยันการลบรายการประวัตินี้?')) return;
+    try {
+      const res = await fetch(`/api/digital-signatures/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchLogs();
+        setToastMessage({ type: 'success', text: 'ลบรายการเรียบร้อยแล้ว' });
+      } else {
+        setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการลบรายการ' });
+      }
+    } catch (err) {
+      setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' });
+    }
+  };
+
+  const clearAll = async () => {
+    if (!confirm('ยืนยันการลบประวัติทั้งหมด?')) return;
+    try {
+      const res = await fetch('/api/digital-signatures', { method: 'DELETE' });
+      if (res.ok) {
+        fetchLogs();
+        setToastMessage({ type: 'success', text: 'ลบประวัติทั้งหมดเรียบร้อยแล้ว' });
+      } else {
+        setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการลบประวัติทั้งหมด' });
+      }
+    } catch (err) {
+      setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' });
+    }
+  };
+
+  return (
+    <div className="space-y-6 p-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-[var(--text-primary)] flex items-center gap-2">
+          <ShieldCheck className="w-7 h-7 text-[var(--primary-color)]" />
+          สมุดบันทึกหลักฐานความถูกต้อง (Digital TSA Logs)
+        </h1>
+        <div className="flex gap-2">
+            <button onClick={fetchLogs} className="p-2 bg-[var(--bg-canvas)] border rounded-lg hover:bg-[var(--border-lighter)] cursor-pointer"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}/></button>
+            {(user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ') && (
+                <button onClick={clearAll} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-medium cursor-pointer">ลบทั้งหมด</button>
+            )}
+        </div>
+      </div>
+      
+      {toastMessage && (
+        <div className={`p-4 rounded-xl border flex items-center justify-between shadow-md ${toastMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600' : 'bg-rose-500/10 border-rose-500/30 text-rose-600'}`}>
+          <div className="flex items-center gap-2">
+            {toastMessage.type === 'success' ? <CheckCircle2 /> : <AlertTriangle />}
+            {toastMessage.text}
+          </div>
+          <button onClick={() => setToastMessage(null)} className="cursor-pointer"><X className="w-4 h-4"/></button>
+        </div>
+      )}
+
+      <div className="bg-[var(--bg-surface)] rounded-2xl border overflow-hidden">
+        <table className="w-full">
+            <thead>
+                <tr className="bg-[var(--bg-canvas)] border-b text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+                    <th className="p-4">ID</th>
+                    <th className="p-4">เอกสาร</th>
+                    <th className="p-4">ผู้ลงนาม</th>
+                    <th className="p-4">เวลา (ISO)</th>
+                    <th className="p-4 text-center">จัดการ</th>
+                </tr>
+            </thead>
+            <tbody className="divide-y">
+                {logs.map(log => (
+                    <tr key={log.id} className="hover:bg-gray-50 text-sm">
+                        <td className="p-4 text-xs font-mono">{log.id.slice(0, 8)}...</td>
+                        <td className="p-4">{log.docTitle}</td>
+                        <td className="p-4">{log.signerName}</td>
+                        <td className="p-4 text-xs font-mono">{log.timestampIso}</td>
+                        <td className="p-4 text-center">
+                            <button onClick={() => deleteLog(log.id)} className="text-rose-500 hover:text-rose-700 cursor-pointer">
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        </td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

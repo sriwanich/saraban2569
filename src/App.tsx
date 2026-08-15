@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
+import { PublicInfographicsViewer } from './components/views/PublicInfographicsViewer';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -11,6 +12,21 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => {
     return (localStorage.getItem('theme') as ThemeMode) || 'auto';
   });
+
+  // Check if current URL is a public/embed infographic view
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const hash = typeof window !== 'undefined' ? window.location.hash : '';
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const isPublicInfographic = 
+    pathname.startsWith('/public/infographics') || 
+    pathname.startsWith('/embed/infographics') || 
+    pathname.startsWith('/view/infographics') ||
+    hash.includes('/public/infographics') ||
+    hash.includes('/embed/infographics') ||
+    hash.includes('/view/infographics') ||
+    searchParams.has('infographic_id') ||
+    searchParams.has('info_id') ||
+    searchParams.get('view') === 'public_infographics';
 
   useEffect(() => {
     const savedUser = localStorage.getItem('edms_user_data') || sessionStorage.getItem('edms_user_data');
@@ -110,6 +126,10 @@ export default function App() {
     setUser(null);
     setIsLoggedIn(false);
   };
+
+  if (isPublicInfographic) {
+    return <PublicInfographicsViewer />;
+  }
 
   if (isCheckingAuth) {
     return <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center text-[var(--text-primary)]">กำลังโหลด...</div>;

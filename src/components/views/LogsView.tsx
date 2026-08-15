@@ -621,6 +621,7 @@ export default function LogsView({ user }: { user?: any }) {
                       {log.details}
                     </td>
                     <td className="py-3.5 px-4 text-xs font-medium text-[var(--text-primary)] whitespace-nowrap">
+
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center font-bold text-[11px] shrink-0 border border-[var(--primary-color)]/20">
                           {getFirstName(log.username).slice(0, 1).toUpperCase()}
@@ -629,10 +630,36 @@ export default function LogsView({ user }: { user?: any }) {
                       </div>
                     </td>
                     <td className="py-3.5 px-4 text-xs text-right whitespace-nowrap">
-                      <span className="font-mono text-[11px] text-[var(--text-muted)] bg-[var(--bg-canvas)] px-2.5 py-1 rounded-md border border-[var(--border-light)] inline-flex items-center gap-1">
-                        <Globe className="w-3 h-3 text-[var(--text-muted)]" />
-                        {log.ipAddress || '127.0.0.1'}
-                      </span>
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="font-mono text-[11px] text-[var(--text-muted)] bg-[var(--bg-canvas)] px-2.5 py-1 rounded-md border border-[var(--border-light)] inline-flex items-center gap-1">
+                          <Globe className="w-3 h-3 text-[var(--text-muted)]" />
+                          {log.ipAddress || '127.0.0.1'}
+                        </span>
+                        {(user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ') && (
+                          <button
+                            onClick={async () => {
+                              if (confirm('ยืนยันการลบรายการประวัตินี้?')) {
+                                try {
+                                  const res = await fetch(`/api/logs/${log.id}`, { method: 'DELETE' });
+                                  if (res.ok) {
+                                    fetchLogs();
+                                    setToastMessage({ type: 'success', text: 'ลบรายการเรียบร้อยแล้ว' });
+                                    setTimeout(() => setToastMessage(null), 4000);
+                                  } else {
+                                    setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการลบรายการ' });
+                                  }
+                                } catch (err) {
+                                  setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' });
+                                }
+                              }
+                            }}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="ลบรายการนี้"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

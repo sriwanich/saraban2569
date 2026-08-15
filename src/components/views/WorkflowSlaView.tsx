@@ -9,6 +9,7 @@ import {
   DocumentItem, WorkflowTemplate, WorkflowInstance, WorkflowStep, 
   SLAStatus, formatThaiDateTime, formatThaiDateMedium 
 } from '../../types';
+import { useRealtimeSync } from '../../utils/realtimeSync';
 
 interface WorkflowSlaViewProps {
   documents: DocumentItem[];
@@ -72,6 +73,10 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
   useEffect(() => {
     fetchData();
   }, []);
+
+  useRealtimeSync(['WORKFLOW_UPDATED', 'DOCUMENTS_UPDATED', 'TAB_FOCUSED', 'DATA_UPDATED'], () => {
+    fetchData();
+  });
 
   // Compute Statistics
   const totalTasks = workflowInstances.length;

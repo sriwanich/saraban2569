@@ -6,19 +6,16 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       injectRegister: 'auto',
       workbox: {
+        maximumFileSizeToCacheInBytes: 5000000,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         // Prevent service worker from intercepting /api or /uploads requests and fallback to SPA
         navigateFallbackDenylist: [/^\/api/, /^\/uploads/],
         runtimeCaching: [
           {
-            urlPattern: /^\/api\/.*/,
-            handler: 'NetworkOnly'
-          },
-          {
-            urlPattern: /^\/uploads\/.*/,
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/'),
             handler: 'NetworkOnly'
           }
         ]
