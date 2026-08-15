@@ -159,6 +159,7 @@ function getPublicBaseUrl(req: express.Request): string {
   return `${finalProto}://${finalHost}`;
 }
 
+app.set('etag', false);
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -2794,6 +2795,12 @@ async function setupDatabase() {
           'ALTER TABLE infographics ADD COLUMN viewCount INT DEFAULT 0',
           'ALTER TABLE infographics ADD COLUMN downloadCount INT DEFAULT 0',
           'ALTER TABLE infographics ADD COLUMN embedCount INT DEFAULT 0',
+          'ALTER TABLE infographics ADD COLUMN scope VARCHAR(50) DEFAULT "central"',
+          'ALTER TABLE infographics ADD COLUMN ownerId VARCHAR(100) DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN ownerName VARCHAR(255) DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN ownerDepartment VARCHAR(255) DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN allowedEditors LONGTEXT DEFAULT NULL',
+          'ALTER TABLE infographics ADD COLUMN allowDepartmentEdit TINYINT(1) DEFAULT 0',
           'ALTER TABLE infographics MODIFY COLUMN data LONGTEXT',
           'ALTER TABLE infographics MODIFY COLUMN thumbnail LONGTEXT'
         ];
@@ -9966,6 +9973,7 @@ app.get('/api/infographics', async (req, res) => {
         id, name, thumbnail, isPublic, allowEmbed, allowDownload, 
         CASE WHEN accessPassword IS NOT NULL AND accessPassword != '' THEN 1 ELSE 0 END AS isProtected,
         authorName, authorDepartment, description, tags, viewCount, downloadCount, embedCount, 
+        scope, ownerId, ownerName, ownerDepartment, allowedEditors, allowDepartmentEdit,
         created_at, updated_at 
       FROM infographics 
       ORDER BY updated_at DESC, created_at DESC
@@ -9987,6 +9995,7 @@ app.get('/api/infographics/:id', async (req, res) => {
       isPublic: Boolean(row.isPublic),
       allowEmbed: Boolean(row.allowEmbed),
       allowDownload: Boolean(row.allowDownload),
+      allowDepartmentEdit: Boolean(row.allowDepartmentEdit),
       isProtected: Boolean(row.accessPassword && row.accessPassword.trim())
     });
   } catch (error) {
@@ -10001,23 +10010,33 @@ app.post('/api/infographics', async (req, res) => {
       name, data, thumbnail, 
       isPublic = 1, allowEmbed = 1, allowDownload = 1, 
       accessPassword = null, authorName = null, authorDepartment = null, 
-      description = null, tags = null 
+      description = null, tags = null,
+      scope = 'central', ownerId = null, ownerName = null, ownerDepartment = null,
+      allowedEditors = null, allowDepartmentEdit = 0
     } = req.body;
     
     const id = `info_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const nowIso = new Date().toISOString();
     
+    const stringifiedEditors = Array.isArray(allowedEditors) 
+      ? JSON.stringify(allowedEditors) 
+      : (typeof allowedEditors === 'string' ? allowedEditors : null);
+
     await pool.query(
       `INSERT INTO infographics (
         id, name, data, thumbnail, isPublic, allowEmbed, allowDownload, 
         accessPassword, authorName, authorDepartment, description, tags, 
+        scope, ownerId, ownerName, ownerDepartment, allowedEditors, allowDepartmentEdit,
         viewCount, downloadCount, embedCount, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
       [
         id, name || 'Infographic', data, thumbnail, 
         isPublic ? 1 : 0, allowEmbed ? 1 : 0, allowDownload ? 1 : 0,
         accessPassword || null, authorName || null, authorDepartment || null,
-        description || null, tags || null, nowIso, nowIso
+        description || null, tags || null,
+        scope || 'central', ownerId || null, ownerName || authorName || null, ownerDepartment || authorDepartment || null,
+        stringifiedEditors, allowDepartmentEdit ? 1 : 0,
+        nowIso, nowIso
       ]
     );
     
@@ -10026,6 +10045,8 @@ app.post('/api/infographics', async (req, res) => {
       isPublic: Boolean(isPublic), allowEmbed: Boolean(allowEmbed), allowDownload: Boolean(allowDownload),
       isProtected: Boolean(accessPassword && accessPassword.trim()),
       authorName, authorDepartment, description, tags,
+      scope: scope || 'central', ownerId, ownerName: ownerName || authorName, ownerDepartment: ownerDepartment || authorDepartment,
+      allowedEditors: stringifiedEditors, allowDepartmentEdit: Boolean(allowDepartmentEdit),
       created_at: nowIso, updated_at: nowIso 
     });
   } catch (error) {
@@ -10040,7 +10061,9 @@ app.put('/api/infographics/:id', async (req, res) => {
       name, data, thumbnail, 
       isPublic, allowEmbed, allowDownload, 
       accessPassword, authorName, authorDepartment, 
-      description, tags 
+      description, tags,
+      scope, ownerId, ownerName, ownerDepartment,
+      allowedEditors, allowDepartmentEdit
     } = req.body;
     
     const nowIso = new Date().toISOString();
@@ -10064,18 +10087,31 @@ app.put('/api/infographics/:id', async (req, res) => {
     const finalDescription = description !== undefined ? description : current.description;
     const finalTags = tags !== undefined ? tags : current.tags;
 
+    const finalScope = scope !== undefined ? scope : (current.scope || 'central');
+    const finalOwnerId = ownerId !== undefined ? ownerId : current.ownerId;
+    const finalOwnerName = ownerName !== undefined ? ownerName : current.ownerName;
+    const finalOwnerDepartment = ownerDepartment !== undefined ? ownerDepartment : current.ownerDepartment;
+    const finalAllowedEditors = allowedEditors !== undefined 
+      ? (Array.isArray(allowedEditors) ? JSON.stringify(allowedEditors) : allowedEditors)
+      : current.allowedEditors;
+    const finalAllowDepartmentEdit = allowDepartmentEdit !== undefined ? (allowDepartmentEdit ? 1 : 0) : current.allowDepartmentEdit;
+
     await pool.query(
       `UPDATE infographics SET 
         name = ?, data = ?, thumbnail = ?, 
         isPublic = ?, allowEmbed = ?, allowDownload = ?, 
         accessPassword = ?, authorName = ?, authorDepartment = ?, 
-        description = ?, tags = ?, updated_at = ? 
+        description = ?, tags = ?,
+        scope = ?, ownerId = ?, ownerName = ?, ownerDepartment = ?,
+        allowedEditors = ?, allowDepartmentEdit = ?, updated_at = ? 
       WHERE id = ?`,
       [
         finalName, finalData, finalThumbnail, 
         finalIsPublic, finalAllowEmbed, finalAllowDownload, 
         finalAccessPassword, finalAuthorName, finalAuthorDepartment, 
-        finalDescription, finalTags, nowIso, req.params.id
+        finalDescription, finalTags,
+        finalScope, finalOwnerId, finalOwnerName, finalOwnerDepartment,
+        finalAllowedEditors, finalAllowDepartmentEdit, nowIso, req.params.id
       ]
     );
     
@@ -10091,6 +10127,12 @@ app.put('/api/infographics/:id', async (req, res) => {
       authorDepartment: finalAuthorDepartment,
       description: finalDescription, 
       tags: finalTags,
+      scope: finalScope,
+      ownerId: finalOwnerId,
+      ownerName: finalOwnerName,
+      ownerDepartment: finalOwnerDepartment,
+      allowedEditors: finalAllowedEditors,
+      allowDepartmentEdit: Boolean(finalAllowDepartmentEdit),
       updated_at: nowIso
     });
   } catch (error) {
@@ -10791,12 +10833,13 @@ app.delete('/api/infographics-assets/images', async (req, res) => {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, {
-      setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html')) {
-          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-          res.setHeader('Pragma', 'no-cache');
-          res.setHeader('Expires', '0');
-        }
+      etag: false,
+      lastModified: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.setHeader('Surrogate-Control', 'no-store');
       }
     }));
     app.get('*all', (req, res) => {

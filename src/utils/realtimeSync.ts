@@ -8,11 +8,29 @@ class RealtimeSyncManager {
   private reconnectTimer: any = null;
   private isConnecting: boolean = false;
   private reconnectAttempts: number = 0;
+  private broadcastChannel: BroadcastChannel | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       this.init();
       this.setupFocusAndVisibilitySync();
+      this.setupBroadcastChannel();
+    }
+  }
+
+  private setupBroadcastChannel() {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        this.broadcastChannel = new BroadcastChannel('edms_realtime_channel');
+        this.broadcastChannel.onmessage = (event) => {
+          if (event?.data?.event) {
+            this.notify(event.data.event, event.data.data || {});
+            this.notify('*', event.data);
+          }
+        };
+      } catch (e) {
+        // ignore
+      }
     }
   }
 
@@ -126,6 +144,11 @@ class RealtimeSyncManager {
   public emitLocal(eventName: string, data: any = {}) {
     this.notify(eventName, data);
     this.notify('*', { event: eventName, data });
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({ event: eventName, data });
+      } catch (e) {}
+    }
   }
 }
 

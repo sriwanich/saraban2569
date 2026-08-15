@@ -31,6 +31,7 @@ interface InfographicPublicData {
 export const PublicInfographicsViewer: React.FC = () => {
   const [infographicId, setInfographicId] = useState<string>('');
   const [data, setData] = useState<InfographicPublicData | null>(null);
+  const [highResImageUrl, setHighResImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -117,6 +118,73 @@ export const PublicInfographicsViewer: React.FC = () => {
     }
   }, [infographicId, passcode]);
 
+  const render4KImageFromData = async (jsonString?: string) => {
+    if (!jsonString) return;
+    try {
+      const payload = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
+      if (!payload || !payload.canvas) return;
+
+      // Ensure Fabric is available globally
+      if (!(window as any).fabric) {
+        await new Promise<void>((resolve, reject) => {
+          const scriptId = 'fabric-cdn-script';
+          let script = document.getElementById(scriptId) as HTMLScriptElement;
+          if ((window as any).fabric) {
+            resolve();
+            return;
+          }
+          if (!script) {
+            script = document.createElement('script');
+            script.id = scriptId;
+            script.src = 'https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js';
+            script.async = true;
+            document.body.appendChild(script);
+          }
+          script.onload = () => resolve();
+          script.onerror = (e) => reject(e);
+        });
+      }
+
+      const fabric = (window as any).fabric;
+      if (!fabric) return;
+
+      const width = payload.size?.width || 800;
+      const height = payload.size?.height || 600;
+      const maxDim = Math.max(width, height);
+      const multiplier = Math.min(8, Math.max(3.5, 3840 / maxDim));
+
+      const tempCanvasEl = document.createElement('canvas');
+      tempCanvasEl.width = width;
+      tempCanvasEl.height = height;
+
+      const staticCanvas = new (fabric.StaticCanvas || fabric.Canvas)(tempCanvasEl, {
+        width,
+        height,
+        backgroundColor: payload.backgroundColor || '#ffffff',
+        enableRetinaScaling: true,
+        imageSmoothingEnabled: true,
+      });
+
+      staticCanvas.loadFromJSON(payload.canvas, () => {
+        staticCanvas.requestRenderAll();
+        try {
+          const dataUrl = staticCanvas.toDataURL({
+            format: 'png',
+            quality: 1,
+            multiplier: multiplier,
+          });
+          setHighResImageUrl(dataUrl);
+        } catch (e) {
+          console.warn('Canvas export error:', e);
+        } finally {
+          staticCanvas.dispose();
+        }
+      });
+    } catch (err) {
+      console.warn('Could not render 4K image from JSON payload:', err);
+    }
+  };
+
   const fetchInfographic = async (id: string, customPasscode?: string) => {
     if (!id || !id.trim()) {
       setLoading(false);
@@ -148,6 +216,9 @@ export const PublicInfographicsViewer: React.FC = () => {
       }
 
       setData(json);
+      if (json.data) {
+        render4KImageFromData(json.data);
+      }
 
       // Track embed impression if in embed mode
       if (isEmbed) {
@@ -259,13 +330,14 @@ export const PublicInfographicsViewer: React.FC = () => {
   }, []);
 
   const handleDownloadPng = () => {
-    if (!data?.thumbnail) return;
+    const targetUrl = highResImageUrl || data?.thumbnail;
+    if (!targetUrl) return;
     // Track download count
-    fetch(`/api/public/infographics/${data.id}/track-download`, { method: 'POST' }).catch(() => {});
+    fetch(`/api/public/infographics/${data!.id}/track-download`, { method: 'POST' }).catch(() => {});
 
     const a = document.createElement('a');
-    a.href = data.thumbnail;
-    a.download = `${(data.name || 'infographic').replace(/[/\\?%*:|"<>]/g, '_')}.png`;
+    a.href = targetUrl;
+    a.download = `${(data!.name || 'infographic').replace(/[/\\?%*:|"<>]/g, '_')}-4K-UltraHD.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -286,9 +358,11 @@ export const PublicInfographicsViewer: React.FC = () => {
   return (
     <div
       ref={containerRef}
-      className={`min-h-screen w-full flex flex-col select-none overflow-hidden ${
+      className={`w-full flex flex-col select-none overflow-hidden ${
+        isEmbed ? 'h-full min-h-full p-0' : 'min-h-screen'
+      } ${
         isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-900 text-slate-100'
-      } ${isEmbed ? 'p-0' : ''}`}
+      }`}
     >
       {/* Top Header Navigation (Only shown if showHeaderParam is true or not in embed) */}
       {(!isEmbed || showHeaderParam) && (
@@ -307,6 +381,10 @@ export const PublicInfographicsViewer: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] font-bold">
                 EDMS Infographics
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-extrabold flex items-center gap-1 shadow-sm">
+                <Sparkles className="w-3 h-3 text-emerald-400" />
+                <span>4K Ultra HD</span>
               </span>
               <div>
                 <h1 className="font-bold text-sm sm:text-base font-noto-serif-thai text-white line-clamp-1">
@@ -461,7 +539,9 @@ export const PublicInfographicsViewer: React.FC = () => {
         {/* Render Image Presentation Stage */}
         {data && !data.isProtected && !loading && data.thumbnail && (
           <div
-            className="transition-transform duration-75 ease-out select-none flex items-center justify-center p-4 max-w-full max-h-full"
+            className={`transition-transform duration-75 ease-out select-none flex items-center justify-center ${
+              isEmbed ? 'w-full h-full p-2' : 'p-4 max-w-full max-h-full'
+            }`}
             style={{
               transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
               cursor: scale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
@@ -469,9 +549,16 @@ export const PublicInfographicsViewer: React.FC = () => {
           >
             <img
               ref={imageRef}
-              src={data.thumbnail}
+              src={highResImageUrl || data.thumbnail}
               alt={data.name || 'Infographic'}
-              className="max-w-[92vw] max-h-[82vh] object-contain rounded-2xl shadow-2xl border border-white/10 pointer-events-none"
+              style={{
+                imageRendering: 'high-quality' as any,
+                WebkitBackfaceVisibility: 'hidden',
+                transform: 'translateZ(0)'
+              }}
+              className={`${
+                isEmbed ? 'max-w-full max-h-full' : 'max-w-[92vw] max-h-[82vh]'
+              } object-contain rounded-2xl shadow-2xl border border-white/10 pointer-events-none`}
               draggable={false}
             />
           </div>

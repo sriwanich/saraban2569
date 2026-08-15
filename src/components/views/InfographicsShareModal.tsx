@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Share2, Copy, Check, ExternalLink, Code2, ShieldCheck, Download,
   Lock, Unlock, Eye, Sparkles, Globe, QrCode as QrCodeIcon,
   MessageCircle, Send, Mail, X, Smartphone, Monitor, Sliders,
-  Layers, RefreshCw, FileText, CheckCircle2, AlertCircle, Printer, FileDown
+  Layers, RefreshCw, FileText, CheckCircle2, AlertCircle, Printer, FileDown, Maximize2
 } from 'lucide-react';
 import QRCode from 'qrcode';
 
@@ -23,6 +23,12 @@ export interface InfographicShareSettings {
   viewCount?: number;
   downloadCount?: number;
   embedCount?: number;
+  scope?: 'central' | 'personal';
+  ownerId?: string | number;
+  ownerName?: string;
+  ownerDepartment?: string;
+  allowedEditors?: string | any[];
+  allowDepartmentEdit?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -78,9 +84,10 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
   const [embedAllowFullscreen, setEmbedAllowFullscreen] = useState(true);
   const [embedStyle, setEmbedStyle] = useState<'none' | 'border' | 'shadow' | 'card'>('shadow');
   const [embedType, setEmbedType] = useState<'iframe' | 'responsive'>('iframe');
+  const [previewMode, setPreviewMode] = useState<'crisp' | 'iframe'>('crisp');
 
   // Multi-res Export State
-  const [pngMultiplier, setPngMultiplier] = useState<number>(2);
+  const [pngMultiplier, setPngMultiplier] = useState<number>(4);
 
   useEffect(() => {
     if (infographic) {
@@ -101,8 +108,8 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
   const directImageUrl = infographic ? `${origin}/api/public/infographics/${infographic.id}/image` : '';
   const directHtmlUrl = infographic ? `${origin}/api/public/infographics/${infographic.id}/export-html` : '';
 
-  // Generate Embed URL with parameters
-  const getEmbedUrl = () => {
+  // Generate Embed URL with parameters (Memoized to prevent constant iframe reloads)
+  const currentEmbedUrl = useMemo(() => {
     if (!infographic) return '';
     const params = new URLSearchParams();
     params.set('embed', 'true');
@@ -112,14 +119,12 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
     if (!embedAllowDownload) params.set('download', '0');
     if (!embedAllowFullscreen) params.set('fullscreen', '0');
     return `${origin}/public/infographics/${infographic.id}?${params.toString()}`;
-  };
-
-  const currentEmbedUrl = getEmbedUrl();
+  }, [infographic?.id, embedTheme, embedShowHeader, embedShowToolbar, embedAllowDownload, embedAllowFullscreen, origin]);
 
   // Generate Embed Code
   const getEmbedCode = () => {
     if (!infographic) return '';
-    const src = getEmbedUrl();
+    const src = currentEmbedUrl;
     const title = (infographic.name || 'Infographic').replace(/"/g, '&quot;');
 
     let styleAttribute = 'border: none; border-radius: 12px; overflow: hidden;';
@@ -699,21 +704,120 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
               </div>
 
               {/* Embed Live Preview Frame */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs sm:text-sm">
                     <Eye className="w-4 h-4 text-blue-500" />
                     <span>ตัวอย่างผลลัพธ์การแสดงผล (Live Preview)</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-bold hidden sm:inline-flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-emerald-500" /> 4K Ultra HD Crisp
+                    </span>
                   </span>
-                  <span className="text-[11px] text-slate-400">ขนาดจำลอง 100%</span>
+                  
+                  {/* Mode Switcher */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewMode('crisp')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        previewMode === 'crisp'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <Sparkles className="w-3 h-3" /> แสดงผลสด 4K (ไม่ Refresh)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewMode('iframe')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        previewMode === 'iframe'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <Globe className="w-3 h-3" /> ทดสอบ Iframe
+                    </button>
+                  </div>
                 </div>
-                <div className="w-full h-80 rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 overflow-hidden shadow-inner relative">
-                  <iframe
-                    src={currentEmbedUrl}
-                    title="Live Preview"
-                    className="w-full h-full border-none"
-                  />
-                </div>
+
+                {previewMode === 'crisp' ? (
+                  /* 4K Direct Crisp Live Preview Frame (Never reloads, 100% crisp) */
+                  <div className={`w-full h-80 rounded-2xl overflow-hidden relative flex flex-col transition-all duration-300 ${
+                    embedTheme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-900 text-slate-100'
+                  } ${
+                    embedStyle === 'border' ? 'border-2 border-slate-300 dark:border-slate-700' :
+                    embedStyle === 'shadow' ? 'shadow-2xl border border-white/10 ring-1 ring-black/20' :
+                    embedStyle === 'card' ? 'border border-slate-200/80 dark:border-slate-800 shadow-xl rounded-3xl' : 'border border-slate-800'
+                  }`}>
+                    {/* Simulated Header */}
+                    {embedShowHeader && (
+                      <div className="px-3.5 py-2.5 bg-slate-900/90 backdrop-blur-md border-b border-white/10 flex items-center justify-between shrink-0 z-10">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[9px] font-bold">
+                            EDMS Infographics
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-extrabold flex items-center gap-1">
+                            <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+                            <span>4K Ultra HD</span>
+                          </span>
+                          <span className="font-bold text-xs text-white truncate max-w-[200px]">
+                            {infographic.name || 'Infographic Presentation'}
+                          </span>
+                        </div>
+                        {embedAllowDownload && (
+                          <div className="px-2 py-1 rounded-lg bg-blue-600 text-white text-[10px] font-bold flex items-center gap-1 shadow-sm">
+                            <Download className="w-3 h-3" />
+                            <span>ดาวน์โหลด</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Image Stage */}
+                    <div className="flex-1 w-full h-full p-3 flex items-center justify-center relative overflow-hidden bg-slate-950/80">
+                      {infographic.thumbnail ? (
+                        <img
+                          src={infographic.thumbnail}
+                          alt={infographic.name}
+                          style={{
+                            imageRendering: 'high-quality' as any,
+                            WebkitBackfaceVisibility: 'hidden',
+                            transform: 'translateZ(0)'
+                          }}
+                          className="max-w-full max-h-full object-contain rounded-xl shadow-2xl border border-white/10"
+                        />
+                      ) : (
+                        <div className="text-center text-slate-400 text-xs font-medium">
+                          กำลังเตรียมตัวอย่างผลลัพธ์...
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Simulated Floating Toolbar */}
+                    {embedShowToolbar && (
+                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-md border border-white/15 rounded-full px-3 py-1 flex items-center gap-2 shadow-xl z-10 text-[10px] text-slate-300">
+                        <span className="hover:text-white cursor-pointer font-bold px-1">-</span>
+                        <span className="font-mono text-[10px] font-bold text-white">100%</span>
+                        <span className="hover:text-white cursor-pointer font-bold px-1">+</span>
+                        {embedAllowFullscreen && (
+                          <span className="pl-1.5 border-l border-white/20 hover:text-white cursor-pointer">
+                            <Maximize2 className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Standard Iframe Mode (Memoized URL, no flickering on typing) */
+                  <div className="w-full h-80 rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 overflow-hidden shadow-inner relative">
+                    <iframe
+                      src={currentEmbedUrl}
+                      title="Live Preview"
+                      className="w-full h-full border-none"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -959,7 +1063,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                     <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-400">
                       <span>สเกลความละเอียด:</span>
                       <div className="flex items-center gap-1">
-                        {[1, 2, 3].map((mul) => (
+                        {[1, 2, 3, 4].map((mul) => (
                           <button
                             key={mul}
                             type="button"
@@ -970,7 +1074,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                                 : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                             }`}
                           >
-                            {mul}x {mul === 3 ? '(Ultra HD)' : mul === 2 ? '(HD)' : '(Web)'}
+                            {mul === 4 ? '4K (Ultra HD)' : mul === 3 ? '3K' : mul === 2 ? '2K (HD)' : '1K'}
                           </button>
                         ))}
                       </div>
@@ -981,7 +1085,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                       onClick={() => onExportPng && onExportPng(pngMultiplier)}
                       className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
                     >
-                      <Download className="w-4 h-4" /> ดาวน์โหลด PNG ({pngMultiplier}x)
+                      <Download className="w-4 h-4" /> ดาวน์โหลด PNG ({pngMultiplier === 4 ? '4K Ultra HD' : `${pngMultiplier}x`})
                     </button>
                   </div>
                 </div>

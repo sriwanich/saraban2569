@@ -25,6 +25,7 @@ import {
 import { InfographicsGalleryModal } from './InfographicsGalleryModal';
 import { InfographicsImageGalleryModal, UploadedImageItem } from './InfographicsImageGalleryModal';
 import { InfographicsShareModal, InfographicShareSettings } from './InfographicsShareModal';
+import { InfographicsPermissionsModal, EditorUser } from './InfographicsPermissionsModal';
 import { ImageCropModal } from './ImageCropModal';
 import { FontSelector, ensureGoogleFontLoaded } from './FontSelector';
 import { 
@@ -296,6 +297,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('My Infographic');
+  const [scope, setScope] = useState<'central' | 'personal'>('central');
+  const [allowedEditors, setAllowedEditors] = useState<EditorUser[]>([]);
+  const [allowDepartmentEdit, setAllowDepartmentEdit] = useState<boolean>(false);
+  const [showPermissionsModal, setShowPermissionsModal] = useState<boolean>(false);
+  const [ownerName, setOwnerName] = useState<string>('');
+  const [ownerDepartment, setOwnerDepartment] = useState<string>('');
   const [showGallery, setShowGallery] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [currentShareData, setCurrentShareData] = useState<InfographicShareSettings | null>(null);
@@ -389,6 +396,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       preserveObjectStacking: true,
       fireRightClick: true,
       stopContextMenu: true,
+      enableRetinaScaling: true,
+      imageSmoothingEnabled: true,
     });
     
     // Disable browser context menu on canvas
@@ -2428,6 +2437,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       img.set({
         left: (canvasSize.width - (img.getScaledWidth ? img.getScaledWidth() : 300)) / 2,
         top: (canvasSize.height - (img.getScaledHeight ? img.getScaledHeight() : 300)) / 2,
+        imageSmoothing: true,
+        objectCaching: false,
       });
       canvas.add(img);
       canvas.setActiveObject(img);
@@ -2525,30 +2536,51 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     saveHistory();
   };
 
-  const exportImage = () => {
-    if (!canvas) return;
-    const dataURL = canvas.toDataURL({
-      format: 'png',
-      quality: 1,
-      multiplier: 2
-    });
-    const link = document.createElement('a');
-    link.download = `${projectName}-${Date.now()}.png`;
-    link.href = dataURL;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Helper function to calculate 4K scale factor (target ~3840px long edge)
+  const get4KScaleMultiplier = (width: number, height: number): number => {
+    const maxDim = Math.max(width || 800, height || 600);
+    const targetDimension = 3840; // 4K Ultra HD target
+    const multiplier = targetDimension / maxDim;
+    return Math.min(8, Math.max(3.5, multiplier));
   };
 
-  const exportPngWithScale = (multiplier: number = 2) => {
+  const generate4KImageData = (fabricCanvas: any, width: number, height: number): string => {
+    const multiplier = get4KScaleMultiplier(width, height);
+    return fabricCanvas.toDataURL({
+      format: 'png',
+      quality: 1,
+      multiplier: multiplier
+    });
+  };
+
+  const exportImage = () => {
     if (!canvas) return;
+    const multiplier = get4KScaleMultiplier(canvasSize.width, canvasSize.height);
     const dataURL = canvas.toDataURL({
       format: 'png',
       quality: 1,
       multiplier: multiplier
     });
     const link = document.createElement('a');
-    link.download = `${projectName}-${multiplier}x-${Date.now()}.png`;
+    link.download = `${projectName}-4K-${Date.now()}.png`;
+    link.href = dataURL;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportPngWithScale = (multiplier: number = 4) => {
+    if (!canvas) return;
+    const effectiveMultiplier = multiplier >= 4
+      ? get4KScaleMultiplier(canvasSize.width, canvasSize.height)
+      : multiplier;
+    const dataURL = canvas.toDataURL({
+      format: 'png',
+      quality: 1,
+      multiplier: effectiveMultiplier
+    });
+    const link = document.createElement('a');
+    link.download = `${projectName}-${multiplier >= 4 ? '4K-UltraHD' : `${multiplier}x`}-${Date.now()}.png`;
     link.href = dataURL;
     document.body.appendChild(link);
     link.click();
@@ -2599,10 +2631,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const exportPDF = async () => {
     if (!canvas) return;
     try {
+      const multiplier = get4KScaleMultiplier(canvasSize.width, canvasSize.height);
       const dataURL = canvas.toDataURL({
         format: 'png',
         quality: 1,
-        multiplier: 2
+        multiplier: multiplier
       });
       
       const pdfDoc = await PDFDocument.create();
@@ -2622,7 +2655,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `${projectName}-${Date.now()}.pdf`;
+      link.download = `${projectName}-4K-${Date.now()}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2645,7 +2678,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     const effectiveMode = overrideMode || saveMode;
     const targetName = saveModalName.trim() || projectName.trim() || 'My Infographic';
 
-    const thumbnail = canvas.toDataURL({ format: 'jpeg', quality: 0.5, multiplier: 0.5 });
+    const thumbnail = generate4KImageData(canvas, canvasSize.width, canvasSize.height);
     
     const payload = {
       canvas: canvas.toJSON(),
@@ -2658,7 +2691,17 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const res = await fetch(`/api/infographics/${currentProjectId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: targetName, data: JSON.stringify(payload), thumbnail })
+          body: JSON.stringify({
+            name: targetName,
+            data: JSON.stringify(payload),
+            thumbnail,
+            scope,
+            ownerId: user?.id || null,
+            ownerName: ownerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้สร้างสรรค์',
+            ownerDepartment: ownerDepartment || user?.department || 'หน่วยงานภาครัฐ',
+            allowedEditors,
+            allowDepartmentEdit
+          })
         });
 
         if (!res.ok) throw new Error('Failed to update project');
@@ -2672,7 +2715,17 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const res = await fetch('/api/infographics', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: targetName, data: JSON.stringify(payload), thumbnail })
+          body: JSON.stringify({
+            name: targetName,
+            data: JSON.stringify(payload),
+            thumbnail,
+            scope,
+            ownerId: user?.id || null,
+            ownerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้สร้างสรรค์',
+            ownerDepartment: user?.department || 'หน่วยงานภาครัฐ',
+            allowedEditors,
+            allowDepartmentEdit
+          })
         });
 
         if (!res.ok) throw new Error('Failed to create project');
@@ -2703,6 +2756,22 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         
         setCurrentProjectId(dbData.id);
         setProjectName(dbData.name);
+        setScope(dbData.scope || 'central');
+        setOwnerName(dbData.ownerName || dbData.authorName || '');
+        setOwnerDepartment(dbData.ownerDepartment || dbData.authorDepartment || '');
+        setAllowDepartmentEdit(Boolean(dbData.allowDepartmentEdit));
+
+        if (dbData.allowedEditors) {
+          try {
+            const list = typeof dbData.allowedEditors === 'string' ? JSON.parse(dbData.allowedEditors) : dbData.allowedEditors;
+            if (Array.isArray(list)) setAllowedEditors(list);
+            else setAllowedEditors([]);
+          } catch (e) {
+            setAllowedEditors([]);
+          }
+        } else {
+          setAllowedEditors([]);
+        }
         
         if (payload.size) setCanvasSize(payload.size);
         if (payload.backgroundColor) setBackgroundColor(payload.backgroundColor);
@@ -2738,7 +2807,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     setIsPreparingShare(true);
     try {
       const targetName = projectName.trim() || 'My Infographic';
-      const thumbnail = canvas.toDataURL({ format: 'jpeg', quality: 0.7, multiplier: 0.6 });
+      const thumbnail = generate4KImageData(canvas, canvasSize.width, canvasSize.height);
       const payload = {
         canvas: canvas.toJSON(),
         size: canvasSize,
@@ -3212,6 +3281,24 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           <button onClick={() => setShowGallery(true)} className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-1.5 sm:px-2.5 rounded-lg transition-colors flex items-center gap-1 text-xs border border-[var(--border-medium)]">
             <FolderOpen className="w-4 h-4 text-amber-500" />
             <span className="hidden sm:inline">แกลลอรี่</span>
+          </button>
+
+          {/* Scope & Permissions Button */}
+          <button 
+            type="button"
+            onClick={() => setShowPermissionsModal(true)} 
+            className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-1.5 sm:px-2.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs border border-[var(--border-medium)] cursor-pointer"
+            title="กำหนดขอบเขตส่วนตัว/ส่วนกลาง และมอบสิทธิ์แก้ไขให้ Users อื่น"
+          >
+            <ShieldCheck className="w-4 h-4 text-blue-500" />
+            <span className="hidden sm:inline font-semibold">
+              {scope === 'personal' ? '🔒 ส่วนตัว' : '🏢 ส่วนกลาง'}
+            </span>
+            {allowedEditors.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-mono text-[10px] font-bold">
+                +{allowedEditors.length}
+              </span>
+            )}
           </button>
 
           {/* Save Button */}
@@ -4471,7 +4558,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                   backgroundColor: backgroundColor 
                 }}
               >
-                <canvas ref={canvasRef} />
+                <canvas ref={canvasRef} style={{ imageRendering: 'high-quality' as any }} />
                 <CanvasGridOverlay
                   width={canvasSize.width}
                   height={canvasSize.height}
@@ -4916,12 +5003,27 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         <InfographicsGalleryModal 
           onClose={() => setShowGallery(false)} 
           onLoad={(id) => loadProjectDB(id)} 
+          currentUser={user}
           onShare={(project) => {
             setShowGallery(false);
             handleOpenShare(project);
           }}
         />
       )}
+
+      <InfographicsPermissionsModal
+        isOpen={showPermissionsModal}
+        onClose={() => setShowPermissionsModal(false)}
+        currentUser={user}
+        scope={scope}
+        onChangeScope={setScope}
+        allowedEditors={allowedEditors}
+        onChangeAllowedEditors={setAllowedEditors}
+        allowDepartmentEdit={allowDepartmentEdit}
+        onChangeAllowDepartmentEdit={setAllowDepartmentEdit}
+        ownerName={ownerName}
+        ownerDepartment={ownerDepartment}
+      />
 
       {showShareModal && (
         <InfographicsShareModal
