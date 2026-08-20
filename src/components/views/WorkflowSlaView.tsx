@@ -122,10 +122,10 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
     if (selectedPriority !== 'all' && inst.priority !== selectedPriority) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchTitle = inst.docTitle.toLowerCase().includes(q);
-      const matchNum = inst.docNumber.toLowerCase().includes(q);
-      const matchAssignee = inst.assignee.toLowerCase().includes(q);
-      const matchDept = inst.department.toLowerCase().includes(q);
+      const matchTitle = String(inst.docTitle || "").toLowerCase().includes(q);
+      const matchNum = String(inst.docNumber || "").toLowerCase().includes(q);
+      const matchAssignee = String(inst.assignee || "").toLowerCase().includes(q);
+      const matchDept = String(inst.department || "").toLowerCase().includes(q);
       if (!matchTitle && !matchNum && !matchAssignee && !matchDept) return false;
     }
     return true;
@@ -319,7 +319,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
   const assignableDocs = documents.filter(d => {
     if (!assignSearch.trim()) return true;
     const q = assignSearch.toLowerCase();
-    return d.docNumber.toLowerCase().includes(q) || d.title.toLowerCase().includes(q) || (d.department && d.department.toLowerCase().includes(q));
+    return String(d.docNumber || "").toLowerCase().includes(q) || String(d.title || "").toLowerCase().includes(q) || (d.department && String(d.department || "").toLowerCase().includes(q));
   });
 
   return (

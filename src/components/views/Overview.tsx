@@ -26,7 +26,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
   // Available Years
   const availableYears = useMemo(() => {
     const years = Array.from(new Set(documents.map(d => d.year).filter(Boolean)));
-    years.sort((a, b) => b.localeCompare(a));
+    years.sort((a, b) => String(b).localeCompare(String(a)));
     return years;
   }, [documents]);
 

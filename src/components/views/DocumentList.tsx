@@ -41,11 +41,11 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   // Filter docs
   const filteredDocs = documents.filter(doc => {
     const matchesSearch = 
-      doc.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      String(doc.title || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
       (doc.receiveNumber && doc.receiveNumber.includes(searchTerm)) ||
-      doc.docNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.from.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.to.toLowerCase().includes(searchTerm.toLowerCase());
+      String(doc.docNumber || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(doc.from || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(doc.to || "").toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
 
@@ -57,7 +57,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   });
 
   // Extract unique years
-  const availableYears = Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => b.localeCompare(a));
+  const availableYears = Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => String(b).localeCompare(String(a)));
 
   const canDeleteDoc = (row: DocumentItem) => {
     if (hasPermission) {
@@ -130,7 +130,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
       groups[d].push(l);
     });
 
-    const dates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+    const dates = Object.keys(groups).sort((a, b) => String(b).localeCompare(String(a)));
 
     const escH = (str: string | undefined | null) => {
       if (!str) return '';

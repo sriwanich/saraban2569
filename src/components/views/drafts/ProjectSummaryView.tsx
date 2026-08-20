@@ -553,7 +553,7 @@ export default function ProjectSummaryView({ user }: Props) {
 
   const filteredSummaries = savedSummaries.filter(item => {
     const matchesSearch = !searchTerm || 
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(item.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       (item.owner && item.owner.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.venue && item.venue.toLowerCase().includes(searchTerm.toLowerCase()));
     

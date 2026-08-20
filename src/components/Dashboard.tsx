@@ -353,6 +353,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       const res = await fetch(`/api/documents?${queryParams}`);
       if (res.ok) {
         const data: DocumentItem[] = await res.json();
+        if (!Array.isArray(data)) { console.error("API did not return an array", data); return; }
         setInboxDocs(data.filter(d => d.type === 'inbox'));
         setOutboxDocs(data.filter(d => d.type === 'outbox'));
         setAdminDocs(data.filter(d => d.type === 'admin'));
