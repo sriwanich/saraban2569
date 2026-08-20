@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import { PublicInfographicsViewer } from './components/views/PublicInfographicsViewer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -128,7 +129,11 @@ export default function App() {
   };
 
   if (isPublicInfographic) {
-    return <PublicInfographicsViewer />;
+    return (
+      <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลสื่อ Infographic">
+        <PublicInfographicsViewer />
+      </ErrorBoundary>
+    );
   }
 
   if (isCheckingAuth) {
@@ -136,16 +141,24 @@ export default function App() {
   }
 
   if (isLoggedIn) {
-    return <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />;
+    return (
+      <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการโหลดหน้าจอการทำงาน">
+        <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />
+      </ErrorBoundary>
+    );
   }
 
-  return <Login onLogin={(u, rememberMe) => {
-    setUser(u);
-    setIsLoggedIn(true);
-    if (rememberMe) {
-      localStorage.setItem('edms_user_data', JSON.stringify(u));
-    } else {
-      sessionStorage.setItem('edms_user_data', JSON.stringify(u));
-    }
-  }} />;
+  return (
+    <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในหน้าต่างเข้าสู่ระบบ">
+      <Login onLogin={(u, rememberMe) => {
+        setUser(u);
+        setIsLoggedIn(true);
+        if (rememberMe) {
+          localStorage.setItem('edms_user_data', JSON.stringify(u));
+        } else {
+          sessionStorage.setItem('edms_user_data', JSON.stringify(u));
+        }
+      }} />
+    </ErrorBoundary>
+  );
 }

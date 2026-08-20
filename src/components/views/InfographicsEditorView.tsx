@@ -19,7 +19,7 @@ import {
   Briefcase, Scale, Building2, Share2, FileSignature, QrCode, Gift, Percent,
   Coins, DollarSign, Megaphone, CheckCheck, Workflow, ShieldCheck as ShieldCheckIcon,
   Ruler, Magnet, Crosshair, Columns, EyeOff, Maximize2, Minimize2, Scaling, Expand, Shrink, Smartphone, Monitor,
-  Upload, RotateCcw, Crop
+  Upload, RotateCcw, Crop, MoreHorizontal, Menu, ChevronDown
 } from 'lucide-react';
 
 import { InfographicsGalleryModal } from './InfographicsGalleryModal';
@@ -27,6 +27,7 @@ import { InfographicsImageGalleryModal, UploadedImageItem } from './Infographics
 import { InfographicsShareModal, InfographicShareSettings } from './InfographicsShareModal';
 import { InfographicsPermissionsModal, EditorUser } from './InfographicsPermissionsModal';
 import { ImageCropModal } from './ImageCropModal';
+import { ImageBackgroundRemovalModal } from './ImageBackgroundRemovalModal';
 import { FontSelector, ensureGoogleFontLoaded } from './FontSelector';
 import { 
   CanvasHorizontalRuler, 
@@ -167,7 +168,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const fetchUploadedImages = async () => {
     setLoadingUploadedImages(true);
     try {
-      const res = await fetch('/api/infographics-assets/images');
+      const currentUserId = user?.id || user?.username || 'guest';
+      const res = await fetch(`/api/infographics-assets/images?userId=${encodeURIComponent(currentUserId)}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.images)) {
@@ -314,6 +316,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const [saveToast, setSaveToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [mobileTab, setMobileTab] = useState<'canvas' | 'tools' | 'properties'>('canvas');
+  const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
   const [tableRows, setTableRows] = useState(3);
   const [tableCols, setTableCols] = useState(3);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -331,6 +334,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const [fillColor, setFillColor] = useState('#000000');
   const [strokeColor, setStrokeColor] = useState('transparent');
   const [strokeWidth, setStrokeWidth] = useState(0);
+  const [strokeDash, setStrokeDash] = useState(false);
   const [opacity, setOpacity] = useState(1);
   const [fontSize, setFontSize] = useState(24);
   const [fontFamily, setFontFamily] = useState('Sarabun');
@@ -364,6 +368,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   // AI Generator state
   const [showAiModal, setShowAiModal] = useState(false);
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
+  const [imageToRemoveBg, setImageToRemoveBg] = useState<string | null>(null);
   const [aiTopic, setAiTopic] = useState('');
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
@@ -448,7 +453,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       try {
         const state = JSON.parse(savedSession);
         if (state.canvasSize) setCanvasSize(state.canvasSize);
-        if (state.backgroundColor) setBackgroundColor(state.backgroundColor);
+        const bg = state.backgroundColor || '#ffffff';
+        setBackgroundColor(bg);
         if (state.projectName) setProjectName(state.projectName);
         if (state.guides) setGuides(state.guides);
         if (state.currentProjectId) setCurrentProjectId(state.currentProjectId);
@@ -456,6 +462,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         
         if (state.canvasJSON) {
           initCanvas.loadFromJSON(state.canvasJSON, () => {
+            initCanvas.set('backgroundColor', bg);
+            initCanvas.backgroundColor = bg;
             initCanvas.requestRenderAll();
             // Important: Don't trigger auto-save during initial load
             isInitialLoadRef.current = false;
@@ -463,13 +471,22 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             setTimeout(() => setSaveToast(null), 3000);
           });
         } else {
+          initCanvas.set('backgroundColor', bg);
+          initCanvas.backgroundColor = bg;
+          initCanvas.requestRenderAll();
           isInitialLoadRef.current = false;
         }
       } catch (err) {
         console.error('Failed to load session:', err);
+        initCanvas.set('backgroundColor', '#ffffff');
+        initCanvas.backgroundColor = '#ffffff';
+        initCanvas.requestRenderAll();
         isInitialLoadRef.current = false;
       }
     } else {
+      initCanvas.set('backgroundColor', '#ffffff');
+      initCanvas.backgroundColor = '#ffffff';
+      initCanvas.requestRenderAll();
       isInitialLoadRef.current = false;
     }
     
@@ -493,6 +510,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         }
         
         setStrokeWidth(activeObj.strokeWidth || 0);
+        setStrokeDash(!!activeObj.strokeDashArray);
         setOpacity(activeObj.opacity ?? 1);
         
         if ('rx' in activeObj && typeof (activeObj as any).rx === 'number') {
@@ -597,7 +615,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   useEffect(() => {
     if (canvas) {
       canvas.setDimensions({ width: canvasSize.width, height: canvasSize.height });
-      canvas.backgroundColor = backgroundColor;
+      const bg = backgroundColor || '#ffffff';
+      canvas.set('backgroundColor', bg);
+      canvas.backgroundColor = bg;
       canvas.requestRenderAll();
     }
   }, [canvasSize, backgroundColor, canvas]);
@@ -629,6 +649,24 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       selectedObject.set('rx', value);
       selectedObject.set('ry', value);
       setCornerRadius(value);
+    } else if (property === 'stroke' || property === 'strokeWidth' || property === 'strokeDash') {
+      if (property === 'strokeDash') {
+        selectedObject.set('strokeDashArray', value ? [5, 5] : null);
+        setStrokeDash(value);
+      } else {
+        selectedObject.set(property as any, value);
+      }
+      
+      // Professional stroke settings
+      selectedObject.set('strokeLineJoin', 'round');
+      selectedObject.set('strokeLineCap', 'round');
+      
+      // For text objects, set paintFirst to stroke so the outline doesn't eat into the fill
+      if (selectedObject.type === 'i-text' || selectedObject.type === 'textbox') {
+        selectedObject.set('paintFirst', 'stroke');
+      }
+      // Keep stroke width consistent when scaling
+      selectedObject.set('strokeUniform', true);
     } else {
       selectedObject.set(property as any, value);
     }
@@ -721,6 +759,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     isHistoryUpdateRef.current = true;
     historyIndexRef.current--;
     canvas.loadFromJSON(historyRef.current[historyIndexRef.current], () => {
+      const bg = backgroundColor || '#ffffff';
+      canvas.set('backgroundColor', bg);
+      canvas.backgroundColor = bg;
       canvas.requestRenderAll();
       isHistoryUpdateRef.current = false;
     });
@@ -731,6 +772,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     isHistoryUpdateRef.current = true;
     historyIndexRef.current++;
     canvas.loadFromJSON(historyRef.current[historyIndexRef.current], () => {
+      const bg = backgroundColor || '#ffffff';
+      canvas.set('backgroundColor', bg);
+      canvas.backgroundColor = bg;
       canvas.requestRenderAll();
       isHistoryUpdateRef.current = false;
     });
@@ -1097,12 +1141,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     let textObj: any;
 
     if (type === 'h1') {
-      textObj = new fabric.IText('หัวข้อใหญ่ (Main Heading)', {
-        left: 100, top: 100, fontFamily: 'Prompt', fill: '#0f172a', fontSize: 44, fontWeight: 'bold'
+      textObj = new fabric.Textbox('หัวข้อใหญ่ (Main Heading)', {
+        left: 100, top: 100, width: 400, fontFamily: 'Prompt', fill: '#0f172a', fontSize: 44, fontWeight: 'bold'
       });
     } else if (type === 'h2') {
-      textObj = new fabric.IText('หัวข้อย่อย (Sub Heading)', {
-        left: 100, top: 100, fontFamily: 'Prompt', fill: '#1e293b', fontSize: 28, fontWeight: 'bold'
+      textObj = new fabric.Textbox('หัวข้อย่อย (Sub Heading)', {
+        left: 100, top: 100, width: 350, fontFamily: 'Prompt', fill: '#1e293b', fontSize: 28, fontWeight: 'bold'
       });
     } else if (type === 'callout') {
       const bg = new fabric.Rect({
@@ -1117,8 +1161,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       canvas.requestRenderAll();
       return;
     } else {
-      textObj = new fabric.IText('เพิ่มรายละเอียดข้อความที่นี่...', {
-        left: 100, top: 100, fontFamily: 'Sarabun', fill: '#334155', fontSize: 18
+      textObj = new fabric.Textbox('เพิ่มรายละเอียดข้อความที่นี่...', {
+        left: 100, top: 100, width: 300, fontFamily: 'Sarabun', fill: '#334155', fontSize: 18
       });
     }
 
@@ -1207,8 +1251,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       canvas.setActiveObject(grp);
     } else if (type === 'badge-num') {
       const circle = new fabric.Circle({ radius: 28, fill: '#3b82f6' });
-      const num = new fabric.IText('1', {
-        left: 28, top: 28, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 28, fontWeight: 'bold', fill: '#ffffff'
+      const num = new fabric.Textbox('1', {
+        left: 28, top: 28, width: 40, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 28, fontWeight: 'bold', fill: '#ffffff'
       });
       const grp = new fabric.Group([circle, num], { left: 100, top: 100 });
       canvas.add(grp);
@@ -1216,8 +1260,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     } else if (type === 'progress-bar') {
       const bgBar = new fabric.Rect({ width: 300, height: 24, rx: 12, ry: 12, fill: '#e2e8f0' });
       const fillBar = new fabric.Rect({ width: 225, height: 24, rx: 12, ry: 12, fill: '#06b6d4' });
-      const txt = new fabric.IText('75%', {
-        left: 285, top: 12, originX: 'right', originY: 'center', fontFamily: 'Prompt', fontSize: 13, fontWeight: 'bold', fill: '#ffffff'
+      const txt = new fabric.Textbox('75%', {
+        left: 285, top: 12, width: 60, originX: 'right', originY: 'center', textAlign: 'right', fontFamily: 'Prompt', fontSize: 13, fontWeight: 'bold', fill: '#ffffff'
       });
       const grp = new fabric.Group([bgBar, fillBar, txt], { left: 100, top: 100 });
       canvas.add(grp);
@@ -1225,7 +1269,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     } else if (type === 'alert-bar') {
       const bg = new fabric.Rect({ width: 500, height: 60, rx: 12, ry: 12, fill: '#fef2f2', stroke: '#ef4444', strokeWidth: 2 });
       const badge = new fabric.Rect({ width: 120, height: 36, left: 12, top: 12, rx: 8, ry: 8, fill: '#ef4444' });
-      const badgeTxt = new fabric.IText('ประกาศด่วน', { left: 72, top: 30, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#ffffff' });
+      const badgeTxt = new fabric.Textbox('ประกาศด่วน', { left: 72, top: 30, width: 100, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#ffffff' });
       const bodyTxt = new fabric.Textbox('ข้อความแจ้งเตือนภัยหรือข้อมูลสำคัญประเด็นเร่งด่วน', { left: 145, top: 20, width: 340, fontFamily: 'Sarabun', fontSize: 15, fill: '#991b1b', fontWeight: 'bold' });
       const grp = new fabric.Group([bg, badge, badgeTxt, bodyTxt], { left: 100, top: 100 });
       canvas.add(grp);
@@ -1638,9 +1682,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const innerBadge = new fabric.Rect({
           left: 4, top: 4, width: 162, height: 44, rx: 22, ry: 22, fill: '#ef4444'
         });
-        const emoji = new fabric.IText('🔥', { left: 16, top: 12, fontSize: 22 });
-        const txt = new fabric.IText('HOT TOPIC', {
-          left: 50, top: 14, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#ffffff'
+        const emoji = new fabric.Textbox('🔥', { left: 16, top: 12, width: 30, fontSize: 22 });
+        const txt = new fabric.Textbox('HOT TOPIC', {
+          left: 50, top: 14, width: 110, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#ffffff'
         });
         elements = [outerShadow, innerBadge, emoji, txt];
         angle = -4;
@@ -1656,9 +1700,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 144, height: 44, rx: 11, ry: 11, fill: '#38bdf8'
         });
-        const emoji = new fabric.IText('✨', { left: 12, top: 12, fontSize: 20 });
-        const txt = new fabric.IText('NEW! ใหม่', {
-          left: 42, top: 13, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#0f172a'
+        const emoji = new fabric.Textbox('✨', { left: 12, top: 12, width: 30, fontSize: 20 });
+        const txt = new fabric.Textbox('NEW! ใหม่', {
+          left: 42, top: 13, width: 100, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#0f172a'
         });
         elements = [outer, inner, emoji, txt];
         angle = 4;
@@ -1674,9 +1718,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 164, height: 46, rx: 9, ry: 9, fill: '#f59e0b'
         });
-        const icon = new fabric.IText('⚡', { left: 14, top: 11, fontSize: 24 });
-        const txt = new fabric.IText('ด่วนพิเศษ!', {
-          left: 48, top: 14, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#78350f'
+        const icon = new fabric.Textbox('⚡', { left: 14, top: 11, width: 30, fontSize: 24 });
+        const txt = new fabric.Textbox('ด่วนพิเศษ!', {
+          left: 48, top: 14, width: 110, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#78350f'
         });
         elements = [outer, inner, icon, txt];
         angle = -6;
@@ -1692,14 +1736,14 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const circleInner = new fabric.Circle({
           left: 6, top: 6, radius: 40, fill: '#10b981', stroke: '#6ee7b7', strokeWidth: 1.5, strokeDashArray: [4, 3]
         });
-        const checkIcon = new fabric.IText('✓', {
-          left: 46, top: 22, originX: 'center', fontFamily: 'Prompt', fontSize: 24, fontWeight: 'bold', fill: '#ffffff'
+        const checkIcon = new fabric.Textbox('✓', {
+          left: 46, top: 22, width: 40, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 24, fontWeight: 'bold', fill: '#ffffff'
         });
-        const txtVer = new fabric.IText('VERIFIED', {
-          left: 46, top: 52, originX: 'center', fontFamily: 'Prompt', fontSize: 10, fontWeight: 'bold', fill: '#ecfdf5'
+        const txtVer = new fabric.Textbox('VERIFIED', {
+          left: 46, top: 52, width: 80, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 10, fontWeight: 'bold', fill: '#ecfdf5'
         });
-        const txtSub = new fabric.IText('100% ผ่านตรวจ', {
-          left: 46, top: 66, originX: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#d1fae5'
+        const txtSub = new fabric.Textbox('100% ผ่านตรวจ', {
+          left: 46, top: 66, width: 80, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#d1fae5'
         });
         elements = [circleOuter, circleInner, checkIcon, txtVer, txtSub];
         break;
@@ -1714,9 +1758,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 169, height: 48, rx: 11, ry: 11, fill: '#6366f1'
         });
-        const icon = new fabric.IText('👑', { left: 14, top: 12, fontSize: 22 });
-        const txt = new fabric.IText('TOP RATED', {
-          left: 48, top: 15, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#ffffff'
+        const icon = new fabric.Textbox('👑', { left: 14, top: 12, width: 30, fontSize: 22 });
+        const txt = new fabric.Textbox('TOP RATED', {
+          left: 48, top: 15, width: 120, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#ffffff'
         });
         elements = [outer, inner, icon, txt];
         angle = 3;
@@ -1732,9 +1776,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 174, height: 48, rx: 24, ry: 24, fill: '#f59e0b'
         });
-        const icon = new fabric.IText('🏆', { left: 16, top: 12, fontSize: 22 });
-        const txt = new fabric.IText('BEST CHOICE', {
-          left: 48, top: 16, fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#451a03'
+        const icon = new fabric.Textbox('🏆', { left: 16, top: 12, width: 30, fontSize: 22 });
+        const txt = new fabric.Textbox('BEST CHOICE', {
+          left: 48, top: 16, width: 125, fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#451a03'
         });
         elements = [outer, inner, icon, txt];
         break;
@@ -1749,9 +1793,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 134, height: 44, rx: 9, ry: 9, fill: '#10b981'
         });
-        const icon = new fabric.IText('🎁', { left: 12, top: 11, fontSize: 20 });
-        const txt = new fabric.IText('FREE ฟรี!', {
-          left: 42, top: 14, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#ffffff'
+        const icon = new fabric.Textbox('🎁', { left: 12, top: 11, width: 30, fontSize: 20 });
+        const txt = new fabric.Textbox('FREE ฟรี!', {
+          left: 42, top: 14, width: 90, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#ffffff'
         });
         elements = [outer, inner, icon, txt];
         angle = -5;
@@ -1766,11 +1810,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         });
         const stripeRed = new fabric.Rect({ left: 4, top: 4, width: 192, height: 6, fill: '#dc2626', rx: 3, ry: 3 });
         const stripeWhite = new fabric.Rect({ left: 4, top: 10, width: 192, height: 4, fill: '#ffffff' });
-        const txt = new fabric.IText('🇹🇭 THAILAND 4.0', {
-          left: 100, top: 22, originX: 'center', fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#ffffff'
+        const txt = new fabric.Textbox('🇹🇭 THAILAND 4.0', {
+          left: 100, top: 22, width: 180, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#ffffff'
         });
-        const txtSub = new fabric.IText('DIGITAL TRANSFORMATION', {
-          left: 100, top: 40, originX: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#93c5fd'
+        const txtSub = new fabric.Textbox('DIGITAL TRANSFORMATION', {
+          left: 100, top: 40, width: 180, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#93c5fd'
         });
         elements = [outer, stripeRed, stripeWhite, txt, txtSub];
         break;
@@ -1782,12 +1826,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           radius: 46, fill: '#1e293b', stroke: '#ffffff', strokeWidth: 4,
           shadow: new fabric.Shadow({ color: 'rgba(30, 41, 59, 0.35)', blur: 12, offsetY: 4 })
         });
-        const lockIcon = new fabric.IText('🔒', { left: 46, top: 18, originX: 'center', fontSize: 24 });
-        const txt = new fabric.IText('100% SECURE', {
-          left: 46, top: 52, originX: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#38bdf8'
+        const lockIcon = new fabric.Textbox('🔒', { left: 46, top: 18, width: 40, originX: 'center', textAlign: 'center', fontSize: 24 });
+        const txt = new fabric.Textbox('100% SECURE', {
+          left: 46, top: 52, width: 80, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#38bdf8'
         });
-        const sub = new fabric.IText('ความปลอดภัยสูง', {
-          left: 46, top: 66, originX: 'center', fontFamily: 'Prompt', fontSize: 8, fill: '#94a3b8'
+        const sub = new fabric.Textbox('ความปลอดภัยสูง', {
+          left: 46, top: 66, width: 80, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 8, fill: '#94a3b8'
         });
         elements = [circle, lockIcon, txt, sub];
         break;
@@ -1802,9 +1846,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 164, height: 44, rx: 22, ry: 22, fill: '#fef08a'
         });
-        const icon = new fabric.IText('💡', { left: 14, top: 10, fontSize: 22 });
-        const txt = new fabric.IText('SMART TIP', {
-          left: 48, top: 14, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#854d0e'
+        const icon = new fabric.Textbox('💡', { left: 14, top: 10, width: 30, fontSize: 22 });
+        const txt = new fabric.Textbox('SMART TIP', {
+          left: 48, top: 14, width: 110, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#854d0e'
         });
         elements = [outer, inner, icon, txt];
         angle = 2;
@@ -1820,9 +1864,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 169, height: 46, rx: 9, ry: 9, fill: '#fee2e2'
         });
-        const icon = new fabric.IText('⏳', { left: 12, top: 11, fontSize: 22 });
-        const txt = new fabric.IText('DEADLINE!', {
-          left: 46, top: 14, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#991b1b'
+        const icon = new fabric.Textbox('⏳', { left: 12, top: 11, width: 30, fontSize: 22 });
+        const txt = new fabric.Textbox('DEADLINE!', {
+          left: 46, top: 14, width: 115, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#991b1b'
         });
         elements = [outer, inner, icon, txt];
         angle = -5;
@@ -1835,12 +1879,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           width: 130, height: 90, rx: 4, ry: 4, fill: '#fef9c3', stroke: '#ffffff', strokeWidth: 3,
           shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.15)', blur: 10, offsetY: 4 })
         });
-        const pin = new fabric.IText('📌', { left: 65, top: -10, originX: 'center', fontSize: 24 });
-        const txt = new fabric.IText('PINNED', {
-          left: 65, top: 32, originX: 'center', fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#854d0e'
+        const pin = new fabric.Textbox('📌', { left: 65, top: -10, width: 40, originX: 'center', textAlign: 'center', fontSize: 24 });
+        const txt = new fabric.Textbox('PINNED', {
+          left: 65, top: 32, width: 120, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#854d0e'
         });
-        const sub = new fabric.IText('เรื่องสำคัญ!', {
-          left: 65, top: 56, originX: 'center', fontFamily: 'Prompt', fontSize: 12, fill: '#a16207'
+        const sub = new fabric.Textbox('เรื่องสำคัญ!', {
+          left: 65, top: 56, width: 120, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 12, fill: '#a16207'
         });
         elements = [paper, pin, txt, sub];
         angle = 6;
@@ -1853,12 +1897,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           radius: 46, fill: '#dc2626', stroke: '#ffffff', strokeWidth: 4,
           shadow: new fabric.Shadow({ color: 'rgba(220, 38, 38, 0.35)', blur: 12, offsetY: 4 })
         });
-        const icon = new fabric.IText('🎯', { left: 46, top: 16, originX: 'center', fontSize: 24 });
-        const txt = new fabric.IText('100% KPI', {
-          left: 46, top: 50, originX: 'center', fontFamily: 'Prompt', fontSize: 11, fontWeight: 'bold', fill: '#ffffff'
+        const icon = new fabric.Textbox('🎯', { left: 46, top: 16, width: 40, originX: 'center', textAlign: 'center', fontSize: 24 });
+        const txt = new fabric.Textbox('100% KPI', {
+          left: 46, top: 50, width: 85, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 11, fontWeight: 'bold', fill: '#ffffff'
         });
-        const sub = new fabric.IText('บรรลุเป้าหมาย', {
-          left: 46, top: 66, originX: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#fecaca'
+        const sub = new fabric.Textbox('บรรลุเป้าหมาย', {
+          left: 46, top: 66, width: 85, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#fecaca'
         });
         elements = [circle, icon, txt, sub];
         break;
@@ -1870,12 +1914,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           width: 190, height: 56, rx: 14, ry: 14, fill: '#1e3a8a', stroke: '#ffffff', strokeWidth: 4,
           shadow: new fabric.Shadow({ color: 'rgba(30, 58, 138, 0.35)', blur: 12, offsetY: 4 })
         });
-        const icon = new fabric.IText('🏛️', { left: 16, top: 12, fontSize: 24 });
-        const txt = new fabric.IText('GOV STANDARD', {
-          left: 54, top: 14, fontFamily: 'Prompt', fontSize: 13, fontWeight: 'bold', fill: '#fbbf24'
+        const icon = new fabric.Textbox('🏛️', { left: 16, top: 12, width: 30, fontSize: 24 });
+        const txt = new fabric.Textbox('GOV STANDARD', {
+          left: 54, top: 14, width: 120, fontFamily: 'Prompt', fontSize: 13, fontWeight: 'bold', fill: '#fbbf24'
         });
-        const sub = new fabric.IText('มาตรฐานงานสารบรรณ', {
-          left: 54, top: 34, fontFamily: 'Prompt', fontSize: 10, fill: '#e0e7ff'
+        const sub = new fabric.Textbox('มาตรฐานงานสารบรรณ', {
+          left: 54, top: 34, width: 120, fontFamily: 'Prompt', fontSize: 10, fill: '#e0e7ff'
         });
         elements = [outer, icon, txt, sub];
         break;
@@ -1887,12 +1931,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           radius: 46, fill: '#15803d', stroke: '#ffffff', strokeWidth: 4,
           shadow: new fabric.Shadow({ color: 'rgba(21, 128, 61, 0.35)', blur: 12, offsetY: 4 })
         });
-        const icon = new fabric.IText('🌿', { left: 46, top: 16, originX: 'center', fontSize: 24 });
-        const txt = new fabric.IText('ECO GREEN', {
-          left: 46, top: 52, originX: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#ffffff'
+        const icon = new fabric.Textbox('🌿', { left: 46, top: 16, width: 40, originX: 'center', textAlign: 'center', fontSize: 24 });
+        const txt = new fabric.Textbox('ECO GREEN', {
+          left: 46, top: 52, width: 85, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#ffffff'
         });
-        const sub = new fabric.IText('รักษ์สิ่งแวดล้อม', {
-          left: 46, top: 66, originX: 'center', fontFamily: 'Prompt', fontSize: 8, fill: '#bbf7d0'
+        const sub = new fabric.Textbox('รักษ์สิ่งแวดล้อม', {
+          left: 46, top: 66, width: 85, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 8, fill: '#bbf7d0'
         });
         elements = [circle, icon, txt, sub];
         break;
@@ -1907,9 +1951,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 169, height: 44, rx: 22, ry: 22, fill: '#fbcfe8'
         });
-        const icon = new fabric.IText('❤️', { left: 14, top: 10, fontSize: 22 });
-        const txt = new fabric.IText('THANK YOU', {
-          left: 46, top: 14, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#9d174d'
+        const icon = new fabric.Textbox('❤️', { left: 14, top: 10, width: 30, fontSize: 22 });
+        const txt = new fabric.Textbox('THANK YOU', {
+          left: 46, top: 14, width: 115, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#9d174d'
         });
         elements = [outer, inner, icon, txt];
         angle = -3;
@@ -1925,9 +1969,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         const inner = new fabric.Rect({
           left: 3, top: 3, width: 179, height: 48, rx: 11, ry: 11, fill: '#f5d0fe'
         });
-        const icon = new fabric.IText('📢', { left: 14, top: 12, fontSize: 22 });
-        const txt = new fabric.IText('ประกาศสำคัญ!', {
-          left: 48, top: 15, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#86198f'
+        const icon = new fabric.Textbox('📢', { left: 14, top: 12, width: 30, fontSize: 22 });
+        const txt = new fabric.Textbox('ประกาศสำคัญ!', {
+          left: 48, top: 15, width: 125, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#86198f'
         });
         elements = [outer, inner, icon, txt];
         angle = 3;
@@ -1940,9 +1984,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           radius: 44, fill: '#dc2626', stroke: '#ffffff', strokeWidth: 4,
           shadow: new fabric.Shadow({ color: 'rgba(220, 38, 38, 0.35)', blur: 12, offsetY: 4 })
         });
-        const icon = new fabric.IText('💯', { left: 44, top: 20, originX: 'center', fontSize: 28 });
-        const txt = new fabric.IText('คะแนนเต็ม!', {
-          left: 44, top: 58, originX: 'center', fontFamily: 'Prompt', fontSize: 10, fontWeight: 'bold', fill: '#ffffff'
+        const icon = new fabric.Textbox('💯', { left: 44, top: 20, width: 50, originX: 'center', textAlign: 'center', fontSize: 28 });
+        const txt = new fabric.Textbox('คะแนนเต็ม!', {
+          left: 44, top: 58, width: 80, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 10, fontWeight: 'bold', fill: '#ffffff'
         });
         elements = [circle, icon, txt];
         angle = -6;
@@ -1980,11 +2024,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const innerRect = new fabric.Rect({
         left: 6, top: 6, width: 208, height: 63, rx: 5, ry: 5, fill: 'transparent', stroke: '#dc2626', strokeWidth: 1.5, strokeDashArray: [5, 3]
       });
-      const txtMain = new fabric.IText('ด่วนที่สุด', {
-        left: 110, top: 18, originX: 'center', fontFamily: 'Prompt', fontSize: 26, fontWeight: 'bold', fill: '#dc2626'
+      const txtMain = new fabric.Textbox('ด่วนที่สุด', {
+        left: 110, top: 18, width: 190, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 26, fontWeight: 'bold', fill: '#dc2626'
       });
-      const txtSub = new fabric.IText('URGENT • หนังสือราชการ', {
-        left: 110, top: 48, originX: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#dc2626'
+      const txtSub = new fabric.Textbox('URGENT • หนังสือราชการ', {
+        left: 110, top: 48, width: 190, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#dc2626'
       });
       elements = [outerRect, innerRect, txtMain, txtSub];
       angle = -10;
@@ -1995,11 +2039,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const innerRect = new fabric.Rect({
         left: 5, top: 5, width: 190, height: 60, rx: 5, ry: 5, fill: 'transparent', stroke: '#991b1b', strokeWidth: 1
       });
-      const txtMain = new fabric.IText('ลับมาก', {
-        left: 100, top: 16, originX: 'center', fontFamily: 'Prompt', fontSize: 26, fontWeight: 'bold', fill: '#991b1b'
+      const txtMain = new fabric.Textbox('ลับมาก', {
+        left: 100, top: 16, width: 180, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 26, fontWeight: 'bold', fill: '#991b1b'
       });
-      const txtSub = new fabric.IText('TOP SECRET • ห้ามเผยแพร่', {
-        left: 100, top: 46, originX: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#991b1b'
+      const txtSub = new fabric.Textbox('TOP SECRET • ห้ามเผยแพร่', {
+        left: 100, top: 46, width: 180, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 8, fontWeight: 'bold', fill: '#991b1b'
       });
       elements = [outerRect, innerRect, txtMain, txtSub];
       angle = -7;
@@ -2007,11 +2051,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const outerRect = new fabric.Rect({
         width: 230, height: 75, rx: 12, ry: 12, fill: 'rgba(22, 163, 74, 0.08)', stroke: '#16a34a', strokeWidth: 3
       });
-      const txtMain = new fabric.IText('✓ อนุมัติแล้ว', {
-        left: 115, top: 16, originX: 'center', fontFamily: 'Prompt', fontSize: 24, fontWeight: 'bold', fill: '#16a34a'
+      const txtMain = new fabric.Textbox('✓ อนุมัติแล้ว', {
+        left: 115, top: 16, width: 210, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 24, fontWeight: 'bold', fill: '#16a34a'
       });
-      const txtSub = new fabric.IText('APPROVED & VERIFIED', {
-        left: 115, top: 46, originX: 'center', fontFamily: 'Prompt', fontSize: 10, fontWeight: 'bold', fill: '#16a34a'
+      const txtSub = new fabric.Textbox('APPROVED & VERIFIED', {
+        left: 115, top: 46, width: 210, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 10, fontWeight: 'bold', fill: '#16a34a'
       });
       elements = [outerRect, txtMain, txtSub];
       angle = -5;
@@ -2019,11 +2063,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const outerRect = new fabric.Rect({
         width: 230, height: 72, rx: 8, ry: 8, fill: 'rgba(37, 99, 235, 0.08)', stroke: '#2563eb', strokeWidth: 2.5
       });
-      const txtMain = new fabric.IText('สำเนาถูกต้อง', {
-        left: 115, top: 16, originX: 'center', fontFamily: 'Prompt', fontSize: 22, fontWeight: 'bold', fill: '#2563eb'
+      const txtMain = new fabric.Textbox('สำเนาถูกต้อง', {
+        left: 115, top: 16, width: 210, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 22, fontWeight: 'bold', fill: '#2563eb'
       });
-      const txtSub = new fabric.IText('CERTIFIED TRUE COPY', {
-        left: 115, top: 44, originX: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#2563eb'
+      const txtSub = new fabric.Textbox('CERTIFIED TRUE COPY', {
+        left: 115, top: 44, width: 210, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 9, fontWeight: 'bold', fill: '#2563eb'
       });
       elements = [outerRect, txtMain, txtSub];
       angle = -6;
@@ -2031,11 +2075,11 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const outerRect = new fabric.Rect({
         width: 240, height: 80, rx: 10, ry: 10, fill: 'rgba(124, 58, 237, 0.08)', stroke: '#7c3aed', strokeWidth: 2.5
       });
-      const txtMain = new fabric.IText('ลงรับเอกสารแล้ว', {
-        left: 120, top: 16, originX: 'center', fontFamily: 'Prompt', fontSize: 20, fontWeight: 'bold', fill: '#7c3aed'
+      const txtMain = new fabric.Textbox('ลงรับเอกสารแล้ว', {
+        left: 120, top: 16, width: 220, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 20, fontWeight: 'bold', fill: '#7c3aed'
       });
-      const txtSub = new fabric.IText('RECEIVED • ระบบงานสารบรรณ', {
-        left: 120, top: 46, originX: 'center', fontFamily: 'Sarabun', fontSize: 11, fontWeight: 'bold', fill: '#7c3aed'
+      const txtSub = new fabric.Textbox('RECEIVED • ระบบงานสารบรรณ', {
+        left: 120, top: 46, width: 220, originX: 'center', textAlign: 'center', fontFamily: 'Sarabun', fontSize: 11, fontWeight: 'bold', fill: '#7c3aed'
       });
       elements = [outerRect, txtMain, txtSub];
       angle = -4;
@@ -2070,8 +2114,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         width: 180, height: 60, rx: 30, ry: 30, fill: baseCol, stroke: '#1d4ed8', strokeWidth: 2,
         shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.08)', blur: 8, offsetY: 2 })
       });
-      const txt = new fabric.IText('เริ่มต้น / สิ้นสุด', {
-        left: 90, top: 30, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#ffffff'
+      const txt = new fabric.Textbox('เริ่มต้น / สิ้นสุด', {
+        left: 90, top: 30, width: 160, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#ffffff'
       });
       elements = [rect, txt];
     } else if (type === 'process') {
@@ -2108,8 +2152,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const topEllipse = new fabric.Ellipse({ left: 0, top: 0, rx: 70, ry: 16, fill: '#e0e7ff', stroke: '#4338ca', strokeWidth: 2 });
       const bodyRect = new fabric.Rect({ left: 0, top: 16, width: 140, height: 60, fill: '#e0e7ff', stroke: '#4338ca', strokeWidth: 2 });
       const botEllipse = new fabric.Ellipse({ left: 0, top: 60, rx: 70, ry: 16, fill: '#c7d2fe', stroke: '#4338ca', strokeWidth: 2 });
-      const txt = new fabric.IText('ฐานข้อมูล (DB)', {
-        left: 70, top: 45, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#312e81'
+      const txt = new fabric.Textbox('ฐานข้อมูล (DB)', {
+        left: 70, top: 45, width: 120, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#312e81'
       });
       elements = [bodyRect, botEllipse, topEllipse, txt];
     } else if (type === 'document') {
@@ -2140,7 +2184,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.06)', blur: 12, offsetY: 3 })
       });
       const badgeCircle = new fabric.Circle({ left: 15, top: 22, radius: 24, fill: '#3b82f6' });
-      const badgeTxt = new fabric.IText('01', { left: 39, top: 46, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 20, fontWeight: 'bold', fill: '#ffffff' });
+      const badgeTxt = new fabric.Textbox('01', { left: 39, top: 46, width: 40, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 20, fontWeight: 'bold', fill: '#ffffff' });
       const heading = new fabric.Textbox('ขั้นตอนที่ 1 : ตรวจสอบเอกสาร', { left: 75, top: 20, width: 230, fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#0f172a' });
       const desc = new fabric.Textbox('กรอกข้อมูลและแนบไฟล์เอกสารราชการเข้าสู่ระบบ', { left: 75, top: 48, width: 230, fontFamily: 'Sarabun', fontSize: 12, fill: '#64748b' });
       grp = new fabric.Group([bg, badgeCircle, badgeTxt, heading, desc], { left: 120, top: 120 });
@@ -2152,8 +2196,8 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const divider = new fabric.Line([190, 0, 190, 160], { stroke: '#e2e8f0', strokeWidth: 1.5 });
       const leftHeader = new fabric.Rect({ width: 190, height: 36, rx: 0, ry: 0, fill: '#dcfce7' });
       const rightHeader = new fabric.Rect({ left: 190, width: 190, height: 36, rx: 0, ry: 0, fill: '#fee2e2' });
-      const leftTitle = new fabric.IText('✓ สิ่งที่ควรปฏิบัติ (DO)', { left: 95, top: 18, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 12, fontWeight: 'bold', fill: '#15803d' });
-      const rightTitle = new fabric.IText('✕ ข้อควรระวัง (DON\'T)', { left: 285, top: 18, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 12, fontWeight: 'bold', fill: '#b91c1c' });
+      const leftTitle = new fabric.Textbox('✓ สิ่งที่ควรปฏิบัติ (DO)', { left: 95, top: 18, width: 180, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 12, fontWeight: 'bold', fill: '#15803d' });
+      const rightTitle = new fabric.Textbox('✕ ข้อควรระวัง (DON\'T)', { left: 285, top: 18, width: 180, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 12, fontWeight: 'bold', fill: '#b91c1c' });
       const leftContent = new fabric.Textbox('• ตรวจสอบเลขที่หนังสือ\n• แนบเอกสารต้นฉบับครบถ้วน\n• ลงนามตามอำนาจหน้าที่', { left: 15, top: 48, width: 160, fontFamily: 'Sarabun', fontSize: 12, fill: '#334155', lineHeight: 1.3 });
       const rightContent = new fabric.Textbox('• ห้ามแก้ไขข้อความหลังลงนาม\n• ห้ามเผยแพร่เอกสารลับ\n• ไม่ละเลยระยะเวลาเสนอเรื่อง', { left: 205, top: 48, width: 160, fontFamily: 'Sarabun', fontSize: 12, fill: '#334155', lineHeight: 1.3 });
       grp = new fabric.Group([bg, divider, leftHeader, rightHeader, leftTitle, rightTitle, leftContent, rightContent], { left: 120, top: 120 });
@@ -2165,15 +2209,15 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const title = new fabric.Textbox('รายการตรวจสอบ (Checklist)', { left: 160, top: 15, width: 290, originX: 'center', fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#0f172a', textAlign: 'center' });
       
       const item1Bg = new fabric.Circle({ left: 20, top: 48, radius: 10, fill: '#10b981' });
-      const item1Check = new fabric.IText('✓', { left: 30, top: 58, originX: 'center', originY: 'center', fontSize: 12, fill: '#ffffff', fontWeight: 'bold' });
+      const item1Check = new fabric.Textbox('✓', { left: 30, top: 58, width: 20, originX: 'center', originY: 'center', textAlign: 'center', fontSize: 12, fill: '#ffffff', fontWeight: 'bold' });
       const item1Txt = new fabric.Textbox('ตรวจสอบความถูกต้องของหัวเรื่องและผู้รับ', { left: 50, top: 47, width: 250, fontFamily: 'Sarabun', fontSize: 13, fill: '#334155' });
 
       const item2Bg = new fabric.Circle({ left: 20, top: 82, radius: 10, fill: '#10b981' });
-      const item2Check = new fabric.IText('✓', { left: 30, top: 92, originX: 'center', originY: 'center', fontSize: 12, fill: '#ffffff', fontWeight: 'bold' });
+      const item2Check = new fabric.Textbox('✓', { left: 30, top: 92, width: 20, originX: 'center', originY: 'center', textAlign: 'center', fontSize: 12, fill: '#ffffff', fontWeight: 'bold' });
       const item2Txt = new fabric.Textbox('แนบไฟล์เอกสารประกอบและเอกสารอ้างอิง', { left: 50, top: 81, width: 250, fontFamily: 'Sarabun', fontSize: 13, fill: '#334155' });
 
       const item3Bg = new fabric.Circle({ left: 20, top: 116, radius: 10, fill: '#10b981' });
-      const item3Check = new fabric.IText('✓', { left: 30, top: 126, originX: 'center', originY: 'center', fontSize: 12, fill: '#ffffff', fontWeight: 'bold' });
+      const item3Check = new fabric.Textbox('✓', { left: 30, top: 126, width: 20, originX: 'center', originY: 'center', textAlign: 'center', fontSize: 12, fill: '#ffffff', fontWeight: 'bold' });
       const item3Txt = new fabric.Textbox('บันทึกและส่งเวียนตามลำดับการเสนอ', { left: 50, top: 115, width: 250, fontFamily: 'Sarabun', fontSize: 13, fill: '#334155' });
 
       grp = new fabric.Group([bg, title, item1Bg, item1Check, item1Txt, item2Bg, item2Check, item2Txt, item3Bg, item3Check, item3Txt], { left: 120, top: 120 });
@@ -2182,16 +2226,16 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         width: 380, height: 110, rx: 12, ry: 12, fill: '#eff6ff', stroke: '#bfdbfe', strokeWidth: 1.5,
         shadow: new fabric.Shadow({ color: 'rgba(59,130,246,0.08)', blur: 10, offsetY: 2 })
       });
-      const quoteMark = new fabric.IText('“', { left: 20, top: 10, fontFamily: 'Prompt', fontSize: 60, fontWeight: 'bold', fill: '#3b82f6', opacity: 0.4 });
+      const quoteMark = new fabric.Textbox('“', { left: 20, top: 10, width: 60, fontFamily: 'Prompt', fontSize: 60, fontWeight: 'bold', fill: '#3b82f6', opacity: 0.4 });
       const quoteTxt = new fabric.Textbox('“การปฏิบัติงานสารบรรณที่รวดเร็วและถูกต้อง คือหัวใจสำคัญของความโปร่งใสในองค์กร”', {
         left: 45, top: 22, width: 315, fontFamily: 'Sarabun', fontSize: 14, fontWeight: 'bold', fill: '#1e3a8a', fontStyle: 'italic'
       });
-      const author = new fabric.IText('— คำแนะนำมาตรฐานงานสารบรรณ', { left: 360, top: 82, originX: 'right', fontFamily: 'Sarabun', fontSize: 11, fill: '#60a5fa' });
+      const author = new fabric.Textbox('— คำแนะนำมาตรฐานงานสารบรรณ', { left: 360, top: 82, width: 300, originX: 'right', textAlign: 'right', fontFamily: 'Sarabun', fontSize: 11, fill: '#60a5fa' });
       grp = new fabric.Group([bg, quoteMark, quoteTxt, author], { left: 120, top: 120 });
     } else if (type === 'donut-stat') {
       const outerCircle = new fabric.Circle({ radius: 55, fill: '#3b82f6', left: 15, top: 15 });
       const innerCircle = new fabric.Circle({ radius: 40, fill: '#ffffff', left: 30, top: 30 });
-      const valTxt = new fabric.IText('85%', { left: 70, top: 70, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 24, fontWeight: 'bold', fill: '#1e3a8a' });
+      const valTxt = new fabric.Textbox('85%', { left: 70, top: 70, width: 80, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 24, fontWeight: 'bold', fill: '#1e3a8a' });
       const label = new fabric.Textbox('ความสำเร็จของโครงการเป้าหมาย', { left: 145, top: 42, width: 170, fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#0f172a' });
       const sub = new fabric.Textbox('อ้างอิงรายงานผลประจำเดือนล่าสุด', { left: 145, top: 70, width: 170, fontFamily: 'Sarabun', fontSize: 12, fill: '#64748b' });
       const cardBg = new fabric.Rect({ width: 330, height: 140, rx: 16, ry: 16, fill: '#ffffff', stroke: '#e2e8f0', strokeWidth: 2, shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.06)', blur: 12, offsetY: 3 }) });
@@ -2202,17 +2246,17 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const bRed = new fabric.Rect({ left: 25, top: 48, width: 85, height: 14, rx: 4, ry: 4, fill: '#ef4444' });
       const bYellow = new fabric.Rect({ left: 115, top: 48, width: 85, height: 14, rx: 4, ry: 4, fill: '#f59e0b' });
       const bGreen = new fabric.Rect({ left: 205, top: 48, width: 90, height: 14, rx: 4, ry: 4, fill: '#10b981' });
-      const score = new fabric.IText('คะแนนรวม 9.4 / 10 (ระดับดีเยี่ยม)', { left: 160, top: 85, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 13, fontWeight: 'bold', fill: '#059669' });
+      const score = new fabric.Textbox('คะแนนรวม 9.4 / 10 (ระดับดีเยี่ยม)', { left: 160, top: 85, width: 280, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 13, fontWeight: 'bold', fill: '#059669' });
       grp = new fabric.Group([bg, title, bRed, bYellow, bGreen, score], { left: 120, top: 120 });
     } else if (type === 'ribbon-banner') {
       const banner = new fabric.Rect({ left: 30, top: 10, width: 320, height: 50, rx: 6, ry: 6, fill: '#4f46e5', shadow: new fabric.Shadow({ color: 'rgba(79,70,229,0.25)', blur: 12, offsetY: 4 }) });
       const leftFold = new fabric.Polygon([{ x: 30, y: 10 }, { x: 0, y: 35 }, { x: 30, y: 60 }], { fill: '#3730a3' });
       const rightFold = new fabric.Polygon([{ x: 350, y: 10 }, { x: 380, y: 35 }, { x: 350, y: 60 }], { fill: '#3730a3' });
-      const txt = new fabric.IText('★ สรุปผลการดำเนินงานสำคัญ ★', { left: 190, top: 35, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#ffffff' });
+      const txt = new fabric.Textbox('★ สรุปผลการดำเนินงานสำคัญ ★', { left: 190, top: 35, width: 300, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 16, fontWeight: 'bold', fill: '#ffffff' });
       grp = new fabric.Group([leftFold, rightFold, banner, txt], { left: 120, top: 120 });
     } else if (type === 'tag-pill') {
       const pill = new fabric.Rect({ width: 140, height: 36, rx: 18, ry: 18, fill: '#10b981' });
-      const txt = new fabric.IText('• ประชาสัมพันธ์', { left: 70, top: 18, originX: 'center', originY: 'center', fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#ffffff' });
+      const txt = new fabric.Textbox('• ประชาสัมพันธ์', { left: 70, top: 18, width: 130, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 14, fontWeight: 'bold', fill: '#ffffff' });
       grp = new fabric.Group([pill, txt], { left: 120, top: 120 });
     }
 
@@ -2484,9 +2528,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
     // Also persist file to server /uploads so it is available in library
     try {
+      const currentUserId = user?.id || user?.username || 'guest';
+      const currentUserName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน';
       const formData = new FormData();
       formData.append('files', file);
-      formData.append('uploadedBy', 'Infographics Studio');
+      formData.append('userId', currentUserId);
+      formData.append('uploadedBy', currentUserName);
       await fetch('/api/infographics/upload', {
         method: 'POST',
         body: formData
@@ -2536,16 +2583,16 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     saveHistory();
   };
 
-  // Helper function to calculate 4K scale factor (target ~3840px long edge)
-  const get4KScaleMultiplier = (width: number, height: number): number => {
+  // Helper function to calculate HD scale factor (target ~2400px long edge)
+  const getHdScaleMultiplier = (width: number, height: number): number => {
     const maxDim = Math.max(width || 800, height || 600);
-    const targetDimension = 3840; // 4K Ultra HD target
+    const targetDimension = 2400; // Crisp HD target
     const multiplier = targetDimension / maxDim;
-    return Math.min(8, Math.max(3.5, multiplier));
+    return Math.min(4, Math.max(2, multiplier));
   };
 
   const generate4KImageData = (fabricCanvas: any, width: number, height: number): string => {
-    const multiplier = get4KScaleMultiplier(width, height);
+    const multiplier = getHdScaleMultiplier(width, height);
     return fabricCanvas.toDataURL({
       format: 'png',
       quality: 1,
@@ -2555,14 +2602,14 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
   const exportImage = () => {
     if (!canvas) return;
-    const multiplier = get4KScaleMultiplier(canvasSize.width, canvasSize.height);
+    const multiplier = getHdScaleMultiplier(canvasSize.width, canvasSize.height);
     const dataURL = canvas.toDataURL({
       format: 'png',
       quality: 1,
       multiplier: multiplier
     });
     const link = document.createElement('a');
-    link.download = `${projectName}-4K-${Date.now()}.png`;
+    link.download = `${projectName}-HD-${Date.now()}.png`;
     link.href = dataURL;
     document.body.appendChild(link);
     link.click();
@@ -2572,7 +2619,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const exportPngWithScale = (multiplier: number = 4) => {
     if (!canvas) return;
     const effectiveMultiplier = multiplier >= 4
-      ? get4KScaleMultiplier(canvasSize.width, canvasSize.height)
+      ? getHdScaleMultiplier(canvasSize.width, canvasSize.height)
       : multiplier;
     const dataURL = canvas.toDataURL({
       format: 'png',
@@ -2580,7 +2627,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       multiplier: effectiveMultiplier
     });
     const link = document.createElement('a');
-    link.download = `${projectName}-${multiplier >= 4 ? '4K-UltraHD' : `${multiplier}x`}-${Date.now()}.png`;
+    link.download = `${projectName}-${multiplier >= 4 ? 'HD' : `${multiplier}x`}-${Date.now()}.png`;
     link.href = dataURL;
     document.body.appendChild(link);
     link.click();
@@ -2631,7 +2678,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   const exportPDF = async () => {
     if (!canvas) return;
     try {
-      const multiplier = get4KScaleMultiplier(canvasSize.width, canvasSize.height);
+      const multiplier = getHdScaleMultiplier(canvasSize.width, canvasSize.height);
       const dataURL = canvas.toDataURL({
         format: 'png',
         quality: 1,
@@ -2655,7 +2702,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `${projectName}-4K-${Date.now()}.pdf`;
+      link.download = `${projectName}-HD-${Date.now()}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2678,7 +2725,26 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     const effectiveMode = overrideMode || saveMode;
     const targetName = saveModalName.trim() || projectName.trim() || 'My Infographic';
 
-    const thumbnail = generate4KImageData(canvas, canvasSize.width, canvasSize.height);
+    let thumbnail = '';
+    try {
+      // Ensure fonts are ready before generating thumbnail
+      if ('fonts' in document) {
+        await (document as any).fonts.ready;
+      }
+      canvas.renderAll();
+
+      // Use compact scale for thumbnail (target ~400px max dimension, quality 0.7 JPEG) to prevent oversized payloads
+      const maxThumbDim = 400;
+      const currentMaxDim = Math.max(canvasSize.width || 800, canvasSize.height || 600);
+      const thumbScale = Math.min(0.5, maxThumbDim / currentMaxDim);
+      thumbnail = canvas.toDataURL({
+        format: 'jpeg',
+        quality: 0.7,
+        multiplier: thumbScale
+      });
+    } catch (e) {
+      console.error('Thumbnail generation error:', e);
+    }
     
     const payload = {
       canvas: canvas.toJSON(),
@@ -2700,11 +2766,20 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             ownerName: ownerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้สร้างสรรค์',
             ownerDepartment: ownerDepartment || user?.department || 'หน่วยงานภาครัฐ',
             allowedEditors,
-            allowDepartmentEdit
+            allowDepartmentEdit,
+            requestingUser: user ? {
+              userId: user.id,
+              userRole: user.role,
+              userName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
+              userDept: user.department
+            } : null
           })
         });
 
-        if (!res.ok) throw new Error('Failed to update project');
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || errBody.message || 'Failed to update project');
+        }
 
         setProjectName(targetName);
         const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
@@ -2728,7 +2803,10 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           })
         });
 
-        if (!res.ok) throw new Error('Failed to create project');
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || errBody.message || 'Failed to create project');
+        }
 
         const data = await res.json();
         setCurrentProjectId(data.id);
@@ -2738,9 +2816,42 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         setShowSaveModal(false);
         setSaveToast({ message: `สร้างและบันทึกโปรเจกต์ใหม่ "${targetName}" เรียบร้อยแล้ว (เวลา ${nowStr} น.)`, type: 'success' });
       }
-    } catch (err) {
-      console.error(err);
-      setSaveToast({ message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง', type: 'error' });
+    } catch (err: any) {
+      console.error('Error saving project:', err);
+      // Fallback: If payload was too large with thumbnail, retry saving without thumbnail
+      if (thumbnail && (err.message?.includes('too large') || err.message?.includes('Failed') || err.message?.includes('payload'))) {
+        try {
+          console.warn('Retrying save without thumbnail...');
+          const fallbackRes = await fetch(currentProjectId && effectiveMode === 'overwrite' ? `/api/infographics/${currentProjectId}` : '/api/infographics', {
+            method: currentProjectId && effectiveMode === 'overwrite' ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: targetName,
+              data: JSON.stringify(payload),
+              thumbnail: '',
+              scope,
+              ownerId: user?.id || null,
+              ownerName: ownerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้สร้างสรรค์',
+              ownerDepartment: ownerDepartment || user?.department || 'หน่วยงานภาครัฐ',
+              allowedEditors,
+              allowDepartmentEdit
+            })
+          });
+          if (fallbackRes.ok) {
+            const data = await fallbackRes.json().catch(() => ({}));
+            if (data.id) setCurrentProjectId(data.id);
+            setProjectName(targetName);
+            const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+            setLastSavedTime(nowStr);
+            setShowSaveModal(false);
+            setSaveToast({ message: `บันทึกโปรเจกต์ "${targetName}" เรียบร้อยแล้ว (เวลา ${nowStr} น.)`, type: 'success' });
+            return;
+          }
+        } catch (retryErr) {
+          console.error('Retry save failed:', retryErr);
+        }
+      }
+      setSaveToast({ message: err?.message ? `เกิดข้อผิดพลาดในการบันทึกข้อมูล: ${err.message}` : 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง', type: 'error' });
     } finally {
       setIsSaving(false);
       setTimeout(() => setSaveToast(null), 5000);
@@ -2749,7 +2860,15 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
   const loadProjectDB = async (id: string) => {
     try {
-      const res = await fetch(`/api/infographics/${id}`);
+      const params = new URLSearchParams();
+      if (user) {
+        params.append('userId', String(user.id || ''));
+        params.append('userRole', String(user.role || ''));
+        params.append('userName', `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username || '');
+        params.append('userDept', String(user.department || ''));
+      }
+
+      const res = await fetch(`/api/infographics/${id}?${params.toString()}`);
       if (res.ok) {
         const dbData = await res.json();
         const payload = JSON.parse(dbData.data);
@@ -2773,11 +2892,14 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           setAllowedEditors([]);
         }
         
+        const targetBg = payload.backgroundColor || '#ffffff';
         if (payload.size) setCanvasSize(payload.size);
-        if (payload.backgroundColor) setBackgroundColor(payload.backgroundColor);
+        setBackgroundColor(targetBg);
         
         if (canvas && payload.canvas) {
           canvas.loadFromJSON(payload.canvas, () => {
+            canvas.set('backgroundColor', targetBg);
+            canvas.backgroundColor = targetBg;
             const objs = canvas.getObjects();
             objs.forEach(async (obj) => {
               if ('fontFamily' in obj && obj.fontFamily) {
@@ -2828,7 +2950,13 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               allowEmbed: true,
               allowDownload: true,
               authorName: user?.name || user?.username || 'ผู้สร้างสรรค์ Infographic',
-              authorDepartment: user?.department || 'หน่วยงานภาครัฐ'
+              authorDepartment: user?.department || 'หน่วยงานภาครัฐ',
+              requestingUser: user ? {
+                userId: user.id,
+                userRole: user.role,
+                userName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
+                userDept: user.department
+              } : null
             })
           });
 
@@ -2876,11 +3004,28 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     }
   };
   
+  const handleNewProject = () => {
+    if (!canvas) return;
+    if (confirm('คุณต้องการสร้างกระดานแผ่นงานใหม่ใช่หรือไม่? (โปรดตรวจสอบว่าได้บันทึกงานปัจจุบันแล้ว)')) {
+      setCurrentProjectId(null);
+      setProjectName('My Infographic');
+      setBackgroundColor('#ffffff');
+      canvas.clear();
+      canvas.backgroundColor = '#ffffff';
+      canvas.requestRenderAll();
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      saveHistory();
+      setSaveToast({ message: 'สร้างกระดานแผ่นงานใหม่ (พื้นหลังสีขาว Default) เรียบร้อยแล้ว', type: 'success' });
+      setTimeout(() => setSaveToast(null), 3000);
+    }
+  };
+
   const clearCanvas = () => {
     if (!canvas) return;
     if (confirm('คุณต้องการล้างหน้ากระดานทั้งหมดใช่หรือไม่?')) {
       canvas.clear();
-      canvas.backgroundColor = backgroundColor;
+      setBackgroundColor('#ffffff');
+      canvas.backgroundColor = '#ffffff';
       canvas.requestRenderAll();
       saveHistory(); // This will trigger persistence
     }
@@ -3101,9 +3246,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     saveHistory();
   };
 
-  // Preset Color Palettes
+  // Preset Color Palettes (Default White First)
   const presetColors = [
-    '#000000', '#ffffff', '#ef4444', '#f97316', '#f59e0b', 
+    '#ffffff', '#f8fafc', '#f1f5f9', '#000000', '#ef4444', '#f97316', '#f59e0b', 
     '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', 
     '#a855f7', '#ec4899', '#64748b', '#0f172a'
   ];
@@ -3133,31 +3278,34 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-[100] w-screen h-screen bg-[var(--bg-base)] shadow-2xl' : 'h-[calc(100vh-8rem)] bg-[var(--bg-base)]'} select-none transition-all`}
     >
       {/* Top Main Navigation Header Toolbar */}
-      <div className="shrink-0 border-b border-[var(--border-light)] bg-[var(--bg-surface)] flex items-center justify-between px-3 sm:px-4 overflow-x-auto whitespace-nowrap h-14 gap-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+      <div className="shrink-0 border-b border-[var(--border-light)] bg-[var(--bg-surface)] px-2.5 sm:px-4 h-14 flex items-center justify-between gap-2 z-20 relative select-none">
+        
+        {/* Left Side: Logo & Project Name */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-1">
+          <div className="flex items-center gap-1.5 shrink-0">
             <div className="p-1.5 bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
               <Palette className="w-5 h-5" />
             </div>
-            <h2 className="hidden lg:block text-base font-bold text-[var(--text-primary)] font-noto-serif-thai">
+            <h2 className="hidden lg:block text-sm font-bold text-[var(--text-primary)] font-noto-serif-thai whitespace-nowrap">
               Infographics Studio
             </h2>
           </div>
           
-          <div className="w-px h-5 bg-[var(--border-medium)]"></div>
+          <div className="hidden sm:block w-px h-5 bg-[var(--border-medium)] shrink-0"></div>
           
           <input 
             type="text" 
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
-            className="bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none px-2 py-0.5 text-sm text-[var(--text-primary)] font-semibold max-w-[140px] sm:max-w-[200px]"
+            className="bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none px-1.5 py-0.5 text-xs sm:text-sm text-[var(--text-primary)] font-semibold w-24 sm:w-36 md:w-48 transition-all truncate"
             placeholder="ชื่อโปรเจกต์..."
           />
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Alignment Quick Bar (If object selected) */}
+        {/* Right Side Desktop Toolbar (md and above) */}
+        <div className="hidden md:flex items-center gap-1.5 lg:gap-2 shrink-0">
+          
+          {/* Quick Align Bar (Wide screen when object selected) */}
           {selectedObject && (
             <div className="hidden xl:flex items-center bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded-lg p-1 gap-0.5">
               <button onClick={() => alignObject('left')} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded text-xs" title="จัดชิดซ้าย"><AlignLeft className="w-3.5 h-3.5"/></button>
@@ -3170,99 +3318,89 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </div>
           )}
 
-          {/* Fit to screen button */}
-          <button 
-            onClick={() => fitToScreen()} 
-            className="p-1.5 rounded-lg border border-[var(--border-medium)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] text-xs flex items-center gap-1 transition-colors"
-            title="ปรับขนาดภาพให้พอดีหน้าจอ (Fit to Screen)"
-          >
-            <Scaling className="w-4 h-4 text-emerald-500" />
-            <span className="hidden md:inline">พอดีจอ</span>
-          </button>
-
-          {/* Full Screen Toggle button */}
-          <button 
-            onClick={toggleFullscreen} 
-            className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 transition-all ${
-              isFullscreen 
-                ? 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 font-bold shadow-sm ring-2 ring-amber-500/20' 
-                : 'border-[var(--border-medium)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
-            }`}
-            title={isFullscreen ? "ออกจากโหมดเต็มจอ (Esc)" : "แสดงผลเต็มจอ (Full Screen Mode)"}
-          >
-            {isFullscreen ? (
-              <>
-                <Minimize2 className="w-4 h-4 text-amber-500" />
-                <span className="hidden sm:inline">ออกเต็มจอ</span>
-              </>
-            ) : (
-              <>
-                <Maximize2 className="w-4 h-4 text-blue-500" />
-                <span className="hidden sm:inline">เต็มจอ</span>
-              </>
-            )}
-          </button>
-
-          {/* Ruler Toggle */}
-          <button 
-            onClick={() => setShowRuler(!showRuler)} 
-            className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 transition-colors ${showRuler ? 'bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-400 font-semibold' : 'border-[var(--border-medium)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'}`}
-            title="แสดง/ซ่อนไม้บรรทัด (Rulers)"
-          >
-            <Ruler className="w-4 h-4" />
-            <span className="hidden md:inline">ไม้บรรทัด</span>
-          </button>
-
-          {/* Grid & Snap Dropdown Popover */}
-          <div className="relative">
+          {/* View Tools Group */}
+          <div className="flex bg-[var(--bg-elevated)] rounded-lg p-0.5 border border-[var(--border-medium)] items-center">
             <button 
-              onClick={() => setShowRulerGridPopover(!showRulerGridPopover)} 
-              className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 transition-colors ${showGrid ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold' : 'border-[var(--border-medium)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'}`}
-              title="ตั้งค่าตารางนำสายตาและแม่เหล็กดูดติดเส้นกริด (Grid & Snap)"
+              onClick={() => fitToScreen()} 
+              className="p-1.5 rounded text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 text-xs flex items-center gap-1 transition-colors"
+              title="ปรับขนาดภาพให้พอดีหน้าจอ (Fit to Screen)"
             >
-              <Grid className="w-4 h-4" />
-              <span className="hidden md:inline">ตาราง</span>
-              {snapToGrid && <Magnet className="w-3 h-3 text-amber-500 ml-0.5" />}
+              <Scaling className="w-4 h-4 text-emerald-500" />
+              <span className="hidden xl:inline">พอดีจอ</span>
             </button>
 
-            {showRulerGridPopover && (
-              <div className="absolute top-full right-0 mt-2 w-80 bg-[var(--bg-surface)] rounded-2xl shadow-2xl border border-[var(--border-light)] p-3.5 z-50 animate-fade-in select-none">
-                <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)] mb-3">
-                  <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
-                    <Sliders className="w-4 h-4 text-emerald-500" />
-                    ตั้งค่าไม้บรรทัดและตารางนำสายตา
-                  </h4>
-                  <button 
-                    onClick={() => setShowRulerGridPopover(false)} 
-                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg hover:bg-[var(--bg-elevated)] transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+            <button 
+              onClick={toggleFullscreen} 
+              className={`p-1.5 rounded text-xs flex items-center gap-1 transition-all ${
+                isFullscreen 
+                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold' 
+                  : 'text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700'
+              }`}
+              title={isFullscreen ? "ออกจากโหมดเต็มจอ (Esc)" : "แสดงผลเต็มจอ"}
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-500" /> : <Maximize2 className="w-4 h-4 text-blue-500" />}
+              <span className="hidden xl:inline">{isFullscreen ? 'ออกเต็มจอ' : 'เต็มจอ'}</span>
+            </button>
+
+            <button 
+              onClick={() => setShowRuler(!showRuler)} 
+              className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors ${showRuler ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold' : 'text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+              title="แสดง/ซ่อนไม้บรรทัด (Rulers)"
+            >
+              <Ruler className="w-4 h-4" />
+              <span className="hidden xl:inline">ไม้บรรทัด</span>
+            </button>
+
+            <div className="relative">
+              <button 
+                onClick={() => setShowRulerGridPopover(!showRulerGridPopover)} 
+                className={`p-1.5 rounded text-xs flex items-center gap-1 transition-colors ${showGrid ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                title="ตั้งค่าตารางนำสายตาและแม่เหล็ก (Grid & Snap)"
+              >
+                <Grid className="w-4 h-4" />
+                <span className="hidden xl:inline">ตาราง</span>
+                {snapToGrid && <Magnet className="w-3 h-3 text-amber-500 ml-0.5" />}
+              </button>
+
+              {showRulerGridPopover && (
+                <div className="absolute top-full right-0 mt-2 w-80 bg-[var(--bg-surface)] rounded-2xl shadow-2xl border border-[var(--border-light)] p-3.5 z-50 animate-fade-in select-none">
+                  <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)] mb-3">
+                    <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                      <Sliders className="w-4 h-4 text-emerald-500" />
+                      ตั้งค่าไม้บรรทัดและตารางนำสายตา
+                    </h4>
+                    <button 
+                      onClick={() => setShowRulerGridPopover(false)} 
+                      className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg hover:bg-[var(--bg-elevated)] transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  
+                  <RulerGridControlPanel
+                    showRuler={showRuler}
+                    setShowRuler={setShowRuler}
+                    rulerUnit={rulerUnit}
+                    setRulerUnit={setRulerUnit}
+                    showGrid={showGrid}
+                    setShowGrid={setShowGrid}
+                    gridStyle={gridStyle}
+                    setGridStyle={setGridStyle}
+                    gridSize={gridSize}
+                    setGridSize={setGridSize}
+                    gridOpacity={gridOpacity}
+                    setGridOpacity={setGridOpacity}
+                    snapToGrid={snapToGrid}
+                    setSnapToGrid={setSnapToGrid}
+                    guides={guides}
+                    showGuides={showGuides}
+                    setShowGuides={setShowGuides}
+                    onAddCenterGuides={addCenterGuides}
+                    onClearGuides={clearGuides}
+                  />
                 </div>
-                
-                <RulerGridControlPanel
-                  showRuler={showRuler}
-                  setShowRuler={setShowRuler}
-                  rulerUnit={rulerUnit}
-                  setRulerUnit={setRulerUnit}
-                  showGrid={showGrid}
-                  setShowGrid={setShowGrid}
-                  gridStyle={gridStyle}
-                  setGridStyle={setGridStyle}
-                  gridSize={gridSize}
-                  setGridSize={setGridSize}
-                  gridOpacity={gridOpacity}
-                  setGridOpacity={setGridOpacity}
-                  snapToGrid={snapToGrid}
-                  setSnapToGrid={setSnapToGrid}
-                  guides={guides}
-                  showGuides={showGuides}
-                  setShowGuides={setShowGuides}
-                  onAddCenterGuides={addCenterGuides}
-                  onClearGuides={clearGuides}
-                />
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Undo / Redo */}
@@ -3277,21 +3415,25 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
           <div className="w-px h-5 bg-[var(--border-medium)] mx-0.5"></div>
 
-          {/* Gallery Button */}
-          <button onClick={() => setShowGallery(true)} className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-1.5 sm:px-2.5 rounded-lg transition-colors flex items-center gap-1 text-xs border border-[var(--border-medium)]">
-            <FolderOpen className="w-4 h-4 text-amber-500" />
-            <span className="hidden sm:inline">แกลลอรี่</span>
+          {/* Project Action Buttons */}
+          <button onClick={handleNewProject} className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-1.5 lg:px-2.5 rounded-lg transition-colors flex items-center gap-1 text-xs border border-[var(--border-medium)] cursor-pointer" title="สร้างงาน Infographic แผ่นใหม่">
+            <Plus className="w-4 h-4 text-emerald-500" />
+            <span className="hidden xl:inline font-medium">สร้างงานใหม่</span>
           </button>
 
-          {/* Scope & Permissions Button */}
+          <button onClick={() => setShowGallery(true)} className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-1.5 lg:px-2.5 rounded-lg transition-colors flex items-center gap-1 text-xs border border-[var(--border-medium)]">
+            <FolderOpen className="w-4 h-4 text-amber-500" />
+            <span className="hidden xl:inline">แกลลอรี่</span>
+          </button>
+
           <button 
             type="button"
             onClick={() => setShowPermissionsModal(true)} 
-            className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-1.5 sm:px-2.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs border border-[var(--border-medium)] cursor-pointer"
-            title="กำหนดขอบเขตส่วนตัว/ส่วนกลาง และมอบสิทธิ์แก้ไขให้ Users อื่น"
+            className="text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] p-1.5 lg:px-2.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs border border-[var(--border-medium)] cursor-pointer"
+            title="กำหนดขอบเขตส่วนตัว/ส่วนกลาง"
           >
             <ShieldCheck className="w-4 h-4 text-blue-500" />
-            <span className="hidden sm:inline font-semibold">
+            <span className="hidden xl:inline font-semibold">
               {scope === 'personal' ? '🔒 ส่วนตัว' : '🏢 ส่วนกลาง'}
             </span>
             {allowedEditors.length > 0 && (
@@ -3305,42 +3447,193 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
           <button 
             onClick={handleOpenSaveModal} 
             disabled={isSaving} 
-            className="text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] p-1.5 sm:px-3 rounded-lg transition-all flex items-center gap-1.5 text-xs font-semibold border border-[var(--border-medium)] bg-[var(--bg-surface)] shadow-sm active:scale-98"
-            title="บันทึกข้อมูลและป้องกันการบันทึกซ้ำ"
+            className="text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] p-1.5 px-2.5 lg:px-3 rounded-lg transition-all flex items-center gap-1.5 text-xs font-semibold border border-[var(--border-medium)] bg-[var(--bg-surface)] shadow-xs active:scale-98"
+            title="บันทึกข้อมูล"
           >
             <Save className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span>{isSaving ? 'กำลังบันทึก...' : 'บันทึกโปรเจกต์'}</span>
+            <span>{isSaving ? 'บันทึก...' : 'บันทึก'}</span>
             {lastSavedTime && (
-              <span className="hidden lg:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-normal">
+              <span className="hidden xl:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-normal">
                 {lastSavedTime} น.
               </span>
             )}
           </button>
 
-          {/* Share & Embed Button */}
+          {/* Share Button */}
           <button 
             onClick={() => handleOpenShare()} 
             disabled={isPreparingShare}
-            className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 text-white font-semibold p-1.5 sm:px-3 rounded-xl transition-all flex items-center gap-1.5 text-xs shadow-md active:scale-98 cursor-pointer disabled:opacity-50"
-            title="แชร์ลิงก์สาธารณะ (Public View Link) / ฝังโค้ด iframe Embed"
+            className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 text-white font-semibold p-1.5 px-2.5 lg:px-3 rounded-xl transition-all flex items-center gap-1.5 text-xs shadow-md active:scale-98 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            title="แชร์ลิงก์สาธารณะ / ฝังโค้ด Embed"
           >
             <Share2 className={`w-3.5 h-3.5 ${isPreparingShare ? 'animate-spin' : ''}`} />
-            <span>{isPreparingShare ? 'กำลังเตรียม...' : 'แชร์ & Embed'}</span>
+            <span>{isPreparingShare ? 'เตรียม...' : 'แชร์ & Embed'}</span>
           </button>
+
+          {/* Export PNG / PDF */}
+          <div className="flex bg-[var(--bg-elevated)] rounded-lg p-0.5 border border-[var(--border-medium)]">
+            <button onClick={exportImage} className="text-[var(--text-primary)] hover:bg-gray-200 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors flex items-center gap-1 text-xs font-semibold">
+              <Download className="w-3.5 h-3.5 text-blue-500" /> PNG
+            </button>
+            <button onClick={exportPDF} className="bg-[var(--primary-color)] text-white hover:opacity-90 px-2 py-1 rounded transition-colors flex items-center gap-1 text-xs font-semibold shadow-xs">
+              PDF
+            </button>
+          </div>
 
           {/* Clear Canvas */}
           <button onClick={clearCanvas} className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 p-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs" title="ล้างหน้ากระดาน">
             <Trash2 className="w-4 h-4" />
           </button>
+        </div>
 
-          {/* Export PNG / PDF */}
+        {/* Mobile Toolbar Actions (< md) */}
+        <div className="flex md:hidden items-center gap-1 shrink-0">
+          {/* Undo / Redo */}
           <div className="flex bg-[var(--bg-elevated)] rounded-lg p-0.5 border border-[var(--border-medium)]">
-            <button onClick={exportImage} className="text-[var(--text-primary)] hover:bg-gray-200 dark:hover:bg-gray-700 px-2.5 py-1 rounded transition-colors flex items-center gap-1 text-xs font-semibold">
-              <Download className="w-3.5 h-3.5 text-blue-500" /> PNG
+            <button onClick={undo} className="text-[var(--text-secondary)] p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700" title="ยกเลิก">
+              <Undo className="w-4 h-4" />
             </button>
-            <button onClick={exportPDF} className="bg-[var(--primary-color)] text-white hover:opacity-90 px-2.5 py-1 rounded transition-colors flex items-center gap-1 text-xs font-semibold shadow-sm">
-              <Download className="w-3.5 h-3.5" /> PDF
+            <button onClick={redo} className="text-[var(--text-secondary)] p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700" title="ทำซ้ำ">
+              <Redo className="w-4 h-4" />
             </button>
+          </div>
+
+          {/* Save Button */}
+          <button 
+            onClick={handleOpenSaveModal} 
+            disabled={isSaving}
+            className="p-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-lg flex items-center gap-1 text-xs font-semibold active:scale-95"
+            title="บันทึก"
+          >
+            <Save className="w-4 h-4 text-emerald-500" />
+            <span className="text-[11px]">บันทึก</span>
+          </button>
+
+          {/* Share Button */}
+          <button 
+            onClick={() => handleOpenShare()} 
+            disabled={isPreparingShare}
+            className="p-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg flex items-center gap-1 text-xs font-semibold active:scale-95"
+            title="แชร์"
+          >
+            <Share2 className="w-4 h-4" />
+          </button>
+
+          {/* Mobile More Menu Toggle */}
+          <div className="relative">
+            <button 
+              onClick={() => setShowMobileMoreMenu(!showMobileMoreMenu)}
+              className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 transition-all ${
+                showMobileMoreMenu 
+                  ? 'bg-blue-500 text-white border-blue-500 shadow-md' 
+                  : 'border-[var(--border-medium)] text-[var(--text-secondary)] bg-[var(--bg-elevated)]'
+              }`}
+              title="เมนูเครื่องมือเพิ่มเติม"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+
+            {/* Mobile More Menu Popover */}
+            {showMobileMoreMenu && (
+              <div className="absolute top-full right-0 mt-2 w-60 bg-[var(--bg-surface)] rounded-2xl shadow-2xl border border-[var(--border-light)] p-2 z-50 animate-fade-in flex flex-col gap-1 text-xs">
+                <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border-light)] mb-1 text-[var(--text-muted)] font-semibold text-[11px]">
+                  <span>เครื่องมือเพิ่มเติม</span>
+                  <button onClick={() => setShowMobileMoreMenu(false)} className="p-0.5 rounded hover:bg-[var(--bg-elevated)]">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <button 
+                  onClick={() => { handleNewProject(); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] flex items-center gap-2 font-medium"
+                >
+                  <Plus className="w-4 h-4 text-emerald-500" />
+                  <span>สร้างงานใหม่</span>
+                </button>
+
+                <button 
+                  onClick={() => { setShowGallery(true); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] flex items-center gap-2 font-medium"
+                >
+                  <FolderOpen className="w-4 h-4 text-amber-500" />
+                  <span>แกลลอรี่โปรเจกต์</span>
+                </button>
+
+                <button 
+                  onClick={() => { setShowPermissionsModal(true); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] flex items-center justify-between font-medium"
+                >
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-blue-500" />
+                    <span>ขอบเขต ({scope === 'personal' ? 'ส่วนตัว' : 'ส่วนกลาง'})</span>
+                  </div>
+                  {allowedEditors.length > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-600 font-mono text-[10px]">
+                      +{allowedEditors.length}
+                    </span>
+                  )}
+                </button>
+
+                <div className="h-px bg-[var(--border-light)] my-0.5"></div>
+
+                <button 
+                  onClick={() => { fitToScreen(); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] flex items-center gap-2"
+                >
+                  <Scaling className="w-4 h-4 text-emerald-500" />
+                  <span>ย่อ/ขยาย พอดีจอ</span>
+                </button>
+
+                <button 
+                  onClick={() => { toggleFullscreen(); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] flex items-center gap-2"
+                >
+                  {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-500" /> : <Maximize2 className="w-4 h-4 text-blue-500" />}
+                  <span>{isFullscreen ? 'ออกจากโหมดเต็มจอ' : 'แสดงผลเต็มจอ'}</span>
+                </button>
+
+                <button 
+                  onClick={() => { setShowRuler(!showRuler); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] flex items-center gap-2"
+                >
+                  <Ruler className="w-4 h-4 text-blue-500" />
+                  <span>ไม้บรรทัด {showRuler ? '(เปิด)' : '(ปิด)'}</span>
+                </button>
+
+                <button 
+                  onClick={() => { setShowRulerGridPopover(true); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] flex items-center gap-2"
+                >
+                  <Grid className="w-4 h-4 text-emerald-500" />
+                  <span>ตั้งค่าตารางกริด & Snap</span>
+                </button>
+
+                <div className="h-px bg-[var(--border-light)] my-0.5"></div>
+
+                <div className="flex gap-1.5 p-1">
+                  <button 
+                    onClick={() => { exportImage(); setShowMobileMoreMenu(false); }}
+                    className="flex-1 py-1.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold rounded-lg flex items-center justify-center gap-1 text-xs"
+                  >
+                    <Download className="w-3.5 h-3.5" /> PNG
+                  </button>
+                  <button 
+                    onClick={() => { exportPDF(); setShowMobileMoreMenu(false); }}
+                    className="flex-1 py-1.5 bg-blue-600 text-white font-bold rounded-lg flex items-center justify-center gap-1 text-xs shadow-xs"
+                  >
+                    <Download className="w-3.5 h-3.5" /> PDF
+                  </button>
+                </div>
+
+                <button 
+                  onClick={() => { clearCanvas(); setShowMobileMoreMenu(false); }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 flex items-center gap-2 font-medium"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>ล้างหน้ากระดาน</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -4376,9 +4669,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                       const file = e.target.files[0];
                       setIsUploadingImageSidebar(true);
                       try {
+                        const currentUserId = user?.id || user?.username || 'guest';
+                        const currentUserName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน';
                         const formData = new FormData();
                         formData.append('files', file);
-                        formData.append('uploadedBy', 'Infographics Studio');
+                        formData.append('userId', currentUserId);
+                        formData.append('uploadedBy', currentUserName);
                         const res = await fetch('/api/infographics/upload', {
                           method: 'POST',
                           body: formData
@@ -4783,26 +5079,64 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               </div>
 
               {/* Stroke / Border */}
-              <div className="space-y-2 pt-3 border-t border-[var(--border-light)]">
-                <label className="font-bold text-[var(--text-primary)] block">เส้นขอบ (Stroke & Border)</label>
-                <div className="flex items-center justify-between gap-2">
+              <div className="space-y-3 pt-3 border-t border-[var(--border-light)]">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-[var(--text-primary)] block">เส้นขอบ (Stroke & Border)</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={strokeDash} 
+                      onChange={(e) => handlePropertyChange('strokeDash', e.target.checked)}
+                      className="w-3 h-3 accent-blue-500 rounded"
+                    />
+                    <span className="text-[10px] text-[var(--text-muted)]">เส้นประ (Dash)</span>
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2">
                   <input 
                     type="color" 
                     value={strokeColor === 'transparent' ? '#000000' : strokeColor} 
                     onChange={(e) => handlePropertyChange('stroke', e.target.value)}
-                    className="w-7 h-7 p-0 border-0 rounded overflow-hidden cursor-pointer"
+                    className="w-8 h-8 p-0 border-0 rounded overflow-hidden cursor-pointer shrink-0"
                   />
-                  <button onClick={() => handlePropertyChange('stroke', 'transparent')} className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 px-2 py-1 rounded">
-                    ไม่มีขอบ
+                  <input 
+                    type="text" 
+                    value={strokeColor} 
+                    onChange={(e) => handlePropertyChange('stroke', e.target.value)}
+                    className="flex-1 p-1 text-[10px] border border-[var(--border-medium)] rounded bg-transparent font-mono text-[var(--text-primary)]"
+                  />
+                  <button 
+                    onClick={() => handlePropertyChange('stroke', 'transparent')} 
+                    className={`px-2 py-1.5 rounded text-[10px] font-bold border transition-colors ${strokeColor === 'transparent' ? 'bg-red-500 text-white border-red-600' : 'bg-[var(--bg-elevated)] text-red-500 border-red-200 dark:border-red-900/30'}`}
+                  >
+                    ลบขอบ
                   </button>
-                  <span className="font-mono text-[var(--text-muted)]">{strokeWidth}px</span>
                 </div>
-                <input 
-                  type="range" min="0" max="20" 
-                  value={strokeWidth} 
-                  onChange={(e) => handlePropertyChange('strokeWidth', parseInt(e.target.value))}
-                  className="w-full accent-blue-500"
-                />
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span className="text-[var(--text-muted)]">ความหนาเส้นขอบ</span>
+                    <span className="font-mono font-bold text-blue-600">{strokeWidth}px</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="25" 
+                    value={strokeWidth} 
+                    onChange={(e) => handlePropertyChange('strokeWidth', parseInt(e.target.value))}
+                    className="w-full accent-blue-500 h-1.5"
+                  />
+                  <div className="flex gap-1 justify-between">
+                    {[0, 1, 2, 4, 8, 12].map(w => (
+                      <button 
+                        key={w}
+                        onClick={() => handlePropertyChange('strokeWidth', w)}
+                        className={`flex-1 py-0.5 text-[9px] rounded border transition-all ${strokeWidth === w ? 'bg-blue-500 text-white border-blue-600' : 'bg-[var(--bg-elevated)] text-[var(--text-muted)] border-[var(--border-medium)]'}`}
+                      >
+                        {w}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* Corner Radius for Rectangles */}
@@ -4821,10 +5155,27 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                 </div>
               )}
 
-              {/* Image Crop */}
+              {/* Image Crop & Remove Background */}
               {selectedObject.type === 'image' && (
-                <div className="space-y-1.5 pt-3 border-t border-[var(--border-light)]">
-                  <label className="font-bold text-[var(--text-primary)] block">รูปภาพ (Image)</label>
+                <div className="space-y-2 pt-3 border-t border-[var(--border-light)]">
+                  <label className="font-bold text-[var(--text-primary)] block">เครื่องมือรูปภาพ (Image Tools)</label>
+                  
+                  {/* AI Background Removal */}
+                  <button
+                    onClick={() => {
+                      if (selectedObject && selectedObject.getSrc) {
+                        setImageToRemoveBg(selectedObject.getSrc());
+                      } else if (selectedObject && selectedObject.src) {
+                        setImageToRemoveBg(selectedObject.src);
+                      }
+                    }}
+                    className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg py-2 flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-sm active:scale-98"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                    <span>ลบพื้นหลังวัตถุ (AI Remove BG)</span>
+                  </button>
+
+                  {/* Crop Image */}
                   <button
                     onClick={() => {
                       if (selectedObject && selectedObject.getSrc) {
@@ -5036,7 +5387,15 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               const res = await fetch(`/api/infographics/${currentShareData.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updated)
+                body: JSON.stringify({
+                  ...updated,
+                  requestingUser: user ? {
+                    userId: user.id,
+                    userRole: user.role,
+                    userName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
+                    userDept: user.department
+                  } : null
+                })
               });
               if (res.ok) {
                 const saved = await res.json();
@@ -5058,6 +5417,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         <InfographicsImageGalleryModal
           onClose={() => setShowImageLibraryModal(false)}
           onSelectImage={(url, name) => insertImageFromUrl(url, name)}
+          currentUser={user}
         />
       )}
 
@@ -5091,6 +5451,45 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               canvas.requestRenderAll();
               saveHistory();
               setImageToCrop(null);
+            });
+          }}
+        />
+      )}
+
+      {imageToRemoveBg && (
+        <ImageBackgroundRemovalModal
+          imageUrl={imageToRemoveBg}
+          onClose={() => setImageToRemoveBg(null)}
+          onApply={(processedDataUrl) => {
+            if (!canvas || !selectedObject || selectedObject.type !== 'image') {
+              setImageToRemoveBg(null);
+              return;
+            }
+            const oldWidth = selectedObject.getScaledWidth ? selectedObject.getScaledWidth() : selectedObject.width;
+            const left = selectedObject.left;
+            const top = selectedObject.top;
+            const angle = selectedObject.angle;
+
+            fabric.Image.fromURL(processedDataUrl, { crossOrigin: 'anonymous' }).then((img: any) => {
+              img.set({
+                left: left,
+                top: top,
+                angle: angle
+              });
+              img.scaleToWidth(oldWidth);
+              
+              canvas.remove(selectedObject);
+              canvas.add(img);
+              canvas.setActiveObject(img);
+              canvas.requestRenderAll();
+              saveHistory();
+              setImageToRemoveBg(null);
+
+              setSaveToast({
+                message: '✨ ลบพื้นหลังและอัปเดตวัตถุเรียบร้อยแล้ว!',
+                type: 'success'
+              });
+              setTimeout(() => setSaveToast(null), 3000);
             });
           }}
         />
@@ -5317,6 +5716,31 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                 <div className="flex flex-col">
                   <span>📦 รวมกลุ่มวัตถุ (Group)</span>
                   <span className="text-[10px] font-normal text-indigo-800/80 dark:text-indigo-300/70">รวมเป็นชิ้นเดียวเพื่อย้ายสะดวก</span>
+                </div>
+              </button>
+            </div>
+          )}
+
+          {/* Context Menu Image Remove BG Action */}
+          {contextMenu.targetObject?.type === 'image' && (
+            <div className="p-1.5 bg-purple-500/10 border-b border-[var(--border-light)]">
+              <button
+                type="button"
+                onClick={() => {
+                  const obj = contextMenu.targetObject;
+                  if (obj && obj.getSrc) {
+                    setImageToRemoveBg(obj.getSrc());
+                  } else if (obj && obj.src) {
+                    setImageToRemoveBg(obj.src);
+                  }
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                className="w-full text-left px-3 py-2 text-xs font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-500/20 rounded-xl flex items-center gap-2 transition-colors"
+              >
+                <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400 animate-pulse" />
+                <div className="flex flex-col">
+                  <span>✨ ลบพื้นหลังด้วย AI (Remove BG)</span>
+                  <span className="text-[10px] font-normal text-purple-800/80 dark:text-purple-300/70">สกัดแยกวัตถุออกจากภาพอัตโนมัติ</span>
                 </div>
               </button>
             </div>

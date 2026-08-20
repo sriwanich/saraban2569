@@ -421,11 +421,9 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       const permRes = await fetch(`/api/role-permissions?t=${Date.now()}`, { cache: 'no-cache' });
       if (permRes.ok && permRes.headers.get('content-type')?.includes('application/json')) {
         setRolePermissions(await permRes.json());
-      } else if (permRes.ok) {
-        console.warn('Received non-JSON response for role-permissions');
       }
-    } catch (err) {
-      console.error('Error fetching role-permissions:', err);
+    } catch (_) {
+      // Graceful fallback during server boot
     }
   };
 
@@ -445,8 +443,18 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           setEnabledFeatures(parsed);
         }
       }
-    } catch (err: any) {
-      console.error('Error fetching settings', err);
+    } catch (_) {
+      // Gracefully fall back to local stored settings
+      try {
+        const cached = localStorage.getItem('moi_settings');
+        if (cached) {
+          const data = JSON.parse(cached);
+          if (data.orgName) setOrgName(data.orgName);
+          if (data.logoUrl) setLogoUrl(data.logoUrl);
+          if (data.currentYear) setCurrentYear(data.currentYear);
+          if (data.enabledFeatures) setEnabledFeatures(parseEnabledFeatures(data.enabledFeatures));
+        }
+      } catch (e) {}
     }
   };
 

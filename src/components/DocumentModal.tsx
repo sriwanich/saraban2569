@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DocumentItem, DocType, DocPriority, DocCategory, Folder as FolderType, User, formatThaiDate } from '../types';
+import { DocumentItem, DocType, DocPriority, DocCategory, Folder as FolderType, User, formatThaiDate, formatThaiDateString } from '../types';
 import { 
   X, Save, Paperclip, Upload, Trash2, FileText, Loader2, Folder, CheckCircle2, 
   Calendar, Lock, Sparkles, Bookmark, Search, Filter, Check, Hash, Building2, 
@@ -26,8 +26,50 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const [selectedReservedId, setSelectedReservedId] = useState<number | null>(null);
 
   const [reservedFilterType, setReservedFilterType] = useState<string>('ALL');
+  const [reservedFilterDate, setReservedFilterDate] = useState<string>('');
   const [reservedFilterStatus, setReservedFilterStatus] = useState<string>('available');
   const [reservedSearchTerm, setReservedSearchTerm] = useState<string>('');
+
+  // Helper to determine exact docType for filtering reserved numbers
+  const getCurrentSpecificDocType = (docType?: DocType, category?: string) => {
+    const t = docType || formData.type;
+    const cat = category || formData.category;
+    if (t === 'admin') {
+      if (cat === 'order') return 'คำสั่ง';
+      if (cat === 'announcement') return 'ประกาศ';
+      if (cat === 'certificate' || cat === 'cert') return 'หนังสือรับรอง';
+      return 'คำสั่ง';
+    }
+    if (t === 'outbox') return 'หนังสือภายนอก';
+    if (t === 'internal') return 'หนังสือภายใน';
+    if (t === 'inbox') return 'หนังสือรับ';
+    return 'หนังสือภายนอก';
+  };
+
+  const getCurrentDocTypeDisplayLabel = (docType?: DocType, category?: string) => {
+    const t = docType || formData.type;
+    const cat = category || formData.category;
+    if (t === 'admin') {
+      if (cat === 'order') return 'คำสั่ง';
+      if (cat === 'announcement') return 'ประกาศ';
+      if (cat === 'certificate' || cat === 'cert') return 'หนังสือรับรอง';
+      return 'งานธุรการ (คำสั่ง)';
+    }
+    if (t === 'outbox') return 'หนังสือส่ง (หนังสือภายนอก)';
+    if (t === 'internal') return 'หนังสือภายใน';
+    if (t === 'inbox') return 'หนังสือรับ';
+    return 'หนังสือภายนอก';
+  };
+
+  const handleOpenReservedModal = () => {
+    const specificType = getCurrentSpecificDocType();
+    setReservedFilterType(specificType);
+    setReservedFilterDate('');
+    setReservedSearchTerm('');
+    setReservedFilterStatus('available');
+    fetchNumberingAndReserved();
+    setShowReservedModal(true);
+  };
 
   const fetchNumberingAndReserved = async () => {
     try {
@@ -55,25 +97,53 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     }
   };
 
-  const [formData, setFormData] = useState<Partial<DocumentItem>>({
-    receiveNumber: '',
-    year: currentYear ? String(currentYear) : '2569',
-    docNumber: '',
-    date: new Date().toISOString().split('T')[0],
-    title: '',
-    from: '',
-    to: '',
-    department: '',
-    assignee: '',
-    note: '',
-    type: defaultType || 'inbox',
-    category: 'order',
-    priority: 'ปกติ',
-    secrecy: 'ปกติ',
-    content: '',
-    folderId: null,
-    status: 'ลงทะเบียน',
-    attachments: []
+  const getInitialYear = () => {
+    if (currentYear) return String(currentYear);
+    try {
+      const saved = localStorage.getItem('moi_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.currentYear) return String(parsed.currentYear);
+      }
+    } catch (e) {}
+    return '2569';
+  };
+
+  const effectiveYear = getInitialYear();
+  const isManualDocNumberRef = useRef<boolean>(false);
+  const hasInitializedRef = useRef<boolean>(false);
+  const hasAppliedRulesRef = useRef<boolean>(false);
+
+  const [formData, setFormData] = useState<Partial<DocumentItem>>(() => {
+    if (initialData) {
+      return {
+        ...initialData,
+        year: initialData.year || effectiveYear,
+        folderId: initialData.folderId ? Number(initialData.folderId) : null,
+        status: initialData.status || 'ลงทะเบียน'
+      };
+    }
+    const activeType = defaultType || 'inbox';
+    return {
+      receiveNumber: '',
+      year: effectiveYear,
+      docNumber: '',
+      date: new Date().toISOString().split('T')[0],
+      title: '',
+      from: activeType === 'outbox' ? 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' : '',
+      to: '',
+      department: user?.department || '',
+      assignee: '',
+      note: '',
+      type: activeType,
+      category: 'order',
+      priority: 'ปกติ',
+      secrecy: 'ปกติ',
+      content: '',
+      folderId: null,
+      status: 'ลงทะเบียน',
+      attachments: []
+    };
   });
 
   // Fetch custom numbering rules & reserved numbers on mount
@@ -179,7 +249,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     const targetType = docType || formData?.type || defaultType || 'inbox';
     const targetIsCircular = isCirc !== undefined ? isCirc : (formData?.isCircular || false);
     const targetCategory = cat || formData?.category || 'order';
-    const targetYear = yr || formData?.year || (currentYear ? String(currentYear) : '2569');
+    const targetYear = yr || formData?.year || effectiveYear;
     const targetDept = formData?.department || user?.department || 'ฝ่ายบริหารงานทั่วไป';
 
     let actualType = 'หนังสือภายนอก';
@@ -279,9 +349,9 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     fetchUsers();
   }, []);
 
-  // Sync outbox numbering logic
+  // Sync outbox numbering logic ONLY when user hasn't selected a reservation number and hasn't manually edited docNumber
   useEffect(() => {
-    if (formData.type === 'outbox') {
+    if (formData.type === 'outbox' && !selectedReservedId && !isManualDocNumberRef.current && !initialData) {
       const targetDept = formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป';
       let rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && r.department === targetDept);
       if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && r.department === 'ทุกฝ่ายงาน');
@@ -292,16 +362,17 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       }
       const circStr = formData.isCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
       const expectedDocNumber = `${prefix}/${circStr}${formData.receiveNumber || ''}`;
-      if (formData.docNumber !== expectedDocNumber && !initialData) {
+      if (formData.docNumber !== expectedDocNumber) {
         setFormData(prev => ({
           ...prev,
           docNumber: expectedDocNumber
         }));
       }
     }
-  }, [formData.type, formData.receiveNumber, formData.isCircular, formData.docNumber, initialData, user?.role, user?.department, numberingRules]);
+  }, [formData.type, formData.receiveNumber, formData.isCircular, formData.department, selectedReservedId, initialData, user?.role, user?.department, numberingRules]);
 
   const handleIsCircularChange = (checked: boolean) => {
+    isManualDocNumberRef.current = false;
     const { seq, docNumber: newDocNumber } = generateNumberInfo('outbox', checked);
     setFormData(prev => ({
       ...prev,
@@ -311,20 +382,22 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     }));
   };
 
-  // Set default values upon opening
+  // Set initial default values ONLY on mount or when switching documents (initialData.id), NEVER on background polling
   useEffect(() => {
-    setSelectedReservedId(null);
     if (initialData) {
+      setSelectedReservedId(null);
       setFormData({
         ...initialData,
+        year: initialData.year || effectiveYear,
         folderId: initialData.folderId ? Number(initialData.folderId) : null,
         status: initialData.status || 'ลงทะเบียน'
       });
-    } else {
+      hasInitializedRef.current = true;
+    } else if (!hasInitializedRef.current) {
       const activeType = defaultType || 'inbox';
-      const isCirc = activeType === 'outbox' ? (formData.isCircular || false) : false;
+      const isCirc = false;
       const initCat = 'order';
-      const initYear = currentYear ? String(currentYear) : '2569';
+      const initYear = effectiveYear;
       const { seq, docNumber: initDocNum } = generateNumberInfo(activeType, isCirc, initCat, initYear);
       setFormData(prev => ({
         ...prev,
@@ -338,31 +411,52 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         folderId: null,
         from: activeType === 'outbox' ? 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' : prev.from
       }));
+      hasInitializedRef.current = true;
     }
-  }, [initialData, defaultType, documents, currentYear, numberingRules]);
+  }, [initialData?.id]);
+
+  // If numberingRules finishes loading after modal opens, apply prefix once if user hasn't edited anything yet
+  useEffect(() => {
+    if (!initialData && !selectedReservedId && !isManualDocNumberRef.current && !hasAppliedRulesRef.current && numberingRules.length > 0) {
+      const activeType = formData.type || defaultType || 'inbox';
+      const isCirc = formData.isCircular || false;
+      const initCat = formData.category || 'order';
+      const initYear = formData.year || effectiveYear;
+      const { seq, docNumber: initDocNum } = generateNumberInfo(activeType, isCirc, initCat, initYear);
+      if (initDocNum) {
+        setFormData(prev => ({
+          ...prev,
+          receiveNumber: prev.receiveNumber || seq,
+          docNumber: prev.docNumber || initDocNum
+        }));
+        hasAppliedRulesRef.current = true;
+      }
+    }
+  }, [numberingRules]);
 
   const handleTypeChange = (newType: DocType) => {
     if (newType === 'inbox') {
       setSelectedReservedId(null);
     }
+    isManualDocNumberRef.current = false;
     if (!initialData) {
       const isCirc = newType === 'outbox' ? (formData.isCircular || false) : false;
       const initCat = formData.category || 'order';
-      const initYear = formData.year || currentYear || '2569';
+      const initYear = formData.year || effectiveYear;
       const { seq, docNumber: newDocNum } = generateNumberInfo(newType, isCirc, initCat, String(initYear));
       setFormData(prev => ({
         ...prev,
         type: newType,
         receiveNumber: seq,
         docNumber: newDocNum,
-        year: currentYear ? String(currentYear) : (prev.year || '2569'),
+        year: prev.year || effectiveYear,
         from: newType === 'outbox' ? 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' : prev.from
       }));
     } else {
       setFormData(prev => ({
         ...prev,
         type: newType,
-        year: currentYear ? String(currentYear) : (prev.year || '2569')
+        year: prev.year || effectiveYear
       }));
     }
   };
@@ -383,9 +477,12 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   }, []);
 
   const handleChange = (field: keyof DocumentItem, value: any) => {
+    if (field === 'docNumber' || field === 'receiveNumber') {
+      isManualDocNumberRef.current = true;
+    }
     if (!initialData && formData.type === 'admin' && (field === 'category' || field === 'year')) {
       const cat = field === 'category' ? value : (formData.category || 'order');
-      const yr = field === 'year' ? value : (formData.year || '2569');
+      const yr = field === 'year' ? value : (formData.year || effectiveYear);
       const { docNumber: nextDocNum } = generateNumberInfo('admin', false, cat, yr);
       setFormData(prev => ({ ...prev, [field]: value, docNumber: nextDocNum }));
       return;
@@ -737,10 +834,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     {formData.type !== 'inbox' && (
                       <button
                         type="button"
-                        onClick={() => {
-                          fetchNumberingAndReserved();
-                          setShowReservedModal(true);
-                        }}
+                        onClick={handleOpenReservedModal}
                         className="text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 px-2 py-0.5 rounded-lg border border-amber-500/30 flex items-center gap-1 transition-all cursor-pointer"
                         title="เลือกเลขจากคลังจองล่วงหน้า"
                       >
@@ -1203,167 +1297,321 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
             </div>
 
             {/* Filter & Search Toolbar */}
-            <div className="p-3 sm:p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)] flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex flex-wrap items-center gap-2">
-                {/* DocType filter */}
-                <div className="flex items-center gap-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2.5 py-1.5 rounded-lg">
-                  <Filter className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                  <span className="text-[var(--text-muted)]">ประเภท:</span>
-                  <select
-                    value={reservedFilterType}
-                    onChange={(e) => setReservedFilterType(e.target.value)}
-                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer"
-                  >
-                    <option value="ALL">ทั้งหมด</option>
-                    <option value="หนังสือภายนอก">หนังสือภายนอก</option>
-                    <option value="หนังสือภายใน">หนังสือภายใน</option>
-                    <option value="คำสั่ง">คำสั่ง</option>
-                    <option value="ประกาศ">ประกาศ</option>
-                    <option value="หนังสือรับรอง">หนังสือรับรอง</option>
-                  </select>
+            <div className="p-3 sm:p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)] space-y-3 text-xs">
+              {/* Type Filter Quick Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+                <span className="text-[var(--text-muted)] font-medium shrink-0 flex items-center gap-1 mr-1">
+                  <Filter className="w-3.5 h-3.5 text-[var(--primary-color)]" /> กรองประเภท:
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setReservedFilterType(getCurrentSpecificDocType())}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                    reservedFilterType === getCurrentSpecificDocType()
+                      ? 'bg-[var(--primary-color)] text-white shadow-sm ring-1 ring-[var(--primary-color)]'
+                      : 'bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)]'
+                  }`}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  ตรงกับเอกสารนี้ ({getCurrentDocTypeDisplayLabel()})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setReservedFilterType('ALL')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                    reservedFilterType === 'ALL'
+                      ? 'bg-[var(--primary-color)] text-white shadow-sm'
+                      : 'bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] border border-[var(--border-light)]'
+                  }`}
+                >
+                  ทั้งหมด
+                </button>
+
+                {['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง', 'หนังสือภายนอก', 'หนังสือภายใน', 'หนังสือรับ'].map(t => {
+                  const isSelected = reservedFilterType === t;
+                  const label = t === 'หนังสือภายนอก' ? 'หนังสือส่ง (ภายนอก)' : t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setReservedFilterType(t)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                        isSelected
+                          ? 'bg-[var(--primary-color)] text-white shadow-sm'
+                          : 'bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] border border-[var(--border-light)]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Date Filter & Search Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+                {/* Date Picker Filter */}
+                <div className="sm:col-span-5 flex items-center gap-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2.5 py-1.5 rounded-lg">
+                  <Calendar className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                  <span className="text-[var(--text-muted)] shrink-0">วันที่จอง:</span>
+                  <input
+                    type="date"
+                    value={reservedFilterDate}
+                    onChange={(e) => setReservedFilterDate(e.target.value)}
+                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none text-xs flex-1 cursor-pointer"
+                  />
+                  {reservedFilterDate ? (
+                    <button
+                      type="button"
+                      onClick={() => setReservedFilterDate('')}
+                      className="text-[10px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded font-semibold transition-colors cursor-pointer"
+                      title="ล้างตัวกรองวันที่"
+                    >
+                      ล้าง
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        setReservedFilterDate(today);
+                      }}
+                      className="text-[10px] text-[var(--text-muted)] hover:text-[var(--primary-color)] hover:underline shrink-0 cursor-pointer"
+                    >
+                      วันนี้
+                    </button>
+                  )}
                 </div>
 
-                {/* Status filter */}
-                <div className="flex items-center gap-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2.5 py-1.5 rounded-lg">
-                  <span className="text-[var(--text-muted)]">สถานะ:</span>
+                {/* Status selector */}
+                <div className="sm:col-span-3 flex items-center gap-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2.5 py-1.5 rounded-lg">
+                  <span className="text-[var(--text-muted)] shrink-0">สถานะ:</span>
                   <select
                     value={reservedFilterStatus}
                     onChange={(e) => setReservedFilterStatus(e.target.value)}
-                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer"
+                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer w-full text-xs"
                   >
-                    <option value="available">เฉพาะพร้อมใช้งาน (Available)</option>
-                    <option value="used">ใช้งานแล้ว (Used)</option>
-                    <option value="ALL">ทั้งหมด</option>
+                    <option value="available">พร้อมใช้งาน</option>
+                    <option value="used">ใช้งานแล้ว</option>
+                    <option value="ALL">ทุกสถานะ</option>
                   </select>
                 </div>
-              </div>
 
-              {/* Search */}
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="ค้นหาเลขที่, ผู้จอง, วัตถุประสงค์..."
-                  value={reservedSearchTerm}
-                  onChange={(e) => setReservedSearchTerm(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)]"
-                />
+                {/* Text Search */}
+                <div className="sm:col-span-4 relative">
+                  <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="ค้นหาเลขที่, ผู้จอง, วัตถุประสงค์..."
+                    value={reservedSearchTerm}
+                    onChange={(e) => setReservedSearchTerm(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)]"
+                  />
+                  {reservedSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setReservedSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* List of Reserved / Reclaimed Numbers */}
             <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
               {(() => {
+                const matchesType = (itemType: string, filterType: string) => {
+                  if (filterType === 'ALL') return true;
+                  if (filterType === 'หนังสือภายนอก') {
+                    return itemType === 'หนังสือภายนอก' || itemType === 'หนังสือส่ง';
+                  }
+                  if (filterType === 'หนังสือรับ') {
+                    return itemType === 'หนังสือรับ' || itemType === 'หนังสือเข้า';
+                  }
+                  return itemType === filterType;
+                };
+
                 const filtered = reservedNumbers.filter(item => {
                   if (reservedFilterStatus !== 'ALL' && item.status !== reservedFilterStatus) return false;
-                  if (reservedFilterType !== 'ALL' && item.docType !== reservedFilterType) return false;
+                  if (!matchesType(item.docType || '', reservedFilterType)) return false;
+                  
+                  if (reservedFilterDate) {
+                    const itemDate = (item.reservedDate || item.createdAt || '').split('T')[0];
+                    if (itemDate !== reservedFilterDate) return false;
+                  }
+
                   if (reservedSearchTerm.trim()) {
                     const term = reservedSearchTerm.toLowerCase();
                     const numStr = (item.numberString || '').toLowerCase();
                     const byStr = (item.reservedBy || '').toLowerCase();
                     const forStr = (item.reservedFor || '').toLowerCase();
                     const deptStr = (item.department || '').toLowerCase();
-                    return numStr.includes(term) || byStr.includes(term) || forStr.includes(term) || deptStr.includes(term);
+                    const seqStr = String(item.seqNumber || '');
+                    return numStr.includes(term) || byStr.includes(term) || forStr.includes(term) || deptStr.includes(term) || seqStr.includes(term);
                   }
                   return true;
                 });
 
                 if (filtered.length === 0) {
                   return (
-                    <div className="p-8 text-center text-[var(--text-muted)] space-y-2">
-                      <Bookmark className="w-10 h-10 mx-auto opacity-40 text-amber-500" />
-                      <p className="font-semibold text-sm text-[var(--text-primary)]">ไม่พบรายการเลขจองตรงตามเงื่อนไข</p>
-                      <p className="text-xs">สามารถไปตั้งเวลาจอง หรือกดจองเลขล่วงหน้าได้ที่เมนู "ตั้งค่าระบบ &gt; กำหนดโครงสร้างเลขหนังสือสารบรรณ"</p>
+                    <div className="p-8 text-center text-[var(--text-muted)] space-y-3">
+                      <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500">
+                        <Bookmark className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-[var(--text-primary)]">ไม่พบรายการเลขจองตรงตามเงื่อนไข</p>
+                        <p className="text-xs text-[var(--text-muted)] mt-1">
+                          {reservedFilterType !== 'ALL' && `ประเภท: "${reservedFilterType}" `}
+                          {reservedFilterDate && `วันที่: "${formatThaiDate(reservedFilterDate)}" `}
+                          {reservedSearchTerm && `ค้นหา: "${reservedSearchTerm}"`}
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-center gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReservedFilterType('ALL');
+                            setReservedFilterDate('');
+                            setReservedSearchTerm('');
+                            setReservedFilterStatus('available');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-xs text-[var(--text-primary)] font-semibold transition-colors cursor-pointer"
+                        >
+                          ล้างตัวกรองทั้งหมดเพื่อดูเลขทั้งหมด
+                        </button>
+                      </div>
                     </div>
                   );
                 }
 
                 return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {filtered.map(item => {
-                      const isAvailable = item.status === 'available';
-                      const isReclaimed = item.type === 'reclaimed';
-                      const isSelected = selectedReservedId === item.id;
-
-                      return (
-                        <div
-                          key={item.id}
-                          className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
-                            isSelected
-                              ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/30'
-                              : isAvailable
-                              ? 'bg-[var(--bg-overlay)] border-[var(--border-light)] hover:border-amber-500/50 hover:shadow-md'
-                              : 'bg-[var(--bg-canvas)] border-[var(--border-light)] opacity-60'
-                          }`}
+                  <div className="space-y-3">
+                    {/* Active Filter Status Indicator */}
+                    <div className="flex items-center justify-between text-xs text-[var(--text-secondary)] px-1">
+                      <span className="flex items-center gap-1.5">
+                        <span className="font-bold text-[var(--text-primary)]">{filtered.length}</span> รายการที่ตรงกับเงื่อนไข
+                        {reservedFilterType !== 'ALL' && (
+                          <span className="px-2 py-0.5 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] font-semibold text-[11px]">
+                            {reservedFilterType}
+                          </span>
+                        )}
+                        {reservedFilterDate && (
+                          <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-700 dark:text-purple-300 font-semibold text-[11px]">
+                            วันที่ {formatThaiDate(reservedFilterDate)}
+                          </span>
+                        )}
+                      </span>
+                      {(reservedFilterType !== 'ALL' || reservedFilterDate || reservedSearchTerm) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReservedFilterType('ALL');
+                            setReservedFilterDate('');
+                            setReservedSearchTerm('');
+                          }}
+                          className="text-[11px] text-[var(--primary-color)] hover:underline cursor-pointer"
                         >
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  isReclaimed ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                          แสดงทั้งหมด ({reservedNumbers.length})
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {filtered.map(item => {
+                        const isAvailable = item.status === 'available';
+                        const isReclaimed = item.type === 'reclaimed';
+                        const isSelected = selectedReservedId === item.id;
+
+                        return (
+                          <div
+                            key={item.id}
+                            className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                              isSelected
+                                ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/30'
+                                : isAvailable
+                                ? 'bg-[var(--bg-overlay)] border-[var(--border-light)] hover:border-amber-500/50 hover:shadow-md'
+                                : 'bg-[var(--bg-canvas)] border-[var(--border-light)] opacity-60'
+                            }`}
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    isReclaimed ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                                  }`}>
+                                    {isReclaimed ? '♻️ เลขคืนเข้าคลัง' : '📌 เลขจองล่วงหน้า'}
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold border border-blue-500/20">
+                                    {item.docType}
+                                  </span>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                  isAvailable ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-gray-500/15 text-gray-500'
                                 }`}>
-                                  {isReclaimed ? '♻️ เลขคืนเข้าคลัง' : '📌 เลขจองล่วงหน้า'}
-                                </span>
-                                <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
-                                  {item.docType}
+                                  {isAvailable ? 'พร้อมใช้งาน' : 'ถูกใช้งานแล้ว'}
                                 </span>
                               </div>
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                isAvailable ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-gray-500/15 text-gray-500'
-                              }`}>
-                                {isAvailable ? 'พร้อมใช้งาน' : 'ถูกใช้งานแล้ว'}
-                              </span>
-                            </div>
 
-                            <div className="font-mono font-bold text-base text-[var(--text-primary)] flex items-center gap-2">
-                              <span>{item.numberString}</span>
-                              {item.year && <span className="text-xs text-[var(--text-muted)] font-normal">({item.year})</span>}
-                            </div>
+                              <div className="font-mono font-bold text-base text-[var(--text-primary)] flex items-center gap-2">
+                                <span>{item.numberString}</span>
+                                {item.year && <span className="text-xs text-[var(--text-muted)] font-normal">({item.year})</span>}
+                              </div>
 
-                            <div className="text-xs text-[var(--text-secondary)] space-y-1 bg-[var(--bg-canvas)] p-2.5 rounded-lg border border-[var(--border-light)]">
-                              <div><span className="text-[var(--text-muted)]">หน่วยงาน:</span> {item.department || 'ทุกฝ่ายงาน'}</div>
-                              <div><span className="text-[var(--text-muted)]">ผู้จอง/คืน:</span> {item.reservedBy || '-'}</div>
-                              {item.reservedFor && (
-                                <div className="text-[11px] text-[var(--text-muted)] line-clamp-2">
-                                  <span className="text-[var(--text-secondary)] font-medium">วัตถุประสงค์:</span> {item.reservedFor}
+                              <div className="text-xs text-[var(--text-secondary)] space-y-1 bg-[var(--bg-canvas)] p-2.5 rounded-lg border border-[var(--border-light)]">
+                                <div className="flex items-center gap-1.5 text-purple-700 dark:text-purple-300 font-medium">
+                                  <Calendar className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                                  <span>วันที่จอง: {formatThaiDateString(item.reservedDate || item.createdAt)}</span>
                                 </div>
+                                <div><span className="text-[var(--text-muted)]">หน่วยงาน:</span> {item.department || 'ทุกฝ่ายงาน'}</div>
+                                <div><span className="text-[var(--text-muted)]">ผู้จอง/คืน:</span> {item.reservedBy || '-'}</div>
+                                {item.reservedFor && (
+                                  <div className="text-[11px] text-[var(--text-muted)] line-clamp-2">
+                                    <span className="text-[var(--text-secondary)] font-medium">วัตถุประสงค์:</span> {item.reservedFor}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end pt-1">
+                              {isAvailable ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    isManualDocNumberRef.current = true;
+                                    setSelectedReservedId(item.id);
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      docNumber: item.numberString,
+                                      receiveNumber: item.seqNumber ? String(item.seqNumber) : prev.receiveNumber,
+                                      department: (item.department && item.department !== 'ทุกฝ่ายงาน') ? item.department : prev.department,
+                                      date: item.reservedDate ? item.reservedDate : prev.date,
+                                      year: item.year || prev.year || effectiveYear
+                                    }));
+                                    setShowReservedModal(false);
+                                  }}
+                                  className={`w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-amber-600 text-white'
+                                      : 'bg-amber-500/20 hover:bg-amber-500 text-amber-800 dark:text-amber-200 hover:text-white'
+                                  }`}
+                                >
+                                  <Check className="w-4 h-4" />
+                                  {isSelected ? 'เลือกเลขนี้แล้ว' : 'เลือกใช้เลขนี้'}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-[var(--text-muted)] italic">
+                                  ถูกใช้งานแล้ว {item.usedAt ? `เมื่อ ${new Date(item.usedAt).toLocaleDateString('th-TH')}` : ''}
+                                </span>
                               )}
                             </div>
                           </div>
-
-                          <div className="flex items-center justify-end pt-1">
-                            {isAvailable ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedReservedId(item.id);
-                                  setFormData(prev => ({
-                                    ...prev,
-                                    docNumber: item.numberString,
-                                    receiveNumber: item.seqNumber ? String(item.seqNumber) : prev.receiveNumber,
-                                    department: (item.department && item.department !== 'ทุกฝ่ายงาน') ? item.department : prev.department,
-                                    year: item.year || prev.year
-                                  }));
-                                  setShowReservedModal(false);
-                                }}
-                                className={`w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer ${
-                                  isSelected
-                                    ? 'bg-amber-600 text-white'
-                                    : 'bg-amber-500/20 hover:bg-amber-500 text-amber-800 dark:text-amber-200 hover:text-white'
-                                }`}
-                              >
-                                <Check className="w-4 h-4" />
-                                {isSelected ? 'เลือกเลขนี้แล้ว' : 'เลือกใช้เลขนี้'}
-                              </button>
-                            ) : (
-                              <span className="text-xs text-[var(--text-muted)] italic">
-                                ถูกใช้งานแล้ว {item.usedAt ? `เมื่อ ${new Date(item.usedAt).toLocaleDateString('th-TH')}` : ''}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })()}

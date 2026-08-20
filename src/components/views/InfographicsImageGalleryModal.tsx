@@ -18,12 +18,14 @@ interface InfographicsImageGalleryModalProps {
   onClose: () => void;
   onSelectImage: (imageUrl: string, imageName?: string) => void;
   onUploadNew?: (file: File) => void;
+  currentUser?: any;
 }
 
 export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryModalProps> = ({
   onClose,
   onSelectImage,
-  onUploadNew
+  onUploadNew,
+  currentUser
 }) => {
   const [images, setImages] = useState<UploadedImageItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,10 +35,13 @@ export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryMod
   const [uploading, setUploading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const userId = currentUser?.id || currentUser?.username || 'guest';
+  const userName = `${currentUser?.firstName || ''} ${currentUser?.lastName || ''}`.trim() || currentUser?.username || 'ผู้ใช้งาน';
+
   const fetchImages = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/infographics-assets/images');
+      const res = await fetch(`/api/infographics-assets/images?userId=${encodeURIComponent(userId)}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.images)) {
@@ -56,7 +61,7 @@ export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryMod
     
     setIsDeleting(true);
     try {
-      const res = await fetch(`/api/infographics-assets/images?url=${encodeURIComponent(img.url)}`, {
+      const res = await fetch(`/api/infographics-assets/images?url=${encodeURIComponent(img.url)}&userId=${encodeURIComponent(userId)}`, {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -82,7 +87,7 @@ export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryMod
 
   useEffect(() => {
     fetchImages();
-  }, []);
+  }, [userId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -95,7 +100,8 @@ export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryMod
     setUploading(true);
     const formData = new FormData();
     formData.append('files', file);
-    formData.append('uploadedBy', 'Infographics Studio');
+    formData.append('userId', userId);
+    formData.append('uploadedBy', userName);
 
     try {
       const res = await fetch('/api/infographics/upload', {

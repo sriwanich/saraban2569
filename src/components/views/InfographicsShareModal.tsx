@@ -709,9 +709,6 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                   <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs sm:text-sm">
                     <Eye className="w-4 h-4 text-blue-500" />
                     <span>ตัวอย่างผลลัพธ์การแสดงผล (Live Preview)</span>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-bold hidden sm:inline-flex items-center gap-1">
-                      <Sparkles className="w-3 h-3 text-emerald-500" /> 4K Ultra HD Crisp
-                    </span>
                   </span>
                   
                   {/* Mode Switcher */}
@@ -725,7 +722,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                       }`}
                     >
-                      <Sparkles className="w-3 h-3" /> แสดงผลสด 4K (ไม่ Refresh)
+                      <Sparkles className="w-3 h-3" /> แสดงผลสด
                     </button>
                     <button
                       type="button"
@@ -742,7 +739,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                 </div>
 
                 {previewMode === 'crisp' ? (
-                  /* 4K Direct Crisp Live Preview Frame (Never reloads, 100% crisp) */
+                  /* Direct Crisp Live Preview Frame (Never reloads) */
                   <div className={`w-full h-80 rounded-2xl overflow-hidden relative flex flex-col transition-all duration-300 ${
                     embedTheme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-900 text-slate-100'
                   } ${
@@ -756,10 +753,6 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[9px] font-bold">
                             EDMS Infographics
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-extrabold flex items-center gap-1">
-                            <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
-                            <span>4K Ultra HD</span>
                           </span>
                           <span className="font-bold text-xs text-white truncate max-w-[200px]">
                             {infographic.name || 'Infographic Presentation'}
@@ -1074,7 +1067,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                                 : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                             }`}
                           >
-                            {mul === 4 ? '4K (Ultra HD)' : mul === 3 ? '3K' : mul === 2 ? '2K (HD)' : '1K'}
+                            {`${mul}x`}
                           </button>
                         ))}
                       </div>
@@ -1085,7 +1078,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                       onClick={() => onExportPng && onExportPng(pngMultiplier)}
                       className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
                     >
-                      <Download className="w-4 h-4" /> ดาวน์โหลด PNG ({pngMultiplier === 4 ? '4K Ultra HD' : `${pngMultiplier}x`})
+                      <Download className="w-4 h-4" /> ดาวน์โหลด PNG ({pngMultiplier === 4 ? 'ความละเอียดสูงสุด 4x' : `${pngMultiplier}x`})
                     </button>
                   </div>
                 </div>

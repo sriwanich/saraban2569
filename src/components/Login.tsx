@@ -35,8 +35,16 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
           if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl);
           if (data.footerText !== undefined) setFooterText(data.footerText);
         }
-      } catch (err: any) {
-        console.error('Error fetching settings', err);
+      } catch (_) {
+        try {
+          const cached = localStorage.getItem('moi_settings');
+          if (cached) {
+            const data = JSON.parse(cached);
+            if (data.orgName) setOrgName(data.orgName);
+            if (data.currentYear) setCurrentYear(String(data.currentYear));
+            if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl);
+          }
+        } catch (e) {}
       }
     };
     fetchSettings();

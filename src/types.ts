@@ -296,4 +296,67 @@ export interface DigitalSignatureRecord {
   status: 'valid' | 'revoked';
 }
 
+export interface ReservedNumber {
+  id: number;
+  ruleId?: number | null;
+  docType: string;
+  department: string;
+  numberString: string;
+  seqNumber?: number;
+  year?: string;
+  type: 'reserved' | 'reclaimed' | 'auto_scheduled';
+  status: 'available' | 'used';
+  reservedBy?: string;
+  reservedFor?: string;
+  reservedDate?: string; // วันที่จองเลข (เช่น 2026-08-20)
+  expiresAt?: string;
+  usedAt?: string;
+  usedForDocId?: string;
+  createdAt?: string;
+}
+
+export interface ScheduledReservation {
+  id: number;
+  name: string;
+  department: string;
+  docType: string;
+  prefix: string;
+  count: number;
+  scheduleType: string; // 'daily' | 'workdays' | 'weekly'
+  scheduledTime: string; // 'HH:mm'
+  reservedFor?: string;
+  reservedBy?: string;
+  dateOption?: 'current_date' | 'next_workday' | 'next_day' | 'specific_date';
+  specificDate?: string;
+  isActive: boolean;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
+  createdAt?: string;
+}
+
+export function formatThaiDateString(dateStr?: string): string {
+  if (!dateStr) return '-';
+  try {
+    const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr.split(' ')[0];
+    const parts = cleanDate.split('-');
+    if (parts.length === 3) {
+      const day = parseInt(parts[2], 10);
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      const rawYear = parseInt(parts[0], 10);
+      const thaiYear = rawYear < 2500 ? rawYear + 543 : rawYear;
+      const thaiMonths = [
+        'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+      ];
+      const monthName = thaiMonths[monthIdx] || parts[1];
+      return `${day} ${monthName} ${thaiYear}`;
+    }
+    return dateStr;
+  } catch (e) {
+    return dateStr;
+  }
+}
+
+
+
 

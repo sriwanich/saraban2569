@@ -24,9 +24,20 @@ import {
   Zap,
   Play
 } from 'lucide-react';
+import { ReservedNumber, ScheduledReservation, formatThaiDateString } from '../types';
 
 export default function CustomNumberingSettings() {
   const [activeSubTab, setActiveSubTab] = useState<'rules' | 'fileCodes' | 'reserved' | 'scheduled'>('rules');
+  const [systemCurrentYear, setSystemCurrentYear] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('moi_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.currentYear) return String(parsed.currentYear);
+      }
+    } catch (e) {}
+    return '2569';
+  });
   
   // States for Numbering Rules
   const [rules, setRules] = useState<any[]>([]);
@@ -45,6 +56,9 @@ export default function CustomNumberingSettings() {
   const [showReserveModal, setShowReserveModal] = useState<boolean>(false);
   const [reservedFilterDept, setReservedFilterDept] = useState<string>('ALL');
   const [reservedFilterStatus, setReservedFilterStatus] = useState<string>('ALL');
+  const [reservedFilterDocType, setReservedFilterDocType] = useState<string>('ALL');
+  const [reservedFilterDate, setReservedFilterDate] = useState<string>('');
+  const [reservedSearchTerm, setReservedSearchTerm] = useState<string>('');
 
   // States for Scheduled Auto-Reservations
   const [scheduledReservations, setScheduledReservations] = useState<any[]>([]);
@@ -63,6 +77,8 @@ export default function CustomNumberingSettings() {
     scheduledTime: '18:00',
     reservedFor: 'จองเลขอัตโนมัติทุกวัน เวลา 18:00 น. สำหรับออกหนังสือรับ-ส่งช่วงเย็น',
     reservedBy: 'ระบบอัตโนมัติ (Schedule 18:00)',
+    dateOption: 'current_date',
+    specificDate: '',
     isActive: true
   });
 
@@ -82,7 +98,7 @@ export default function CustomNumberingSettings() {
     docType: 'หนังสือภายนอก',
     prefixPattern: 'รย 0021',
     currentSeq: 1,
-    year: '2569',
+    year: systemCurrentYear,
     isActive: true,
     description: ''
   });
@@ -104,6 +120,7 @@ export default function CustomNumberingSettings() {
     isCircular: false,
     reservedBy: 'ผู้ดูแลระบบสารบรรณ',
     reservedFor: 'จองเลขล่วงหน้าสำหรับโครงการสำคัญ',
+    reservedDate: new Date().toISOString().split('T')[0],
     expiresAt: '2026-12-31'
   });
 
@@ -173,7 +190,22 @@ export default function CustomNumberingSettings() {
     }
   };
 
+  const fetchSystemSettings = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.currentYear) {
+          setSystemCurrentYear(String(data.currentYear));
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+    }
+  };
+
   useEffect(() => {
+    fetchSystemSettings();
     fetchRules();
     fetchFileCodes();
     fetchReservedNumbers();
@@ -353,12 +385,12 @@ export default function CustomNumberingSettings() {
     ) || rules.find(r => r.isActive && r.docType === previewDocType);
 
     if (!matchedRule) {
-      return ['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType) ? `${previewDocType} 1/2569` : 'รย 0021/1';
+      return ['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType) ? `${previewDocType} 1/${systemCurrentYear}` : 'รย 0021/1';
     }
 
     const nextSeq = (matchedRule.currentSeq || 0) + 1;
     if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(previewDocType)) {
-      return `${matchedRule.prefixPattern || previewDocType} ${nextSeq}/${matchedRule.year || '2569'}`;
+      return `${matchedRule.prefixPattern || previewDocType} ${nextSeq}/${matchedRule.year || systemCurrentYear}`;
     } else {
       const circ = previewIsCircular ? 'ว ' : '';
       return `${matchedRule.prefixPattern || 'รย 0021'}/${circ}${nextSeq}`;
@@ -369,7 +401,33 @@ export default function CustomNumberingSettings() {
   const filteredReserved = reservedNumbers.filter(item => {
     const matchDept = reservedFilterDept === 'ALL' || item.department === reservedFilterDept;
     const matchStatus = reservedFilterStatus === 'ALL' || item.status === reservedFilterStatus;
-    return matchDept && matchStatus;
+    
+    const matchesDocType = (itemType: string, filterType: string) => {
+      if (filterType === 'ALL') return true;
+      if (filterType === 'หนังสือภายนอก') return itemType === 'หนังสือภายนอก' || itemType === 'หนังสือส่ง';
+      if (filterType === 'หนังสือรับ') return itemType === 'หนังสือรับ' || itemType === 'หนังสือเข้า';
+      return itemType === filterType;
+    };
+    const matchType = matchesDocType(item.docType || '', reservedFilterDocType);
+
+    let matchDate = true;
+    if (reservedFilterDate) {
+      const itemDate = (item.reservedDate || item.createdAt || '').split('T')[0];
+      matchDate = itemDate === reservedFilterDate;
+    }
+
+    let matchSearch = true;
+    if (reservedSearchTerm.trim()) {
+      const term = reservedSearchTerm.toLowerCase();
+      const numStr = (item.numberString || '').toLowerCase();
+      const byStr = (item.reservedBy || '').toLowerCase();
+      const forStr = (item.reservedFor || '').toLowerCase();
+      const deptStr = (item.department || '').toLowerCase();
+      const seqStr = String(item.seqNumber || '');
+      matchSearch = numStr.includes(term) || byStr.includes(term) || forStr.includes(term) || deptStr.includes(term) || seqStr.includes(term);
+    }
+
+    return matchDept && matchStatus && matchType && matchDate && matchSearch;
   });
 
   return (
@@ -413,7 +471,7 @@ export default function CustomNumberingSettings() {
                   docType: 'หนังสือภายนอก',
                   prefixPattern: 'รย 0021',
                   currentSeq: 1,
-                  year: '2569',
+                  year: systemCurrentYear,
                   isActive: true,
                   description: ''
                 });
@@ -575,7 +633,7 @@ export default function CustomNumberingSettings() {
                 </span>
               </div>
               <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                ปี พ.ศ. 2569 | รันต่อตามลำดับ
+                ปี พ.ศ. {systemCurrentYear} | รันต่อตามลำดับ
               </span>
             </div>
           </div>
@@ -730,43 +788,114 @@ export default function CustomNumberingSettings() {
           </div>
 
           {/* Filter Bar */}
-          <div className="p-3 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)] flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-1.5 text-[var(--text-muted)]">
-                <Filter className="w-3.5 h-3.5" /> กรองตามฝ่าย:
-              </div>
-              <select
-                value={reservedFilterDept}
-                onChange={(e) => setReservedFilterDept(e.target.value)}
-                className="p-1.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
-              >
-                <option value="ALL">ทุกฝ่ายงาน</option>
-                <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
-                <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ</option>
-                <option value="ฝ่ายสงเคราะห์ผู้ประสบภัย">ฝ่ายสงเคราะห์ผู้ประสบภัย</option>
-                <option value="ฝ่ายป้องกันและปฏิบัติการ">ฝ่ายป้องกันและปฏิบัติการ</option>
-              </select>
+          <div className="p-3 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)] space-y-2.5 text-xs">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap flex-1">
+                {/* DocType filter */}
+                <div className="flex items-center gap-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2 py-1 rounded-lg">
+                  <span className="text-[var(--text-muted)]">ประเภท:</span>
+                  <select
+                    value={reservedFilterDocType}
+                    onChange={(e) => setReservedFilterDocType(e.target.value)}
+                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer text-xs"
+                  >
+                    <option value="ALL">ทุกประเภทเอกสาร</option>
+                    <option value="คำสั่ง">คำสั่ง</option>
+                    <option value="ประกาศ">ประกาศ</option>
+                    <option value="หนังสือรับรอง">หนังสือรับรอง</option>
+                    <option value="หนังสือภายนอก">หนังสือส่ง (ภายนอก)</option>
+                    <option value="หนังสือภายใน">หนังสือภายใน</option>
+                    <option value="หนังสือรับ">หนังสือรับ</option>
+                  </select>
+                </div>
 
-              <div className="flex items-center gap-1.5 text-[var(--text-muted)] ml-2">
-                สถานะ:
+                {/* Date Filter */}
+                <div className="flex items-center gap-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2 py-1 rounded-lg">
+                  <Calendar className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  <span className="text-[var(--text-muted)]">วันที่จอง:</span>
+                  <input
+                    type="date"
+                    value={reservedFilterDate}
+                    onChange={(e) => setReservedFilterDate(e.target.value)}
+                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer text-xs"
+                  />
+                  {reservedFilterDate && (
+                    <button
+                      onClick={() => setReservedFilterDate('')}
+                      className="text-[10px] text-rose-500 hover:underline ml-1"
+                    >
+                      ล้าง
+                    </button>
+                  )}
+                </div>
+
+                {/* Dept Filter */}
+                <div className="flex items-center gap-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2 py-1 rounded-lg">
+                  <Filter className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                  <span className="text-[var(--text-muted)]">ฝ่าย:</span>
+                  <select
+                    value={reservedFilterDept}
+                    onChange={(e) => setReservedFilterDept(e.target.value)}
+                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer text-xs"
+                  >
+                    <option value="ALL">ทุกฝ่ายงาน</option>
+                    <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
+                    <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ</option>
+                    <option value="ฝ่ายสงเคราะห์ผู้ประสบภัย">ฝ่ายสงเคราะห์ผู้ประสบภัย</option>
+                    <option value="ฝ่ายป้องกันและปฏิบัติการ">ฝ่ายป้องกันและปฏิบัติการ</option>
+                  </select>
+                </div>
+
+                {/* Status Filter */}
+                <div className="flex items-center gap-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2 py-1 rounded-lg">
+                  <span className="text-[var(--text-muted)]">สถานะ:</span>
+                  <select
+                    value={reservedFilterStatus}
+                    onChange={(e) => setReservedFilterStatus(e.target.value)}
+                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer text-xs"
+                  >
+                    <option value="ALL">ทุกสถานะ</option>
+                    <option value="available">พร้อมใช้งาน</option>
+                    <option value="used">ใช้งานแล้ว</option>
+                  </select>
+                </div>
+
+                {/* Search */}
+                <div className="relative min-w-[160px] flex-1">
+                  <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="ค้นหาเลขที่, ผู้จอง..."
+                    value={reservedSearchTerm}
+                    onChange={(e) => setReservedSearchTerm(e.target.value)}
+                    className="w-full pl-7 pr-2.5 py-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg text-xs outline-none focus:border-[var(--primary-color)] text-[var(--text-primary)]"
+                  />
+                </div>
               </div>
-              <select
-                value={reservedFilterStatus}
-                onChange={(e) => setReservedFilterStatus(e.target.value)}
-                className="p-1.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
-              >
-                <option value="ALL">ทุกสถานะ</option>
-                <option value="available">พร้อมใช้งาน</option>
-                <option value="used">ใช้งานแล้ว</option>
-              </select>
+
+              <div className="flex items-center gap-2">
+                {(reservedFilterDocType !== 'ALL' || reservedFilterDate || reservedFilterDept !== 'ALL' || reservedFilterStatus !== 'ALL' || reservedSearchTerm) && (
+                  <button
+                    onClick={() => {
+                      setReservedFilterDocType('ALL');
+                      setReservedFilterDate('');
+                      setReservedFilterDept('ALL');
+                      setReservedFilterStatus('ALL');
+                      setReservedSearchTerm('');
+                    }}
+                    className="px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:text-rose-500 hover:underline"
+                  >
+                    ล้างตัวกรอง
+                  </button>
+                )}
+                <button
+                  onClick={fetchReservedNumbers}
+                  className="px-3 py-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg hover:bg-[var(--border-lighter)] flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> รีเฟรช ({filteredReserved.length}/{reservedNumbers.length})
+                </button>
+              </div>
             </div>
-
-            <button
-              onClick={fetchReservedNumbers}
-              className="px-3 py-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg hover:bg-[var(--border-lighter)] flex items-center gap-1"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> รีเฟรช
-            </button>
           </div>
 
           {/* Table */}
@@ -786,6 +915,7 @@ export default function CustomNumberingSettings() {
                     <tr>
                       <th className="px-4 py-3">เลขหนังสือ</th>
                       <th className="px-4 py-3">ประเภท</th>
+                      <th className="px-4 py-3">วันที่จอง</th>
                       <th className="px-4 py-3">ฝ่าย/กอง & ประเภทเอกสาร</th>
                       <th className="px-4 py-3">ผู้จอง / วัตถุประสงค์</th>
                       <th className="px-4 py-3">วันหมดอายุ</th>
@@ -803,11 +933,21 @@ export default function CustomNumberingSettings() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20">
                               <RotateCcw className="w-3 h-3" /> เลขคืนจากลบ
                             </span>
+                          ) : item.type === 'auto_scheduled' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
+                              <Clock className="w-3 h-3" /> จองอัตโนมัติ
+                            </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
                               <Bookmark className="w-3 h-3" /> จองล่วงหน้า
                             </span>
                           )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-light)] font-medium text-[var(--text-primary)] text-[11px]">
+                            <Calendar className="w-3 h-3 text-purple-600 dark:text-purple-400 shrink-0" />
+                            {formatThaiDateString(item.reservedDate || item.createdAt)}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           <p className="font-medium text-[var(--text-primary)]">{item.department}</p>
@@ -974,6 +1114,21 @@ export default function CustomNumberingSettings() {
 
                     <div className="flex items-center justify-between">
                       <span className="text-[var(--text-muted)] flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-indigo-500" /> วันที่จองสำหรับเลข:
+                      </span>
+                      <span className="font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded text-[11px]">
+                        📅 {sch.dateOption === 'specific_date' && sch.specificDate
+                          ? `ระบุเจาะจง: ${formatThaiDateString(sch.specificDate)}`
+                          : sch.dateOption === 'next_workday'
+                          ? 'ระบุวันทำการถัดไป (จ-ศ)'
+                          : sch.dateOption === 'next_day'
+                          ? 'ระบุวันถัดไป (พรุ่งนี้)'
+                          : 'ระบุตามวันปัจจุบันที่ทำงาน'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[var(--text-muted)] flex items-center gap-1.5">
                         <Tag className="w-3.5 h-3.5 text-amber-500" /> จำนวนเลขที่จองต่อรอบ:
                       </span>
                       <span className="font-bold text-amber-600 dark:text-amber-400">
@@ -1028,6 +1183,8 @@ export default function CustomNumberingSettings() {
                             scheduledTime: sch.scheduledTime || '18:00',
                             reservedFor: sch.reservedFor,
                             reservedBy: sch.reservedBy,
+                            dateOption: sch.dateOption || 'current_date',
+                            specificDate: sch.specificDate || '',
                             isActive: sch.isActive
                           });
                           setShowScheduleModal(true);
@@ -1291,6 +1448,32 @@ export default function CustomNumberingSettings() {
                 </label>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">
+                    วันที่จองเลข (Reservation Date): <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={reserveFormData.reservedDate}
+                    onChange={(e) => setReserveFormData({ ...reserveFormData, reservedDate: e.target.value })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-medium text-[var(--text-primary)] outline-none"
+                  />
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">ระบุวันที่ที่จะประทับลงในเลขจองนี้</p>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--text-primary)] block mb-1">วันหมดอายุ (ถ้ามี):</label>
+                  <input
+                    type="date"
+                    value={reserveFormData.expiresAt}
+                    onChange={(e) => setReserveFormData({ ...reserveFormData, expiresAt: e.target.value })}
+                    className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="font-semibold text-[var(--text-primary)] block mb-1">ผู้จอง / เจ้าของเรื่อง:</label>
                 <input
@@ -1453,6 +1636,98 @@ export default function CustomNumberingSettings() {
                     className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] font-bold text-amber-600 outline-none"
                   />
                 </div>
+              </div>
+
+              {/* Reservation Date Option in Scheduled Form */}
+              <div className="p-3.5 rounded-xl bg-purple-500/5 border border-purple-500/20 space-y-2.5">
+                <label className="font-bold text-sm text-[var(--text-primary)] flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                  การระบุวันที่จองสำหรับเลขที่จองอัตโนมัติ (Reservation Date):
+                </label>
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  กำหนดว่าเมื่อถึงเวลาจองเลขอัตโนมัติ ระบบจะระบุวันที่จองสำหรับเลขนั้นๆ เป็นรูปแบบใด
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <label className={`p-2.5 rounded-lg border cursor-pointer flex items-center gap-2 transition-all ${
+                    scheduleFormData.dateOption === 'current_date' 
+                      ? 'bg-purple-600/10 border-purple-500 text-purple-900 dark:text-purple-200 font-semibold'
+                      : 'bg-[var(--bg-overlay)] border-[var(--border-light)] text-[var(--text-secondary)]'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="dateOption"
+                      value="current_date"
+                      checked={scheduleFormData.dateOption === 'current_date' || !scheduleFormData.dateOption}
+                      onChange={() => setScheduleFormData({ ...scheduleFormData, dateOption: 'current_date' })}
+                      className="accent-purple-600"
+                    />
+                    <span className="text-xs">วันปัจจุบันที่ระบบทำงาน</span>
+                  </label>
+
+                  <label className={`p-2.5 rounded-lg border cursor-pointer flex items-center gap-2 transition-all ${
+                    scheduleFormData.dateOption === 'next_workday' 
+                      ? 'bg-purple-600/10 border-purple-500 text-purple-900 dark:text-purple-200 font-semibold'
+                      : 'bg-[var(--bg-overlay)] border-[var(--border-light)] text-[var(--text-secondary)]'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="dateOption"
+                      value="next_workday"
+                      checked={scheduleFormData.dateOption === 'next_workday'}
+                      onChange={() => setScheduleFormData({ ...scheduleFormData, dateOption: 'next_workday' })}
+                      className="accent-purple-600"
+                    />
+                    <span className="text-xs">วันทำการถัดไป (จันทร์-ศุกร์)</span>
+                  </label>
+
+                  <label className={`p-2.5 rounded-lg border cursor-pointer flex items-center gap-2 transition-all ${
+                    scheduleFormData.dateOption === 'next_day' 
+                      ? 'bg-purple-600/10 border-purple-500 text-purple-900 dark:text-purple-200 font-semibold'
+                      : 'bg-[var(--bg-overlay)] border-[var(--border-light)] text-[var(--text-secondary)]'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="dateOption"
+                      value="next_day"
+                      checked={scheduleFormData.dateOption === 'next_day'}
+                      onChange={() => setScheduleFormData({ ...scheduleFormData, dateOption: 'next_day' })}
+                      className="accent-purple-600"
+                    />
+                    <span className="text-xs">วันถัดไป (วันพรุ่งนี้)</span>
+                  </label>
+
+                  <label className={`p-2.5 rounded-lg border cursor-pointer flex items-center gap-2 transition-all ${
+                    scheduleFormData.dateOption === 'specific_date' 
+                      ? 'bg-purple-600/10 border-purple-500 text-purple-900 dark:text-purple-200 font-semibold'
+                      : 'bg-[var(--bg-overlay)] border-[var(--border-light)] text-[var(--text-secondary)]'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="dateOption"
+                      value="specific_date"
+                      checked={scheduleFormData.dateOption === 'specific_date'}
+                      onChange={() => setScheduleFormData({ ...scheduleFormData, dateOption: 'specific_date' })}
+                      className="accent-purple-600"
+                    />
+                    <span className="text-xs">ระบุวันที่เจาะจง</span>
+                  </label>
+                </div>
+
+                {scheduleFormData.dateOption === 'specific_date' && (
+                  <div className="pt-2">
+                    <label className="font-semibold text-xs text-[var(--text-primary)] block mb-1">
+                      เลือกวันที่เจาะจงสำหรับเลขที่จอง:
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={scheduleFormData.specificDate || ''}
+                      onChange={(e) => setScheduleFormData({ ...scheduleFormData, specificDate: e.target.value })}
+                      className="w-full p-2.5 rounded-lg bg-[var(--bg-surface)] border border-purple-300 dark:border-purple-800 text-xs font-semibold outline-none"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>

@@ -83,29 +83,38 @@ const PRESET_FONTS: FontOption[] = [
 export async function ensureGoogleFontLoaded(fontName: string): Promise<boolean> {
   if (!fontName) return false;
   
+  // Clean font name: remove quotes and take first part if it's a stack
+  const cleanName = fontName.split(',')[0].replace(/['"]/g, '').trim();
+  if (!cleanName) return false;
+
   // Clean standard fonts that don't need Google API
-  const systemFonts = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 'sans-serif', 'serif', 'monospace'];
-  if (systemFonts.includes(fontName)) return true;
+  const systemFonts = ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Impact', 'Comic Sans MS', 'sans-serif', 'serif', 'monospace', 'cursive', 'fantasy'];
+  if (systemFonts.some(f => cleanName.toLowerCase() === f.toLowerCase())) return true;
 
   try {
-    const fontId = `gf-link-${fontName.replace(/\s+/g, '-').toLowerCase()}`;
+    const fontId = `gf-link-${cleanName.replace(/\s+/g, '-').toLowerCase()}`;
     if (!document.getElementById(fontId)) {
       const link = document.createElement('link');
       link.id = fontId;
       link.rel = 'stylesheet';
-      const formattedName = fontName.replace(/\s+/g, '+');
-      link.href = `https://fonts.googleapis.com/css2?family=${formattedName}:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,700&display=swap`;
+      const formattedNameForUrl = cleanName.replace(/\s+/g, '+');
+      // Using a slightly more conservative set of weights to ensure compatibility
+      link.href = `https://fonts.googleapis.com/css2?family=${formattedNameForUrl}:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,700&display=swap`;
       document.head.appendChild(link);
     }
 
     if ('fonts' in document) {
-      await (document as any).fonts.load(`16px "${fontName}"`);
+      // Use a timeout to avoid hanging if the font fails to load
+      // Increased to 5s for mobile stability
+      const loadPromise = (document as any).fonts.load(`16px "${cleanName}"`);
+      const timeoutPromise = new Promise(r => setTimeout(r, 5000));
+      await Promise.race([loadPromise, timeoutPromise]);
     } else {
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 1000));
     }
     return true;
   } catch (err) {
-    console.warn(`Could not load Google Font ${fontName}:`, err);
+    console.warn(`Could not load Google Font ${cleanName}:`, err);
     return false;
   }
 }

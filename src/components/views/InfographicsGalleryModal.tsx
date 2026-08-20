@@ -22,7 +22,15 @@ export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose,
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/infographics');
+      const params = new URLSearchParams();
+      if (currentUser) {
+        params.append('userId', String(currentUser.id || ''));
+        params.append('userRole', String(currentUser.role || ''));
+        params.append('userName', `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || '');
+        params.append('userDept', String(currentUser.department || ''));
+      }
+      
+      const res = await fetch(`/api/infographics?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setProjects(data);
@@ -46,7 +54,14 @@ export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose,
     e.stopPropagation();
     if (confirm('ยืนยันการลบโปรเจกต์นี้? การกระทำนี้ไม่สามารถย้อนกลับได้')) {
       try {
-        await fetch(`/api/infographics/${id}`, { method: 'DELETE' });
+        const params = new URLSearchParams();
+        if (currentUser) {
+          params.append('userId', String(currentUser.id || ''));
+          params.append('userRole', String(currentUser.role || ''));
+          params.append('userName', `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || '');
+          params.append('userDept', String(currentUser.department || ''));
+        }
+        await fetch(`/api/infographics/${id}?${params.toString()}`, { method: 'DELETE' });
         fetchProjects();
       } catch (err) {
         console.error(err);
@@ -99,7 +114,23 @@ export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose,
   };
 
   const filteredProjects = projects.filter(p => {
-    // Tab filtering
+    // 1. Rights Check: Show only if user has rights (Owner, Editor, or Admin/Central)
+    const hasEditRights = canEdit(p);
+    
+    if (!hasEditRights) {
+      return false;
+    }
+
+    // 2. Tab filtering
+    if (filterTab === 'all') {
+      // "All" tab should show only projects of self or where rights are explicitly granted
+      // (Exclude general "Central" items that the user doesn't own or have rights to)
+      if (currentUser?.role !== 'admin' && currentUser?.role !== 'moderator') {
+        const isSelf = isOwner(p);
+        const isGranted = isGrantedEditor(p);
+        if (!isSelf && !isGranted) return false;
+      }
+    }
     if (filterTab === 'central' && p.scope === 'personal') return false;
     if (filterTab === 'mine' && !isOwner(p)) return false;
     if (filterTab === 'shared' && (!isGrantedEditor(p) || isOwner(p))) return false;
@@ -156,7 +187,7 @@ export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose,
                 }`}
               >
                 <Globe className="w-3.5 h-3.5" />
-                <span>ทั้งหมด ({projects.length})</span>
+                <span>ทั้งหมด ({filteredProjects.length})</span>
               </button>
 
               <button

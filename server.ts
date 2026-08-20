@@ -19,6 +19,25 @@ const execFileAsync = promisify(execFile);
 
 dotenv.config();
 
+// Global crash-prevention listeners for maximum server uptime & stability
+process.on('uncaughtException', (err: any) => {
+  console.error('💥 [ResilienceGuard] Uncaught Exception prevented from crashing server:', err?.message || err);
+});
+process.on('unhandledRejection', (reason: any) => {
+  console.error('💥 [ResilienceGuard] Unhandled Rejection prevented from crashing server:', reason?.message || reason);
+});
+
+// Robust JSON parsing utility
+function safeJsonParse<T = any>(value: any, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
 // Pre-create standard upload directories to avoid any folder-creation or write-permission issues
 const baseUploadsDir = path.join(process.cwd(), 'uploads');
 const standardFolders = [
@@ -161,8 +180,8 @@ function getPublicBaseUrl(req: express.Request): string {
 
 app.set('etag', false);
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Real-time Event Stream (SSE) for zero-latency live sync without Ctrl+F5
 const sseClients = new Set<express.Response>();
@@ -519,6 +538,97 @@ app.post('/api/ai-design-assist', upload.single('image'), async (req, res) => {
   } catch (err: any) {
     console.error('AI Analysis Error:', err.message, err.stack);
     res.status(500).json({ error: 'วิเคราะห์ล้มเหลว: ' + (err.message || 'Unknown error') + ' (Details: ' + (err.stack?.substring(0, 100) || 'No stack') + ')' });
+  }
+});
+
+app.post('/api/ai/remove-background', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'ไม่พบข้อมูลรูปภาพ' });
+    }
+
+    const matches = image.match(/^data:(image\/\w+);base64,(.+)$/);
+    let mimeType = 'image/png';
+    let base64Data = image;
+
+    if (matches && matches.length === 3) {
+      mimeType = matches[1];
+      base64Data = matches[2];
+    } else {
+      base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    }
+
+    let apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      try {
+        const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
+        if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+
+    if (!apiKey) {
+      return res.status(500).json({ error: 'ไม่พบ Gemini API Key ในระบบ' });
+    }
+
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+    });
+
+    const modelsToTry = ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image', 'gemini-3.7-flash'];
+    let resultImageBase64: string | null = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Data,
+                },
+              },
+              {
+                text: 'Isolate the main subject or object in this image. Remove the background completely, turning all background area into transparent PNG. Return ONLY the isolated subject on a transparent background PNG image.',
+              },
+            ],
+          },
+        });
+
+        const candidates = response.candidates;
+        if (candidates && candidates.length > 0) {
+          const parts = candidates[0].content?.parts || [];
+          for (const part of parts) {
+            if (part.inlineData && part.inlineData.data) {
+              const resMime = part.inlineData.mimeType || 'image/png';
+              resultImageBase64 = `data:${resMime};base64,${part.inlineData.data}`;
+              break;
+            }
+          }
+        }
+
+        if (resultImageBase64) break;
+      } catch (err: any) {
+        console.warn(`[Remove BG] Model ${modelName} failed:`, err.message || err);
+      }
+    }
+
+    if (resultImageBase64) {
+      return res.json({ transparentImage: resultImageBase64, method: 'ai' });
+    }
+
+    return res.status(422).json({ 
+      error: 'AI Model ไม่ส่งคืนรูปภาพใส สามารถเลือกโหมดลบสีพื้นหลัง (Smart Chroma Key) แทนได้',
+      fallbackToChroma: true 
+    });
+  } catch (err: any) {
+    console.error('Remove background error:', err);
+    res.status(500).json({ error: 'การประมวลผลลบพื้นหลังล้มเหลว: ' + (err.message || 'Unknown error') });
   }
 });
 app.get('/api/digital-signatures', async (req, res) => {
@@ -1220,6 +1330,7 @@ const initialSeedData = {
       status: 'available',
       reservedBy: 'สมศรี รักษ์ดี',
       reservedFor: 'จองเลขหนังสือเวียนโครงการฝึกอบรมกู้ภัยทางน้ำช่วงเทศกาล',
+      reservedDate: '2026-08-01',
       createdAt: '2026-08-01 09:30:00',
       expiresAt: '2026-08-15'
     },
@@ -1235,6 +1346,7 @@ const initialSeedData = {
       status: 'available',
       reservedBy: 'สมชาย ใจดี',
       reservedFor: 'จองเลขคำสั่งแต่งตั้งคณะทำงานเตรียมพร้อมรับมือฤดูฝน',
+      reservedDate: '2026-08-02',
       createdAt: '2026-08-02 11:00:00',
       expiresAt: '2026-08-20'
     },
@@ -1250,6 +1362,7 @@ const initialSeedData = {
       status: 'available',
       reservedBy: 'ระบบสารบรรณ (เลขคืนจากเอกสารยกเลิก)',
       reservedFor: 'คืนเลขเนื่องจากยกเลิกร่างหนังสือประสานงานเดิม',
+      reservedDate: '2026-08-02',
       createdAt: '2026-08-02 14:20:00',
       expiresAt: '2026-12-31'
     }
@@ -1266,6 +1379,8 @@ const initialSeedData = {
       scheduledTime: '18:00',
       reservedFor: 'จองเลขอัตโนมัติทุกวัน เวลา 18:00 น. สำหรับออกหนังสือรับ-ส่งช่วงเย็น',
       reservedBy: 'ระบบอัตโนมัติ (Schedule 18:00)',
+      dateOption: 'current_date',
+      specificDate: '',
       isActive: true,
       lastRunAt: null,
       nextRunAt: '2026-08-04 18:00',
@@ -1282,6 +1397,8 @@ const initialSeedData = {
       scheduledTime: '18:00',
       reservedFor: 'จองเลขคำสั่งอัตโนมัติประจำวัน เวลา 18:00 น.',
       reservedBy: 'ระบบอัตโนมัติ (Schedule 18:00)',
+      dateOption: 'current_date',
+      specificDate: '',
       isActive: true,
       lastRunAt: null,
       nextRunAt: '2026-08-04 18:00',
@@ -1712,20 +1829,61 @@ function loadLocalDb() {
       saveLocalDb();
     }
   } catch (err) {
-    console.warn('Failed to load local db_store.json, resetting to initial seed:', err);
+    console.warn('Failed to load local db_store.json, attempting backup restore:', err);
+    try {
+      const bakPath = `${dbStorePath}.bak`;
+      if (fs.existsSync(bakPath)) {
+        const bakData = fs.readFileSync(bakPath, 'utf-8');
+        if (bakData && bakData.trim().length > 0) {
+          localDb = JSON.parse(bakData);
+          console.log('✅ Successfully restored local database from .bak snapshot');
+          saveLocalDb(true);
+          return;
+        }
+      }
+    } catch (bakErr) {
+      console.warn('Backup snapshot not readable:', bakErr);
+    }
     localDb = JSON.parse(JSON.stringify(initialSeedData));
   }
 }
 
-function saveLocalDb() {
-  try {
-    const uploadDir = path.join(process.cwd(), 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+let saveDbDebounceTimer: NodeJS.Timeout | null = null;
+
+function saveLocalDb(immediate = false) {
+  const performSave = () => {
+    try {
+      const uploadDir = path.join(process.cwd(), 'uploads');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const dataStr = JSON.stringify(localDb, null, 2);
+      const tmpPath = `${dbStorePath}.tmp`;
+      fs.writeFileSync(tmpPath, dataStr, 'utf-8');
+      fs.renameSync(tmpPath, dbStorePath);
+
+      // Create backup snapshot
+      try {
+        fs.copyFileSync(dbStorePath, `${dbStorePath}.bak`);
+      } catch (_) {}
+    } catch (err) {
+      console.error('Failed to save local db_store.json:', err);
     }
-    fs.writeFileSync(dbStorePath, JSON.stringify(localDb, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to save local db_store.json:', err);
+  };
+
+  if (immediate) {
+    if (saveDbDebounceTimer) {
+      clearTimeout(saveDbDebounceTimer);
+      saveDbDebounceTimer = null;
+    }
+    performSave();
+  } else {
+    if (!saveDbDebounceTimer) {
+      saveDbDebounceTimer = setTimeout(() => {
+        saveDbDebounceTimer = null;
+        performSave();
+      }, 150);
+    }
   }
 }
 
@@ -2011,8 +2169,29 @@ async function handleLocalDbQuery(sql: string, params: any[] = []): Promise<[any
 
 const originalPoolQuery = pool.query.bind(pool);
 (pool as any).query = async (sql: string, params: any[] = []) => {
-  // Directly forward queries to MySQL pool. Local JSON database fallback is disabled.
-  return await originalPoolQuery(sql, params);
+  try {
+    return await originalPoolQuery(sql, params);
+  } catch (err: any) {
+    const msg = err.message || '';
+    const isSchemaError = msg.includes('Duplicate column name') || 
+                         msg.includes('already exists') || 
+                         msg.includes('Duplicate key name') || 
+                         msg.includes('Duplicate entry') ||
+                         msg.includes('SUPER privilege');
+    
+    if (!isSchemaError) {
+      console.warn('⚠️ MySQL Query failed, using local DB fallback:', msg);
+    }
+    
+    try {
+      return await handleLocalDbQuery(sql, params);
+    } catch (fallbackErr: any) {
+      if (!isSchemaError) {
+        console.error('❌ Local DB fallback failed:', fallbackErr.message);
+      }
+      throw err;
+    }
+  }
 };
 
 // Also wrap execute if called anywhere
@@ -2126,6 +2305,7 @@ async function setupDatabase() {
             status VARCHAR(50),
             reservedBy VARCHAR(255),
             reservedFor TEXT,
+            reservedDate VARCHAR(100),
             expiresAt VARCHAR(50),
             usedAt VARCHAR(50),
             usedForDocId VARCHAR(100),
@@ -2142,6 +2322,7 @@ async function setupDatabase() {
         try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN status VARCHAR(50)', []); } catch (e) {}
         try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN reservedBy VARCHAR(255)', []); } catch (e) {}
         try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN reservedFor TEXT', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN reservedDate VARCHAR(100)', []); } catch (e) {}
         try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN expiresAt VARCHAR(50)', []); } catch (e) {}
         try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN usedAt VARCHAR(50)', []); } catch (e) {}
         try { await pool.query('ALTER TABLE reserved_numbers ADD COLUMN usedForDocId VARCHAR(100)', []); } catch (e) {}
@@ -2162,6 +2343,8 @@ async function setupDatabase() {
             scheduledTime VARCHAR(20) DEFAULT '18:00',
             reservedFor TEXT,
             reservedBy VARCHAR(255),
+            dateOption VARCHAR(50) DEFAULT 'current_date',
+            specificDate VARCHAR(50),
             isActive TINYINT(1) DEFAULT 1,
             lastRunAt VARCHAR(50),
             nextRunAt VARCHAR(50),
@@ -2177,6 +2360,8 @@ async function setupDatabase() {
         try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN scheduledTime VARCHAR(20) DEFAULT "18:00"', []); } catch (e) {}
         try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN reservedFor TEXT', []); } catch (e) {}
         try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN reservedBy VARCHAR(255)', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN dateOption VARCHAR(50) DEFAULT "current_date"', []); } catch (e) {}
+        try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN specificDate VARCHAR(50)', []); } catch (e) {}
         try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN isActive TINYINT(1) DEFAULT 1', []); } catch (e) {}
         try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN lastRunAt VARCHAR(50)', []); } catch (e) {}
         try { await pool.query('ALTER TABLE scheduled_reservations ADD COLUMN nextRunAt VARCHAR(50)', []); } catch (e) {}
@@ -2795,7 +2980,7 @@ async function setupDatabase() {
           'ALTER TABLE infographics ADD COLUMN viewCount INT DEFAULT 0',
           'ALTER TABLE infographics ADD COLUMN downloadCount INT DEFAULT 0',
           'ALTER TABLE infographics ADD COLUMN embedCount INT DEFAULT 0',
-          'ALTER TABLE infographics ADD COLUMN scope VARCHAR(50) DEFAULT "central"',
+          'ALTER TABLE infographics ADD COLUMN scope VARCHAR(50) DEFAULT \'central\'',
           'ALTER TABLE infographics ADD COLUMN ownerId VARCHAR(100) DEFAULT NULL',
           'ALTER TABLE infographics ADD COLUMN ownerName VARCHAR(255) DEFAULT NULL',
           'ALTER TABLE infographics ADD COLUMN ownerDepartment VARCHAR(255) DEFAULT NULL',
@@ -2833,9 +3018,26 @@ pool.getConnection()
   })
   .catch((err) => {
     isMysqlOnline = false;
-    console.error('❌ FATAL ERROR: MySQL Connection Offline/Unavailable! Local JSON database fallback is disabled. The application requires a working MySQL database to start.', err.message);
-    process.exit(1); // Enforce MySQL-only mode by exiting immediately
+    console.warn('⚠️ MySQL Connection Offline/Unavailable. Operating seamlessly with local JSON database store:', err.message);
   });
+
+// Periodic background health-check for MySQL pool resilience and auto-recovery
+setInterval(async () => {
+  try {
+    const conn = await pool.getConnection();
+    conn.release();
+    if (!isMysqlOnline) {
+      isMysqlOnline = true;
+      console.log('🔄 MySQL connection online/restored successfully!');
+      setupDatabase().catch(() => {});
+    }
+  } catch (err: any) {
+    if (isMysqlOnline) {
+      isMysqlOnline = false;
+      console.warn('⚠️ MySQL connection dropped, fallback to local DB store active:', err.message);
+    }
+  }
+}, 15000);
 
 // System Logging Utility Function (MySQL + Local Fallback)
 function getClientIp(req: express.Request): string {
@@ -2862,6 +3064,21 @@ async function addSystemLog(action: string, details: string, username: string = 
   saveLocalDb();
 }
 
+
+async function getSystemCurrentYear(): Promise<string> {
+  try {
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT currentYear FROM settings LIMIT 1');
+      if (rows && rows.length > 0 && rows[0].currentYear) {
+        return String(rows[0].currentYear);
+      }
+    }
+  } catch (e) {}
+  if (localDb.settings && localDb.settings[0] && localDb.settings[0].currentYear) {
+    return String(localDb.settings[0].currentYear);
+  }
+  return '2569';
+}
 
 // 1. Settings API Endpoints
 app.get('/api/settings', async (req, res) => {
@@ -2916,44 +3133,63 @@ app.put("/api/settings", async (req, res) => {
   const data = req.body;
   const ip = getClientIp(req);
   try {
-    if (!isMysqlOnline) throw new Error("Database offline");
-
     let formattedFeatures = data.enabledFeatures;
     if (formattedFeatures !== undefined && typeof formattedFeatures === 'object' && formattedFeatures !== null) {
       formattedFeatures = JSON.stringify(formattedFeatures);
     }
 
-    const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
-    if (rows.length > 0) {
-      let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
-      const params: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
-      
-      if (formattedFeatures !== undefined) {
-        query += ", enabledFeatures=?";
-        params.push(formattedFeatures);
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query("SELECT id FROM settings LIMIT 1");
+        if (rows.length > 0) {
+          let query = "UPDATE settings SET currentYear=?, startSequence=?, orgName=?, headerOrgName=?, logoUrl=?, garuda15Url=?, garuda30Url=?, faviconUrl=?, footerText=?, smtpHost=?, smtpPort=?, smtpUser=?, smtpPassword=?, smtpFrom=?, geminiApiKey=?";
+          const params: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+          
+          if (formattedFeatures !== undefined) {
+            query += ", enabledFeatures=?";
+            params.push(formattedFeatures);
+          }
+          
+          query += " WHERE id=?";
+          params.push(rows[0].id);
+          
+          await pool.query(query, params);
+        } else {
+          const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
+          const values: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
+          
+          if (formattedFeatures !== undefined) {
+            fields.push("enabledFeatures");
+            values.push(formattedFeatures);
+          }
+          
+          const placeholders = fields.map(() => "?").join(", ");
+          await pool.query(
+            `INSERT INTO settings (${fields.join(", ")}) VALUES (${placeholders})`,
+            values
+          );
+        }
+      } catch (dbErr: any) {
+        console.error("Failed to update settings in MySQL, falling back to localDb:", dbErr.message);
       }
-      
-      query += " WHERE id=?";
-      params.push(rows[0].id);
-      
-      await pool.query(query, params);
-    } else {
-      const fields = ["currentYear", "startSequence", "orgName", "headerOrgName", "logoUrl", "garuda15Url", "garuda30Url", "faviconUrl", "footerText", "smtpHost", "smtpPort", "smtpUser", "smtpPassword", "smtpFrom", "geminiApiKey"];
-      const values: any[] = [data.currentYear, data.startSequence, data.orgName, data.headerOrgName ?? '', data.logoUrl, data.garuda15Url, data.garuda30Url, data.faviconUrl, data.footerText, data.smtpHost, data.smtpPort, data.smtpUser, data.smtpPassword, data.smtpFrom, data.geminiApiKey];
-      
-      if (formattedFeatures !== undefined) {
-        fields.push("enabledFeatures");
-        values.push(formattedFeatures);
-      }
-      
-      const placeholders = fields.map(() => "?").join(", ");
-      await pool.query(
-        `INSERT INTO settings (${fields.join(", ")}) VALUES (${placeholders})`,
-        values
-      );
     }
 
     if (localDb.settings && localDb.settings.length > 0) {
+      if (data.currentYear !== undefined) localDb.settings[0].currentYear = data.currentYear;
+      if (data.startSequence !== undefined) localDb.settings[0].startSequence = data.startSequence;
+      if (data.orgName !== undefined) localDb.settings[0].orgName = data.orgName;
+      if (data.headerOrgName !== undefined) localDb.settings[0].headerOrgName = data.headerOrgName;
+      if (data.logoUrl !== undefined) localDb.settings[0].logoUrl = data.logoUrl;
+      if (data.garuda15Url !== undefined) localDb.settings[0].garuda15Url = data.garuda15Url;
+      if (data.garuda30Url !== undefined) localDb.settings[0].garuda30Url = data.garuda30Url;
+      if (data.faviconUrl !== undefined) localDb.settings[0].faviconUrl = data.faviconUrl;
+      if (data.footerText !== undefined) localDb.settings[0].footerText = data.footerText;
+      if (data.smtpHost !== undefined) localDb.settings[0].smtpHost = data.smtpHost;
+      if (data.smtpPort !== undefined) localDb.settings[0].smtpPort = data.smtpPort;
+      if (data.smtpUser !== undefined) localDb.settings[0].smtpUser = data.smtpUser;
+      if (data.smtpPassword !== undefined) localDb.settings[0].smtpPassword = data.smtpPassword;
+      if (data.smtpFrom !== undefined) localDb.settings[0].smtpFrom = data.smtpFrom;
+      if (data.geminiApiKey !== undefined) localDb.settings[0].geminiApiKey = data.geminiApiKey;
       if (formattedFeatures !== undefined) {
         localDb.settings[0].enabledFeatures = formattedFeatures;
       }
@@ -3058,6 +3294,7 @@ app.post('/api/numbering-rules', async (req, res) => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    const currentSystemYear = await getSystemCurrentYear();
     const newRule: any = {
       ruleName: req.body.ruleName || 'กฎออกเลขใหม่',
       department: req.body.department || 'ทุกฝ่ายงาน',
@@ -3068,7 +3305,7 @@ app.post('/api/numbering-rules', async (req, res) => {
       numberFormat: req.body.numberFormat || '{prefix}/{isCircular ? "ว " : ""}{seq}',
       runningScope: req.body.runningScope || 'department',
       currentSeq: Number(req.body.currentSeq) || 1,
-      year: req.body.year || '2569',
+      year: req.body.year || currentSystemYear,
       resetFrequency: req.body.resetFrequency || 'yearly',
       isActive: req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : 1,
       description: req.body.description || ''
@@ -3232,6 +3469,7 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
         status VARCHAR(50),
         reservedBy VARCHAR(255),
         reservedFor TEXT,
+        reservedDate VARCHAR(100),
         expiresAt VARCHAR(50),
         usedAt VARCHAR(50),
         usedForDocId VARCHAR(100),
@@ -3239,12 +3477,13 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    const { ruleId, docType, department, prefix, startSeq, count, reservedBy, reservedFor } = req.body;
+    const { ruleId, docType, department, prefix, startSeq, count, reservedBy, reservedFor, reservedDate } = req.body;
     const qty = Number(count) || 1;
     const startNumber = Number(startSeq) || 1;
-    const yearStr = req.body.year || '2569';
+    const yearStr = req.body.year || await getSystemCurrentYear();
     const createdItems: any[] = [];
     const nowStr = new Date().toISOString();
+    const targetReservedDate = reservedDate || nowStr.split('T')[0];
 
     for (let i = 0; i < qty; i++) {
       const currentSeqNum = startNumber + i;
@@ -3258,10 +3497,10 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
 
       try {
         const [result]: any = await pool.query(
-          'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [ruleId || null, docType || 'หนังสือภายนอก', department || 'ฝ่ายบริหารงานทั่วไป', numberStr, currentSeqNum, yearStr, 'reserved', 'available', reservedBy || 'ผู้ใช้งานระบบ', reservedFor || 'สำรอง/จองเลขล่วงหน้า', nowStr]
+          'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, reservedDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [ruleId || null, docType || 'หนังสือภายนอก', department || 'ฝ่ายบริหารงานทั่วไป', numberStr, currentSeqNum, yearStr, 'reserved', 'available', reservedBy || 'ผู้ใช้งานระบบ', reservedFor || 'สำรอง/จองเลขล่วงหน้า', targetReservedDate, nowStr]
         );
-        createdItems.push({ id: result.insertId, numberString: numberStr });
+        createdItems.push({ id: result.insertId, numberString: numberStr, reservedDate: targetReservedDate });
       } catch (e) {
         if (!localDb.reserved_numbers) localDb.reserved_numbers = [];
         const newId = localDb.reserved_numbers.length > 0 ? Math.max(...localDb.reserved_numbers.map((r: any) => Number(r.id) || 0)) + 1 : 1;
@@ -3277,10 +3516,11 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
           status: 'available',
           reservedBy: reservedBy || 'ผู้ใช้งานระบบ',
           reservedFor: reservedFor || 'สำรอง/จองเลขล่วงหน้า',
+          reservedDate: targetReservedDate,
           createdAt: nowStr
         };
         localDb.reserved_numbers.unshift(item);
-        createdItems.push({ id: newId, numberString: numberStr });
+        createdItems.push({ id: newId, numberString: numberStr, reservedDate: targetReservedDate });
         saveLocalDb();
       }
     }
@@ -3314,11 +3554,29 @@ async function executeScheduledReservation(sch: any) {
   const docType = sch.docType || 'หนังสือภายนอก';
   const department = sch.department || 'ฝ่ายบริหารงานทั่วไป';
   const prefix = sch.prefix || (docType === 'คำสั่ง' ? 'คำสั่ง' : (docType === 'ประกาศ' ? 'ประกาศ' : 'รย 0021'));
-  const reservedBy = sch.reservedBy || `ระบบจองเลขอัตโนมัติ (${sch.scheduledTime || '18:00'})`;
-  const reservedFor = sch.reservedFor || `จองเลขอัตโนมัติประจำวัน เวลา ${sch.scheduledTime || '18:00'} น.`;
-  const yearStr = '2569';
   const now = new Date();
   const nowIso = now.toISOString();
+  const todayYmd = nowIso.split('T')[0];
+
+  // Calculate explicit reservation date for this batch of numbers
+  let reservedDate = todayYmd;
+  if (sch.dateOption === 'specific_date' && sch.specificDate) {
+    reservedDate = sch.specificDate;
+  } else if (sch.dateOption === 'next_workday') {
+    const nextWd = new Date();
+    do {
+      nextWd.setDate(nextWd.getDate() + 1);
+    } while (nextWd.getDay() === 0 || nextWd.getDay() === 6);
+    reservedDate = nextWd.toISOString().split('T')[0];
+  } else if (sch.dateOption === 'next_day') {
+    const nextD = new Date();
+    nextD.setDate(nextD.getDate() + 1);
+    reservedDate = nextD.toISOString().split('T')[0];
+  }
+
+  const reservedBy = sch.reservedBy || `ระบบจองเลขอัตโนมัติ (${sch.scheduledTime || '18:00'})`;
+  const reservedFor = sch.reservedFor || `จองเลขอัตโนมัติรอบ ${sch.scheduledTime || '18:00'} น. (วันที่จอง: ${reservedDate})`;
+  const yearStr = await getSystemCurrentYear();
 
   let ruleId: any = null;
   let startSeq = 1;
@@ -3356,10 +3614,10 @@ async function executeScheduledReservation(sch: any) {
 
     try {
       const [result]: any = await pool.query(
-        'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ruleId, docType, department, numberStr, currentSeqNum, yearStr, 'auto_scheduled', 'available', reservedBy, reservedFor, nowIso]
+        'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, reservedDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [ruleId, docType, department, numberStr, currentSeqNum, yearStr, 'auto_scheduled', 'available', reservedBy, reservedFor, reservedDate, nowIso]
       );
-      createdItems.push({ id: result.insertId, numberString: numberStr });
+      createdItems.push({ id: result.insertId, numberString: numberStr, reservedDate });
     } catch (e) {
       if (!localDb.reserved_numbers) localDb.reserved_numbers = [];
       const newId = localDb.reserved_numbers.length > 0 ? Math.max(...localDb.reserved_numbers.map((r: any) => Number(r.id) || 0)) + 1 : 1;
@@ -3375,10 +3633,11 @@ async function executeScheduledReservation(sch: any) {
         status: 'available',
         reservedBy,
         reservedFor,
+        reservedDate,
         createdAt: nowIso
       };
       localDb.reserved_numbers.unshift(item);
-      createdItems.push({ id: newId, numberString: numberStr });
+      createdItems.push({ id: newId, numberString: numberStr, reservedDate });
       saveLocalDb();
     }
   }
@@ -3497,6 +3756,8 @@ async function ensureScheduledReservationsTable() {
         scheduledTime VARCHAR(20) DEFAULT '18:00',
         reservedFor TEXT,
         reservedBy VARCHAR(255),
+        dateOption VARCHAR(50) DEFAULT 'current_date',
+        specificDate VARCHAR(50),
         isActive TINYINT(1) DEFAULT 1,
         lastRunAt VARCHAR(50),
         nextRunAt VARCHAR(50),
@@ -3513,6 +3774,8 @@ async function ensureScheduledReservationsTable() {
       'scheduledTime VARCHAR(20) DEFAULT "18:00"',
       'reservedFor TEXT',
       'reservedBy VARCHAR(255)',
+      'dateOption VARCHAR(50) DEFAULT "current_date"',
+      'specificDate VARCHAR(50)',
       'isActive TINYINT(1) DEFAULT 1',
       'lastRunAt VARCHAR(50)',
       'nextRunAt VARCHAR(50)',
@@ -3543,7 +3806,7 @@ app.post('/api/scheduled-reservations', async (req, res) => {
   try {
     await ensureScheduledReservationsTable();
 
-    const { name, department, docType, prefix, count, scheduleType, scheduledTime, reservedFor, reservedBy, isActive } = req.body;
+    const { name, department, docType, prefix, count, scheduleType, scheduledTime, reservedFor, reservedBy, dateOption, specificDate, isActive } = req.body;
     const nowIso = new Date().toISOString();
     const activeVal = isActive !== undefined ? (isActive ? 1 : 0) : 1;
 
@@ -3557,6 +3820,8 @@ app.post('/api/scheduled-reservations', async (req, res) => {
       scheduledTime: scheduledTime || '18:00',
       reservedFor: reservedFor || 'จองเลขอัตโนมัติตามกำหนดเวลา',
       reservedBy: reservedBy || 'ระบบอัตโนมัติ',
+      dateOption: dateOption || 'current_date',
+      specificDate: specificDate || '',
       isActive: Boolean(activeVal),
       lastRunAt: null,
       nextRunAt: `${nowIso.split('T')[0]} ${scheduledTime || '18:00'}`,
@@ -3566,8 +3831,8 @@ app.post('/api/scheduled-reservations', async (req, res) => {
     let insertedId: any = null;
     try {
       const [result]: any = await pool.query(
-        'INSERT INTO scheduled_reservations (name, department, docType, prefix, count, scheduleType, scheduledTime, reservedFor, reservedBy, isActive, lastRunAt, nextRunAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [newSchedule.name, newSchedule.department, newSchedule.docType, newSchedule.prefix, newSchedule.count, newSchedule.scheduleType, newSchedule.scheduledTime, newSchedule.reservedFor, newSchedule.reservedBy, activeVal, newSchedule.lastRunAt, newSchedule.nextRunAt, newSchedule.createdAt]
+        'INSERT INTO scheduled_reservations (name, department, docType, prefix, count, scheduleType, scheduledTime, reservedFor, reservedBy, dateOption, specificDate, isActive, lastRunAt, nextRunAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [newSchedule.name, newSchedule.department, newSchedule.docType, newSchedule.prefix, newSchedule.count, newSchedule.scheduleType, newSchedule.scheduledTime, newSchedule.reservedFor, newSchedule.reservedBy, newSchedule.dateOption, newSchedule.specificDate, activeVal, newSchedule.lastRunAt, newSchedule.nextRunAt, newSchedule.createdAt]
       );
       if (result && result.insertId) {
         insertedId = result.insertId;
@@ -3613,7 +3878,7 @@ app.put('/api/scheduled-reservations/:id', async (req, res) => {
       updates.isActive = updates.isActive ? 1 : 0;
     }
 
-    const allowedColumns = ['name', 'department', 'docType', 'prefix', 'count', 'scheduleType', 'scheduledTime', 'reservedFor', 'reservedBy', 'isActive', 'lastRunAt', 'nextRunAt', 'createdAt'];
+    const allowedColumns = ['name', 'department', 'docType', 'prefix', 'count', 'scheduleType', 'scheduledTime', 'reservedFor', 'reservedBy', 'dateOption', 'specificDate', 'isActive', 'lastRunAt', 'nextRunAt', 'createdAt'];
     const validKeys = Object.keys(updates).filter(k => allowedColumns.includes(k));
 
     if (validKeys.length > 0) {
@@ -3732,6 +3997,7 @@ app.post('/api/reserved-numbers/reclaim', async (req, res) => {
   try {
     const { docId, docType, department, numberString, year, reclaimedBy, reason } = req.body;
     const nowStr = new Date().toISOString();
+    const effectiveYr = year || await getSystemCurrentYear();
     
     // We try to extract seq number from numberString
     let seqNumber = 0;
@@ -3741,8 +4007,8 @@ app.post('/api/reserved-numbers/reclaim', async (req, res) => {
     }
     
     const [result]: any = await pool.query(
-      'INSERT INTO reserved_numbers (docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, year || '2569', 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr]
+      'INSERT INTO reserved_numbers (docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, reservedDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, effectiveYr, 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr.split('T')[0], nowStr]
     );
 
     await addSystemLog("RECLAIM_NUMBER", `ดึงเลขหนังสือ ${numberString} กลับเข้าคลังจอง`, reclaimedBy || "ระบบ", getClientIp(req));
@@ -3769,7 +4035,7 @@ app.post('/api/reserved-numbers/use', async (req, res) => {
 app.post('/api/numbering/generate-next', async (req, res) => {
   try {
     const { department, docType, isCircular, category, year } = req.body;
-    const yr = year || '2569';
+    const yr = year || await getSystemCurrentYear();
     let actualType = docType || 'หนังสือภายนอก';
     if (docType === 'admin') {
       if (category === 'order') actualType = 'คำสั่ง';
@@ -7104,6 +7370,9 @@ app.post('/api/documents/:id/receive-department', async (req, res) => {
 
 app.post('/api/documents', async (req, res) => {
   const doc = req.body;
+  const currentSystemYear = await getSystemCurrentYear();
+  const docYear = doc.year || currentSystemYear;
+  doc.year = docYear;
   const docId = doc.id || 'doc_' + Math.random().toString(36).substring(2, 9);
   const type = doc.type || 'inbox';
   const folderId = doc.folderId ? parseInt(doc.folderId, 10) : null;
@@ -7186,6 +7455,9 @@ app.post('/api/documents', async (req, res) => {
 app.put('/api/documents/:id', async (req, res) => {
   const { id } = req.params;
   const doc = req.body;
+  const currentSystemYear = await getSystemCurrentYear();
+  const docYear = doc.year || currentSystemYear;
+  doc.year = docYear;
   const type = doc.type || 'inbox';
   const folderId = doc.folderId ? parseInt(doc.folderId, 10) : null;
   const status = doc.status || 'ลงทะเบียน';
@@ -9966,8 +10238,53 @@ ${JSON.stringify(docsSummaryContext, null, 2)}
 async function startServer() {
 
 // Infographics API (Enterprise & Public Delivery Engine)
+const canAccessInfographic = (row: any, user: any, action: 'list' | 'view' | 'edit' = 'view') => {
+  const { userId, userRole, userName, userDept } = user;
+  const isPublic = row.isPublic === 1 || row.isPublic === true;
+  
+  // Special roles see and edit all
+  if (userRole === 'admin' || userRole === 'moderator') return true;
+
+  // Owner Check
+  if (userId && String(row.ownerId) === String(userId)) return true;
+  if (userName && (row.ownerName === userName || row.authorName === userName)) return true;
+
+  // Central scope is visible and editable to all authenticated users in this app context 
+  if (row.scope === 'central') return true;
+
+  // Department shared edit
+  if (row.allowDepartmentEdit === 1 && row.ownerDepartment && userDept && row.ownerDepartment === userDept) return true;
+
+  // Check allowed editors list
+  if (row.allowedEditors) {
+    let editors: any[] = [];
+    try {
+      editors = typeof row.allowedEditors === 'string' ? JSON.parse(row.allowedEditors) : row.allowedEditors;
+    } catch (e) {}
+    if (Array.isArray(editors)) {
+      const hasExplicitEditorRight = editors.some(e => 
+        (userId && String(e.id) === String(userId)) || 
+        (userName && e.username === userName)
+      );
+      if (hasExplicitEditorRight) return true;
+    }
+  }
+
+  // If no explicit rights, only allow if it's public and we are just viewing (not listing or editing)
+  if (isPublic && action === 'view') return true;
+
+  return false;
+};
+
 app.get('/api/infographics', async (req, res) => {
   try {
+    const user = {
+      userId: req.query.userId,
+      userRole: req.query.userRole,
+      userName: req.query.userName,
+      userDept: req.query.userDept
+    };
+
     const [rows]: any = await pool.query(`
       SELECT 
         id, name, thumbnail, isPublic, allowEmbed, allowDownload, 
@@ -9978,7 +10295,11 @@ app.get('/api/infographics', async (req, res) => {
       FROM infographics 
       ORDER BY updated_at DESC, created_at DESC
     `);
-    res.json(rows || []);
+
+    // Filter results based on visibility and permissions for listing
+    const filtered = (rows || []).filter((row: any) => canAccessInfographic(row, user, 'list'));
+
+    res.json(filtered);
   } catch (error) {
     console.error('Error fetching infographics:', error);
     res.status(500).json({ error: 'Failed to fetch infographics' });
@@ -9987,9 +10308,21 @@ app.get('/api/infographics', async (req, res) => {
 
 app.get('/api/infographics/:id', async (req, res) => {
   try {
+    const user = {
+      userId: req.query.userId,
+      userRole: req.query.userRole,
+      userName: req.query.userName,
+      userDept: req.query.userDept
+    };
     const [rows]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [req.params.id]);
+    
     if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const row = rows[0];
+
+    if (!canAccessInfographic(row, user, 'view')) {
+      return res.status(403).json({ error: 'สื่อ Infographic นี้ถูกตั้งค่าเป็นส่วนตัว คุณไม่มีสิทธิ์ในการเข้าถึงหรือแก้ไข' });
+    }
+
     res.json({
       ...row,
       isPublic: Boolean(row.isPublic),
@@ -10063,8 +10396,12 @@ app.put('/api/infographics/:id', async (req, res) => {
       accessPassword, authorName, authorDepartment, 
       description, tags,
       scope, ownerId, ownerName, ownerDepartment,
-      allowedEditors, allowDepartmentEdit
+      allowedEditors, allowDepartmentEdit,
+      // Pass user info in body for mutations
+      requestingUser 
     } = req.body;
+
+    const user = requestingUser || {};
     
     const nowIso = new Date().toISOString();
 
@@ -10075,6 +10412,12 @@ app.put('/api/infographics/:id', async (req, res) => {
     }
 
     const current = existing[0];
+
+    // Permission Check for Edit
+    if (!canAccessInfographic(current, user, 'edit')) {
+      return res.status(403).json({ error: 'คุณไม่มีสิทธิ์ในการแก้ไขสื่อ Infographic นี้' });
+    }
+
     const finalName = name !== undefined ? name : current.name;
     const finalData = data !== undefined ? data : current.data;
     const finalThumbnail = thumbnail !== undefined ? thumbnail : current.thumbnail;
@@ -10143,6 +10486,26 @@ app.put('/api/infographics/:id', async (req, res) => {
 
 app.delete('/api/infographics/:id', async (req, res) => {
   try {
+    const user = {
+      userId: req.query.userId,
+      userRole: req.query.userRole,
+      userName: req.query.userName,
+      userDept: req.query.userDept
+    };
+
+    // Check existing
+    const [existing]: any = await pool.query('SELECT * FROM infographics WHERE id = ?', [req.params.id]);
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    const current = existing[0];
+
+    // Permission Check for Delete
+    if (!canAccessInfographic(current, user, 'edit')) {
+      return res.status(403).json({ error: 'คุณไม่มีสิทธิ์ในการลบสื่อ Infographic นี้' });
+    }
+
     await pool.query('DELETE FROM infographics WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (error) {
@@ -10667,7 +11030,7 @@ app.get('/api/public/infographics', (req, res) => {
   res.status(400).json({ error: 'กรุณาระบุรหัสสื่อ Infographic' });
 });
 
-// Infographics Uploaded Images & Assets Library API
+// Infographics Uploaded Images & Assets Library API (Per-User Isolation)
 app.post('/api/infographics/upload', upload.array('files', 10), async (req, res) => {
   try {
     const files = req.files as Express.Multer.File[];
@@ -10675,20 +11038,21 @@ app.post('/api/infographics/upload', upload.array('files', 10), async (req, res)
       return res.status(400).json({ success: false, error: 'ไม่พบไฟล์รูปภาพที่อัปโหลด' });
     }
 
+    const rawUserId = (req.body?.userId || req.query?.userId || req.body?.uploadedById || req.body?.uploadedBy || 'guest').toString().trim();
+    const sanitizedUserId = rawUserId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'guest';
     const uploadedBy = (req.body?.uploadedBy || req.query?.uploadedBy || 'Infographics Studio').toString();
     const ip = getClientIp(req);
     const uploadsBase = path.resolve(process.cwd(), 'uploads');
-    const infographicsDir = path.join(uploadsBase, 'infographics');
-    if (!fs.existsSync(infographicsDir)) {
-      fs.mkdirSync(infographicsDir, { recursive: true });
+    const userInfographicsDir = path.join(uploadsBase, 'infographics', `user_${sanitizedUserId}`);
+    if (!fs.existsSync(userInfographicsDir)) {
+      fs.mkdirSync(userInfographicsDir, { recursive: true });
     }
 
     const uploadedFiles: any[] = [];
     for (const file of files) {
-      // If file was placed in another directory by default, ensure it is in infographics
       let finalFilename = file.filename;
       let finalPath = file.path;
-      const targetPath = path.join(infographicsDir, finalFilename);
+      const targetPath = path.join(userInfographicsDir, finalFilename);
 
       if (path.resolve(finalPath) !== path.resolve(targetPath)) {
         try {
@@ -10698,7 +11062,7 @@ app.post('/api/infographics/upload', upload.array('files', 10), async (req, res)
             finalPath = targetPath;
           }
         } catch (moveErr) {
-          console.warn('Could not relocate file to infographics directory:', moveErr);
+          console.warn('Could not relocate file to user infographics directory:', moveErr);
         }
       }
 
@@ -10710,14 +11074,15 @@ app.post('/api/infographics/upload', upload.array('files', 10), async (req, res)
         filename: finalFilename,
         size: stat.size,
         mimetype: file.mimetype,
-        url: `/uploads/infographics/${finalFilename}`,
+        url: `/uploads/infographics/user_${sanitizedUserId}/${finalFilename}`,
         folder: 'infographics',
+        userId: sanitizedUserId,
         createdAt: new Date().toISOString()
       });
     }
 
     const fileNames = files.map(f => f.originalname).join(', ');
-    await addSystemLog('UPLOAD_INFOGRAPHIC_IMAGE', `อัปโหลดรูปภาพ Infographics: ${fileNames}`, uploadedBy, ip);
+    await addSystemLog('UPLOAD_INFOGRAPHIC_IMAGE', `อัปโหลดรูปภาพ Infographics (${sanitizedUserId}): ${fileNames}`, uploadedBy, ip);
 
     return res.json({ success: true, files: uploadedFiles });
   } catch (err: any) {
@@ -10726,15 +11091,14 @@ app.post('/api/infographics/upload', upload.array('files', 10), async (req, res)
   }
 });
 
-// Infographics Uploaded Images & Assets Library List API
+// Infographics Uploaded Images & Assets Library List API (Per-User Isolation)
 app.get('/api/infographics-assets/images', async (req, res) => {
   try {
-    const uploadsBase = path.resolve(process.cwd(), 'uploads');
-    const infographicsDir = path.join(uploadsBase, 'infographics');
-    if (!fs.existsSync(infographicsDir)) {
-      fs.mkdirSync(infographicsDir, { recursive: true });
-    }
+    const rawUserId = (req.query?.userId || req.query?.uploadedBy || '').toString().trim();
+    const sanitizedUserId = rawUserId ? rawUserId.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
+    const showAll = req.query?.all === 'true';
 
+    const uploadsBase = path.resolve(process.cwd(), 'uploads');
     const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.bmp']);
     const imageList: Array<{
       id: string;
@@ -10746,14 +11110,13 @@ app.get('/api/infographics-assets/images', async (req, res) => {
       createdAt: string;
     }> = [];
 
-    function scanFolder(dirPath: string, relativeSubfolder: string) {
+    function scanDir(dirPath: string, webSubFolder: string) {
       if (!fs.existsSync(dirPath)) return;
       const entries = fs.readdirSync(dirPath, { withFileTypes: true });
       for (const entry of entries) {
         const fullPath = path.join(dirPath, entry.name);
         if (entry.isDirectory()) {
-          const nextSub = relativeSubfolder ? `${relativeSubfolder}/${entry.name}` : entry.name;
-          scanFolder(fullPath, nextSub);
+          scanDir(fullPath, `${webSubFolder}/${entry.name}`);
         } else if (entry.isFile()) {
           const ext = path.extname(entry.name).toLowerCase();
           if (imageExts.has(ext)) {
@@ -10764,14 +11127,13 @@ app.get('/api/infographics-assets/images', async (req, res) => {
               if (nameParts.length > 2) {
                 originalName = nameParts.slice(2).join('-');
               }
-              const webSub = relativeSubfolder ? `/${relativeSubfolder.replace(/\\/g, '/')}` : '';
-              const url = `/uploads${webSub}/${entry.name}`;
+              const url = `/uploads/${webSubFolder}/${entry.name}`;
               imageList.push({
                 id: `img_${Buffer.from(fullPath).toString('base64').substring(0, 16)}_${stat.mtimeMs}`,
                 filename: entry.name,
                 originalName,
                 url,
-                folder: relativeSubfolder || 'root',
+                folder: 'infographics',
                 size: stat.size,
                 createdAt: stat.mtime.toISOString(),
               });
@@ -10783,7 +11145,15 @@ app.get('/api/infographics-assets/images', async (req, res) => {
       }
     }
 
-    scanFolder(infographicsDir, 'infographics');
+    if (sanitizedUserId && !showAll) {
+      // Per-user isolated directory
+      const userDir = path.join(uploadsBase, 'infographics', `user_${sanitizedUserId}`);
+      scanDir(userDir, `infographics/user_${sanitizedUserId}`);
+    } else {
+      // Fallback or show all
+      const infographicsDir = path.join(uploadsBase, 'infographics');
+      scanDir(infographicsDir, 'infographics');
+    }
 
     // Sort by newest first
     imageList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -10822,6 +11192,7 @@ app.delete('/api/infographics-assets/images', async (req, res) => {
     return res.status(500).json({ success: false, error: 'เกิดข้อผิดพลาดในการลบรูปภาพ' });
   }
 });
+
   const listenPort = process.env.PORT || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
@@ -10849,6 +11220,21 @@ app.delete('/api/infographics-assets/images', async (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Express global error handling middleware for API routes
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+    console.error('💥 Express API Error Handler caught:', err?.message || err);
+    if (req.path.startsWith('/api/')) {
+      return res.status(err?.status || 500).json({
+        success: false,
+        error: err?.message || 'เกิดข้อผิดพลาดในการประมวลผลคำขอ'
+      });
+    }
+    return next(err);
+  });
 
   if (typeof listenPort === 'string' && (listenPort.startsWith('/') || listenPort.startsWith('\\\\'))) {
     app.listen(listenPort, () => {
