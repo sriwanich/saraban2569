@@ -1773,7 +1773,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   <div className="max-h-36 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-slate-800 rounded-lg p-2 bg-white dark:bg-slate-900">
                     {documents
                       .filter(d => 
-                        String(d.title || "").toLowerCase().includes(docSearchQuery.toLowerCase()) || 
+                        d.title.toLowerCase().includes(docSearchQuery.toLowerCase()) || 
                         (d.docNumber && d.docNumber.toLowerCase().includes(docSearchQuery.toLowerCase()))
                       )
                       .map((doc) => (

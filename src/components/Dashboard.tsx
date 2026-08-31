@@ -353,7 +353,6 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       const res = await fetch(`/api/documents?${queryParams}`);
       if (res.ok) {
         const data: DocumentItem[] = await res.json();
-        if (!Array.isArray(data)) { console.error("API did not return an array", data); return; }
         setInboxDocs(data.filter(d => d.type === 'inbox'));
         setOutboxDocs(data.filter(d => d.type === 'outbox'));
         setAdminDocs(data.filter(d => d.type === 'admin'));
@@ -638,7 +637,21 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const renderContent = () => {
     switch(activeTab) {
       case 'overview':
-        return <Overview documents={documents} user={currentUser} onCreateDoc={(type) => { setCreateDocType(type || 'inbox'); setIsCreateModalOpen(true); }} onViewDoc={setSelectedDoc} enabledFeatures={enabledFeatures} />;
+        return <Overview 
+          documents={documents} 
+          user={currentUser} 
+          onCreateDoc={(type, prefillData) => { 
+            setCreateDocType(type || 'inbox'); 
+            if (prefillData) {
+              setDocToEdit(prefillData as DocumentItem);
+            } else {
+              setDocToEdit(null);
+            }
+            setIsCreateModalOpen(true); 
+          }} 
+          onViewDoc={setSelectedDoc} 
+          enabledFeatures={enabledFeatures} 
+        />;
       case 'ai_assistant':
         return renderGuardedView('ai_assistant', 'ผู้ช่วย AI Smart สารบรรณ', (
           <SmartAiAssistantView 

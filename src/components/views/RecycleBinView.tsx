@@ -113,7 +113,7 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
   const filteredItems = items.filter(item => {
     const searchLower = searchTerm.toLowerCase();
     return (
-      String(item.title || "").toLowerCase().includes(searchLower) ||
+      item.title.toLowerCase().includes(searchLower) ||
       (item.docNumber && item.docNumber.toLowerCase().includes(searchLower)) ||
       (item.deletedBy && item.deletedBy.toLowerCase().includes(searchLower))
     );

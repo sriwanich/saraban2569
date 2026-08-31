@@ -41,15 +41,15 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
   const filteredDocs = adminDocs.filter(doc => {
     const matchesCategory = categoryFilter === 'all' || doc.category === categoryFilter;
     const matchesSearch = searchQuery.trim() === '' || 
-      String(doc.title || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      String(doc.docNumber || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (doc.content && String(doc.content || "").toLowerCase().includes(searchQuery.toLowerCase()));
+      doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      doc.docNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (doc.content && doc.content.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
     return matchesCategory && matchesSearch && matchesYear;
   });
 
   // Unique years list for filter
-  const years = Array.from(new Set(adminDocs.map(d => d.year))).sort((a, b) => String(b).localeCompare(String(a)));
+  const years = Array.from(new Set(adminDocs.map(d => d.year))).sort((a, b) => b.localeCompare(a));
 
   const getCategoryLabel = (cat?: string) => {
     switch (cat) {

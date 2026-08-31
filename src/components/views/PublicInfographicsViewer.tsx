@@ -48,6 +48,7 @@ export const PublicInfographicsViewer: React.FC = () => {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [lastTouchDistance, setLastTouchDistance] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [logoUrl, setLogoUrl] = useState('');
 
   // Share & QR Modal
   const [showShareModal, setShowShareModal] = useState(false);
@@ -334,6 +335,10 @@ export const PublicInfographicsViewer: React.FC = () => {
 
   // Generate QR Code for Share Modal
   useEffect(() => {
+    fetch('/api/settings').then(res => res.json()).then(data => {
+      if (data.logoUrl) setLogoUrl(data.logoUrl);
+    }).catch(console.error);
+
     const fullUrl = window.location.href.replace(/([?&])embed=true(&|$)/, '$1').replace(/[?&]$/, '');
     QRCode.toDataURL(fullUrl, {
       width: 280,
@@ -607,6 +612,9 @@ export const PublicInfographicsViewer: React.FC = () => {
               </a>
             )}
             <div className="flex items-center gap-2">
+              {searchParams.get('logo') === 'true' && logoUrl && (
+                <img src={logoUrl} alt="Logo" className="w-6 h-6 object-contain" />
+              )}
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] font-bold">
                 EDMS Infographics
               </span>

@@ -7192,18 +7192,15 @@ app.get('/api/documents', async (req, res) => {
   try {
       const { role, department, isCentral, username } = req.query;
       const query = `
-        SELECT * FROM (
-          SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM outbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, NULL AS category, 1 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM circular_documents
-          UNION ALL
-          SELECT id, 'internal' AS type, NULL AS category, 0 AS isCircular, 'ปกติ' AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM internal_documents
-          UNION ALL
-          SELECT id, 'admin' AS type, category, 0 AS isCircular, 'ปกติ' AS secrecy, NULL AS receiveNumber, year, docNumber, date, 'ปกติ' AS priority, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM admin_documents
-        ) AS all_docs
-        ORDER BY date DESC LIMIT 1000
+        SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM outbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, NULL AS category, 1 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM circular_documents
+        UNION ALL
+        SELECT id, 'internal' AS type, NULL AS category, 0 AS isCircular, 'ปกติ' AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM internal_documents
+        UNION ALL
+        SELECT id, 'admin' AS type, category, 0 AS isCircular, 'ปกติ' AS secrecy, NULL AS receiveNumber, year, docNumber, date, 'ปกติ' AS priority, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM admin_documents
       `;
       const [rows]: any = await pool.query(query);
       const [deptReceives]: any = await pool.query('SELECT * FROM department_receives');
@@ -8715,18 +8712,15 @@ app.post('/api/ai/detect-cross-references', async (req, res) => {
     let allDocs: any[] = [];
     try {
       const query = `
-        SELECT * FROM (
-          SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM inbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM outbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM circular_documents
-          UNION ALL
-          SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM internal_documents
-          UNION ALL
-          SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content FROM admin_documents
-        ) AS all_docs
-        ORDER BY date DESC LIMIT 1000
+        SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM inbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM outbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM circular_documents
+        UNION ALL
+        SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content FROM internal_documents
+        UNION ALL
+        SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content FROM admin_documents
       `;
       const [rows]: any = await pool.query(query);
       allDocs = rows || [];
@@ -10001,18 +9995,15 @@ app.post('/api/ai-assistant', async (req, res) => {
     let documents: any[] = [];
     try {
       const query = `
-        SELECT * FROM (
-          SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM inbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM outbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM circular_documents
-          UNION ALL
-          SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM internal_documents
-          UNION ALL
-          SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, 'ปกติ' AS priority, 'ปกติ' AS secrecy, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, status FROM admin_documents
-        ) AS all_docs
-        ORDER BY date DESC LIMIT 1000
+        SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM inbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM outbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM circular_documents
+        UNION ALL
+        SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM internal_documents
+        UNION ALL
+        SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, 'ปกติ' AS priority, 'ปกติ' AS secrecy, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, status FROM admin_documents
       `;
       const [rows]: any = await pool.query(query);
       documents = rows || [];

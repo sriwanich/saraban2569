@@ -5,11 +5,12 @@ import {
   ShieldAlert, BarChart3, PieChart, Layers, Filter, CheckCircle2, Clock, 
   Building2, Lock, FileCheck, ArrowUpRight, Activity, Calendar, Zap, ChevronRight
 } from 'lucide-react';
+import EecWeatherWidget from './EecWeatherWidget';
 
 interface Props {
   documents: DocumentItem[];
   user?: User;
-  onCreateDoc: (type?: 'inbox' | 'outbox' | 'admin') => void;
+  onCreateDoc: (type?: 'inbox' | 'outbox' | 'admin', prefillData?: Partial<DocumentItem>) => void;
   onViewDoc: (doc: DocumentItem) => void;
   enabledFeatures?: Record<string, boolean>;
 }
@@ -26,7 +27,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
   // Available Years
   const availableYears = useMemo(() => {
     const years = Array.from(new Set(documents.map(d => d.year).filter(Boolean)));
-    years.sort((a, b) => String(b).localeCompare(String(a)));
+    years.sort((a, b) => b.localeCompare(a));
     return years;
   }, [documents]);
 
@@ -140,6 +141,20 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
 
   return (
     <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in">
+      {/* Real-time Environmental & Disaster Climate Data Sources (TMD / EEC API) */}
+      <EecWeatherWidget 
+        onDraftAlertDoc={(weatherSummary, location) => {
+          onCreateDoc('outbox', {
+            title: `แจ้งเตือนสภาวะอากาศและเฝ้าระวังปริมาณฝนสะสม พื้นที่ ${location}`,
+            priority: 'ด่วนที่สุด',
+            to: 'หัวหน้าส่วนราชการ / นายอำเภอ / ผู้บริหารองค์กรปกครองส่วนท้องถิ่นในพื้นที่',
+            department: 'ฝ่ายป้องกันและบรรเทาสาธารณภัย',
+            content: `${weatherSummary}\n\nจึงขอให้หน่วยงานที่เกี่ยวข้องเตรียมความพร้อมเจ้าหน้าที่ เครื่องมือ เครื่องจักรกลสาธารณภัย และเฝ้าระวังจุดเสี่ยงน้ำท่วมขังตลอด 24 ชั่วโมง`,
+            note: 'ออกหนังสือโดยอ้างอิงข้อมูลเปิดสถานีตรวจวัดสภาพอากาศ กรมอุตุนิยมวิทยา - จังหวัดระยอง'
+          });
+        }}
+      />
+
       {/* Executive Header Banner */}
       <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-6 lg:p-8 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-[var(--primary-color)]/5 rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20" />

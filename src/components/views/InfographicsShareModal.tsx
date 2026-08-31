@@ -82,6 +82,7 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
   const [embedShowToolbar, setEmbedShowToolbar] = useState(true);
   const [embedAllowDownload, setEmbedAllowDownload] = useState(true);
   const [embedAllowFullscreen, setEmbedAllowFullscreen] = useState(true);
+  const [embedShowLogo, setEmbedShowLogo] = useState(false);
   const [embedStyle, setEmbedStyle] = useState<'none' | 'border' | 'shadow' | 'card'>('shadow');
   const [embedType, setEmbedType] = useState<'iframe' | 'responsive'>('iframe');
   const [previewMode, setPreviewMode] = useState<'crisp' | 'iframe'>('crisp');
@@ -118,8 +119,9 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
     if (!embedShowToolbar) params.set('toolbar', '0');
     if (!embedAllowDownload) params.set('download', '0');
     if (!embedAllowFullscreen) params.set('fullscreen', '0');
+    if (embedShowLogo) params.set('logo', 'true');
     return `${origin}/public/infographics/${infographic.id}?${params.toString()}`;
-  }, [infographic?.id, embedTheme, embedShowHeader, embedShowToolbar, embedAllowDownload, embedAllowFullscreen, origin]);
+  }, [infographic?.id, embedTheme, embedShowHeader, embedShowToolbar, embedAllowDownload, embedAllowFullscreen, embedShowLogo, origin]);
 
   // Generate Embed Code
   const getEmbedCode = () => {
@@ -671,6 +673,16 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                       className="w-4 h-4 text-blue-600 rounded"
                     />
                     <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">แสดงปุ่มเต็มจอ (Fullscreen)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={embedShowLogo}
+                      onChange={(e) => setEmbedShowLogo(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">แสดงโลโก้ระบบ</span>
                   </label>
                 </div>
               </div>

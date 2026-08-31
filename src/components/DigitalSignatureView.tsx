@@ -151,9 +151,9 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
 
   const filteredDocs = processedDocs.filter(d => {
     const matchesSearch = searchQuery === '' || 
-      (d.docNumber && String(d.docNumber || "").toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (d.title && String(d.title || "").toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (d.department && String(d.department || "").toLowerCase().includes(searchQuery.toLowerCase()));
+      (d.docNumber && d.docNumber.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (d.title && d.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (d.department && d.department.toLowerCase().includes(searchQuery.toLowerCase()));
 
     if (statusFilter === 'signed') return matchesSearch && d.isSigned;
     if (statusFilter === 'pending') return matchesSearch && !d.isSigned;
