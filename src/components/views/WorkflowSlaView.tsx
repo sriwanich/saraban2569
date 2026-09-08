@@ -342,7 +342,7 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
             <Clock className="w-3.5 h-3.5" />
             <span>ระบบกำหนดเส้นทางเสนออนุมัติ &amp; ติดตาม SLA สารบรรณ</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-noto-serif-thai font-bold tracking-tight text-white mb-2">
+          <h1 className="text-2xl sm:text-3xl font-sans font-bold tracking-tight text-white mb-2">
             Workflow และ SLA ติดตามงาน
           </h1>
           <p className="text-sm sm:text-base text-blue-100/90 leading-relaxed">

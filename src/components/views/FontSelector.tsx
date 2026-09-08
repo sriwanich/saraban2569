@@ -349,7 +349,7 @@ export function FontSelector({ currentFont, onSelectFont }: FontSelectorProps) {
                   <Sparkles className="w-5 h-5 text-indigo-300" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold font-noto-serif-thai text-white">
+                  <h3 className="text-lg font-bold font-sans text-white">
                     ศูนย์ฟอนต์สารบรรณ (Google Fonts & Custom Fonts Hub)
                   </h3>
                   <p className="text-xs text-indigo-200/80">

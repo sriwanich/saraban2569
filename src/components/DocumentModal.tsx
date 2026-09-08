@@ -62,6 +62,10 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   };
 
   const handleOpenReservedModal = () => {
+    // ลงทะเบียนและบันทึกเอกสาร ฝ่าย / กลุ่ม ต้องไม่สามารถใช้งาน เลือกจากเลขจอง ได้
+    if ((formData.isCentral ?? 1) === 0 || (user?.role !== 'admin' && user?.role !== 'moderator')) {
+      return;
+    }
     const specificType = getCurrentSpecificDocType();
     setReservedFilterType(specificType);
     setReservedFilterDate('');
@@ -120,10 +124,13 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         ...initialData,
         year: initialData.year || effectiveYear,
         folderId: initialData.folderId ? Number(initialData.folderId) : null,
-        status: initialData.status || 'ลงทะเบียน'
+        status: initialData.status || 'ลงทะเบียน',
+        isCentral: initialData.isCentral !== undefined ? Number(initialData.isCentral) : 1
       };
     }
     const activeType = defaultType || 'inbox';
+    const initIsCentral = (user?.role === 'admin' || user?.role === 'moderator' || user?.isCentral === 1) ? 1 : 0;
+    const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป');
     return {
       receiveNumber: '',
       year: effectiveYear,
@@ -132,7 +139,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       title: '',
       from: activeType === 'outbox' ? 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' : '',
       to: '',
-      department: user?.department || '',
+      department: initDept,
       assignee: '',
       note: '',
       type: activeType,
@@ -142,7 +149,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       content: '',
       folderId: null,
       status: 'ลงทะเบียน',
-      attachments: []
+      attachments: [],
+      isCentral: initIsCentral
     };
   });
 
@@ -245,12 +253,45 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     fetchOrgs();
   }, []);
 
-  const generateNumberInfo = (docType?: DocType, isCirc?: boolean, cat?: string, yr?: string) => {
+  // Helper to determine department prefix
+  const getDepartmentPrefix = (deptName: string): string => {
+    const trimmed = (deptName || '').trim();
+    const rule = numberingRules.find((r: any) => 
+      r.isActive && 
+      r.docType === 'หนังสือภายนอก' && 
+      r.department === trimmed &&
+      r.prefixPattern
+    );
+    if (rule?.prefixPattern) return rule.prefixPattern;
+
+    if (trimmed === 'ฝ่ายยุทธศาสตร์และการจัดการ') return 'รย 0021.1';
+    if (trimmed === 'ฝ่ายสงเคราะห์ผู้ประสบภัย') return 'รย 0021.2';
+    if (trimmed === 'ฝ่ายป้องกันและปฏิบัติการ') return 'รย 0021.3';
+    if (trimmed === 'ฝ่ายบริหารงานทั่วไป') return 'รย 0021';
+
+    return 'รย 0021';
+  };
+
+  const generateNumberInfo = (
+    docType?: DocType,
+    isCirc?: boolean,
+    cat?: string,
+    yr?: string,
+    targetIsCentral?: number,
+    targetDeptName?: string
+  ) => {
     const targetType = docType || formData?.type || defaultType || 'inbox';
     const targetIsCircular = isCirc !== undefined ? isCirc : (formData?.isCircular || false);
     const targetCategory = cat || formData?.category || 'order';
-    const targetYear = yr || formData?.year || effectiveYear;
-    const targetDept = formData?.department || user?.department || 'ฝ่ายบริหารงานทั่วไป';
+    const targetYear = String(yr || formData?.year || effectiveYear);
+
+    const activeIsCentral = targetIsCentral !== undefined 
+      ? Number(targetIsCentral)
+      : (formData?.isCentral !== undefined ? Number(formData.isCentral) : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0));
+
+    const activeDept = (targetDeptName !== undefined
+      ? targetDeptName
+      : (formData?.department || user?.department || (activeIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป'))).trim();
 
     let actualType = 'หนังสือภายนอก';
     if (targetType === 'admin') {
@@ -261,45 +302,56 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       actualType = 'หนังสือภายใน';
     }
 
-    let rule = numberingRules.find((r: any) => r.isActive && r.docType === actualType && r.department === targetDept);
-    if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === actualType && r.department === 'ทุกฝ่ายงาน');
-    if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === actualType);
-
     let existingMax = 0;
     if (targetType === 'admin') {
       const existing = documents.filter(d => d.type === 'admin' && d.category === targetCategory);
       existingMax = existing.reduce((max, d) => {
         const match = (d.docNumber || '').match(/(\d+)\s*\/\s*(\d+)/);
-        if (match && match[2] === targetYear) return Math.max(max, parseInt(match[1], 10));
+        if (match && String(match[2]) === targetYear) return Math.max(max, parseInt(match[1], 10));
         const parts = (d.docNumber || '').split('/');
         const n = parseInt(parts[0], 10);
         return !isNaN(n) ? Math.max(max, n) : max;
       }, 0);
     } else {
       const filteredDocs = documents.filter(d => {
-        if (d.year && d.year !== targetYear) return false;
+        if (d.year && String(d.year) !== targetYear) return false;
+
         if (targetType === 'outbox') {
-          return d.type === 'outbox' && !!d.isCircular === targetIsCircular;
+          if (d.type !== 'outbox' || !!d.isCircular !== targetIsCircular) return false;
+        } else if (d.type !== targetType) {
+          return false;
         }
-        return d.type === targetType;
+
+        if (activeIsCentral === 1) {
+          // สารบรรณกลาง: นับเฉพาะเอกสารสารบรรณกลางเท่านั้น
+          return d.isCentral === 1 || Number(d.isCentral) === 1 || d.isCentral === undefined || d.isCentral === null;
+        } else {
+          // สารบรรณฝ่าย/กลุ่มงาน: นับเฉพาะเอกสารของฝ่ายนี้เท่านั้น แยกขาดจากสารบรรณกลาง
+          const isDeptDoc = d.isCentral === 0 || Number(d.isCentral) === 0;
+          return isDeptDoc && (d.department || '').trim() === activeDept;
+        }
       });
+
       existingMax = filteredDocs.reduce((max, d) => {
         const n = parseInt(d.receiveNumber || '0', 10);
         return !isNaN(n) ? Math.max(max, n) : max;
       }, 0);
     }
 
-    const ruleStartSeq = rule ? Number(rule.currentSeq || 1) : 1;
-    const finalSeq = Math.max(existingMax + 1, ruleStartSeq);
+    const finalSeq = existingMax + 1;
 
     let formattedNumber = '';
     if (targetType === 'admin') {
+      let rule = numberingRules.find((r: any) => r.isActive && r.docType === actualType);
       const prefix = rule ? (rule.prefixPattern || actualType) : actualType;
       formattedNumber = `${prefix} ${finalSeq}/${targetYear}`;
     } else if (targetType === 'outbox') {
-      let prefix = rule ? (rule.prefixPattern || 'รย 0021') : 'รย 0021';
-      if (user?.role === 'admin' || user?.role === 'moderator') {
-        prefix = 'รย 0021';
+      let prefix = 'รย 0021';
+      if (activeIsCentral === 1) {
+        let rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && (r.department === 'ทุกฝ่ายงาน' || r.department === 'สารบรรณกลาง'));
+        prefix = rule?.prefixPattern || 'รย 0021';
+      } else {
+        prefix = getDepartmentPrefix(activeDept);
       }
       const circStr = targetIsCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
       formattedNumber = `${prefix}/${circStr}${finalSeq}`;
@@ -310,6 +362,66 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     }
 
     return { seq: String(finalSeq), docNumber: formattedNumber };
+  };
+
+  const fetchNextNumberFromServer = async (
+    targetType: DocType, 
+    targetIsCirc: boolean, 
+    targetCategory: string, 
+    targetYr: string, 
+    targetIsCentral: number, 
+    targetDept: string
+  ) => {
+    try {
+      const res = await fetch('/api/numbering/generate-next', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          docType: targetType,
+          isCircular: targetIsCirc,
+          category: targetCategory,
+          year: targetYr,
+          isCentral: targetIsCentral,
+          department: targetDept
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success) {
+          return {
+            seq: String(data.nextSeq),
+            docNumber: data.formattedNumber || ''
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('generate-next server endpoint fallback:', err);
+    }
+    return generateNumberInfo(targetType, targetIsCirc, targetCategory, targetYr, targetIsCentral, targetDept);
+  };
+
+  const applyNewNumbering = async (
+    targetType: DocType,
+    targetIsCirc: boolean,
+    targetCategory: string,
+    targetYr: string,
+    targetIsCentral: number,
+    targetDept: string
+  ) => {
+    const { seq, docNumber: newDocNum } = await fetchNextNumberFromServer(
+      targetType,
+      targetIsCirc,
+      targetCategory,
+      targetYr,
+      targetIsCentral,
+      targetDept
+    );
+
+    setFormData(prev => ({
+      ...prev,
+      receiveNumber: seq,
+      docNumber: newDocNum
+    }));
   };
 
   // Fetch folders list
@@ -352,13 +464,17 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   // Sync outbox numbering logic ONLY when user hasn't selected a reservation number and hasn't manually edited docNumber
   useEffect(() => {
     if (formData.type === 'outbox' && !selectedReservedId && !isManualDocNumberRef.current && !initialData) {
-      const targetDept = formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป';
-      let rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && r.department === targetDept);
-      if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && r.department === 'ทุกฝ่ายงาน');
-      if (!rule) rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก');
-      let prefix = rule ? (rule.prefixPattern || 'รย 0021') : 'รย 0021';
-      if (user?.role === 'admin' || user?.role === 'moderator') {
-        prefix = 'รย 0021';
+      const activeIsCentral = formData.isCentral !== undefined 
+        ? Number(formData.isCentral) 
+        : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
+      const targetDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+
+      let prefix = 'รย 0021';
+      if (activeIsCentral === 1) {
+        let rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && (r.department === 'ทุกฝ่ายงาน' || r.department === 'สารบรรณกลาง'));
+        prefix = rule?.prefixPattern || 'รย 0021';
+      } else {
+        prefix = getDepartmentPrefix(targetDept);
       }
       const circStr = formData.isCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
       const expectedDocNumber = `${prefix}/${circStr}${formData.receiveNumber || ''}`;
@@ -369,17 +485,18 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         }));
       }
     }
-  }, [formData.type, formData.receiveNumber, formData.isCircular, formData.department, selectedReservedId, initialData, user?.role, user?.department, numberingRules]);
+  }, [formData.type, formData.receiveNumber, formData.isCircular, formData.department, formData.isCentral, selectedReservedId, initialData, numberingRules]);
 
   const handleIsCircularChange = (checked: boolean) => {
     isManualDocNumberRef.current = false;
-    const { seq, docNumber: newDocNumber } = generateNumberInfo('outbox', checked);
-    setFormData(prev => ({
-      ...prev,
-      isCircular: checked,
-      receiveNumber: seq,
-      docNumber: newDocNumber
-    }));
+    const currentIsCentral = formData.isCentral !== undefined 
+      ? Number(formData.isCentral) 
+      : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
+    const currentDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+    const currentYear = formData.year || effectiveYear;
+
+    setFormData(prev => ({ ...prev, isCircular: checked }));
+    applyNewNumbering('outbox', checked, formData.category || 'order', currentYear, currentIsCentral, currentDept);
   };
 
   // Set initial default values ONLY on mount or when switching documents (initialData.id), NEVER on background polling
@@ -390,7 +507,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         ...initialData,
         year: initialData.year || effectiveYear,
         folderId: initialData.folderId ? Number(initialData.folderId) : null,
-        status: initialData.status || 'ลงทะเบียน'
+        status: initialData.status || 'ลงทะเบียน',
+        isCentral: initialData.isCentral !== undefined ? Number(initialData.isCentral) : 1
       });
       hasInitializedRef.current = true;
     } else if (!hasInitializedRef.current) {
@@ -398,19 +516,22 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const isCirc = false;
       const initCat = 'order';
       const initYear = effectiveYear;
-      const { seq, docNumber: initDocNum } = generateNumberInfo(activeType, isCirc, initCat, initYear);
+      const initIsCentral = (user?.role === 'admin' || user?.role === 'moderator' || user?.isCentral === 1) ? 1 : 0;
+      const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป');
+
       setFormData(prev => ({
         ...prev,
         type: activeType,
         category: initCat,
-        receiveNumber: seq,
-        docNumber: initDocNum,
         year: initYear,
         status: 'ลงทะเบียน',
-        department: user?.department || prev.department || '',
+        department: initDept,
         folderId: null,
+        isCentral: initIsCentral,
         from: activeType === 'outbox' ? 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' : prev.from
       }));
+
+      applyNewNumbering(activeType, isCirc, initCat, initYear, initIsCentral, initDept);
       hasInitializedRef.current = true;
     }
   }, [initialData?.id]);
@@ -422,12 +543,17 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const isCirc = formData.isCircular || false;
       const initCat = formData.category || 'order';
       const initYear = formData.year || effectiveYear;
-      const { seq, docNumber: initDocNum } = generateNumberInfo(activeType, isCirc, initCat, initYear);
+      const currentIsCentral = formData.isCentral !== undefined 
+        ? Number(formData.isCentral) 
+        : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
+      const currentDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+
+      const { seq, docNumber: initDocNum } = generateNumberInfo(activeType, isCirc, initCat, initYear, currentIsCentral, currentDept);
       if (initDocNum) {
         setFormData(prev => ({
           ...prev,
           receiveNumber: prev.receiveNumber || seq,
-          docNumber: prev.docNumber || initDocNum
+          docNumber: activeType === 'inbox' ? (prev.docNumber || '') : (prev.docNumber || initDocNum)
         }));
         hasAppliedRulesRef.current = true;
       }
@@ -443,21 +569,70 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const isCirc = newType === 'outbox' ? (formData.isCircular || false) : false;
       const initCat = formData.category || 'order';
       const initYear = formData.year || effectiveYear;
-      const { seq, docNumber: newDocNum } = generateNumberInfo(newType, isCirc, initCat, String(initYear));
+      const currentIsCentral = formData.isCentral !== undefined 
+        ? Number(formData.isCentral) 
+        : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
+      const currentDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+
       setFormData(prev => ({
         ...prev,
         type: newType,
-        receiveNumber: seq,
-        docNumber: newDocNum,
         year: prev.year || effectiveYear,
         from: newType === 'outbox' ? 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' : prev.from
       }));
+
+      applyNewNumbering(newType, isCirc, initCat, String(initYear), currentIsCentral, currentDept);
     } else {
       setFormData(prev => ({
         ...prev,
         type: newType,
         year: prev.year || effectiveYear
       }));
+    }
+  };
+
+  const handleRegistrationLevelChange = (newIsCentral: number) => {
+    isManualDocNumberRef.current = false;
+    setSelectedReservedId(null);
+
+    const targetDept = newIsCentral === 1 
+      ? (formData.department || 'ฝ่ายบริหารงานทั่วไป')
+      : (user?.department || (formData.department && formData.department !== 'ฝ่ายบริหารงานทั่วไป' ? formData.department : 'ฝ่ายยุทธศาสตร์และการจัดการ'));
+
+    setFormData(prev => ({
+      ...prev,
+      isCentral: newIsCentral,
+      department: targetDept
+    }));
+
+    if (!initialData) {
+      applyNewNumbering(
+        formData.type || defaultType || 'inbox',
+        formData.isCircular || false,
+        formData.category || 'order',
+        formData.year || effectiveYear,
+        newIsCentral,
+        targetDept
+      );
+    }
+  };
+
+  const handleDepartmentChange = (newDept: string) => {
+    const isDeptLevel = (formData.isCentral ?? 1) === 0;
+    setFormData(prev => ({
+      ...prev,
+      department: newDept
+    }));
+
+    if (isDeptLevel && !isManualDocNumberRef.current && !initialData) {
+      applyNewNumbering(
+        formData.type || defaultType || 'inbox',
+        formData.isCircular || false,
+        formData.category || 'order',
+        formData.year || effectiveYear,
+        0,
+        newDept
+      );
     }
   };
 
@@ -610,10 +785,18 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       }
     }
 
+    const resolvedIsCentral = formData.isCentral !== undefined 
+      ? Number(formData.isCentral) 
+      : ((user?.role === 'admin' || user?.role === 'moderator' || user?.isCentral === 1) ? 1 : 0);
+
+    const resolvedDept = (formData.department || (resolvedIsCentral === 0 ? user?.department : 'ฝ่ายบริหารงานทั่วไป') || '').trim();
+
     const newDoc: DocumentItem = {
       ...formData as DocumentItem,
       id: initialData?.id || `DOC-${Math.floor(Math.random() * 100000)}`,
       registerDate: initialData?.registerDate || new Date().toISOString(),
+      isCentral: resolvedIsCentral,
+      department: resolvedDept,
     };
 
     if (selectedReservedId) {
@@ -642,7 +825,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
               <FileText className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <h2 className="text-base sm:text-xl font-bold font-noto-serif-thai text-[var(--text-primary)] flex items-center gap-1.5 sm:gap-2 flex-wrap leading-tight">
+              <h2 className="text-base sm:text-xl font-bold font-sans text-[var(--text-primary)] flex items-center gap-1.5 sm:gap-2 flex-wrap leading-tight">
                 <span>{initialData ? 'แก้ไขข้อมูลเอกสาร' : `ลงทะเบียนและบันทึกเอกสาร ${user && (user.role === 'admin' || user.role === 'moderator') ? '' : (formData.department ? `(${formData.department})` : '')}`}</span>
                 <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full font-sans font-medium bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20 whitespace-nowrap">
                   {formData.type === 'inbox' ? 'หนังสือรับ' : formData.type === 'outbox' ? 'หนังสือส่ง' : 'งานธุรการ'}
@@ -707,6 +890,59 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 <Layers className="w-4 h-4 text-purple-500 shrink-0" />
                 <span>3. งานธุรการ (คำสั่ง/ประกาศ)</span>
               </button>
+            </div>
+
+            {/* Level Selector: สารบรรณกลาง VS ฝ่าย/กลุ่มงาน */}
+            <div className="p-3 bg-[var(--bg-canvas)]/80 border border-[var(--border-light)] rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                  (formData.isCentral ?? 1) === 1 
+                    ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30' 
+                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                }`}>
+                  {(formData.isCentral ?? 1) === 1 ? 'กลาง' : 'ฝ่าย'}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5 flex-wrap">
+                    <span>ระดับทะเบียนเอกสาร:</span>
+                    <span className={(formData.isCentral ?? 1) === 1 ? 'text-blue-600 dark:text-blue-400 font-semibold' : 'text-emerald-600 dark:text-emerald-400 font-semibold'}>
+                      {(formData.isCentral ?? 1) === 1 ? 'สารบรรณกลาง' : (user?.department || formData.department || 'ฝ่ายปฏิบัติ')}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)] truncate">
+                    {(formData.isCentral ?? 1) === 1 
+                      ? 'สมุดทะเบียนและเลขหนังสือรับ-ส่งของส่วนกลางหน่วยงาน'
+                      : 'สมุดทะเบียนและเลขหนังสือรับ-ส่งของฝ่าย แยกขาดอิสระจากสารบรรณกลาง'}
+                  </p>
+                </div>
+              </div>
+
+              {(user?.role === 'admin' || user?.role === 'moderator') && (
+                <div className="flex items-center gap-1 bg-[var(--bg-surface)] p-1 rounded-xl border border-[var(--border-light)] self-stretch sm:self-auto justify-end shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleRegistrationLevelChange(1)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      (formData.isCentral ?? 1) === 1
+                        ? 'bg-blue-600 text-white shadow-sm font-bold'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    สารบรรณกลาง
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRegistrationLevelChange(0)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      (formData.isCentral ?? 1) === 0
+                        ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    ฝ่าย / กลุ่มงาน
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Section 1: ข้อมูลระบบและหมวดหมู่ */}
@@ -825,18 +1061,18 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-1.5 lg:col-span-1 sm:col-span-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between flex-wrap gap-1">
                     <label className="text-xs font-semibold text-[var(--text-secondary)]">
                       {formData.type === 'admin' ? 'เลขที่' : 'ที่หนังสือ'} <span className="text-rose-500">*</span>
                     </label>
-                    {formData.type !== 'inbox' && (
+                    {formData.type !== 'inbox' && (user?.role === 'admin' || user?.role === 'moderator') && (formData.isCentral ?? 1) === 1 && (
                       <button
                         type="button"
                         onClick={handleOpenReservedModal}
                         className="text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 px-2 py-0.5 rounded-lg border border-amber-500/30 flex items-center gap-1 transition-all cursor-pointer"
-                        title="เลือกเลขจากคลังจองล่วงหน้า"
+                        title="เลือกเลขจากคลังจองล่วงหน้า (สารบรรณกลาง)"
                       >
                         <Sparkles className="w-3 h-3 text-amber-600 animate-pulse" />
                         เลือกจากเลขจอง
@@ -845,11 +1081,16 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                   </div>
                   <input 
                     required
+                    readOnly={formData.type !== 'inbox'}
                     type="text" 
                     value={formData.docNumber || ''}
-                    onChange={(e) => handleChange('docNumber', e.target.value)}
+                    onChange={(e) => {
+                      if (formData.type === 'inbox') {
+                        handleChange('docNumber', e.target.value);
+                      }
+                    }}
                     placeholder={formData.type === 'admin' ? 'เช่น คำสั่งที่ 12/2569' : formData.type === 'inbox' ? 'เช่น รย 0021/1234 (ระบุเลขที่หนังสือจากต้นทาง)' : 'เช่น รย 0021/1'}
-                    className="w-full border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs font-mono outline-none transition-colors placeholder-[var(--text-muted)] bg-[var(--bg-overlay)] text-[var(--text-primary)] focus:border-[var(--primary-color)]"
+                    className={`w-full border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs font-mono outline-none transition-colors placeholder-[var(--text-muted)] ${formData.type === 'inbox' ? 'bg-[var(--bg-overlay)] text-[var(--text-primary)] focus:border-[var(--primary-color)]' : 'bg-[var(--bg-canvas)] text-[var(--text-muted)] cursor-not-allowed select-none'}`}
                   />
 
                   {formData.type !== 'inbox' && selectedReservedId && (
@@ -1030,14 +1271,14 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 </div>
               </div>
 
-              {formData.type === 'inbox' && !initialData ? (
+              {formData.type === 'inbox' && !initialData && (formData.isCentral ?? 1) === 1 ? (
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3.5 space-y-1.5">
                   <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-xs">
                     <Info className="w-4 h-4 shrink-0" />
-                    <span>คำแนะนำขั้นตอนการลงรับหนังสือกลาง</span>
+                    <span>คำแนะนำขั้นตอนการลงรับหนังสือกลาง (สารบรรณกลาง)</span>
                   </div>
                   <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                    เมื่อลงทะเบียนหนังสือรับแล้ว ระบบจะกำหนดสถานะเป็น <b>"ลงทะเบียน"</b> โดยท่านสามารถเปิดหน้ารายละเอียดเอกสารเพื่อเลือก <b>"ส่งต่อกลุ่มงาน"</b> เพื่อมอบหมายผู้รับผิดชอบตามระเบียบสารบรรณได้ในขั้นตอนถัดไป
+                    เมื่อลงทะเบียนหนังสือรับสารบรรณกลางแล้ว ระบบจะกำหนดสถานะเป็น <b>"ลงทะเบียน"</b> โดยท่านสามารถเปิดหน้ารายละเอียดเอกสารเพื่อเลือก <b>"ส่งต่อกลุ่มงาน"</b> เพื่อมอบหมายฝ่ายงานต่อไป
                   </p>
                 </div>
               ) : (
@@ -1046,7 +1287,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     <label className="text-xs font-semibold text-[var(--text-secondary)]">กลุ่มงาน/ฝ่ายปฏิบัติงาน</label>
                     <select 
                       value={formData.department || ''}
-                      onChange={(e) => handleChange('department', e.target.value)}
+                      onChange={(e) => handleDepartmentChange(e.target.value)}
+                      disabled={user?.role === 'user' && !!user?.department}
                       className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors"
                     >
                       <option value="">-- เลือกกลุ่มปฏิบัติ/ฝ่าย --</option>

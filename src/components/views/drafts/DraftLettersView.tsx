@@ -343,7 +343,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
       {/* Header & Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-light)] pb-4">
         <div>
-          <h2 className="text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">
+          <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
             ร่างหนังสือราชการ
           </h2>
           <p className="text-sm text-[var(--text-secondary)] mt-1">
@@ -765,7 +765,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                   <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-3">
                     <div className="flex items-center gap-2">
                       <Sparkles className="w-5 h-5 text-indigo-500 animate-pulse" />
-                      <h3 className="font-bold text-sm text-[var(--text-primary)] font-noto-serif-thai">
+                      <h3 className="font-bold text-sm text-[var(--text-primary)] font-sans">
                         ผลการตรวจหนังสือด้วย AI
                       </h3>
                     </div>

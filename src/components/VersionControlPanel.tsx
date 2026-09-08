@@ -395,8 +395,8 @@ export default function VersionControlPanel({ doc, user, onClose, onDocumentRest
                       onChange={(e) => setVerAId(e.target.value)}
                       className="px-2.5 py-1 rounded bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-xs font-medium"
                     >
-                      {versions.map((v) => (
-                        <option key={v.id} value={v.id}>
+                      {versions.map((v, idx) => (
+                        <option key={`${v.id}-${idx}`} value={v.id}>
                           Version {v.versionNumber} ({formatThaiDateTime(v.modifiedAt)})
                         </option>
                       ))}
@@ -412,8 +412,8 @@ export default function VersionControlPanel({ doc, user, onClose, onDocumentRest
                       onChange={(e) => setVerBId(e.target.value)}
                       className="px-2.5 py-1 rounded bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-xs font-medium"
                     >
-                      {versions.map((v) => (
-                        <option key={v.id} value={v.id}>
+                      {versions.map((v, idx) => (
+                        <option key={`${v.id}-${idx}`} value={v.id}>
                           Version {v.versionNumber} {v.isCurrent ? '(ปัจจุบัน)' : ''} ({formatThaiDateTime(v.modifiedAt)})
                         </option>
                       ))}
@@ -487,7 +487,7 @@ export default function VersionControlPanel({ doc, user, onClose, onDocumentRest
 
                 return (
                   <div
-                    key={ver.id}
+                    key={`${ver.id}-${index}`}
                     className={`p-4 rounded-xl border transition-all ${
                       isCurrent
                         ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-300 dark:border-blue-800 shadow-sm'

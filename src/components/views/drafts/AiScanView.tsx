@@ -215,7 +215,7 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
             <Sparkles className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">
+            <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
               AI สแกนและถอดความเอกสาร
             </h2>
             <p className="text-sm text-[var(--text-secondary)] mt-0.5">

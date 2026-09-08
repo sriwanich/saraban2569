@@ -1,97 +1,102 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --bg-base: #F1F5F9;
+    --bg-base: #F8FAFC;
     --bg-surface: #FFFFFF;
-    --bg-elevated: #F8FAFC;
+    --bg-elevated: #F1F5F9;
     --bg-canvas: #FFFFFF;
-    --bg-overlay: #FFFFFF;
+    --bg-overlay: rgba(255, 255, 255, 0.8);
     
     --text-primary: #0F172A;
-    --text-secondary: #334155;
+    --text-secondary: #475569;
     --text-muted: #64748B;
     
     --border-light: #E2E8F0;
     --border-lighter: #F1F5F9;
     --border-medium: #CBD5E1;
-
     --primary-color: #2563EB;
     --primary-dark: #1E40AF;
     --primary-hover: #1D4ED8;
-
     --success: #10B981;
     --danger: #EF4444;
+
+    --glass-border: rgba(255, 255, 255, 0.4);
+    --glass-bg: rgba(255, 255, 255, 0.6);
   }
 
   .dark {
-    --bg-base: #020617;
-    --bg-surface: #0F172A;
-    --bg-elevated: #1E293B;
-    --bg-canvas: #020617;
-    --bg-overlay: #0F172A;
+    --bg-base: #0B0F19;
+    --bg-surface: #111827;
+    --bg-elevated: #1F2937;
+    --bg-canvas: #0B0F19;
+    --bg-overlay: rgba(17, 24, 39, 0.8);
     
     --text-primary: #F8FAFC;
     --text-secondary: #94A3B8;
     --text-muted: #64748B;
     
-    --border-light: #1E293B;
-    --border-lighter: #0F172A;
-    --border-medium: #334155;
-
+    --border-light: #1F2937;
+    --border-lighter: #111827;
+    --border-medium: #374151;
     --primary-color: #3B82F6;
     --primary-dark: #1E40AF;
-    --primary-hover: #2563EB;
-
+    --primary-hover: #60A5FA;
     --success: #10B981;
-    --danger: #EF4444;
+    --danger: #F87171;
+
+    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-bg: rgba(17, 24, 39, 0.6);
   }
 
   /* Touch target & mobile input optimization */
   button, a, input, select, textarea {
     touch-action: manipulation;
   }
-
   .touch-target-min {
     min-height: 44px;
     min-width: 44px;
   }
-
   body {
-    @apply font-sarabun text-[var(--text-primary)] bg-[var(--bg-base)] min-h-screen relative overflow-x-hidden transition-colors duration-300 antialiased;
+    @apply font-sans text-[var(--text-primary)] bg-[var(--bg-base)] min-h-screen relative overflow-x-hidden transition-colors duration-300 antialiased;
   }
 
-  /* Override Webkit Autofill styling to prevent low contrast in light and dark mode */
+  /* Override Webkit Autofill styling */
   input:-webkit-autofill,
   input:-webkit-autofill:hover, 
   input:-webkit-autofill:focus,
   input:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
-    -webkit-text-fill-color: #0F172A !important;
-    transition: background-color 5000s ease-in-out 0s;
-  }
-
-  .dark input:-webkit-autofill,
-  .dark input:-webkit-autofill:hover, 
-  .dark input:-webkit-autofill:focus,
-  .dark input:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 1000px #1E293B inset !important;
-    -webkit-text-fill-color: #F8FAFC !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--bg-surface) inset !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
     transition: background-color 5000s ease-in-out 0s;
   }
 }
 
 @layer utilities {
   .shadow-card {
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
   }
   .dark .shadow-card {
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
   }
   
+  .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+  }
+
+  .shadow-glow {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+  }
+  
+  .dark .shadow-glow {
+    box-shadow: 0 0 20px rgba(96, 165, 250, 0.3);
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -110,18 +115,25 @@
 
 @layer utilities {
   .animate-fade-in {
-    animation: fadeIn 0.3s ease-out;
+    animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .animate-slide-up {
-    animation: slideUp 0.3s ease-out;
+    animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .animate-scale-in {
+    animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }

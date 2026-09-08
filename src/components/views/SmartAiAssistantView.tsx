@@ -187,7 +187,7 @@ export default function SmartAiAssistantView({
   };
 
   return (
-    <div className={`flex flex-col h-full bg-[var(--bg-base)] text-[var(--text-primary)] font-sarabun ${isFloatingDrawer ? 'p-3' : 'p-4 sm:p-6 space-y-6 max-w-7xl mx-auto'}`}>
+    <div className={`flex flex-col h-full bg-[var(--bg-base)] text-[var(--text-primary)] font-sans ${isFloatingDrawer ? 'p-3' : 'p-4 sm:p-6 space-y-6 max-w-7xl mx-auto'}`}>
       
       {/* View Header */}
       {!isFloatingDrawer && (
@@ -198,7 +198,7 @@ export default function SmartAiAssistantView({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-xl sm:text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">
+                <h2 className="text-xl sm:text-2xl font-sans font-bold text-[var(--text-primary)]">
                   Smart e-Saraban AI Assistant
                 </h2>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-600 dark:text-indigo-400 font-semibold border border-indigo-500/30">
@@ -289,7 +289,7 @@ export default function SmartAiAssistantView({
               }`}
             >
               {/* Message Text */}
-              <div className="whitespace-pre-wrap font-sarabun">
+              <div className="whitespace-pre-wrap font-sans">
                 {msg.text}
               </div>
 
@@ -427,7 +427,7 @@ export default function SmartAiAssistantView({
                       </div>
 
                       {/* Official Thai Letter Box */}
-                      <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-[var(--border-medium)] text-[var(--text-primary)] font-sarabun text-xs leading-relaxed space-y-3 shadow-inner">
+                      <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-[var(--border-medium)] text-[var(--text-primary)] font-sans text-xs leading-relaxed space-y-3 shadow-inner">
                         <div className="text-center font-bold text-sm text-[var(--text-primary)]">
                           {msg.payload.draftLetter.departmentName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}
                         </div>

@@ -110,7 +110,7 @@ export const InfographicsPermissionsModal: React.FC<InfographicsPermissionsModal
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 font-noto-serif-thai">
+              <h2 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 font-sans">
                 กำหนดขอบเขต & มอบสิทธิ์แก้ไขเพิ่มเติม
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">

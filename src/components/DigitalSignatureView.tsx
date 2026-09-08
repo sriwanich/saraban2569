@@ -172,7 +172,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
               <ShieldCheck className="w-4 h-4 animate-pulse" />
               <span>มาตรฐานความปลอดภัยสูงสุด (ETDA Standard)</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight font-noto-serif-thai text-slate-100">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight font-sans text-slate-100">
               ระบบลงนามดิจิทัล & ตรวจสอบเอกสาร PDF
             </h1>
             <p className="text-slate-300 text-xs sm:text-sm max-w-3xl leading-relaxed">
@@ -316,7 +316,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
 
                     <h3
                       onClick={() => onViewDoc && onViewDoc(doc)}
-                      className="text-sm font-bold font-noto-serif-thai text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer line-clamp-2 leading-relaxed transition-colors min-h-[40px]"
+                      className="text-sm font-bold font-sans text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer line-clamp-2 leading-relaxed transition-colors min-h-[40px]"
                     >
                       {doc.title}
                     </h3>
@@ -400,7 +400,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
                 <KeyRound className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-lg font-bold font-noto-serif-thai text-[var(--text-primary)]">
+                <h3 className="text-lg font-bold font-sans text-[var(--text-primary)]">
                   ระบบตรวจสอบความถูกต้องเอกสาร PDF และกุญแจดิจิทัล
                 </h3>
                 <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">
@@ -498,7 +498,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
                     {verifyResult.valid ? <CheckCircle2 className="w-10 h-10" /> : <AlertTriangle className="w-10 h-10" />}
                   </div>
                   <div className="text-center sm:text-left flex-1 space-y-1">
-                    <h4 className="text-xl sm:text-2xl font-extrabold tracking-tight font-noto-serif-thai">{verifyResult.statusText}</h4>
+                    <h4 className="text-xl sm:text-2xl font-extrabold tracking-tight font-sans">{verifyResult.statusText}</h4>
                     <p className="text-xs opacity-90 font-medium">ผลการตรวจสอบสำเร็จ ณ วันที่ {formatThaiDateTime(new Date().toISOString())}</p>
                   </div>
                   <div className="shrink-0 flex items-center gap-2 px-4 py-2 bg-black/20 rounded-xl border border-white/20">
@@ -734,7 +734,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
                 <div className="p-2.5 bg-emerald-500/20 rounded-2xl border border-emerald-500/40 mb-2 shadow-[0_0_15px_rgba(16,185,129,0.5)]">
                   <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
                 </div>
-                <h3 className="font-extrabold text-base sm:text-lg text-white tracking-wide font-noto-serif-thai">
+                <h3 className="font-extrabold text-base sm:text-lg text-white tracking-wide font-sans">
                   ใบรับรองลายมือชื่อดิจิทัลและตราประทับอิเล็กทรอนิกส์
                 </h3>
                 <p className="text-emerald-400 text-[9px] mt-1 font-mono tracking-widest uppercase">

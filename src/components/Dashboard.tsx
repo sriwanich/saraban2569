@@ -342,12 +342,34 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [logoUrl, setLogoUrl] = useState('https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg');
   const [currentYear, setCurrentYear] = useState<number>(2569);
 
+  const isCentralUser = currentUser?.role === 'admin' || currentUser?.isCentral === 1 || (currentUser?.role === 'moderator' && hasPermission('view_all_docs'));
+
+  const isDocForUserDepartment = (doc: DocumentItem) => {
+    if (isCentralUser || !currentUser?.department) return true;
+    if (doc.type === 'admin') return true;
+
+    const userDept = currentUser.department.trim();
+    const userName = currentUser.username;
+    const userFirstName = currentUser.firstName;
+
+    const matchesDept = 
+      doc.department === userDept ||
+      doc.from === userDept ||
+      doc.to === userDept ||
+      (doc.createdBy && userName && doc.createdBy === userName) ||
+      (doc.assignee && ((userName && doc.assignee.includes(userName)) || (userFirstName && doc.assignee.includes(userFirstName)))) ||
+      (doc.forwardedTo && doc.forwardedTo.includes(userDept)) ||
+      (doc.departmentReceives && Array.isArray(doc.departmentReceives) && doc.departmentReceives.some(r => r.department === userDept));
+
+    return Boolean(matchesDept);
+  };
+
   const fetchDocuments = async () => {
     try {
       const queryParams = new URLSearchParams({
         role: currentUser?.role || 'user',
         department: currentUser?.department || '',
-        isCentral: String(currentUser?.isCentral ?? 1),
+        isCentral: isCentralUser ? '1' : '0',
         username: currentUser?.username || ''
       }).toString();
       const res = await fetch(`/api/documents?${queryParams}`);
@@ -610,7 +632,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             <ShieldAlert className="w-8 h-8" />
           </div>
           <div className="space-y-1.5">
-            <h3 className="text-xl font-bold font-noto-serif-thai text-[var(--text-primary)]">
+            <h3 className="text-xl font-bold font-sans text-[var(--text-primary)]">
               ไม่มีสิทธิ์เข้าถึงฟังก์ชัน {featureName}
             </h3>
             <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
@@ -638,7 +660,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     switch(activeTab) {
       case 'overview':
         return <Overview 
-          documents={documents} 
+          documents={documents.filter(isDocForUserDepartment)} 
           user={currentUser} 
           onCreateDoc={(type, prefillData) => { 
             setCreateDocType(type || 'inbox'); 
@@ -656,7 +678,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         return renderGuardedView('ai_assistant', 'ผู้ช่วย AI Smart สารบรรณ', (
           <SmartAiAssistantView 
             user={currentUser} 
-            documents={documents} 
+            documents={documents.filter(isDocForUserDepartment)} 
             onViewDoc={handleViewDoc} 
             onNavigateToDrafts={() => setActiveTab('draft_docs')}
           />
@@ -664,7 +686,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'inbox':
         return <DocumentList 
           title="ทะเบียนหนังสือรับ" 
-          documents={documents.filter(d => d.type === 'inbox')} 
+          documents={inboxDocs.filter(isDocForUserDepartment)} 
           onViewDoc={setSelectedDoc} 
           onCreateDoc={() => { setCreateDocType('inbox'); setIsCreateModalOpen(true); }}
           onEditDoc={handleEditDoc}
@@ -677,7 +699,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'outbox':
         return <DocumentList 
           title="ทะเบียนหนังสือส่ง" 
-          documents={documents.filter(d => d.type === 'outbox')} 
+          documents={outboxDocs.filter(isDocForUserDepartment)} 
           onViewDoc={setSelectedDoc} 
           onCreateDoc={() => { setCreateDocType('outbox'); setIsCreateModalOpen(true); }}
           onEditDoc={handleEditDoc}
@@ -714,7 +736,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'favorites':
         return <DocumentList 
           title="เอกสารสำคัญปักหมุด" 
-          documents={documents.filter(d => favorites.includes(d.id))} 
+          documents={documents.filter(d => favorites.includes(d.id)).filter(isDocForUserDepartment)} 
           onViewDoc={setSelectedDoc} 
           onEditDoc={handleEditDoc}
           onDeleteDoc={handleDeleteDoc}
@@ -787,7 +809,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           <div className="space-y-6">
             <div className="flex items-center justify-between mb-8">
               <div>
-                <h2 className="text-2xl font-noto-serif-thai font-semibold text-[var(--text-primary)]">การแจ้งเตือนทั้งหมด</h2>
+                <h2 className="text-2xl font-sans font-semibold text-[var(--text-primary)]">การแจ้งเตือนทั้งหมด</h2>
                 <p className="text-[var(--text-secondary)] mt-1 text-sm">รายการอัพเดทและข้อความแจ้งเตือนต่างๆ</p>
               </div>
               {unreadCount > 0 && (
@@ -831,7 +853,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-base)] text-[var(--text-primary)] font-sarabun flex">
+    <div className="min-h-screen bg-[var(--bg-base)] text-[var(--text-primary)] font-sans flex">
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div 
@@ -854,7 +876,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                <div className="w-8 h-8 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-elevated)] flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                  <img src={logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg'} className="w-[80%] h-[80%] object-contain" alt="Logo" />
                </div>
-               <span className={`font-noto-serif-thai font-bold tracking-wide text-[var(--text-primary)] text-[0.95rem] truncate flex-1 transition-all duration-200 ${isSidebarCollapsed ? 'lg:hidden' : ''}`} title={headerOrgName || orgName}>
+               <span className={`font-sans font-bold tracking-wide text-[var(--text-primary)] text-[0.95rem] truncate flex-1 transition-all duration-200 ${isSidebarCollapsed ? 'lg:hidden' : ''}`} title={headerOrgName || orgName}>
                  {headerOrgName || orgName}
                </span>
             </div>
@@ -889,7 +911,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden bg-[var(--bg-base)]">
         {/* Topbar */}
-        <header className="h-16 shrink-0 bg-[var(--bg-surface)]/80 backdrop-blur-md border-b border-[var(--border-light)] flex items-center justify-between px-3 sm:px-5 lg:px-8 z-30 sticky top-0">
+        <header className="h-16 shrink-0 bg-[var(--bg-surface)]/70 backdrop-blur-xl border-b border-[var(--border-light)] flex items-center justify-between px-3 sm:px-5 lg:px-8 z-30 sticky top-0 shadow-sm">
            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 mr-3">
              <button 
                className="lg:hidden text-[var(--text-primary)] p-2 hover:bg-[var(--border-lighter)] active:scale-95 rounded-xl transition-all shrink-0 -ml-1 touch-target-min flex items-center justify-center" 
@@ -911,7 +933,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
              {/* Header Title Badge */}
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-light)] min-w-0 max-w-[220px] sm:max-w-full transition-colors shadow-sm">
                 <Building2 className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
-                <span className="text-xs sm:text-sm font-semibold text-[var(--text-primary)] font-sarabun truncate">
+                <span className="text-xs sm:text-sm font-semibold text-[var(--text-primary)] font-sans truncate">
                   {currentUser?.role === 'admin'
                     ? `EDMS: ${headerOrgName || orgName || 'ส่วนกลาง'}`
                     : `EDMS: ${currentUser?.department || 'ฝ่ายงาน'}`
@@ -965,7 +987,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                    />
                    <div className="absolute right-0 mt-2 w-80 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl shadow-xl z-50 overflow-hidden">
                      <div className="p-4 border-b border-[var(--border-light)] flex items-center justify-between bg-[var(--bg-surface)]/50">
-                       <h3 className="font-noto-serif-thai font-medium text-[var(--text-primary)]">การแจ้งเตือน</h3>
+                       <h3 className="font-sans font-medium text-[var(--text-primary)]">การแจ้งเตือน</h3>
                        {unreadCount > 0 && (
                          <button 
                            onClick={markAllAsRead}
@@ -1135,7 +1157,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-light)] bg-[var(--bg-surface)]">
-              <h3 className="font-noto-serif-thai font-medium text-lg text-[var(--text-primary)] flex items-center gap-2">
+              <h3 className="font-sans font-medium text-lg text-[var(--text-primary)] flex items-center gap-2">
                 <User className="w-5 h-5 text-[var(--primary-color)]" /> จัดการโปรไฟล์ส่วนตัว
               </h3>
               <button 
@@ -1202,7 +1224,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                 <select
                   value={profileForm.position}
                   onChange={(e) => setProfileForm({ ...profileForm, position: e.target.value })}
-                  className="w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                  disabled={currentUser?.role !== 'admin'}
+                  className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${currentUser?.role !== 'admin' ? 'opacity-70 bg-[var(--bg-elevated)] cursor-not-allowed' : ''}`}
                 >
                   <option value="">-- เลือกตำแหน่งงาน --</option>
                   {positionsList.map((p: any) => (
@@ -1212,6 +1235,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                     <option value={profileForm.position}>{profileForm.position}</option>
                   )}
                 </select>
+                
               </div>
 
               <div>
@@ -1219,7 +1243,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                 <select
                   value={profileForm.department}
                   onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })}
-                  className="w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                  disabled={currentUser?.role !== 'admin'}
+                  className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${currentUser?.role !== 'admin' ? 'opacity-70 bg-[var(--bg-elevated)] cursor-not-allowed' : ''}`}
                 >
                   <option value="">-- เลือกฝ่าย / กลุ่มงาน --</option>
                   {departmentsList.map((d: any) => (
@@ -1229,6 +1254,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                     <option value={profileForm.department}>{profileForm.department}</option>
                   )}
                 </select>
+                
               </div>
 
               <div>
@@ -1312,7 +1338,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-light)] bg-red-500/5">
-              <h3 className="font-noto-serif-thai font-medium text-lg text-red-400 flex items-center gap-2">
+              <h3 className="font-sans font-medium text-lg text-red-400 flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-red-500" /> ยืนยันการลบหนังสือราชการ
               </h3>
               <button 

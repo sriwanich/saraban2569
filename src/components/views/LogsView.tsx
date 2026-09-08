@@ -311,7 +311,7 @@ export default function LogsView({ user }: { user?: any }) {
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] text-xs font-semibold border border-[var(--primary-color)]/20">
               <Database className="w-3.5 h-3.5" /> Audit Logs
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text-primary)] flex items-center gap-2.5 font-noto-serif-thai">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text-primary)] flex items-center gap-2.5 font-sans">
               <ShieldCheck className="w-6 h-6 sm:w-7 sm:h-7 text-[var(--primary-color)] shrink-0" />
               บันทึกประวัติการใช้งานระบบ
             </h1>

@@ -8,9 +8,11 @@ export default {
   theme: {
     extend: {
       fontFamily: {
+        sans: ['Sarabun', 'sans-serif'],
         sarabun: ['Sarabun', 'sans-serif'],
         'noto-serif-thai': ['"Noto Serif Thai"', 'serif'],
-        mono: ['"IBM Plex Mono"', 'monospace'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+        prompt: ['Prompt', 'sans-serif'],
       },
       colors: {
         brand: {

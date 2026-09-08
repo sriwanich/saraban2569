@@ -3,8 +3,8 @@ import {
   CloudRain, Thermometer, Droplets, Wind, Compass, 
   Sun, Cloud, CloudLightning, RefreshCw, MapPin, 
   AlertTriangle, ShieldCheck, CheckCircle2, ChevronRight,
-  ExternalLink, FileEdit, Info, Calendar, Sparkles, Activity,
-  Gauge, Eye, ArrowUp, ArrowDown, Clock, Waves, ChevronDown,
+  ExternalLink, Info, Calendar, Sparkles, Activity,
+  Gauge, Eye, EyeOff, ArrowUp, ArrowDown, Clock, Waves, ChevronDown, ChevronUp,
   Navigation, Zap
 } from 'lucide-react';
 import { EEC_PROVINCES, LiveWeatherData, getWmoWeatherInfo } from '../../data/eecLocations';
@@ -12,9 +12,11 @@ import { fetchLiveEecWeather } from '../../utils/eecWeatherService';
 
 interface Props {
   onDraftAlertDoc?: (weatherSummary: string, location: string) => void;
+  defaultExpanded?: boolean;
 }
 
-export default function EecWeatherWidget({ onDraftAlertDoc }: Props) {
+export default function EecWeatherWidget({ onDraftAlertDoc, defaultExpanded = false }: Props) {
+  const [isExpanded, setIsExpanded] = useState<boolean>(defaultExpanded);
   const [selectedDistrictId, setSelectedDistrictId] = useState<string>('mueang-rayong');
   const [selectedSubdistrictName, setSelectedSubdistrictName] = useState<string>('ตำบลท่าประดู่ (ศูนย์ราชการ/ตัวเมือง)');
   
@@ -74,11 +76,11 @@ export default function EecWeatherWidget({ onDraftAlertDoc }: Props) {
     loadWeather();
   }, [loadWeather]);
 
-  // Auto refresh interval (every 3 minutes)
+  // Auto refresh interval (every 30 seconds)
   useEffect(() => {
     const interval = setInterval(() => {
       loadWeather(true);
-    }, 180000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [loadWeather]);
 
@@ -100,20 +102,17 @@ export default function EecWeatherWidget({ onDraftAlertDoc }: Props) {
     }
   };
 
-  const handleCreateDisasterAlert = () => {
-    if (!weatherData) return;
-    const summary = `รายงานสภาวะอากาศและปริมาณฝน พื้นที่ ${weatherData.locationName}: อุณหภูมิ ${weatherData.temperature}°C (รู้สึกเหมือน ${weatherData.apparentTemperature}°C), ความชื้นสัมพัทธ์ ${weatherData.relativeHumidity}%, ปริมาณฝนสะสม 24 ชม. ${weatherData.precipitationSum} มม. (โอกาสเกิดฝน ${weatherData.precipitationProbability}%), สภาพอากาศ: ${weatherData.weatherDescription} [เกณฑ์เตือนภัย ปภ.: ${weatherData.rainCategoryLabel}]`;
-    if (onDraftAlertDoc) {
-      onDraftAlertDoc(summary, weatherData.locationName);
-    }
-  };
-
   return (
     <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl shadow-sm overflow-hidden transition-all duration-300">
       {/* 1. Header Bar: Official Identity & Real-time Connectivity */}
-      <div className="px-4 py-3.5 sm:px-6 sm:py-4 border-b border-[var(--border-lighter)] bg-gradient-to-r from-[var(--bg-elevated)] via-[var(--bg-surface)] to-[var(--bg-surface)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className={`px-4 py-3.5 sm:px-6 sm:py-4 bg-gradient-to-r from-[var(--bg-elevated)] via-[var(--bg-surface)] to-[var(--bg-surface)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none group hover:bg-[var(--bg-elevated)]/80 transition-colors ${
+          isExpanded ? 'border-b border-[var(--border-lighter)]' : ''
+        }`}
+      >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/20 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/20 shadow-xs group-hover:scale-105 transition-transform">
             <CloudRain className="w-5 h-5" />
           </div>
           <div>
@@ -123,44 +122,67 @@ export default function EecWeatherWidget({ onDraftAlertDoc }: Props) {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                 </span>
-                <span>TMD Open Data Live API</span>
+                <span>ข้อมูลสดเรียลไทม์</span>
               </span>
               <span className="text-[10px] sm:text-[11px] text-[var(--text-muted)] font-mono">
                 อัปเดต: {weatherData?.updatedAt || lastRefreshed.toLocaleTimeString('th-TH')}
               </span>
+              {!isExpanded && weatherData && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-bold border border-blue-500/20 animate-fade-in">
+                  <span>{weatherData.temperature}°C</span>
+                  <span className="opacity-40">•</span>
+                  <span>{weatherData.rainRate > 0 ? `ฝน ${weatherData.rainRate} มม./ชม.` : (getWmoWeatherInfo(weatherData.weatherCode)?.description || 'ปกติ')}</span>
+                </span>
+              )}
             </div>
-            <h2 className="text-base sm:text-lg lg:text-xl font-noto-serif-thai font-extrabold text-[var(--text-primary)]">
-              ศูนย์ข้อมูลสภาพอากาศและปริมาณฝน จังหวัดระยอง & EEC
+            <h2 className="text-base sm:text-lg lg:text-xl font-sans font-extrabold text-[var(--text-primary)]">
+              ศูนย์ข้อมูลสภาพอากาศและปริมาณฝน จังหวัดระยอง
             </h2>
           </div>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 w-full sm:w-auto justify-end">
+        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => loadWeather()}
             disabled={isLoading}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-xs min-h-[38px]"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-xs min-h-[36px]"
             title="รีเฟรชข้อมูลสภาพอากาศสด"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-blue-500 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>รีเฟรช</span>
+            <span className="hidden sm:inline">รีเฟรชข้อมูล</span>
           </button>
 
-          {onDraftAlertDoc && (
-            <button
-              onClick={handleCreateDisasterAlert}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer min-h-[38px]"
-              title="นำข้อมูลสภาพอากาศและปริมาณฝนไปเปิดร่างหนังสือสั่งการ/เตือนภัย ปภ."
-            >
-              <FileEdit className="w-3.5 h-3.5" />
-              <span>ร่างหนังสือ ปภ.</span>
-            </button>
-          )}
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className={`flex items-center justify-center gap-1.5 px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs min-h-[36px] ${
+              isExpanded 
+                ? 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)]' 
+                : 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 shadow-blue-500/20'
+            }`}
+            title={isExpanded ? "ซ่อนข้อมูลสภาพอากาศ" : "แสดงข้อมูลสภาพอากาศ"}
+          >
+            {isExpanded ? (
+              <>
+                <EyeOff className="w-3.5 h-3.5" />
+                <span>ซ่อนข้อมูล</span>
+                <ChevronUp className="w-4 h-4 ml-0.5" />
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5" />
+                <span>แสดงข้อมูล</span>
+                <ChevronDown className="w-4 h-4 ml-0.5" />
+              </>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* 2. Rayong 8 Districts Quick-Selector Pills & Hotspots Ribbon */}
+      {/* Expandable Content Body */}
+      {isExpanded && (
+        <>
+          {/* 2. Rayong 8 Districts Quick-Selector Pills & Hotspots Ribbon */}
       <div className="px-4 py-3 sm:px-6 bg-[var(--bg-elevated)]/60 border-b border-[var(--border-lighter)] space-y-2.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
           <div className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5">
@@ -497,6 +519,8 @@ export default function EecWeatherWidget({ onDraftAlertDoc }: Props) {
           </>
         ) : null}
       </div>
+        </>
+      )}
     </div>
   );
 }

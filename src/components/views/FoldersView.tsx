@@ -225,7 +225,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-noto-serif-thai font-semibold text-[var(--text-primary)] flex items-center gap-2">
+          <h2 className="text-2xl font-sans font-semibold text-[var(--text-primary)] flex items-center gap-2">
             จัดการแฟ้มเอกสารดิจิทัล
           </h2>
           <p className="text-[var(--text-secondary)] mt-1 text-sm">
@@ -444,7 +444,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
           {/* Folder Grid Cards */}
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-base sm:text-lg font-semibold text-[var(--text-primary)] font-noto-serif-thai">
+              <h3 className="text-base sm:text-lg font-semibold text-[var(--text-primary)] font-sans">
                 รายการแฟ้มเอกสารทั้งหมด ({folders.length})
               </h3>
               <span className="text-xs text-[var(--text-muted)] font-mono">EDMS DIRECTORY</span>
@@ -535,7 +535,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-light)] bg-[var(--bg-surface)]">
-              <h3 className="font-noto-serif-thai font-medium text-lg text-[var(--text-primary)] flex items-center gap-2">
+              <h3 className="font-sans font-medium text-lg text-[var(--text-primary)] flex items-center gap-2">
                 <Pencil className="w-5 h-5 text-amber-500" /> แก้ไขแฟ้มเอกสารดิจิทัล
               </h3>
               <button 
@@ -599,7 +599,7 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-light)] bg-red-500/5">
-              <h3 className="font-noto-serif-thai font-medium text-lg text-red-400 flex items-center gap-2">
+              <h3 className="font-sans font-medium text-lg text-red-400 flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-red-500" /> ยืนยันการลบแฟ้มเอกสาร
               </h3>
               <button 

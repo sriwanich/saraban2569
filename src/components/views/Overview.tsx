@@ -141,19 +141,75 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
 
   return (
     <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in">
+      {/* 1. Quick Registration Shortcuts (Top Priority Action Bar) */}
+      {(showInbox || showOutbox || showAdmin) && (
+        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="text-[11px] sm:text-xs uppercase font-bold tracking-wider text-[var(--primary-color)] flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20">
+                <Zap className="w-3.5 h-3.5 animate-pulse" />
+              </div>
+              <span className="font-sans text-sm font-extrabold text-[var(--text-primary)]">ทางลัดการลงทะเบียนด่วน (Quick Registration Shortcuts)</span>
+            </div>
+            <span className="text-[11px] text-[var(--text-muted)] hidden sm:inline">
+              เลือกเพื่อเปิดแบบฟอร์มลงทะเบียนเอกสารทันที
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {showInbox && (
+              <button
+                type="button"
+                onClick={() => onCreateDoc('inbox')}
+                className="flex items-center gap-3.5 p-3.5 rounded-xl bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/15 hover:border-blue-500/40 transition-all text-xs font-semibold text-left group shadow-xs active:scale-[0.98] cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
+                  <Inbox className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">ลงทะเบียนหนังสือรับ</div>
+                  <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">บันทึกและจำแนกเรื่องเข้าหน่วยงาน</div>
+                </div>
+              </button>
+            )}
+
+            {showOutbox && (
+              <button
+                type="button"
+                onClick={() => onCreateDoc('outbox')}
+                className="flex items-center gap-3.5 p-3.5 rounded-xl bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/15 hover:border-emerald-500/40 transition-all text-xs font-semibold text-left group shadow-xs active:scale-[0.98] cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
+                  <Send className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">ออกเลขหนังสือส่ง</div>
+                  <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">จัดส่งหนังสือออกภายนอก / ลงทะเบียนเวียน</div>
+                </div>
+              </button>
+            )}
+
+            {showAdmin && (
+              <button
+                type="button"
+                onClick={() => onCreateDoc('admin')}
+                className="flex items-center gap-3.5 p-3.5 rounded-xl bg-violet-500/5 hover:bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/15 hover:border-violet-500/40 transition-all text-xs font-semibold text-left group shadow-xs active:scale-[0.98] cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-xl bg-violet-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
+                  <FileCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">สร้างคำสั่ง / ประกาศ</div>
+                  <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">ออกเลขรับรอง จังหวัด ประกาศ และเอกสารธุรการ</div>
+                </div>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Real-time Environmental & Disaster Climate Data Sources (TMD / EEC API) */}
-      <EecWeatherWidget 
-        onDraftAlertDoc={(weatherSummary, location) => {
-          onCreateDoc('outbox', {
-            title: `แจ้งเตือนสภาวะอากาศและเฝ้าระวังปริมาณฝนสะสม พื้นที่ ${location}`,
-            priority: 'ด่วนที่สุด',
-            to: 'หัวหน้าส่วนราชการ / นายอำเภอ / ผู้บริหารองค์กรปกครองส่วนท้องถิ่นในพื้นที่',
-            department: 'ฝ่ายป้องกันและบรรเทาสาธารณภัย',
-            content: `${weatherSummary}\n\nจึงขอให้หน่วยงานที่เกี่ยวข้องเตรียมความพร้อมเจ้าหน้าที่ เครื่องมือ เครื่องจักรกลสาธารณภัย และเฝ้าระวังจุดเสี่ยงน้ำท่วมขังตลอด 24 ชั่วโมง`,
-            note: 'ออกหนังสือโดยอ้างอิงข้อมูลเปิดสถานีตรวจวัดสภาพอากาศ กรมอุตุนิยมวิทยา - จังหวัดระยอง'
-          });
-        }}
-      />
+      <EecWeatherWidget />
 
       {/* Executive Header Banner */}
       <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-6 lg:p-8 shadow-sm relative overflow-hidden">
@@ -166,7 +222,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               <Activity className="w-4 h-4 text-[var(--primary-color)] animate-pulse" />
               <span className="tracking-widest">Executive Analytics Dashboard</span>
             </div>
-            <h1 className="text-2xl lg:text-3xl font-noto-serif-thai font-extrabold text-[var(--text-primary)] tracking-tight leading-none">
+            <h1 className="text-2xl lg:text-3xl font-sans font-extrabold text-[var(--text-primary)] tracking-tight leading-none">
               ภาพรวมและสถิติงานสารบรรณ
             </h1>
             <p className="text-xs sm:text-sm text-[var(--text-secondary)] mt-2 max-w-2xl leading-relaxed">
@@ -223,65 +279,6 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
             )}
           </div>
         </div>
-
-        {/* Quick Action Shortcuts for Mobile & PC */}
-        {(showInbox || showOutbox || showAdmin) && (
-          <div className="mt-6 pt-5 border-t border-[var(--border-lighter)]">
-            <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--text-muted)] mb-3 flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-              <span>ทางลัดการลงทะเบียนด่วน (Quick Registration Shortcuts)</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {showInbox && (
-                <button
-                  type="button"
-                  onClick={() => onCreateDoc('inbox')}
-                  className="flex items-center gap-3.5 p-3.5 rounded-xl bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/10 hover:border-blue-500/30 transition-all text-xs font-semibold text-left group shadow-sm active:scale-[0.98] cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
-                    <Inbox className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">ลงทะเบียนหนังสือรับ</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">บันทึกและจำแนกเรื่องเข้าหน่วยงาน</div>
-                  </div>
-                </button>
-              )}
-
-              {showOutbox && (
-                <button
-                  type="button"
-                  onClick={() => onCreateDoc('outbox')}
-                  className="flex items-center gap-3.5 p-3.5 rounded-xl bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/10 hover:border-emerald-500/30 transition-all text-xs font-semibold text-left group shadow-sm active:scale-[0.98] cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
-                    <Send className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">ออกเลขหนังสือส่ง</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">จัดส่งหนังสือออกภายนอก / ลงทะเบียนเวียน</div>
-                  </div>
-                </button>
-              )}
-
-              {showAdmin && (
-                <button
-                  type="button"
-                  onClick={() => onCreateDoc('admin')}
-                  className="flex items-center gap-3.5 p-3.5 rounded-xl bg-violet-500/5 hover:bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/10 hover:border-violet-500/30 transition-all text-xs font-semibold text-left group shadow-sm active:scale-[0.98] cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-violet-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
-                    <FileCheck className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">สร้างคำสั่ง / ประกาศ</div>
-                    <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">ออกเลขรับรอง จังหวัด ประกาศ และเอกสารธุรการ</div>
-                  </div>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* KPI Highlight Cards (5 Metrics) */}
@@ -305,7 +302,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               <div>
                 <div className="text-3xl lg:text-4xl font-extrabold font-mono text-[var(--text-primary)] tracking-tight flex items-baseline gap-1.5">
                   {totalCount}
-                  <span className="text-xs font-sarabun font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                  <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                 </div>
                 <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center gap-1 font-semibold">
                   <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
@@ -326,7 +323,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
                 <div>
                   <div className="text-3xl lg:text-4xl font-extrabold font-mono text-blue-600 dark:text-blue-400 tracking-tight flex items-baseline gap-1.5">
                     {inboxDocs.length}
-                    <span className="text-xs font-sarabun font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                    <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                   </div>
                   <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
                     <span>สัดส่วน {totalCount > 0 ? Math.round((inboxDocs.length / totalCount) * 100) : 0}% ของทั้งหมด</span>
@@ -348,7 +345,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
                 <div>
                   <div className="text-3xl lg:text-4xl font-extrabold font-mono text-emerald-600 dark:text-emerald-400 tracking-tight flex items-baseline gap-1.5">
                     {outboxDocs.length}
-                    <span className="text-xs font-sarabun font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                    <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                   </div>
                   <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
                     <span>สัดส่วน {totalCount > 0 ? Math.round((outboxDocs.length / totalCount) * 100) : 0}% ของทั้งหมด</span>
@@ -370,7 +367,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
                 <div>
                   <div className="text-3xl lg:text-4xl font-extrabold font-mono text-violet-600 dark:text-violet-400 tracking-tight flex items-baseline gap-1.5">
                     {adminDocs.length}
-                    <span className="text-xs font-sarabun font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                    <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                   </div>
                   <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
                     <span>สัดส่วน {totalCount > 0 ? Math.round((adminDocs.length / totalCount) * 100) : 0}% ของทั้งหมด</span>
@@ -394,7 +391,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               <div>
                 <div className="text-3xl lg:text-4xl font-extrabold font-mono text-rose-600 dark:text-rose-400 tracking-tight flex items-baseline gap-1.5">
                   {urgentCount}
-                  <span className="text-xs font-sarabun font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                  <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                 </div>
                 <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
                   <span className="text-rose-600 dark:text-rose-400 font-bold">ด่วนพิเศษ {urgentCount} ฉบับ</span>
@@ -415,7 +412,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
             <div className="flex items-center justify-between mb-5 pb-3 border-b border-[var(--border-lighter)]">
               <div className="flex items-center gap-2">
                 <PieChart className="w-4 h-4 text-[var(--primary-color)]" />
-                <h3 className="text-base font-noto-serif-thai font-semibold text-[var(--text-primary)]">สัดส่วนประเภทหนังสือ</h3>
+                <h3 className="text-base font-sans font-semibold text-[var(--text-primary)]">สัดส่วนประเภทหนังสือ</h3>
               </div>
               <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--text-muted)]">สถิติมวลรวม</span>
             </div>
@@ -508,7 +505,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
             <div className="flex items-center justify-between mb-5 pb-3 border-b border-[var(--border-lighter)]">
               <div className="flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-amber-500" />
-                <h3 className="text-base font-noto-serif-thai font-semibold text-[var(--text-primary)]">ระดับความเร่งด่วน</h3>
+                <h3 className="text-base font-sans font-semibold text-[var(--text-primary)]">ระดับความเร่งด่วน</h3>
               </div>
               <span className="text-[10px] font-bold text-red-500 bg-red-500/10 px-2.5 py-1 rounded-xl border border-red-500/10">
                 ด่วนรวม {priorityStats.urgent + priorityStats.veryUrgent + priorityStats.topUrgent} ฉบับ
@@ -593,7 +590,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
             <div className="flex items-center justify-between mb-5 pb-3 border-b border-[var(--border-lighter)]">
               <div className="flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-emerald-500" />
-                <h3 className="text-base font-noto-serif-thai font-semibold text-[var(--text-primary)]">ปริมาณงานแยกตามกลุ่มงาน</h3>
+                <h3 className="text-base font-sans font-semibold text-[var(--text-primary)]">ปริมาณงานแยกตามกลุ่มงาน</h3>
               </div>
               <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/10 font-mono">
                 {deptStats.length} กลุ่มปฏิบัติ
@@ -637,7 +634,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 pb-3 border-b border-[var(--border-lighter)]">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-indigo-500 animate-pulse" />
-            <h3 className="text-base font-noto-serif-thai font-bold text-[var(--text-primary)]">
+            <h3 className="text-base font-sans font-bold text-[var(--text-primary)]">
               สถานะวงจรการดำเนินงานสารบรรณ (Document Processing Pipeline)
             </h3>
           </div>

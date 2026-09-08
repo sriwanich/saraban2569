@@ -303,7 +303,8 @@ export default function CustomNumberingSettings() {
         setEditingRule(null);
         fetchRules();
       } else {
-        showNotification('error', 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+        const errData = await res.json().catch(() => ({}));
+        showNotification('error', errData.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
       }
     } catch (err) {
       showNotification('error', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์');
@@ -1266,6 +1267,7 @@ export default function CustomNumberingSettings() {
                     onChange={(e) => setRuleFormData({ ...ruleFormData, docType: e.target.value })}
                     className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
                   >
+                    <option value="หนังสือรับ">หนังสือรับ</option>
                     <option value="หนังสือภายนอก">หนังสือภายนอก</option>
                     <option value="หนังสือภายใน">หนังสือภายใน</option>
                     <option value="คำสั่ง">คำสั่ง</option>
@@ -1391,6 +1393,7 @@ export default function CustomNumberingSettings() {
                     onChange={(e) => setReserveFormData({ ...reserveFormData, docType: e.target.value })}
                     className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
                   >
+                    <option value="หนังสือรับ">หนังสือรับ</option>
                     <option value="หนังสือภายนอก">หนังสือภายนอก</option>
                     <option value="คำสั่ง">คำสั่ง</option>
                     <option value="ประกาศ">ประกาศ</option>
@@ -1602,6 +1605,7 @@ export default function CustomNumberingSettings() {
                     }}
                     className="w-full p-2.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] outline-none"
                   >
+                    <option value="หนังสือรับ">หนังสือรับ</option>
                     <option value="หนังสือภายนอก">หนังสือภายนอก</option>
                     <option value="หนังสือภายใน">หนังสือภายใน</option>
                     <option value="คำสั่ง">คำสั่ง</option>

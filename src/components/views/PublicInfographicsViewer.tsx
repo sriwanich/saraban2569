@@ -619,7 +619,7 @@ export const PublicInfographicsViewer: React.FC = () => {
                 EDMS Infographics
               </span>
               <div>
-                <h1 className="font-bold text-sm sm:text-base font-noto-serif-thai text-white line-clamp-1">
+                <h1 className="font-bold text-sm sm:text-base font-sans text-white line-clamp-1">
                   {data?.name || 'Infographic Presentation'}
                 </h1>
                 {data && (
@@ -683,7 +683,7 @@ export const PublicInfographicsViewer: React.FC = () => {
         {loading && (
           <div className="flex flex-col items-center gap-3 text-slate-400 animate-pulse">
             <RefreshCw className="w-8 h-8 animate-spin text-blue-500" />
-            <span className="text-sm font-medium font-noto-serif-thai">กำลังโหลด Infographic...</span>
+            <span className="text-sm font-medium font-sans">กำลังโหลด Infographic...</span>
           </div>
         )}
 
@@ -694,7 +694,7 @@ export const PublicInfographicsViewer: React.FC = () => {
               <AlertCircle className="w-7 h-7" />
             </div>
             <div>
-              <h3 className="font-bold text-base sm:text-lg text-rose-400 font-noto-serif-thai">ไม่สามารถแสดงผลได้</h3>
+              <h3 className="font-bold text-base sm:text-lg text-rose-400 font-sans">ไม่สามารถแสดงผลได้</h3>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed">{error}</p>
             </div>
             
@@ -729,7 +729,7 @@ export const PublicInfographicsViewer: React.FC = () => {
             </div>
 
             <div>
-              <h3 className="font-bold text-lg text-white font-noto-serif-thai">
+              <h3 className="font-bold text-lg text-white font-sans">
                 เอกสารถูกจำกัดสิทธิ์การเข้าชม
               </h3>
               <p className="text-xs text-slate-400 mt-1">
@@ -870,7 +870,7 @@ export const PublicInfographicsViewer: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Share2 className="w-5 h-5 text-blue-400" />
-                <h4 className="font-bold text-base font-noto-serif-thai text-white">แชร์สื่อ Infographic</h4>
+                <h4 className="font-bold text-base font-sans text-white">แชร์สื่อ Infographic</h4>
               </div>
               <button
                 type="button"
@@ -981,7 +981,7 @@ export const PublicInfographicsViewer: React.FC = () => {
                   <Download className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-base font-noto-serif-thai text-white">ดาวน์โหลดรูปภาพ Infographic</h4>
+                  <h4 className="font-bold text-base font-sans text-white">ดาวน์โหลดรูปภาพ Infographic</h4>
                   <p className="text-xs text-slate-400">เลือกระดับความละเอียดที่ต้องการ (รองรับสูงสุด 4K Ultra HD)</p>
                 </div>
               </div>

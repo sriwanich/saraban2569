@@ -91,7 +91,7 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">
+            <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
               ระบบงานธุรการ (คำสั่ง / ประกาศ / หนังสือรับรอง)
             </h2>
             <span className="px-3 py-0.5 text-xs font-semibold rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20 font-mono">

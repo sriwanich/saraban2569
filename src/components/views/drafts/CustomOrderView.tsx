@@ -186,7 +186,7 @@ ${sealHTML ? `<div style="text-align:center;margin-bottom:8pt;">${sealHTML}</div
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="border-b border-[var(--border-light)] pb-4">
-        <h2 className="text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">
+        <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
           สร้างคำสั่ง / ประกาศ / ระเบียบ เองแบบอิสระ
         </h2>
         <p className="text-sm text-[var(--text-secondary)] mt-1">

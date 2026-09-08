@@ -170,7 +170,7 @@ export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryMod
               <ImageIcon className="w-6 h-6 text-blue-400" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold font-noto-serif-thai text-white flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-bold font-sans text-white flex items-center gap-2">
                 คลังรูปภาพที่เคยอัปโหลด (Uploaded Images Library)
                 <span className="text-xs font-mono font-normal bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2 py-0.5 rounded-full">
                   {images.length} รูป

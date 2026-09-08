@@ -283,7 +283,7 @@ app.get('/api/events', (req, res) => {
 });
 
 app.use((req, res, next) => {
-  console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`);
+  // console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`); // Silenced to prevent user confusion
   next();
 });
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
@@ -1977,11 +1977,23 @@ async function handleLocalDbQuery(sql: string, params: any[] = []): Promise<[any
 
   // 5. MAX(receiveNumber)
   if (/SELECT MAX\(receiveNumber\)/i.test(cleanSql)) {
-    const dept = params[0];
-    const yr = params[1];
-    const items = (localDb.department_receives || []).filter(item => item.department === dept && String(item.year) === String(yr));
+    const match = cleanSql.match(/FROM\s+[`']?([a-zA-Z0-9_]+)[`']?/i);
+    const tbl = match ? match[1] : 'department_receives';
+    let items = (localDb[tbl] || []);
+    if (cleanSql.includes('isCentral = 0') && cleanSql.includes('department = ?')) {
+      const dept = params[0];
+      const yr = params[1];
+      items = items.filter(item => (item.isCentral === 0 || Number(item.isCentral) === 0) && item.department === dept && (!yr || String(item.year) === String(yr)));
+    } else if (cleanSql.includes('isCentral = 1') || cleanSql.includes('isCentral IS NULL')) {
+      const yr = params[0];
+      items = items.filter(item => (item.isCentral === 1 || Number(item.isCentral) === 1 || item.isCentral === undefined || item.isCentral === null) && (!yr || String(item.year) === String(yr)));
+    } else if (params.length >= 2) {
+      const dept = params[0];
+      const yr = params[1];
+      items = items.filter(item => item.department === dept && (!yr || String(item.year) === String(yr)));
+    }
     const maxVal = items.reduce((max, item) => Math.max(max, Number(item.receiveNumber) || 0), 0);
-    return [[{ maxNum: maxVal }], []];
+    return [[{ maxNum: maxVal, max: maxVal }], []];
   }
 
   // 6. SELECT FROM
@@ -3240,6 +3252,128 @@ app.put("/api/settings/features", async (req, res) => {
 });
 
 // ==================== CUSTOM NUMBERING & FILE CODES APIS ====================
+async function getRealMaxSequenceForRule(rule: any): Promise<number> {
+  const yr = String(rule.year || await getSystemCurrentYear());
+  let maxSeq = 0;
+  
+  let inboxRows: any[] = [];
+  let outboxRows: any[] = [];
+  let circRows: any[] = [];
+  let internalRows: any[] = [];
+  let adminRows: any[] = [];
+  let reservedRows: any[] = [];
+
+  try {
+    if (isMysqlOnline) {
+      [inboxRows] = await pool.query('SELECT receiveNumber, docNumber, isCentral, department, year FROM inbox_documents').catch(() => [[]]);
+      [outboxRows] = await pool.query('SELECT receiveNumber, docNumber, isCentral, department, year FROM outbox_documents').catch(() => [[]]);
+      [circRows] = await pool.query('SELECT receiveNumber, docNumber, isCentral, department, year FROM circular_documents').catch(() => [[]]);
+      [internalRows] = await pool.query('SELECT receiveNumber, docNumber, department, year FROM internal_documents').catch(() => [[]]);
+      [adminRows] = await pool.query('SELECT docNumber, category, department, year FROM admin_documents').catch(() => [[]]);
+      [reservedRows] = await pool.query('SELECT ruleId, docType, department, seqNumber, year FROM reserved_numbers').catch(() => [[]]);
+    } else {
+      inboxRows = localDb.inbox_documents || [];
+      outboxRows = localDb.outbox_documents || [];
+      circRows = localDb.circular_documents || [];
+      internalRows = localDb.internal_documents || [];
+      adminRows = localDb.admin_documents || [];
+      reservedRows = localDb.reserved_numbers || [];
+    }
+  } catch (e) {
+    inboxRows = localDb.inbox_documents || [];
+    outboxRows = localDb.outbox_documents || [];
+    circRows = localDb.circular_documents || [];
+    internalRows = localDb.internal_documents || [];
+    adminRows = localDb.admin_documents || [];
+    reservedRows = localDb.reserved_numbers || [];
+  }
+
+  const docType = rule.docType;
+  const dept = rule.department || 'ทุกฝ่ายงาน';
+  const isGlobal = dept === 'ทุกฝ่ายงาน' || rule.runningScope === 'global';
+
+  if (docType === 'หนังสือรับ') {
+    const list = inboxRows.filter((d: any) => String(d.year || '') === yr);
+    list.forEach((d: any) => {
+      let matches = false;
+      const isDocCentral = d.isCentral === 1 || Number(d.isCentral) === 1 || d.isCentral === undefined || d.isCentral === null;
+      if (isGlobal) {
+        matches = isDocCentral;
+      } else {
+        matches = (!isDocCentral) && d.department === dept;
+      }
+      if (matches) {
+        const rec = parseInt(d.receiveNumber || '0', 10);
+        if (!isNaN(rec) && rec < 1000000 && rec > maxSeq) maxSeq = rec;
+        if (d.docNumber) {
+          const m = d.docNumber.match(/\/(\d+)$/) || d.docNumber.match(/\/ว\s*(\d+)$/);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (!isNaN(num) && num < 1000000 && num > maxSeq) maxSeq = num;
+          }
+        }
+      }
+    });
+  } else if (docType === 'หนังสือภายนอก' || docType === 'หนังสือส่ง') {
+    const list = [...outboxRows, ...circRows].filter((d: any) => String(d.year || '') === yr);
+    list.forEach((d: any) => {
+      let matches = false;
+      const isDocCentral = d.isCentral === 1 || Number(d.isCentral) === 1 || d.isCentral === undefined || d.isCentral === null;
+      if (isGlobal) {
+        matches = isDocCentral;
+      } else {
+        matches = (!isDocCentral) && d.department === dept;
+      }
+      if (matches) {
+        const rec = parseInt(d.receiveNumber || '0', 10);
+        if (!isNaN(rec) && rec < 1000000 && rec > maxSeq) maxSeq = rec;
+        if (d.docNumber) {
+          const m = d.docNumber.match(/\/(\d+)$/) || d.docNumber.match(/\/ว\s*(\d+)$/);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (!isNaN(num) && num < 1000000 && num > maxSeq) maxSeq = num;
+          }
+        }
+      }
+    });
+  } else if (docType === 'หนังสือภายใน') {
+    const list = internalRows.filter((d: any) => String(d.year || '') === yr);
+    list.forEach((d: any) => {
+      const rec = parseInt(d.receiveNumber || '0', 10);
+      if (!isNaN(rec) && rec < 1000000 && rec > maxSeq) maxSeq = rec;
+      if (d.docNumber) {
+        const m = d.docNumber.match(/\/(\d+)$/) || d.docNumber.match(/\/ว\s*(\d+)$/);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          if (!isNaN(num) && num < 1000000 && num > maxSeq) maxSeq = num;
+        }
+      }
+    });
+  } else if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(docType)) {
+    const catMap: any = { 'คำสั่ง': 'order', 'ประกาศ': 'announcement', 'หนังสือรับรอง': 'certificate' };
+    const targetCat = catMap[docType];
+    const list = adminRows.filter((d: any) => (d.category === targetCat || (d.docNumber && d.docNumber.includes(docType))) && String(d.year || '') === yr);
+    list.forEach((d: any) => {
+      const m = (d.docNumber || '').match(/(\d+)\s*\/\s*(\d+)/);
+      if (m) {
+        const num = parseInt(m[1], 10);
+        if (!isNaN(num) && num > maxSeq) maxSeq = num;
+      }
+    });
+  }
+
+  reservedRows.forEach((resv: any) => {
+    if (String(resv.year || '') === yr) {
+      if (resv.ruleId === rule.id || (resv.docType === docType && (isGlobal || resv.department === dept))) {
+        const s = parseInt(resv.seqNumber || '0', 10);
+        if (!isNaN(s) && s > maxSeq) maxSeq = s;
+      }
+    }
+  });
+
+  return maxSeq;
+}
+
 app.get('/api/numbering-rules', async (req, res) => {
   try {
     await pool.query(`
@@ -3259,14 +3393,30 @@ app.get('/api/numbering-rules', async (req, res) => {
         isActive TINYINT(1) DEFAULT 1,
         description TEXT
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
+    `).catch(() => {});
 
-    const [rows]: any = await pool.query('SELECT * FROM numbering_rules');
-    // Ensure boolean types
-    const formattedRows = rows.map((r: any) => ({
-      ...r,
-      isActive: Boolean(r.isActive)
-    }));
+    let rows: any[] = [];
+    try {
+      const [dbRows]: any = await pool.query('SELECT * FROM numbering_rules');
+      rows = dbRows || [];
+    } catch (dbErr) {
+      if (!localDb.numbering_rules) {
+        localDb.numbering_rules = JSON.parse(JSON.stringify(initialSeedData.numbering_rules || []));
+        saveLocalDb();
+      }
+      rows = localDb.numbering_rules || [];
+    }
+
+    const formattedRows = [];
+    for (const r of rows) {
+      const realMax = await getRealMaxSequenceForRule(r);
+      const effectiveSeq = realMax;
+      formattedRows.push({
+        ...r,
+        currentSeq: effectiveSeq,
+        isActive: Boolean(r.isActive)
+      });
+    }
     return res.json(formattedRows);
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch numbering rules' });
@@ -3292,7 +3442,7 @@ app.post('/api/numbering-rules', async (req, res) => {
         isActive TINYINT(1) DEFAULT 1,
         description TEXT
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
+    `).catch(() => {});
 
     const currentSystemYear = await getSystemCurrentYear();
     const newRule: any = {
@@ -3310,11 +3460,30 @@ app.post('/api/numbering-rules', async (req, res) => {
       isActive: req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : 1,
       description: req.body.description || ''
     };
-    const [result]: any = await pool.query(
-      'INSERT INTO numbering_rules (ruleName, department, divisionCode, docType, prefixPattern, suffixPattern, numberFormat, runningScope, currentSeq, year, resetFrequency, isActive, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [newRule.ruleName, newRule.department, newRule.divisionCode, newRule.docType, newRule.prefixPattern, newRule.suffixPattern, newRule.numberFormat, newRule.runningScope, newRule.currentSeq, newRule.year, newRule.resetFrequency, newRule.isActive, newRule.description]
-    );
-    newRule.id = result.insertId;
+
+    const realMax = await getRealMaxSequenceForRule(newRule);
+    if (newRule.currentSeq < realMax) {
+      return res.status(400).json({
+        error: `ไม่สามารถกำหนดลำดับซ้ำหรือต่ำกว่าเลขที่ใช้งานไปแล้ว (ลำดับสูงสุดที่มีการใช้งานในระบบคือ ${realMax})`
+      });
+    }
+
+    let insertId = 1;
+    try {
+      const [result]: any = await pool.query(
+        'INSERT INTO numbering_rules (ruleName, department, divisionCode, docType, prefixPattern, suffixPattern, numberFormat, runningScope, currentSeq, year, resetFrequency, isActive, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [newRule.ruleName, newRule.department, newRule.divisionCode, newRule.docType, newRule.prefixPattern, newRule.suffixPattern, newRule.numberFormat, newRule.runningScope, newRule.currentSeq, newRule.year, newRule.resetFrequency, newRule.isActive, newRule.description]
+      );
+      insertId = result.insertId;
+    } catch (e) {
+      if (!localDb.numbering_rules) localDb.numbering_rules = [];
+      insertId = localDb.numbering_rules.length > 0 ? Math.max(...localDb.numbering_rules.map((r: any) => Number(r.id) || 0)) + 1 : 1;
+      newRule.id = insertId;
+      localDb.numbering_rules.push(newRule);
+      saveLocalDb();
+    }
+
+    newRule.id = insertId;
     newRule.isActive = Boolean(newRule.isActive);
     await addSystemLog("CREATE_NUMBERING_RULE", `เพิ่มกฎออกเลขหนังสือ: ${newRule.ruleName}`, req.body.createdBy || "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true, data: newRule });
@@ -3332,6 +3501,26 @@ app.put('/api/numbering-rules/:id', async (req, res) => {
       updates.isActive = updates.isActive ? 1 : 0;
     }
     
+    let existingRule: any = null;
+    try {
+      const [rows]: any = await pool.query('SELECT * FROM numbering_rules WHERE id = ?', [id]);
+      if (rows && rows.length > 0) existingRule = rows[0];
+    } catch (e) {}
+    if (!existingRule && localDb.numbering_rules) {
+      existingRule = localDb.numbering_rules.find((r: any) => r.id === id);
+    }
+
+    if (existingRule && updates.currentSeq !== undefined) {
+      const testRule = { ...existingRule, ...updates };
+      const realMax = await getRealMaxSequenceForRule(testRule);
+      const requestedSeq = Number(updates.currentSeq);
+      if (requestedSeq < realMax) {
+        return res.status(400).json({
+          error: `ไม่สามารถกำหนดลำดับซ้ำหรือต่ำกว่าเลขที่ใช้งานไปแล้ว (ลำดับสูงสุดที่มีการใช้งานในระบบคือ ${realMax})`
+        });
+      }
+    }
+
     const keys = Object.keys(updates);
     if (keys.length === 0) return res.json({ success: true });
     
@@ -3339,13 +3528,32 @@ app.put('/api/numbering-rules/:id', async (req, res) => {
     const values = keys.map(k => updates[k]);
     values.push(id);
     
-    await pool.query(`UPDATE numbering_rules SET ${setClause} WHERE id = ?`, values);
+    try {
+      await pool.query(`UPDATE numbering_rules SET ${setClause} WHERE id = ?`, values);
+    } catch (e) {
+      if (localDb.numbering_rules) {
+        const idx = localDb.numbering_rules.findIndex((r: any) => r.id === id);
+        if (idx !== -1) {
+          localDb.numbering_rules[idx] = { ...localDb.numbering_rules[idx], ...updates };
+          saveLocalDb();
+        }
+      }
+    }
+
     await addSystemLog("UPDATE_NUMBERING_RULE", `อัปเดตกฎออกเลขหนังสือ ID: ${id}`, req.body.updatedBy || "ผู้ดูแลระบบ", getClientIp(req));
     
-    const [rows]: any = await pool.query('SELECT * FROM numbering_rules WHERE id = ?', [id]);
-    if (rows.length > 0) {
-      rows[0].isActive = Boolean(rows[0].isActive);
-      return res.json({ success: true, data: rows[0] });
+    let updatedRow: any = null;
+    try {
+      const [rows]: any = await pool.query('SELECT * FROM numbering_rules WHERE id = ?', [id]);
+      if (rows && rows.length > 0) updatedRow = rows[0];
+    } catch (e) {}
+    if (!updatedRow && localDb.numbering_rules) {
+      updatedRow = localDb.numbering_rules.find((r: any) => r.id === id);
+    }
+
+    if (updatedRow) {
+      updatedRow.isActive = Boolean(updatedRow.isActive);
+      return res.json({ success: true, data: updatedRow });
     }
     return res.status(404).json({ error: 'Rule not found' });
   } catch (err: any) {
@@ -4034,47 +4242,73 @@ app.post('/api/reserved-numbers/use', async (req, res) => {
 
 app.post('/api/numbering/generate-next', async (req, res) => {
   try {
-    const { department, docType, isCircular, category, year } = req.body;
-    const yr = year || await getSystemCurrentYear();
+    const { department, docType, isCircular, category, year, isCentral } = req.body;
+    const yr = String(year || await getSystemCurrentYear());
+    const isCentralNum = isCentral !== undefined ? (Number(isCentral) === 1 || isCentral === true ? 1 : 0) : 1;
+    const isCentralBool = isCentralNum === 1;
+    const targetDept = (department || '').trim();
+
     let actualType = docType || 'หนังสือภายนอก';
     if (docType === 'admin') {
       if (category === 'order') actualType = 'คำสั่ง';
       else if (category === 'announcement') actualType = 'ประกาศ';
       else if (category === 'certificate') actualType = 'หนังสือรับรอง';
+    } else if (docType === 'inbox') {
+      actualType = 'หนังสือรับ';
+    } else if (docType === 'outbox') {
+      actualType = 'หนังสือภายนอก';
+    } else if (docType === 'internal') {
+      actualType = 'หนังสือภายใน';
     }
 
-    const [rules]: any = await pool.query('SELECT * FROM numbering_rules WHERE isActive = 1');
-    
-    let rule = rules.find((r: any) => (r.docType === actualType) && (r.department === department));
-    if (!rule) rule = rules.find((r: any) => (r.docType === actualType) && (r.department === 'ทุกฝ่ายงาน'));
-    if (!rule) rule = rules.find((r: any) => r.docType === actualType);
+    const dummyRule = {
+      docType: actualType,
+      department: isCentralBool ? 'ทุกฝ่ายงาน' : targetDept,
+      runningScope: isCentralBool ? 'global' : 'department',
+      year: yr
+    };
 
-    if (!rule) {
-      rule = {
-        ruleName: 'กฎทั่วไปแบบตั้งต้น',
-        prefixPattern: actualType === 'คำสั่ง' ? 'คำสั่ง' : (actualType === 'ประกาศ' ? 'ประกาศ' : (actualType === 'หนังสือรับรอง' ? 'หนังสือรับรอง' : 'รย 0021')),
-        currentSeq: 1,
-        docType: actualType
-      };
-    }
+    const maxSeq = await getRealMaxSequenceForRule(dummyRule);
+    const nextSeq = maxSeq + 1;
 
-    const nextSeq = (rule.currentSeq || 0) + 1;
+    let usedPrefix = 'รย 0021';
     let formattedNumber = '';
 
     if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(actualType)) {
-      formattedNumber = `${rule.prefixPattern || actualType} ${nextSeq}/${yr}`;
+      usedPrefix = actualType;
+      formattedNumber = `${actualType} ${nextSeq}/${yr}`;
+    } else if (actualType === 'หนังสือรับ') {
+      usedPrefix = 'รย 0021';
+      formattedNumber = '';
     } else {
-      const circFlag = isCircular ? (rule.prefixPattern?.includes('ว') ? '' : 'ว ') : '';
-      formattedNumber = `${rule.prefixPattern || 'รย 0021'}/${circFlag}${nextSeq}`;
+      if (isCentralBool) {
+        usedPrefix = 'รย 0021';
+      } else {
+        if (targetDept === 'ฝ่ายยุทธศาสตร์และการจัดการ') usedPrefix = 'รย 0021.1';
+        else if (targetDept === 'ฝ่ายสงเคราะห์ผู้ประสบภัย') usedPrefix = 'รย 0021.2';
+        else if (targetDept === 'ฝ่ายป้องกันและปฏิบัติการ') usedPrefix = 'รย 0021.3';
+        else if (targetDept === 'ฝ่ายบริหารงานทั่วไป') usedPrefix = 'รย 0021';
+        else {
+          const [rules]: any = await pool.query('SELECT * FROM numbering_rules WHERE isActive = 1 AND department = ?', [targetDept]).catch(() => [[]]);
+          const foundRule = (rules || []).find((r: any) => r.prefixPattern);
+          usedPrefix = foundRule ? foundRule.prefixPattern : 'รย 0021';
+        }
+      }
+      const circFlag = isCircular ? (usedPrefix.includes('ว') ? '' : 'ว ') : '';
+      formattedNumber = `${usedPrefix}/${circFlag}${nextSeq}`;
     }
 
     return res.json({
       success: true,
-      rule,
       nextSeq,
-      formattedNumber
+      receiveNumber: String(nextSeq),
+      formattedNumber,
+      prefix: usedPrefix,
+      isCentral: isCentralNum,
+      department: targetDept
     });
   } catch (err: any) {
+    console.error('Failed to generate next number:', err);
     return res.status(500).json({ error: 'Failed to generate next number' });
   }
 });
@@ -7247,7 +7481,16 @@ app.get('/api/documents', async (req, res) => {
         const deptRecs = deptReceives.filter((r: any) => r.docId === d.id);
         const folderName = d.folderId ? (folderMap.get(Number(d.folderId)) || null) : null;
         
-        let item = { ...d, attachments, isCircular: Boolean(d.isCircular), departmentReceives: deptRecs, folderName, readStatus: userReadsMap.get(d.id) || 'sent' };
+        const isCentralVal = (d.isCentral === 0 || d.isCentral === '0' || Number(d.isCentral) === 0) ? 0 : 1;
+        let item = { 
+          ...d, 
+          isCentral: isCentralVal,
+          attachments, 
+          isCircular: Boolean(d.isCircular), 
+          departmentReceives: deptRecs, 
+          folderName, 
+          readStatus: userReadsMap.get(d.id) || 'sent' 
+        };
         if (d.type === 'outbox' && d.note && d.note.startsWith('[CATEGORY:')) {
           const match = d.note.match(/^\[CATEGORY:(.*?)\] (.*)/);
           if (match) {
@@ -7260,21 +7503,18 @@ app.get('/api/documents', async (req, res) => {
       // Filter by department if user is not central
       if (isCentral !== '1' && department && typeof department === 'string' && department.trim() !== '') {
         const userDept = department.trim();
-
         processedRows = processedRows.filter((doc: any) => {
-          if (doc.type === 'inbox') {
-            // For department users (isCentral=0), they only see inbox docs if it is explicitly forwarded to their department
-            return doc.forwardedTo && doc.forwardedTo.includes(userDept);
-          }
-
+          if (doc.type === 'admin') return true;
           const matchesDept = doc.department === userDept ||
             doc.from === userDept ||
             doc.to === userDept ||
-            (doc.forwardedTo && doc.forwardedTo.includes(userDept));
-          return matchesDept;
+            (doc.createdBy && username && doc.createdBy === username) ||
+            (doc.assignee && username && (doc.assignee === username || doc.assignee.includes(username))) ||
+            (doc.forwardedTo && doc.forwardedTo.includes(userDept)) ||
+            (doc.departmentReceives && Array.isArray(doc.departmentReceives) && doc.departmentReceives.some((r: any) => r.department === userDept));
+          return Boolean(matchesDept);
         });
       }
-
       return res.json(processedRows);
     } catch (error: any) {
       console.error('Database error:', error.message);
@@ -7380,33 +7620,35 @@ app.post('/api/documents', async (req, res) => {
   const ip = getClientIp(req);
   const attachmentsJson = JSON.stringify(doc.attachments || []);
 
+  const isCentralVal = doc.isCentral !== undefined ? Number(doc.isCentral) : 1;
+
   try {
       if (type === 'inbox') {
         await pool.query(
-          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson]
+          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson, isCentralVal]
         );
       } else if (type === 'outbox') {
         if (doc.isCircular) {
           await pool.query(
-            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson]
+            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson, isCentralVal]
           );
         } else {
           await pool.query(
-            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson, 0]
+            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.secrecy || 'ปกติ', doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson, 0, isCentralVal]
           );
         }
       } else if (type === 'internal') {
         await pool.query(
-          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson]
+          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [docId, doc.receiveNumber, doc.year, doc.docNumber, doc.date, doc.priority, doc.title, doc.from, doc.to, doc.department, doc.assignee, doc.note, doc.content, doc.registerDate, folderId, status, attachmentsJson, isCentralVal]
         );
       } else if (type === 'admin') {
         await pool.query(
-          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [docId, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [docId, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, isCentralVal]
         );
       }
       
@@ -7472,32 +7714,34 @@ app.put('/api/documents/:id', async (req, res) => {
       await pool.query('DELETE FROM internal_documents WHERE id=?', [id]);
       await pool.query('DELETE FROM admin_documents WHERE id=?', [id]);
 
+      const isCentralVal = doc.isCentral !== undefined ? Number(doc.isCentral) : 1;
+
       if (type === 'inbox') {
         await pool.query(
-          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, isCentralVal]
         );
       } else if (type === 'outbox') {
         if (doc.isCircular) {
           await pool.query(
-            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+            'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, isCentralVal]
           );
         } else {
           await pool.query(
-            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, 0]
+            'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.secrecy || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, 0, isCentralVal]
           );
         }
       } else if (type === 'internal') {
         await pool.query(
-          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, doc.receiveNumber || '', doc.year || '', doc.docNumber || '', doc.date || '', doc.priority || 'ปกติ', doc.title || '', doc.from || '', doc.to || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, isCentralVal]
         );
       } else if (type === 'admin') {
         await pool.query(
-          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [id, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson]
+          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, doc.category || 'order', doc.docNumber || '', doc.year || '', doc.date || '', doc.title || '', doc.department || '', doc.assignee || '', doc.note || '', doc.content || '', doc.registerDate || new Date().toISOString(), folderId, status, attachmentsJson, isCentralVal]
         );
       }
 
@@ -7931,30 +8175,31 @@ app.post('/api/recycle-bin/:id/restore', async (req, res) => {
     
     // Restore in MySQL
     if (isMysqlOnline && recycleItem) {
+      const isCentralVal = d.isCentral !== undefined ? Number(d.isCentral) : 1;
       if (type === 'inbox') {
         await pool.query(
-          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+          'INSERT INTO inbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []), isCentralVal]
         );
       } else if (type === 'outbox') {
         await pool.query(
-          'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []), d.isCircular ? 1 : 0]
+          'INSERT INTO outbox_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCircular, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []), d.isCircular ? 1 : 0, isCentralVal]
         );
       } else if (type === 'circular') {
         await pool.query(
-          'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+          'INSERT INTO circular_documents (id, receiveNumber, year, docNumber, date, priority, secrecy, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.secrecy, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []), isCentralVal]
         );
       } else if (type === 'internal') {
         await pool.query(
-          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+          'INSERT INTO internal_documents (id, receiveNumber, year, docNumber, date, priority, title, fromDept, toDept, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.receiveNumber, d.year, d.docNumber, d.date, d.priority, d.title, d.fromDept, d.toDept, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []), isCentralVal]
         );
       } else if (type === 'admin') {
         await pool.query(
-          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [d.id, d.category, d.docNumber, d.year, d.date, d.title, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || [])]
+          'INSERT INTO admin_documents (id, category, docNumber, year, date, title, department, assignee, note, content, registerDate, folderId, status, attachments, isCentral) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [d.id, d.category, d.docNumber, d.year, d.date, d.title, d.department, d.assignee, d.note, d.content, d.registerDate, d.folderId, d.status, typeof d.attachments === 'string' ? d.attachments : JSON.stringify(d.attachments || []), isCentralVal]
         );
       }
       

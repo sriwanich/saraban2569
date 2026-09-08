@@ -41,6 +41,14 @@ import {
 } from './InfographicsRulerGrid';
 import { PDFDocument } from 'pdf-lib';
 import { InfographicsAiAssistant } from './InfographicsAiAssistant';
+import {
+  CANVA_COLOR_THEMES,
+  CanvaColorTheme,
+  applyColorThemeToCanvas,
+  addCanvaInfographicElement,
+  loadCanvaTemplate,
+  generateFullAILegend
+} from './InfographicsCanvaKit';
 
 interface InfographicsEditorViewProps {
   user: any;
@@ -151,6 +159,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   
   // Left Sidebar active tab
   const [activeSidebarTab, setActiveSidebarTab] = useState<'text' | 'shapes' | 'elements' | 'infographic' | 'images' | 'templates' | 'canvas' | 'ai'>('elements');
+  const [templateCategory, setTemplateCategory] = useState<'all' | 'gov' | 'kpi' | 'flow' | 'eec' | 'social'>('all');
   const [elementCategory, setElementCategory] = useState<'all' | 'stickers' | 'icons' | 'stamps' | 'flowchart' | 'diagrams' | 'dividers'>('all');
   const [iconSubCategory, setIconSubCategory] = useState<'all' | 'gov' | 'tech' | 'finance' | 'comm' | 'symbols' | 'safety'>('all');
   const [iconActiveColor, setIconActiveColor] = useState<string>('#2563eb');
@@ -702,6 +711,34 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     canvas.requestRenderAll();
   };
 
+  const applyShadowPreset = (type: 'none' | 'soft' | 'hard' | 'glow' | 'float') => {
+    if (!canvas || !selectedObject) return;
+    if (type === 'none') {
+      applyShadow(false);
+    } else if (type === 'soft') {
+      applyShadow(true, 'rgba(0,0,0,0.18)', 15, 0, 5);
+    } else if (type === 'hard') {
+      applyShadow(true, 'rgba(0,0,0,0.4)', 0, 5, 5);
+    } else if (type === 'glow') {
+      applyShadow(true, '#38bdf8', 25, 0, 0);
+    } else if (type === 'float') {
+      applyShadow(true, 'rgba(0,0,0,0.3)', 30, 0, 12);
+    }
+    saveHistory();
+  };
+
+  const flipObject = (axis: 'x' | 'y') => {
+    if (!canvas || !selectedObject) return;
+    if (axis === 'x') {
+      selectedObject.set('flipX', !selectedObject.flipX);
+    } else {
+      selectedObject.set('flipY', !selectedObject.flipY);
+    }
+    selectedObject.setCoords();
+    canvas.requestRenderAll();
+    saveHistory();
+  };
+
   const saveHistory = () => {
     if (!canvas || isHistoryUpdateRef.current) return;
     const json = JSON.stringify(canvas.toJSON());
@@ -1231,52 +1268,10 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   };
 
   // Add Infographic Kit Elements
-  const addInfographicComponent = (type: 'stat-card' | 'badge-num' | 'progress-bar' | 'alert-bar') => {
-    if (!canvas) return;
-
-    if (type === 'stat-card') {
-      const cardBg = new fabric.Rect({
-        width: 220, height: 130, rx: 16, ry: 16, fill: '#ffffff', stroke: '#e2e8f0', strokeWidth: 2,
-        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.08)', blur: 15, offsetY: 4 })
-      });
-      const topBar = new fabric.Rect({ width: 220, height: 8, rx: 4, ry: 4, fill: '#10b981' });
-      const numText = new fabric.Textbox('98.5%', {
-        left: 110, top: 25, width: 200, originX: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 36, fontWeight: 'bold', fill: '#0f172a'
-      });
-      const labelText = new fabric.Textbox('อัตราความพึงพอใจลูกค้า', {
-        left: 110, top: 78, width: 200, originX: 'center', textAlign: 'center', fontFamily: 'Sarabun', fontSize: 14, fill: '#64748b'
-      });
-      const grp = new fabric.Group([cardBg, topBar, numText, labelText], { left: 100, top: 100 });
-      canvas.add(grp);
-      canvas.setActiveObject(grp);
-    } else if (type === 'badge-num') {
-      const circle = new fabric.Circle({ radius: 28, fill: '#3b82f6' });
-      const num = new fabric.Textbox('1', {
-        left: 28, top: 28, width: 40, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 28, fontWeight: 'bold', fill: '#ffffff'
-      });
-      const grp = new fabric.Group([circle, num], { left: 100, top: 100 });
-      canvas.add(grp);
-      canvas.setActiveObject(grp);
-    } else if (type === 'progress-bar') {
-      const bgBar = new fabric.Rect({ width: 300, height: 24, rx: 12, ry: 12, fill: '#e2e8f0' });
-      const fillBar = new fabric.Rect({ width: 225, height: 24, rx: 12, ry: 12, fill: '#06b6d4' });
-      const txt = new fabric.Textbox('75%', {
-        left: 285, top: 12, width: 60, originX: 'right', originY: 'center', textAlign: 'right', fontFamily: 'Prompt', fontSize: 13, fontWeight: 'bold', fill: '#ffffff'
-      });
-      const grp = new fabric.Group([bgBar, fillBar, txt], { left: 100, top: 100 });
-      canvas.add(grp);
-      canvas.setActiveObject(grp);
-    } else if (type === 'alert-bar') {
-      const bg = new fabric.Rect({ width: 500, height: 60, rx: 12, ry: 12, fill: '#fef2f2', stroke: '#ef4444', strokeWidth: 2 });
-      const badge = new fabric.Rect({ width: 120, height: 36, left: 12, top: 12, rx: 8, ry: 8, fill: '#ef4444' });
-      const badgeTxt = new fabric.Textbox('ประกาศด่วน', { left: 72, top: 30, width: 100, originX: 'center', originY: 'center', textAlign: 'center', fontFamily: 'Prompt', fontSize: 15, fontWeight: 'bold', fill: '#ffffff' });
-      const bodyTxt = new fabric.Textbox('ข้อความแจ้งเตือนภัยหรือข้อมูลสำคัญประเด็นเร่งด่วน', { left: 145, top: 20, width: 340, fontFamily: 'Sarabun', fontSize: 15, fill: '#991b1b', fontWeight: 'bold' });
-      const grp = new fabric.Group([bg, badge, badgeTxt, bodyTxt], { left: 100, top: 100 });
-      canvas.add(grp);
-      canvas.setActiveObject(grp);
-    }
-
-    canvas.requestRenderAll();
+  const addInfographicComponent = (type: string) => {
+    if (!canvas || !fabric) return;
+    addCanvaInfographicElement(canvas, fabric, type);
+    saveHistory();
   };
 
   const addTableComponent = (rowsCount: number, colsCount: number) => {
@@ -3286,7 +3281,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             <div className="p-1.5 bg-blue-500/10 rounded-lg text-blue-600 dark:text-blue-400">
               <Palette className="w-5 h-5" />
             </div>
-            <h2 className="hidden lg:block text-sm font-bold text-[var(--text-primary)] font-noto-serif-thai whitespace-nowrap">
+            <h2 className="hidden lg:block text-sm font-bold text-[var(--text-primary)] font-sans whitespace-nowrap">
               Infographics Studio
             </h2>
           </div>
@@ -3789,23 +3784,6 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               </div>
             )}
 
-            {/* AI Assistant Tab */}
-            {activeSidebarTab === 'ai' && (
-              <div className="space-y-4">
-                <InfographicsAiAssistant onImageSelected={(src: string) => {
-                  if (canvas && fabric) {
-                    (fabric.FabricImage || fabric.Image).fromURL(src).then((img: any) => {
-                      img.scaleToWidth(Math.min(320, canvasSize.width * 0.6));
-                      img.set({ left: 100, top: 100 });
-                      canvas.add(img);
-                      canvas.setActiveObject(img);
-                      canvas.requestRenderAll();
-                    });
-                  }
-                }} />
-              </div>
-            )}
-
             {/* Elements & Symbols Tab */}
             {activeSidebarTab === 'elements' && (
               <div className="space-y-4">
@@ -4256,12 +4234,12 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                 </button>
 
                 <button onClick={() => addTextPreset('body')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-blue-500 hover:bg-blue-500/5 transition-all">
-                  <div className="text-xs font-sarabun text-[var(--text-primary)]">เพิ่มรายละเอียดข้อความทั่วไป...</div>
+                  <div className="text-xs font-sans text-[var(--text-primary)]">เพิ่มรายละเอียดข้อความทั่วไป...</div>
                   <div className="text-[11px] text-[var(--text-muted)]">ขนาด 18px</div>
                 </button>
 
                 <button onClick={() => addTextPreset('callout')} className="w-full text-left p-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 hover:border-blue-500 transition-all">
-                  <div className="text-xs font-bold font-sarabun text-blue-600 dark:text-blue-400">กล่องเน้นข้อความสำคัญ (Callout)</div>
+                  <div className="text-xs font-bold font-sans text-blue-600 dark:text-blue-400">กล่องเน้นข้อความสำคัญ (Callout)</div>
                   <div className="text-[11px] text-[var(--text-muted)]">พร้อมพื้นหลังเน้นสายตา</div>
                 </button>
               </div>
@@ -4269,43 +4247,141 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
             {/* Infographic Kit Elements Tab */}
             {activeSidebarTab === 'infographic' && (
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">ชุดกราฟิกอินโฟกราฟิก (Infographic Kits)</h3>
-                <button onClick={() => addInfographicComponent('stat-card')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-emerald-500 hover:bg-emerald-500/5 transition-all flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-[var(--text-primary)]">การ์ดเน้นสถิติ (Stat Highlight)</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">แสดงตัวเลขและข้อความคำอธิบาย</div>
-                  </div>
-                  <BarChart3 className="w-5 h-5 text-emerald-500" />
-                </button>
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-2">📊 กราฟและตัวชี้วัด (Charts & KPI Metrics)</h3>
+                  <div className="space-y-2">
+                    <button onClick={() => addInfographicComponent('kpi-trend-card')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-cyan-500 hover:bg-cyan-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">การ์ด KPI พร้อมป้ายแนวโน้ม (+YoY)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">สถิติเปรียบเทียบแนวโน้มเติบโต</div>
+                      </div>
+                      <TrendingUp className="w-5 h-5 text-cyan-500" />
+                    </button>
 
-                <button onClick={() => addInfographicComponent('badge-num')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-blue-500 hover:bg-blue-500/5 transition-all flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-[var(--text-primary)]">ป้ายวงกลมตัวเลข (Number Badge)</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">สำหรับจัดลำดับขั้นตอน 1, 2, 3</div>
-                  </div>
-                  <Award className="w-5 h-5 text-blue-500" />
-                </button>
+                    <button onClick={() => addInfographicComponent('donut-chart')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-blue-500 hover:bg-blue-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">เกจวงกลมเปอร์เซ็นต์ (Donut Gauge)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">กราฟวงแหวนแสดงความสำเร็จ 85%</div>
+                      </div>
+                      <PieChart className="w-5 h-5 text-blue-500" />
+                    </button>
 
-                <button onClick={() => addInfographicComponent('progress-bar')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-cyan-500 hover:bg-cyan-500/5 transition-all flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-[var(--text-primary)]">แถบความคืบหน้า (Progress Bar)</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">แสดงเปอร์เซ็นต์ KPI และเป้าหมาย</div>
-                  </div>
-                  <Activity className="w-5 h-5 text-cyan-500" />
-                </button>
+                    <button onClick={() => addInfographicComponent('multi-bar-chart')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-emerald-500 hover:bg-emerald-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">แถบแท่งเปรียบเทียบ 3 ไตรมาส</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">Multi-Bar Chart สรุปเปรียบเทียบ</div>
+                      </div>
+                      <BarChart3 className="w-5 h-5 text-emerald-500" />
+                    </button>
 
-                <button onClick={() => addInfographicComponent('alert-bar')} className="w-full text-left p-3 rounded-xl border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 hover:border-red-500 transition-all flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-red-700 dark:text-red-400">แถบประกาศเตือนภัย (Alert Banner)</div>
-                    <div className="text-[11px] text-[var(--text-muted)]">สำหรับเรื่องเร่งด่วน</div>
+                    <button onClick={() => addInfographicComponent('stat-card')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-emerald-500 hover:bg-emerald-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">การ์ดสถิติไฮไลต์ (Stat Highlight)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">แสดงตัวเลขและคำอธิบาย</div>
+                      </div>
+                      <Award className="w-5 h-5 text-emerald-500" />
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('progress-bar')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-cyan-500 hover:bg-cyan-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">แถบความคืบหน้า (Progress Bar)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">แสดงเปอร์เซ็นต์ KPI และเป้าหมาย</div>
+                      </div>
+                      <Activity className="w-5 h-5 text-cyan-500" />
+                    </button>
                   </div>
-                  <AlertTriangle className="w-5 h-5 text-red-500" />
-                </button>
+                </div>
+
+                <div className="border-t border-[var(--border-light)] pt-3">
+                  <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-2">🛡️ ป้ายสัญลักษณ์ & ไฮไลต์ (Badges & Banners)</h3>
+                  <div className="space-y-2">
+                    <button onClick={() => addInfographicComponent('garuda-badge')} className="w-full text-left p-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20 hover:border-amber-500 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-amber-900 dark:text-amber-300">ป้ายหัวหนังสือราชการ / ตราครุฑ</div>
+                        <div className="text-[11px] text-amber-700/70 dark:text-amber-400">สำหรับประกาศและงานทางการ</div>
+                      </div>
+                      <ShieldCheckIcon className="w-5 h-5 text-amber-600" />
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('smart-city-badge')} className="w-full text-left p-3 rounded-xl border border-teal-200 dark:border-teal-900 bg-teal-50/50 dark:bg-teal-950/20 hover:border-teal-500 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-teal-900 dark:text-teal-300">ป้าย EEC Smart City Rayong</div>
+                        <div className="text-[11px] text-teal-700/70 dark:text-teal-400">เมืองอัจฉริยะและนวัตกรรม</div>
+                      </div>
+                      <Sparkles className="w-5 h-5 text-teal-600" />
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('timeline-step')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-indigo-500 hover:bg-indigo-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">แถบ 4 ลำดับขั้นตอน (Timeline Flow)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">เส้นเชื่อมโยงกระบวนการทำงาน</div>
+                      </div>
+                      <Workflow className="w-5 h-5 text-indigo-500" />
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('comparison-box')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-blue-500 hover:bg-blue-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">กล่องเปรียบเทียบ (ก่อน vs หลัง)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">Before & After Comparison Box</div>
+                      </div>
+                      <Scale className="w-5 h-5 text-blue-500" />
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('quote-card')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-blue-500 hover:bg-blue-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">การ์ดคำคมผู้บริหาร (Quote Card)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">กรอบเน้นวิสัยทัศน์พร้อมเครื่องหมายคำพูด</div>
+                      </div>
+                      <Quote className="w-5 h-5 text-blue-500" />
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('badge-num')} className="w-full text-left p-3 rounded-xl border border-[var(--border-light)] hover:border-blue-500 hover:bg-blue-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">ป้ายวงกลมตัวเลข (Number Badge)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">สำหรับจัดลำดับขั้นตอน 1, 2, 3</div>
+                      </div>
+                      <Award className="w-5 h-5 text-blue-500" />
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('alert-bar')} className="w-full text-left p-3 rounded-xl border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 hover:border-red-500 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-red-700 dark:text-red-400">แถบประกาศเตือนภัย (Alert Banner)</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">สำหรับเรื่องเร่งด่วน</div>
+                      </div>
+                      <AlertTriangle className="w-5 h-5 text-red-500" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border-t border-[var(--border-light)] pt-3">
+                  <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider mb-2">📱 กรอบอุปกรณ์ & ภาพถ่าย (Mockups & Frames)</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => addInfographicComponent('device-phone-frame')} className="text-left p-2.5 rounded-xl border border-[var(--border-light)] hover:border-indigo-500 hover:bg-indigo-500/5 transition-all">
+                      <Smartphone className="w-5 h-5 text-indigo-500 mb-1" />
+                      <div className="text-xs font-bold text-[var(--text-primary)]">ม็อคอัพมือถือ</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Smartphone Frame</div>
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('device-laptop-frame')} className="text-left p-2.5 rounded-xl border border-[var(--border-light)] hover:border-indigo-500 hover:bg-indigo-500/5 transition-all">
+                      <Laptop className="w-5 h-5 text-indigo-500 mb-1" />
+                      <div className="text-xs font-bold text-[var(--text-primary)]">ม็อคอัพแล็ปท็อป</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Laptop Screen</div>
+                    </button>
+
+                    <button onClick={() => addInfographicComponent('photo-polaroid-frame')} className="col-span-2 text-left p-2.5 rounded-xl border border-[var(--border-light)] hover:border-indigo-500 hover:bg-indigo-500/5 transition-all flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--text-primary)]">กรอบรูปโพลารอยด์ (Polaroid Photo)</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">กรอบภาพถ่ายกิจกรรมพร้อมคำบรรยาย</div>
+                      </div>
+                      <ImageIcon className="w-5 h-5 text-indigo-500" />
+                    </button>
+                  </div>
+                </div>
 
                 {/* เครื่องมือสร้างตาราง (Table Creator Tool) */}
                 <div className="border-t border-[var(--border-light)] pt-4 mt-4 space-y-3">
-                  <h4 className="text-xs font-bold text-[var(--text-primary)] font-noto-serif-thai flex items-center gap-1.5">
+                  <h4 className="text-xs font-bold text-[var(--text-primary)] font-sans flex items-center gap-1.5">
                     <Grid className="w-4 h-4 text-indigo-500" />
                     เครื่องมือสร้างตารางข้อมูล (Table Creator)
                   </h4>
@@ -4352,38 +4428,151 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               </div>
             )}
 
-            {/* Templates Tab */}
+            {/* Templates Tab with Canva Categories */}
             {activeSidebarTab === 'templates' && (
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">แม่แบบสำเร็จรูป (Templates)</h3>
-                
-                <button onClick={loadDisasterWarningTemplate} className="w-full text-left p-3 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:border-red-800 transition-all">
-                  <div className="flex items-center gap-2 font-bold text-xs text-red-800 dark:text-red-200">
-                    <ShieldAlert className="w-4 h-4 text-red-600" />
-                    <span>1. แจ้งเตือนสาธารณภัย / สภาวะอากาศ</span>
-                  </div>
-                  <p className="text-[11px] text-red-600 dark:text-red-300 mt-1">โทนสีน้ำเงินเข้ม-แดง สำหรับงาน ปภ. และสภาวะฉุกเฉิน</p>
-                </button>
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">คลังแม่แบบสำเร็จรูป (Canva Templates)</h3>
+                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-full">9 แม่แบบ</span>
+                </div>
 
-                <button onClick={loadKpiSummaryTemplate} className="w-full text-left p-3 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-white transition-all">
-                  <div className="flex items-center gap-2 font-bold text-xs text-emerald-400">
-                    <BarChart3 className="w-4 h-4 text-emerald-400" />
-                    <span>2. สรุปผลงานประจำปี / KPI Summary</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1">อินโฟกราฟิกผู้บริหาร แสดงตัวเลขสำคัญและแถบเป้าหมาย</p>
-                </button>
+                {/* Filter Category Pills */}
+                <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                  {[
+                    { id: 'all', label: 'ทั้งหมด' },
+                    { id: 'gov', label: '🏛️ ราชการ/ปภ.' },
+                    { id: 'kpi', label: '📈 ธุรกิจ/KPI' },
+                    { id: 'flow', label: '⚡ แผนผัง/SOP' },
+                    { id: 'eec', label: '🌐 ระยอง EEC' },
+                    { id: 'social', label: '📱 โซเชียล' }
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setTemplateCategory(cat.id as any)}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg font-bold shrink-0 transition-all ${
+                        templateCategory === cat.id
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--border-light)]'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
 
-                <button onClick={loadProcessFlowTemplate} className="w-full text-left p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:border-blue-800 transition-all">
-                  <div className="flex items-center gap-2 font-bold text-xs text-blue-900 dark:text-blue-200">
-                    <Zap className="w-4 h-4 text-blue-600" />
-                    <span>3. ขั้นตอนการปฏิบัติงาน (4-Step Flow)</span>
-                  </div>
-                  <p className="text-[11px] text-blue-700 dark:text-blue-300 mt-1">กระบวนการยื่นคำขอและอนุมัติเอกสารแบบลำดับ</p>
-                </button>
+                <div className="space-y-2.5">
+                  {/* Template 1: Disaster */}
+                  {(templateCategory === 'all' || templateCategory === 'gov') && (
+                    <button onClick={loadDisasterWarningTemplate} className="w-full text-left p-3 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:border-red-800 transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-600 text-white">1080 x 1620 px (แนวตั้ง)</span>
+                        <ShieldAlert className="w-4 h-4 text-red-600 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-red-900 dark:text-red-200">1. แจ้งเตือนสาธารณภัย & สภาวะอากาศ ปภ.</div>
+                      <p className="text-[11px] text-red-700/80 dark:text-red-300 mt-0.5">โครงสร้างสีแดง-น้ำเงินเข้ม แสดงการ์ดสถิติน้ำฝน 3 อำเภอ และสายด่วน 1784</p>
+                    </button>
+                  )}
+
+                  {/* Template 2: KPI Summary */}
+                  {(templateCategory === 'all' || templateCategory === 'kpi') && (
+                    <button onClick={loadKpiSummaryTemplate} className="w-full text-left p-3 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-white transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-600 text-white">1280 x 720 px (HD)</span>
+                        <BarChart3 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-emerald-400">2. สรุปผลงานประจำปี & KPI Dashboard</div>
+                      <p className="text-[11px] text-slate-300 mt-0.5">สไตล์ดาร์กโหมดพรีเมียม แสดง 3 ตัวชี้วัดหลัก การ์ดสถิติ และแท่งเป้าหมาย</p>
+                    </button>
+                  )}
+
+                  {/* Template 3: Process Flow */}
+                  {(templateCategory === 'all' || templateCategory === 'flow') && (
+                    <button onClick={loadProcessFlowTemplate} className="w-full text-left p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:border-blue-800 transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-600 text-white">1280 x 720 px (HD)</span>
+                        <Zap className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-blue-900 dark:text-blue-200">3. ขั้นตอนการปฏิบัติงาน 4 ขั้นตอน (SOP Flow)</div>
+                      <p className="text-[11px] text-blue-700/80 dark:text-blue-300 mt-0.5">แผนผังลำดับขั้นตอนยื่นคำขอ ตรวจสอบ อนุมัติ และจัดเก็บเอกสาร</p>
+                    </button>
+                  )}
+
+                  {/* Template 4: Comparison Matrix */}
+                  {(templateCategory === 'all' || templateCategory === 'kpi' || templateCategory === 'flow') && (
+                    <button onClick={() => loadCanvaTemplate('comparison-matrix', canvas, fabric, setCanvasSize, setBackgroundColor, saveHistory)} className="w-full text-left p-3 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:border-indigo-800 transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-600 text-white">1280 x 720 px (HD)</span>
+                        <Scale className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-indigo-900 dark:text-indigo-200">4. ตารางเปรียบเทียบก่อน-หลัง e-Document</div>
+                      <p className="text-[11px] text-indigo-700/80 dark:text-indigo-300 mt-0.5">เปรียบเทียบความคุ้มค่าและประสิทธิภาพระบบเดิม vs ระบบดิจิทัลใหม่</p>
+                    </button>
+                  )}
+
+                  {/* Template 5: Policy Notice A4 */}
+                  {(templateCategory === 'all' || templateCategory === 'gov') && (
+                    <button onClick={() => loadCanvaTemplate('policy-notice', canvas, fabric, setCanvasSize, setBackgroundColor, saveHistory)} className="w-full text-left p-3 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:border-amber-800 transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-600 text-white">794 x 1123 px (A4)</span>
+                        <FileSignature className="w-4 h-4 text-amber-700 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-amber-900 dark:text-amber-200">5. ประกาศนโยบาย & มาตรการทางการ (A4)</div>
+                      <p className="text-[11px] text-amber-700/80 dark:text-amber-300 mt-0.5">ตราครุฑทางการ พร้อมกรอบ 4 ข้อกำหนด และส่วนลงนามผู้ว่าราชการ</p>
+                    </button>
+                  )}
+
+                  {/* Template 6: EEC Smart City */}
+                  {(templateCategory === 'all' || templateCategory === 'eec' || templateCategory === 'social') && (
+                    <button onClick={() => loadCanvaTemplate('eec-smart-city', canvas, fabric, setCanvasSize, setBackgroundColor, saveHistory)} className="w-full text-left p-3 rounded-xl border border-cyan-900 bg-gray-950 hover:bg-gray-900 text-white transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-600 text-white">1080 x 1080 px (1:1 Square)</span>
+                        <Sparkles className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-cyan-400">6. ระยองเมืองอัจฉริยะ EEC Smart City 2026</div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">สไตล์ไซเบอร์โมเดิร์น 4 เสาหลัก Governance, Living, Economy, Eco</p>
+                    </button>
+                  )}
+
+                  {/* Template 7: GovTech Story */}
+                  {(templateCategory === 'all' || templateCategory === 'gov' || templateCategory === 'social') && (
+                    <button onClick={() => loadCanvaTemplate('govtech-digital', canvas, fabric, setCanvasSize, setBackgroundColor, saveHistory)} className="w-full text-left p-3 rounded-xl border border-blue-900 bg-[#0b1329] hover:bg-[#111d40] text-white transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-600 text-white">1080 x 1920 px (Story 9:16)</span>
+                        <Megaphone className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-blue-400">7. การเปลี่ยนผ่านสารบรรณดิจิทัล GovTech</div>
+                      <p className="text-[11px] text-slate-300 mt-0.5">สัดส่วนแนวตั้งสำหรับ Mobile & Story ประชาสัมพันธ์สถิติความสำเร็จ</p>
+                    </button>
+                  )}
+
+                  {/* Template 8: Org Structure */}
+                  {(templateCategory === 'all' || templateCategory === 'gov' || templateCategory === 'flow') && (
+                    <button onClick={() => loadCanvaTemplate('org-structure', canvas, fabric, setCanvasSize, setBackgroundColor, saveHistory)} className="w-full text-left p-3 rounded-xl border border-slate-300 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:border-slate-700 transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-white">1280 x 720 px (HD)</span>
+                        <Building2 className="w-4 h-4 text-slate-700 dark:text-slate-300 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-slate-900 dark:text-slate-100">8. ผังโครงสร้างองค์กร & ศูนย์ปฏิบัติการ</div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">ผังสายการบังคับบัญชา 3 กลุ่มงาน สารบรรณ, เฝ้าระวัง ปภ., และโครงสร้าง IoT</p>
+                    </button>
+                  )}
+
+                  {/* Template 9: Strategic 5-Year Roadmap */}
+                  {(templateCategory === 'all' || templateCategory === 'eec' || templateCategory === 'kpi') && (
+                    <button onClick={() => loadCanvaTemplate('strategic-roadmap', canvas, fabric, setCanvasSize, setBackgroundColor, saveHistory)} className="w-full text-left p-3 rounded-xl border border-purple-900 bg-[#0b132b] hover:bg-[#162047] text-white transition-all group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-600 text-white">1920 x 1080 px (Full HD)</span>
+                        <Rocket className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
+                      </div>
+                      <div className="font-bold text-xs text-purple-300">9. แผนยุทธศาสตร์พัฒนาดิจิทัล 5 ปี (2569-2573)</div>
+                      <p className="text-[11px] text-slate-300 mt-0.5">Roadmap 5 เสาหลัก พร้อมตัวชี้วัดเป้าหมายรายปีสำหรับนำเสนอผู้บริหาร</p>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* Canvas Settings Tab */}
+            {/* Canvas Settings Tab with Canva Brand Color Themes */}
             {activeSidebarTab === 'canvas' && (
               <div className="space-y-4">
                 <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">ตั้งค่าขนาดและพื้นหลัง</h3>
@@ -4401,15 +4590,52 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                     <option value="1280x720">HD (16:9) - 1280 x 720 px</option>
                     <option value="1920x1080">Full HD (16:9) - 1920 x 1080 px</option>
                     <option value="800x600">การนำเสนอ (4:3) - 800 x 600 px</option>
-                    <option value="1080x1620">โพสเตอร์แนวตั้ง - 1080 x 1620 px</option>
-                    <option value="1080x1080">จัตุรัส (Square) - 1080 x 1080 px</option>
+                    <option value="1080x1620">โพสเตอร์แนวตั้ง ปภ. - 1080 x 1620 px</option>
+                    <option value="1080x1080">จัตุรัสโซเชียล (1:1) - 1080 x 1080 px</option>
+                    <option value="1080x1920">สตอรี่มือถือ (9:16) - 1080 x 1920 px</option>
                     <option value="794x1123">A4 แนวตั้ง - 794 x 1123 px</option>
                     <option value="1123x794">A4 แนวนอน - 1123 x 794 px</option>
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-xs text-[var(--text-secondary)] mb-2 block">สีพื้นหลังกระดาน</label>
+                {/* Canva Brand Color Palettes */}
+                <div className="pt-2 border-t border-[var(--border-light)]">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                      <Palette className="w-4 h-4 text-indigo-500" />
+                      ชุดสีแบรนด์เนม (Canva Color Kits)
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)] mb-2.5">
+                    คลิกเลือกธีมสีเพื่อเปลี่ยนโทนสีพื้นหลัง กล่องการ์ด และข้อความทั้งหมดในกระดาษพร้อมกันทันที
+                  </p>
+                  <div className="space-y-2">
+                    {CANVA_COLOR_THEMES.map((theme) => (
+                      <button
+                        key={theme.id}
+                        onClick={() => applyColorThemeToCanvas(canvas, theme, setBackgroundColor, saveHistory)}
+                        className="w-full text-left p-2 rounded-xl border border-[var(--border-light)] hover:border-indigo-500 bg-[var(--bg-canvas)] transition-all flex items-center justify-between group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="flex -space-x-1">
+                            <span className="w-4 h-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: theme.bg }} />
+                            <span className="w-4 h-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: theme.primary }} />
+                            <span className="w-4 h-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: theme.secondary }} />
+                            <span className="w-4 h-4 rounded-full border border-white shadow-xs" style={{ backgroundColor: theme.accent }} />
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-bold text-[var(--text-primary)] group-hover:text-indigo-600 transition-colors">{theme.name}</div>
+                            <div className="text-[9px] text-[var(--text-muted)]">{theme.category}</div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity">ใช้ธีมนี้ →</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-[var(--border-light)]">
+                  <label className="text-xs text-[var(--text-secondary)] mb-2 block">สีพื้นหลังกำหนดเอง</label>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {presetColors.map(color => (
                       <button 
@@ -4535,6 +4761,15 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                 {aiResult && (
                   <div className="space-y-4 pt-2 border-t border-dashed border-[var(--border-medium)]">
                     
+                    {/* Canva Magic Layout 1-Click Button */}
+                    <button
+                      onClick={() => generateFullAILegend(canvas, fabric, aiResult, setCanvasSize, setBackgroundColor, saveHistory)}
+                      className="w-full py-3 px-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition-all"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                      <span>✨ วางผังอินโฟกราฟิกแบบเต็มแผ่นอัตโนมัติ (Magic Canvas)</span>
+                    </button>
+
                     {/* Design Advice Callout */}
                     <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-indigo-950 text-xs leading-relaxed">
                       <div className="flex items-center gap-1.5 mb-1 text-indigo-700 font-bold">
@@ -5204,6 +5439,77 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                   onChange={(e) => handlePropertyChange('opacity', parseFloat(e.target.value))}
                   className="w-full accent-blue-500"
                 />
+                <div className="flex gap-1 justify-between">
+                  {[0.25, 0.5, 0.75, 1.0].map((op) => (
+                    <button
+                      key={op}
+                      onClick={() => handlePropertyChange('opacity', op)}
+                      className={`flex-1 py-0.5 text-[9px] font-bold rounded border transition-all ${
+                        Math.abs(opacity - op) < 0.05
+                          ? 'bg-blue-500 text-white border-blue-600'
+                          : 'bg-[var(--bg-elevated)] text-[var(--text-muted)] border-[var(--border-medium)]'
+                      }`}
+                    >
+                      {Math.round(op * 100)}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Canva Object Alignment & Position */}
+              <div className="pt-3 border-t border-[var(--border-light)] space-y-2">
+                <label className="font-bold text-[var(--text-primary)] block">จัดตำแหน่งบนหน้ากระดาษ (Align Position)</label>
+                <div className="grid grid-cols-3 gap-1">
+                  <button onClick={() => alignObject('left')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    ซ้าย
+                  </button>
+                  <button onClick={() => alignObject('center-h')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    กึ่งกลางแนวนอน
+                  </button>
+                  <button onClick={() => alignObject('right')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    ขวา
+                  </button>
+                  <button onClick={() => alignObject('top')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    บน
+                  </button>
+                  <button onClick={() => alignObject('center-v')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    กึ่งกลางแนวตั้ง
+                  </button>
+                  <button onClick={() => alignObject('bottom')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    ล่าง
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  <button onClick={() => flipObject('x')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)] flex items-center justify-center gap-1">
+                    <span>↔️ พลิกแนวนอน</span>
+                  </button>
+                  <button onClick={() => flipObject('y')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)] flex items-center justify-center gap-1">
+                    <span>↕️ พลิกแนวตั้ง</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Shadow Presets */}
+              <div className="pt-3 border-t border-[var(--border-light)] space-y-2">
+                <label className="font-bold text-[var(--text-primary)] block">เอฟเฟกต์เงา (Shadow Presets)</label>
+                <div className="grid grid-cols-3 gap-1">
+                  <button onClick={() => applyShadowPreset('none')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    ไม่มีเงา
+                  </button>
+                  <button onClick={() => applyShadowPreset('soft')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    เงานุ่มละมุน
+                  </button>
+                  <button onClick={() => applyShadowPreset('hard')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    เงาคมชัด
+                  </button>
+                  <button onClick={() => applyShadowPreset('glow')} className="p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-cyan-500">
+                    แสงนีออน (Glow)
+                  </button>
+                  <button onClick={() => applyShadowPreset('float')} className="col-span-2 p-1.5 bg-[var(--bg-elevated)] border border-[var(--border-medium)] rounded hover:bg-[var(--border-light)] text-[10px] font-bold text-[var(--text-secondary)]">
+                    เงาลอยตัว 3D (Floating)
+                  </button>
+                </div>
               </div>
 
               {/* Text specific tools */}
@@ -5528,7 +5834,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                   <ShieldCheck className="w-6 h-6 text-emerald-400" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold font-noto-serif-thai text-white">
+                  <h3 className="text-base sm:text-lg font-bold font-sans text-white">
                     ยืนยันการบันทึกโปรเจกต์ (Save Protection)
                   </h3>
                   <p className="text-xs text-emerald-200/80">

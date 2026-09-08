@@ -229,7 +229,7 @@ ${agendas.map(ag => `<div style="margin-[12pt 0 6pt];">
       {/* Header & Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-light)] pb-4">
         <div>
-          <h2 className="text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">
+          <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
             บันทึกรายงานการประชุม
           </h2>
           <p className="text-sm text-[var(--text-secondary)] mt-1">

@@ -1500,7 +1500,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       {/* Upper header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[var(--bg-surface)] p-6 rounded-2xl border border-[var(--border-light)] shadow-sm">
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold font-noto-serif-thai text-slate-800 dark:text-slate-100 flex items-center gap-2.5">
+          <h1 className="text-2xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-2.5">
             <QrCode className="w-8 h-8 text-blue-600" />
             <span>ระบบสร้าง QR Code (QR Studio v1.0)</span>
           </h1>
@@ -2579,7 +2579,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-4 gap-4">
             <div>
-              <h2 className="text-xl font-bold font-noto-serif-thai text-slate-800">
+              <h2 className="text-xl font-bold font-sans text-slate-800">
                 ระบบสร้างคิวอาร์โค้ดคราวละจำนวนมาก (Enterprise Bulk Generator)
               </h2>
               <p className="text-xs text-slate-500 mt-1">
@@ -2705,7 +2705,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Bookmark className="w-6 h-6 text-blue-600" />
-                <h2 className="text-xl font-bold font-noto-serif-thai text-slate-800 dark:text-slate-100">
+                <h2 className="text-xl font-bold font-sans text-slate-800 dark:text-slate-100">
                   ไลบรารีแม่แบบงานเอกสารสารบรรณ (Full Options QR Templates)
                 </h2>
               </div>
@@ -3050,7 +3050,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6">
           <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-4 text-left">
             <div>
-              <h2 className="text-xl font-bold font-noto-serif-thai text-slate-800">
+              <h2 className="text-xl font-bold font-sans text-slate-800">
                 ระบบพิมพ์สติ๊กเกอร์ และสลิปตรวจสอบเอกสาร (Official Document Labels)
               </h2>
               <p className="text-xs text-slate-500 mt-1">
@@ -3088,7 +3088,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6 max-w-5xl mx-auto text-left">
           <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-[var(--border-lighter)] pb-4 gap-4">
             <div>
-              <h2 className="text-xl font-bold font-noto-serif-thai text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <h2 className="text-xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <Eye className="w-6 h-6 text-emerald-500" />
                 เครื่องจำลองสแกนและถอดรหัส QR Code (Scanner Simulator v3.0)
               </h2>
@@ -3222,7 +3222,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                         <QrCode className="w-10 h-10 text-emerald-500" />
                       </div>
                       <div className="space-y-1">
-                        <p className="text-sm font-bold text-emerald-400 font-noto-serif-thai">กำลังสแกนและแกะรหัส...</p>
+                        <p className="text-sm font-bold text-emerald-400 font-sans">กำลังสแกนและแกะรหัส...</p>
                         <p className="text-[10px] text-slate-400">ถอดรหัส Co-Signature SHA-256</p>
                       </div>
                     </div>
@@ -3501,7 +3501,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             <div className="p-5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Bookmark className="w-5 h-5" />
-                <h3 className="font-bold text-base font-noto-serif-thai">
+                <h3 className="font-bold text-base font-sans">
                   บันทึกแม่แบบงานออกแบบ (Save as Template)
                 </h3>
               </div>
@@ -3651,7 +3651,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             <div className="p-5 bg-gradient-to-r from-slate-800 to-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Edit className="w-5 h-5 text-blue-400" />
-                <h3 className="font-bold text-base font-noto-serif-thai">
+                <h3 className="font-bold text-base font-sans">
                   แก้ไขข้อมูลแม่แบบ (Edit Template)
                 </h3>
               </div>

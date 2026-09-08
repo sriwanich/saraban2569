@@ -1061,7 +1061,7 @@ export default function Settings(props: SettingsProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h2 className="text-2xl font-noto-serif-thai font-semibold text-[var(--text-primary)]">ตั้งค่าระบบ</h2>
+          <h2 className="text-2xl font-sans font-semibold text-[var(--text-primary)]">ตั้งค่าระบบ</h2>
           <p className="text-[var(--text-secondary)] mt-1 text-sm">จัดการข้อมูลพื้นฐานและสิทธิ์การใช้งานของระบบ</p>
         </div>
       </div>
@@ -1151,7 +1151,7 @@ export default function Settings(props: SettingsProps) {
         {activeTab === 'system' && (
           <div className="max-w-4xl space-y-6 animate-fade-in">
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
-              <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+              <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-[var(--primary-color)]" /> ชื่อหน่วยงาน
               </h3>
               <div className="space-y-4">
@@ -1180,7 +1180,7 @@ export default function Settings(props: SettingsProps) {
 
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                   <Crown className="w-5 h-5 text-[var(--primary-color)]" /> ตราครุฑ ๑.๕ ซม. (หนังสือภายใน/บันทึกข้อความ)
                 </h3>
                 <div className="space-y-4">
@@ -1237,7 +1237,7 @@ export default function Settings(props: SettingsProps) {
               </div>
 
               <div>
-                <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                   <Crown className="w-5 h-5 text-[var(--primary-color)]" /> ตราครุฑ ๓.๐ ซม. (หนังสือภายนอก/คำสั่ง/ประกาศ)
                 </h3>
                 <div className="space-y-4">
@@ -1296,7 +1296,7 @@ export default function Settings(props: SettingsProps) {
 
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                   <Image className="w-5 h-5 text-[var(--primary-color)]" /> โลโก้หน่วยงาน
                 </h3>
                 <div className="space-y-4">
@@ -1347,7 +1347,7 @@ export default function Settings(props: SettingsProps) {
               </div>
 
               <div>
-                <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                   <Camera className="w-5 h-5 text-[var(--primary-color)]" /> Favicon (ไอคอนแท็บ)
                 </h3>
                 <div className="space-y-4">
@@ -1399,7 +1399,7 @@ export default function Settings(props: SettingsProps) {
             </div>
 
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
-              <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-1 flex items-center gap-2">
+              <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-1 flex items-center gap-2">
                 <Key className="w-5 h-5 text-[var(--primary-color)]" /> ตั้งค่า Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)
               </h3>
               <p className="text-xs text-[var(--text-muted)] mb-4">
@@ -1438,7 +1438,7 @@ export default function Settings(props: SettingsProps) {
 
 
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
-              <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+              <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                 <Type className="w-5 h-5 text-[var(--primary-color)]" /> ข้อความส่วนท้าย (Footer)
               </h3>
               <div className="space-y-2">
@@ -1467,7 +1467,7 @@ export default function Settings(props: SettingsProps) {
         {activeTab === 'smtp' && (
           <div className="max-w-xl space-y-6 animate-fade-in">
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
-              <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+              <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                 <SettingsIcon className="w-5 h-5 text-[var(--primary-color)]" /> การเชื่อมต่อ SMTP สำหรับส่งอีเมล
               </h3>
               <div className="space-y-4">
@@ -1625,7 +1625,7 @@ export default function Settings(props: SettingsProps) {
             {activeSystemDocTab === 'docSettings' && (
               <div className="max-w-xl space-y-6">
                 <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
-                  <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
+                  <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-[var(--primary-color)]" /> ปีการใช้งานปัจจุบัน
                   </h3>
                   <div className="space-y-2">
@@ -1655,7 +1655,7 @@ export default function Settings(props: SettingsProps) {
         {activeSystemDocTab === 'departments' && (
           <div className="space-y-6 animate-fade-in">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)]">รายชื่อแผนก/กลุ่มงาน</h3>
+              <h3 className="text-lg font-sans font-medium text-[var(--text-primary)]">รายชื่อแผนก/กลุ่มงาน</h3>
               <button 
                 onClick={() => setShowAddDeptModal(true)}
                 className="flex items-center gap-2 bg-[var(--primary-dark)] hover:bg-[var(--primary-hover)] border border-[var(--primary-color)]/30 text-[var(--primary-color)] px-4 py-2 rounded-lg font-medium transition-colors text-sm"
@@ -1730,7 +1730,7 @@ export default function Settings(props: SettingsProps) {
           <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
               <div>
-                <h3 className="text-lg font-noto-serif-thai font-medium text-[var(--text-primary)] flex items-center gap-2">
+                <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] flex items-center gap-2">
                   <Briefcase className="w-5 h-5 text-[var(--primary-color)]" /> รายชื่อตำแหน่งงานในหน่วยงาน
                 </h3>
                 <p className="text-xs text-[var(--text-muted)] mt-1">
@@ -1820,7 +1820,7 @@ export default function Settings(props: SettingsProps) {
             <div className="flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-noto-serif-thai font-semibold text-[var(--text-primary)]">จัดการเจ้าหน้าที่ในหน่วยงาน</h3>
+                  <h3 className="text-lg font-sans font-semibold text-[var(--text-primary)]">จัดการเจ้าหน้าที่ในหน่วยงาน</h3>
                   <p className="text-xs text-[var(--text-muted)] mt-0.5">เชื่อมโยงข้อมูลฝ่ายงาน และรักษาความปลอดภัยด้วยรหัสผ่าน Argon2id</p>
                 </div>
                 
@@ -2503,7 +2503,7 @@ export default function Settings(props: SettingsProps) {
                       <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-400/30">
                         <Shield className="w-6 h-6 text-indigo-400" />
                       </div>
-                      <h3 className="text-xl sm:text-2xl font-bold font-noto-serif-thai text-white">
+                      <h3 className="text-xl sm:text-2xl font-bold font-sans text-white">
                         การกำหนดสิทธิ์ผู้ใช้งาน (Role & Permission Control Hub)
                       </h3>
                     </div>
@@ -2674,7 +2674,7 @@ export default function Settings(props: SettingsProps) {
                 <div className="p-4 bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Layers className="w-5 h-5 text-[var(--primary-color)]" />
-                    <h4 className="font-bold text-[var(--text-primary)] text-sm sm:text-base font-noto-serif-thai">
+                    <h4 className="font-bold text-[var(--text-primary)] text-sm sm:text-base font-sans">
                       แผงตารางควบคุมสิทธิ์ทุกฟังก์ชัน (Role Permission Matrix)
                     </h4>
                   </div>
@@ -2918,7 +2918,7 @@ export default function Settings(props: SettingsProps) {
                   <Database className="w-7 h-7" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-noto-serif-thai font-semibold text-[var(--text-primary)]">
+                  <h3 className="text-xl font-sans font-semibold text-[var(--text-primary)]">
                     สำรองและคืนค่าข้อมูลระบบ (Backup & Restore)
                   </h3>
                   <p className="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed">
@@ -2939,7 +2939,7 @@ export default function Settings(props: SettingsProps) {
                       <Download className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="font-noto-serif-thai font-medium text-base text-[var(--text-primary)]">
+                      <h4 className="font-sans font-medium text-base text-[var(--text-primary)]">
                         1. สำรองข้อมูลระบบ (Export Backup)
                       </h4>
                       <p className="text-xs text-[var(--text-muted)]">
@@ -3008,7 +3008,7 @@ export default function Settings(props: SettingsProps) {
                       <Upload className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="font-noto-serif-thai font-medium text-base text-[var(--text-primary)]">
+                      <h4 className="font-sans font-medium text-base text-[var(--text-primary)]">
                         2. คืนค่าข้อมูลระบบ (Import Restore)
                       </h4>
                       <p className="text-xs text-[var(--text-muted)]">
@@ -3108,7 +3108,7 @@ export default function Settings(props: SettingsProps) {
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
                 <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-md overflow-hidden shadow-2xl animate-[scaleIn_0.2s_ease-out]">
                   <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-amber-500/10">
-                    <h3 className="font-noto-serif-thai font-semibold text-base text-amber-400 flex items-center gap-2">
+                    <h3 className="font-sans font-semibold text-base text-amber-400 flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 text-amber-400" /> ยืนยันการคืนค่าข้อมูลระบบ
                     </h3>
                     <button 
@@ -3165,7 +3165,7 @@ export default function Settings(props: SettingsProps) {
                   </div>
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg sm:text-xl font-noto-serif-thai font-semibold text-[var(--text-primary)]">
+                      <h3 className="text-lg sm:text-xl font-sans font-semibold text-[var(--text-primary)]">
                         ระบบบริหารจัดการและลดความซ้ำซ้อนของไฟล์
                       </h3>
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-500 font-sans border border-emerald-500/20 font-medium">
@@ -3313,7 +3313,7 @@ export default function Settings(props: SettingsProps) {
             <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-xs overflow-hidden">
               <div className="p-5 border-b border-[var(--border-light)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--bg-canvas)]/35">
                 <div>
-                  <h4 className="font-semibold text-base text-[var(--text-primary)] flex items-center gap-2 font-noto-serif-thai">
+                  <h4 className="font-semibold text-base text-[var(--text-primary)] flex items-center gap-2 font-sans">
                     <Copy className="w-5 h-5 text-indigo-500" />
                     กลุ่มไฟล์แนบที่ตรวจพบความซ้ำซ้อน ({dedupStats?.groups?.length || 0} กลุ่ม)
                   </h4>
@@ -3439,7 +3439,7 @@ export default function Settings(props: SettingsProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-lg overflow-hidden shadow-xl animate-[scaleIn_0.2s_ease-out]">
             <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]">
-              <h3 className="font-noto-serif-thai font-semibold text-lg text-[var(--text-primary)] flex items-center gap-2">
+              <h3 className="font-sans font-semibold text-lg text-[var(--text-primary)] flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-[var(--primary-color)]" /> เพิ่มเจ้าหน้าที่ในหน่วยงาน
               </h3>
               <button 
@@ -3588,7 +3588,7 @@ export default function Settings(props: SettingsProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-md overflow-hidden shadow-xl animate-[scaleIn_0.2s_ease-out]">
             <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]">
-              <h3 className="font-noto-serif-thai font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
+              <h3 className="font-sans font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
                 <Key className="w-4 h-4 text-[var(--primary-color)]" /> เปลี่ยนรหัสผ่านเจ้าหน้าที่
               </h3>
               <button 
@@ -3642,7 +3642,7 @@ export default function Settings(props: SettingsProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-md overflow-hidden shadow-2xl animate-[scaleIn_0.2s_ease-out]">
             <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]">
-              <h3 className="font-noto-serif-thai font-semibold text-base text-rose-500 flex items-center gap-2">
+              <h3 className="font-sans font-semibold text-base text-rose-500 flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-rose-500" /> {confirmDeleteModal.title}
               </h3>
               <button 
@@ -3691,7 +3691,7 @@ export default function Settings(props: SettingsProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-md overflow-hidden shadow-2xl animate-[scaleIn_0.2s_ease-out]">
             <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]">
-              <h3 className="font-noto-serif-thai font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
+              <h3 className="font-sans font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-[var(--primary-color)]" /> เพิ่มแผนก/กลุ่มงานใหม่
               </h3>
               <button 
@@ -3751,7 +3751,7 @@ export default function Settings(props: SettingsProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-md overflow-hidden shadow-2xl animate-[scaleIn_0.2s_ease-out]">
             <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]">
-              <h3 className="font-noto-serif-thai font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
+              <h3 className="font-sans font-semibold text-base text-[var(--text-primary)] flex items-center gap-2">
                 <Briefcase className="w-5 h-5 text-[var(--primary-color)]" /> เพิ่มตำแหน่งงานใหม่
               </h3>
               <button 

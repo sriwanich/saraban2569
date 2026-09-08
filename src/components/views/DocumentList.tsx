@@ -18,8 +18,18 @@ interface Props {
 export default function DocumentList({ title, documents, user, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite, hasPermission }: Props) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(0);
+  const pageSize = 50;
   const [orgName, setOrgName] = useState('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
   const [logoUrl, setLogoUrl] = useState('https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg');
+
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'central' | 'department'>('all');
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
+
+  // Reset page on filter change
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [searchTerm, selectedYear, scopeFilter, selectedDeptFilter]);
 
   useEffect(() => {
     fetch('/api/settings')
@@ -49,15 +59,29 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
     
     const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
 
-    return matchesSearch && matchesYear;
+    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
+    const matchesScope = 
+      scopeFilter === 'all' ? true :
+      scopeFilter === 'central' ? isCentralDoc :
+      !isCentralDoc;
+
+    const matchesDept = 
+      selectedDeptFilter === 'all' ? true :
+      (doc.department === selectedDeptFilter || (doc.departmentReceives && doc.departmentReceives.some(r => r.department === selectedDeptFilter)));
+
+    return matchesSearch && matchesYear && matchesScope && matchesDept;
   });
 
   const sortedFilteredDocs = [...filteredDocs].sort((a, b) => {
     return Number(b.receiveNumber) - Number(a.receiveNumber);
   });
 
-  // Extract unique years
+  const paginatedDocs = sortedFilteredDocs.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const totalPages = Math.ceil(sortedFilteredDocs.length / pageSize);
+
+  // Extract unique years & departments
   const availableYears = Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => b.localeCompare(a));
+  const availableDepartments = Array.from(new Set(documents.map(d => d.department).filter(Boolean))) as string[];
 
   const canDeleteDoc = (row: DocumentItem) => {
     if (hasPermission) {
@@ -81,21 +105,46 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   };
 
   const getReceiveNumberDisplay = (row: DocumentItem, isMobile: boolean) => {
+    const isDeptDoc = row.isCentral === 0 || Number(row.isCentral) === 0;
+
+    if (isDeptDoc) {
+      if (isMobile) {
+        return `${row.receiveNumber || '-'} (${row.department || 'ฝ่าย'})`;
+      }
+      return (
+        <div className="flex flex-col">
+          <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{row.receiveNumber || '-'}</span>
+          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
+            {row.department ? `(ฝ่าย: ${row.department})` : '(ฝ่าย/กลุ่มงาน)'}
+          </span>
+        </div>
+      );
+    }
+
     if (user && user.role !== 'admin' && user.department && row.departmentReceives) {
       const deptRec = row.departmentReceives.find(r => r.department === user.department);
       if (deptRec) {
         if (isMobile) {
-          return `${deptRec.receiveNumber} (ฝ่าย)`;
+          return `${deptRec.receiveNumber} (ฝ่าย) / ${row.receiveNumber || '-'} (กลาง)`;
         }
         return (
           <div className="flex flex-col">
-            <span className="text-emerald-500 font-bold">{deptRec.receiveNumber} <span className="text-[10px] font-normal text-[var(--text-muted)]">(ฝ่าย)</span></span>
-            <span className="text-[11px] text-[var(--text-muted)]">{row.receiveNumber} (กลาง)</span>
+            <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{deptRec.receiveNumber} <span className="text-[10px] font-normal text-[var(--text-muted)]">(ฝ่าย)</span></span>
+            <span className="text-[11px] text-blue-500/80 font-mono">{row.receiveNumber} (กลาง)</span>
           </div>
         );
       }
     }
-    return row.receiveNumber || '-';
+
+    if (isMobile) {
+      return `${row.receiveNumber || '-'} (กลาง)`;
+    }
+    return (
+      <div className="flex flex-col">
+        <span className="font-bold text-[var(--text-primary)] font-mono">{row.receiveNumber || '-'}</span>
+        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium whitespace-nowrap">(สารบรรณกลาง)</span>
+      </div>
+    );
   };
 
   const getPriorityBadge = (priority: string) => {
@@ -285,7 +334,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">{title}</h1>
+            <h1 className="text-2xl font-sans font-bold text-[var(--text-primary)]">{title}</h1>
             <span className="px-3 py-0.5 text-xs font-semibold rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20 font-mono">
               {filteredDocs.length} ฉบับ
             </span>
@@ -347,12 +396,69 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
         </div>
       </div>
 
+      {/* Registry Level Tabs (สารบรรณกลาง VS ฝ่าย/กลุ่มงาน) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-2 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setScopeFilter('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              scopeFilter === 'all'
+                ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm border border-[var(--border-light)] font-bold'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
+            }`}
+          >
+            สมุดทะเบียนทั้งหมด ({documents.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setScopeFilter('central')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+              scopeFilter === 'central'
+                ? 'bg-blue-600 text-white shadow-sm font-bold'
+                : 'text-[var(--text-secondary)] hover:text-blue-600 hover:bg-blue-500/10'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${scopeFilter === 'central' ? 'bg-white' : 'bg-blue-500'}`}></span>
+            สารบรรณกลาง ({documents.filter(d => !(d.isCentral === 0 || Number(d.isCentral) === 0)).length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setScopeFilter('department')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+              scopeFilter === 'department'
+                ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                : 'text-[var(--text-secondary)] hover:text-emerald-600 hover:bg-emerald-500/10'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${scopeFilter === 'department' ? 'bg-white' : 'bg-emerald-500'}`}></span>
+            ฝ่าย / กลุ่มงาน ({documents.filter(d => (d.isCentral === 0 || Number(d.isCentral) === 0)).length})
+          </button>
+        </div>
+
+        {scopeFilter === 'department' && availableDepartments.length > 0 && (
+          <div className="flex items-center gap-2 pl-2">
+            <span className="text-xs text-[var(--text-muted)] font-medium">สังกัดฝ่าย:</span>
+            <select
+              value={selectedDeptFilter}
+              onChange={(e) => setSelectedDeptFilter(e.target.value)}
+              className="bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-primary)] rounded-lg px-2.5 py-1 text-xs outline-none focus:border-[var(--primary-color)] cursor-pointer"
+            >
+              <option value="all">ทุกฝ่ายงาน</option>
+              {availableDepartments.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
       {/* Main Table Container */}
       <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl overflow-hidden shadow-sm flex flex-col">
         {/* Mobile View: Cards */}
         <div className="block lg:hidden divide-y divide-[var(--border-lighter)]">
-          {sortedFilteredDocs.length > 0 ? (
-            sortedFilteredDocs.map((row) => (
+          {paginatedDocs.length > 0 ? (
+            paginatedDocs.map((row) => (
               <div key={row.id} className="p-4 space-y-3 hover:bg-[var(--border-lighter)]/30 transition-colors">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex flex-wrap gap-1.5 items-center">
@@ -506,8 +612,8 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
               </tr>
             </thead>
             <tbody className="text-sm divide-y divide-[var(--border-lighter)]">
-              {sortedFilteredDocs.length > 0 ? (
-                sortedFilteredDocs.map((row) => (
+              {paginatedDocs.length > 0 ? (
+                paginatedDocs.map((row) => (
                   <tr 
                     key={row.id} 
                     className="hover:bg-[var(--border-lighter)]/40 transition-colors group"
@@ -626,6 +732,27 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-4 border-t border-[var(--border-lighter)] bg-[var(--bg-elevated)]">
+             <button 
+                onClick={() => setCurrentPage(p => Math.max(0, p - 1))} 
+                disabled={currentPage === 0}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-[var(--border-light)] disabled:opacity-50 hover:bg-[var(--border-lighter)] transition-colors"
+             >
+                ก่อนหน้า
+             </button>
+             <span className="text-sm text-[var(--text-secondary)]">หน้า {currentPage + 1} จาก {totalPages}</span>
+             <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))} 
+                disabled={currentPage === totalPages - 1}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-[var(--border-light)] disabled:opacity-50 hover:bg-[var(--border-lighter)] transition-colors"
+             >
+                ถัดไป
+             </button>
+          </div>
+        )}
       </div>
     </div>
   );

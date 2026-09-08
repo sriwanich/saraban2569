@@ -1,126 +1,83 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, ShieldAlert, CheckCircle, User, KeyRound, Eye, EyeOff, Lock, Clock, ShieldCheck, Server, HelpCircle, FolderOpen, Home, RefreshCw, LogIn } from 'lucide-react';
+import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu } from 'lucide-react';
 
-export default function Login({ onLogin }: { onLogin: (user: any, remember: boolean) => void }) {
+interface LoginProps {
+  onLogin: (user: any, rememberMe: boolean) => void;
+}
+
+export default function Login({ onLogin }: LoginProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [alert, setAlert] = useState<{ type: 'success' | 'error', message: string, title: string } | null>(null);
-  const [time, setTime] = useState('--:--:--');
-  const [os, setOs] = useState('--');
   
-  const [orgName, setOrgName] = useState('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
-  const [currentYear, setCurrentYear] = useState('2569');
-  const [logoUrl, setLogoUrl] = useState('https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg');
-  const [footerText, setFooterText] = useState('© 2026 ระบบสารบรรณอิเล็กทรอนิกส์');
-
   const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotOtp, setForgotOtp] = useState('');
-  const [forgotNewPassword, setForgotNewPassword] = useState('');
-  const [isForgotLoading, setIsForgotLoading] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetStatus, setResetStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+  
+  const [isLoading, setIsLoading] = useState(false);
+  const [alert, setAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  const [os, setOs] = useState('กำลังตรวจสอบระบบ...');
+  const [time, setTime] = useState('');
+  const [isDark, setIsDark] = useState(true);
+  
+  const [orgName, setOrgName] = useState('ระบบงานสารบรรณอิเล็กทรอนิกส์');
+  const [footerText, setFooterText] = useState('© 2026 สงวนลิขสิทธิ์');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch settings
+    // Initial Theme Setup
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    setIsDark(isDarkMode);
+
+    const ua = navigator.userAgent;
+    let currentOs = 'Unknown OS';
+    if (ua.indexOf('Win') !== -1) currentOs = 'Windows 11 / Node 20.x';
+    if (ua.indexOf('Mac') !== -1) currentOs = 'macOS Sonoma / Node 20.x';
+    if (ua.indexOf('Linux') !== -1) currentOs = 'Ubuntu Linux 24.04 / Node 20.x';
+    if (ua.indexOf('Android') !== -1) currentOs = 'Android 14';
+    if (ua.indexOf('like Mac') !== -1) currentOs = 'iOS 17';
+    setOs(`Client: ${currentOs}`);
+
+    const timer = setInterval(() => {
+      setTime(new Date().toLocaleTimeString('th-TH'));
+    }, 1000);
+    
     const fetchSettings = async () => {
       try {
-        const response = await fetch('/api/settings');
-        if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
-          const data = await response.json();
+        const res = await fetch('/api/settings');
+        if (res.ok) {
+          const data = await res.json();
           if (data.orgName) setOrgName(data.orgName);
-          if (data.currentYear) setCurrentYear(String(data.currentYear));
-          if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl);
-          if (data.footerText !== undefined) setFooterText(data.footerText);
+          if (data.footerText) setFooterText(data.footerText);
+          if (data.logoUrl) setLogoUrl(data.logoUrl);
         }
-      } catch (_) {
-        try {
-          const cached = localStorage.getItem('moi_settings');
-          if (cached) {
-            const data = JSON.parse(cached);
-            if (data.orgName) setOrgName(data.orgName);
-            if (data.currentYear) setCurrentYear(String(data.currentYear));
-            if (data.logoUrl !== undefined) setLogoUrl(data.logoUrl);
-          }
-        } catch (e) {}
+      } catch (err) {
+        console.error('Failed to load org settings:', err);
       }
     };
     fetchSettings();
-
-    // Restore username if remembered
-    try {
-      if (localStorage.getItem('edms_remember') === '1') {
-        const saved = localStorage.getItem('edms_user');
-        if (saved) {
-          setUsername(saved);
-          setRemember(true);
-        }
-      }
-    } catch (_) {}
-
-    // Live clock
-    const updateClock = () => {
-      const now = new Date();
-      setTime(
-        String(now.getHours()).padStart(2, '0') + ':' +
-        String(now.getMinutes()).padStart(2, '0') + ':' +
-        String(now.getSeconds()).padStart(2, '0')
-      );
-    };
-    updateClock();
-    const interval = setInterval(updateClock, 1000);
-
-    // Client OS detection
-    const ua = navigator.userAgent;
-    let detectedOs = 'Unknown';
-    if (/Windows NT 10/.test(ua)) detectedOs = 'Win10';
-    else if (/Windows NT 11/.test(ua)) detectedOs = 'Win11';
-    else if (/Mac OS X/.test(ua)) detectedOs = 'macOS';
-    else if (/Android/.test(ua)) detectedOs = 'Android';
-    else if (/iPhone|iPad/.test(ua)) detectedOs = 'iOS';
-    else if (/Linux/.test(ua)) detectedOs = 'Linux';
-    setOs(detectedOs);
-
-    return () => clearInterval(interval);
+    return () => clearInterval(timer);
   }, []);
 
-  const calculateStrength = (pwd: string) => {
-    if (!pwd) return 0;
-    let score = 0;
-    if (pwd.length >= 8) score++;
-    if (pwd.length >= 12) score++;
-    if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score++;
-    if (/\d/.test(pwd)) score++;
-    if (/[^A-Za-z0-9]/.test(pwd)) score++;
-    return Math.min(Math.ceil(score * 0.8), 4);
+  const toggleTheme = () => {
+    const html = document.documentElement;
+    if (html.classList.contains('dark')) {
+      html.classList.remove('dark');
+      setIsDark(false);
+      localStorage.setItem('theme', 'light');
+    } else {
+      html.classList.add('dark');
+      setIsDark(true);
+      localStorage.setItem('theme', 'dark');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAlert(null);
-    
-    if (!username.trim() || !password) {
-      setAlert({
-        type: 'error',
-        title: 'เข้าสู่ระบบไม่สำเร็จ',
-        message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองอีกครั้ง'
-      });
-      return;
-    }
-
-    try {
-      if (remember) {
-        localStorage.setItem('edms_remember', '1');
-        localStorage.setItem('edms_user', username);
-      } else {
-        localStorage.removeItem('edms_remember');
-        localStorage.removeItem('edms_user');
-      }
-    } catch (_) {}
-
     setIsLoading(true);
+    setAlert(null);
 
     try {
       const response = await fetch('/api/login', {
@@ -128,293 +85,190 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
-      
+
       const data = await response.json();
-      if (data.success) {
-        setAlert({
-          type: 'success',
-          title: 'เข้าสู่ระบบสำเร็จ',
-          message: 'กำลังนำท่านเข้าสู่ระบบ...'
-        });
-        setTimeout(() => {
-          onLogin(data.user, remember);
-        }, 1000);
+      if (response.ok) {
+        onLogin(data.user, remember);
       } else {
-        setAlert({
-          type: 'error',
-          title: 'เข้าสู่ระบบไม่สำเร็จ',
-          message: data.message || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'
-        });
+        setAlert({ type: 'error', message: data.error || 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
       }
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        title: 'เข้าสู่ระบบไม่สำเร็จ',
-        message: 'เกิดข้อผิดพลาดในการเชื่อมต่อระบบ'
-      });
+    } catch (err) {
+      setAlert({ type: 'error', message: 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาลองใหม่อีกครั้ง' });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleReset = () => {
-    setUsername('');
-    setPassword('');
-    setRemember(false);
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail) {
+      setAlert({ type: 'error', message: 'กรุณาระบุอีเมล' });
+      return;
+    }
+    
+    setResetStatus('loading');
     setAlert(null);
-  };
-
-  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotEmail.trim()) {
-      setAlert({ type: 'error', title: 'เกิดข้อผิดพลาด', message: 'กรุณากรอกอีเมล' });
-      return;
-    }
     
-    setIsForgotLoading(true);
     try {
-      const response = await fetch('/api/forgot-password', {
+      const response = await fetch('/api/password/forgot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail })
+        body: JSON.stringify({ email: resetEmail })
       });
-      const data = await response.json();
       
+      const data = await response.json();
       if (response.ok) {
-        setOtpSent(true);
-        setAlert({
-          type: 'success',
-          title: 'ส่ง OTP สำเร็จ',
-          message: 'ระบบได้ส่งรหัส OTP ไปยังอีเมลของท่านแล้ว'
-        });
+        setResetStatus('success');
+        setAlert({ type: 'success', message: 'ส่งลิงก์รีเซ็ตรหัสผ่านไปยังอีเมลของคุณแล้ว' });
       } else {
-        setAlert({
-          type: 'error',
-          title: 'ไม่สามารถส่ง OTP ได้',
-          message: data.message || 'เกิดข้อผิดพลาดในการส่งอีเมล'
-        });
+        setResetStatus('idle');
+        setAlert({ type: 'error', message: data.error || 'ไม่พบอีเมลนี้ในระบบ' });
       }
     } catch (error) {
-      setAlert({
-        type: 'error',
-        title: 'ไม่สามารถส่ง OTP ได้',
-        message: 'เกิดข้อผิดพลาดในการเชื่อมต่อระบบ'
-      });
-    } finally {
-      setIsForgotLoading(false);
-    }
-  };
-
-  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotOtp.trim() || !forgotNewPassword.trim()) {
-      setAlert({ type: 'error', title: 'เกิดข้อผิดพลาด', message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
-      return;
-    }
-    
-    setIsForgotLoading(true);
-    try {
-      const response = await fetch('/api/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail, otp: forgotOtp, newPassword: forgotNewPassword })
-      });
-      const data = await response.json();
-      
-      if (response.ok) {
-        setAlert({
-          type: 'success',
-          title: 'เปลี่ยนรหัสผ่านสำเร็จ',
-          message: 'สามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้ทันที'
-        });
-        setTimeout(() => {
-          setIsForgotPassword(false);
-          setOtpSent(false);
-          setForgotEmail('');
-          setForgotOtp('');
-          setForgotNewPassword('');
-          setAlert(null);
-        }, 3000);
-      } else {
-        setAlert({
-          type: 'error',
-          title: 'เปลี่ยนรหัสผ่านไม่สำเร็จ',
-          message: data.message || 'ข้อมูลไม่ถูกต้อง หรือรหัส OTP หมดอายุ'
-        });
-      }
-    } catch (error) {
-      setAlert({
-        type: 'error',
-        title: 'เปลี่ยนรหัสผ่านไม่สำเร็จ',
-        message: 'เกิดข้อผิดพลาดในการเชื่อมต่อระบบ'
-      });
-    } finally {
-      setIsForgotLoading(false);
+      setResetStatus('idle');
+      setAlert({ type: 'error', message: 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์' });
     }
   };
 
   return (
     <>
-      {/* Refined subtle top border */}
-      <div className="fixed top-0 left-0 right-0 h-1 z-[9999] bg-gradient-to-r from-[#2556A0] via-[var(--primary-color)] to-[#2556A0]" aria-hidden="true" />
+      <div className="min-h-screen bg-[var(--bg-base)] flex flex-col justify-center items-center p-4 sm:p-6 overflow-hidden relative selection:bg-blue-500/30 transition-colors duration-700">
+        
+        {/* Theme Toggle Button - Floating Top Right */}
+        <button 
+          onClick={toggleTheme}
+          className="absolute top-6 right-6 z-50 p-2.5 rounded-full bg-[var(--bg-surface)] border border-[var(--border-light)] shadow-card text-[var(--text-secondary)] hover:text-[var(--primary-color)] transition-all hover:scale-105"
+          title={isDark ? "เปลี่ยนเป็นโหมดสว่าง" : "เปลี่ยนเป็นโหมดมืด"}
+        >
+          {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+        </button>
 
-      <div className="relative z-10 min-h-screen flex flex-col justify-center py-6 px-4 sm:px-6 lg:px-8">
-        <main className="w-full max-w-md mx-auto">
+        {/* Animated Futuristic Background - Adapts to theme */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {/* Top Right Orb */}
+          <div className="absolute -top-40 -right-40 w-[500px] h-[500px] dark:bg-blue-600/20 bg-blue-500/10 rounded-full blur-[100px] animate-pulse transition-colors duration-700"></div>
+          {/* Bottom Left Orb */}
+          <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] dark:bg-amber-500/10 bg-blue-300/20 rounded-full blur-[100px] animate-pulse transition-colors duration-700" style={{ animationDelay: '2s' }}></div>
+          {/* Center Glow */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-[400px] dark:bg-sky-500/5 bg-sky-300/10 rounded-full blur-[120px] transition-colors duration-700"></div>
           
-          <header className="flex flex-col items-center mb-6">
-            <div className="relative mb-4">
-              <div className="w-20 h-20 flex items-center justify-center">
-                <img 
-                  src={logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg'} 
-                  alt="ตราสัญลักษณ์" 
-                  className="w-full h-full object-contain drop-shadow-md" 
-                />
-              </div>
+          {/* Grid Pattern overlay */}
+          <div className="absolute inset-0 dark:opacity-50 opacity-10 transition-opacity duration-700" style={{ backgroundImage: "url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PHBhdGggZD0iTTAgMGg0MHY0MEgweiIgZmlsbD0ibm9uZSIvPjxwaXhlbHMgeD0iMCIgeT0iMCIgd2lkdGg9IjQiIGhlaWdodD0iNCIgZmlsbD0icmdiYSgxNDgsMTYzLDE4NCwwLjA1KSIvPjwvc3ZnPg==')" }}></div>
+        </div>
+
+        <main className="w-full max-w-[440px] relative z-10 animate-slide-up flex flex-col">
+          
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-[var(--bg-surface)] backdrop-blur-md border border-[var(--glass-border)] shadow-glow mb-4 p-3 relative group overflow-hidden transition-colors duration-500">
+              <div className="absolute inset-0 bg-gradient-to-tr from-[var(--primary-color)]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              {logoUrl ? (
+                <img src={logoUrl} alt="Logo" className="w-full h-full object-contain relative z-10" />
+              ) : (
+                <Building2 className="w-10 h-10 text-[var(--primary-color)] relative z-10" />
+              )}
             </div>
-
-            <h1 className="font-noto-serif-thai text-[clamp(10px,3.2vw,1.25rem)] sm:text-xl font-medium text-[var(--text-primary)] text-center mb-1 w-full whitespace-nowrap tracking-tight">
-              {orgName}
+            <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)] drop-shadow-sm font-sans transition-colors duration-500">
+              EDMS <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-indigo-500 dark:from-blue-400 dark:to-amber-200">Saraban</span>
             </h1>
-            <p className="text-sm text-[var(--text-secondary)] text-center">
-              ระบบงานสารบรรณอิเล็กทรอนิกส์ (EDMS) ปี {currentYear}
+            <p className="text-sm font-medium text-[var(--text-secondary)] mt-2 tracking-wide uppercase font-sans transition-colors duration-500">
+              ระบบสารบรรณอิเล็กทรอนิกส์อัจฉริยะ
             </p>
-          </header>
+          </div>
 
-          <div className="bg-[var(--bg-surface)]/80 backdrop-blur-xl border border-[var(--border-light)] rounded-2xl shadow-2xl overflow-hidden">
-            <div className="p-5 sm:p-6">
-              <div className="mb-5 text-center">
-                <h2 className="text-xl font-medium text-[var(--text-primary)] mb-1">
-                  {isForgotPassword ? 'ลืมรหัสผ่าน' : 'เข้าสู่ระบบ'}
-                </h2>
-                <p className="text-sm text-[var(--text-muted)]">
-                  {isForgotPassword 
-                    ? (otpSent ? 'กรุณากรอกรหัส OTP และรหัสผ่านใหม่' : 'กรุณากรอกอีเมลเพื่อรับรหัส OTP สำหรับตั้งรหัสผ่านใหม่') 
-                    : 'กรุณากรอกข้อมูลเพื่อเข้าใช้งานระบบ'}
-                </p>
-              </div>
-              
+          <div className="bg-[var(--bg-surface)]/80 dark:bg-[var(--bg-surface)]/60 backdrop-blur-2xl rounded-3xl overflow-hidden shadow-card border border-[var(--glass-border)] relative transition-colors duration-500">
+            <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
+            
+            <div className="p-6 sm:p-8 relative z-10">
               {alert && (
-                <div className={`flex items-start gap-3 p-3.5 rounded-xl mb-5 text-sm border ${
+                <div className={`mb-6 p-4 rounded-xl text-sm font-medium flex items-start gap-3 border backdrop-blur-md ${
                   alert.type === 'error' 
-                    ? 'bg-red-500/10 border-red-500/20 text-red-400' 
-                    : 'bg-green-500/10 border-green-500/20 text-green-400'
-                }`}>
-                  <span className="shrink-0 mt-[2px]">
-                    {alert.type === 'error' ? <ShieldAlert className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
-                  </span>
-                  <div>
-                    <strong className="block font-medium mb-0.5">{alert.title}</strong>
-                    <span className="opacity-90 leading-relaxed">{alert.message}</span>
-                  </div>
+                    ? 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-200' 
+                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-200'
+                } animate-scale-in transition-colors duration-500`}>
+                  {alert.type === 'error' ? <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5 text-red-500 dark:text-red-400" /> : <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5 text-emerald-500 dark:text-emerald-400" />}
+                  <span className="leading-relaxed">{alert.message}</span>
                 </div>
               )}
 
               {isForgotPassword ? (
-                <form onSubmit={otpSent ? handleResetPasswordSubmit : handleForgotPasswordSubmit} className="space-y-4">
-                  {!otpSent ? (
-                    <div>
-                      <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5" htmlFor="forgotEmail">
-                        อีเมล
-                      </label>
-                      <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
-                          <User className="w-5 h-5" />
-                        </div>
-                        <input
-                          type="email"
-                          id="forgotEmail"
-                          value={forgotEmail}
-                          onChange={(e) => setForgotEmail(e.target.value)}
-                          className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
-                          placeholder="กรอกอีเมลของคุณ"
-                          required
-                        />
+                <form onSubmit={handleResetPassword} className="space-y-5 animate-fade-in">
+                  <div className="text-center mb-6">
+                    <h2 className="text-xl font-bold text-[var(--text-primary)] mb-2 font-sans transition-colors">ลืมรหัสผ่าน?</h2>
+                    <p className="text-sm text-[var(--text-secondary)] font-sans transition-colors">กรอกอีเมลของคุณ เราจะส่งลิงก์สำหรับรีเซ็ตรหัสผ่านไปให้</p>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5 font-sans transition-colors" htmlFor="resetEmail">อีเมล (Email)</label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
+                        <Mail className="w-5 h-5" />
                       </div>
+                      <input
+                        type="email"
+                        id="resetEmail"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        className="block w-full pl-11 pr-4 py-3 border border-[var(--border-medium)] rounded-xl bg-[var(--bg-canvas)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all font-sans"
+                        placeholder="your@email.com"
+                        required
+                        disabled={resetStatus === 'loading' || resetStatus === 'success'}
+                      />
                     </div>
-                  ) : (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5" htmlFor="forgotOtp">
-                          รหัส OTP (6 หลัก)
-                        </label>
-                        <div className="relative group">
-                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
-                            <Lock className="w-5 h-5" />
-                          </div>
-                          <input
-                            type="text"
-                            id="forgotOtp"
-                            value={forgotOtp}
-                            onChange={(e) => setForgotOtp(e.target.value)}
-                            maxLength={6}
-                            className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all tracking-widest"
-                            placeholder="123456"
-                            required
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5" htmlFor="forgotNewPassword">
-                          รหัสผ่านใหม่
-                        </label>
-                        <div className="relative group">
-                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
-                            <Lock className="w-5 h-5" />
-                          </div>
-                          <input
-                            type={showPassword ? "text" : "password"}
-                            id="forgotNewPassword"
-                            value={forgotNewPassword}
-                            onChange={(e) => setForgotNewPassword(e.target.value)}
-                            className="block w-full pl-10 pr-10 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
-                            placeholder="รหัสผ่านใหม่ของคุณ"
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-                          >
-                            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  <div className="pt-1 space-y-3">
-                    <button
-                      type="submit"
-                      disabled={isForgotLoading}
-                      className="w-full flex justify-center items-center gap-2 py-2.5 px-4 border border-transparent rounded-xl text-sm font-medium text-white bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-color)] focus:ring-offset-[var(--bg-surface)] transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-                    >
-                      {isForgotLoading ? (
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      ) : (
-                        otpSent ? 'รีเซ็ตรหัสผ่าน' : 'ส่งคำร้อง'
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsForgotPassword(false);
-                        setOtpSent(false);
-                        setAlert(null);
-                      }}
-                      className="w-full flex justify-center items-center gap-2 py-2.5 px-4 rounded-xl text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-overlay)] transition-colors"
-                    >
-                      กลับไปหน้าเข้าสู่ระบบ
-                    </button>
+                  </div>
+                  
+                  <div className="pt-2 flex flex-col gap-3">
+                    {resetStatus === 'success' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsForgotPassword(false);
+                          setAlert(null);
+                          setResetStatus('idle');
+                          setResetEmail('');
+                        }}
+                        className="w-full flex justify-center items-center gap-2 py-3 px-4 border border-[var(--border-medium)] rounded-xl text-sm font-bold text-[var(--text-primary)] bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] transition-colors font-sans"
+                      >
+                        กลับไปหน้าเข้าสู่ระบบ
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="submit"
+                          disabled={resetStatus === 'loading'}
+                          className="w-full flex justify-center items-center gap-2 py-3 px-4 border border-transparent rounded-xl text-sm font-bold text-white bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-color)] focus:ring-offset-[var(--bg-surface)] transition-all disabled:opacity-70 disabled:cursor-not-allowed font-sans"
+                        >
+                          {resetStatus === 'loading' ? (
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <>
+                              <Send className="w-5 h-5" />
+                              ส่งลิงก์รีเซ็ตรหัสผ่าน
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsForgotPassword(false);
+                            setAlert(null);
+                          }}
+                          className="w-full flex justify-center items-center gap-2 py-3 px-4 rounded-xl text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors font-sans"
+                        >
+                          <ArrowLeft className="w-4 h-4" />
+                          กลับ
+                        </button>
+                      </>
+                    )}
                   </div>
                 </form>
               ) : (
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-5 animate-fade-in">
                   <div>
-                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5" htmlFor="username">
-                      ชื่อผู้ใช้งาน
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5 font-sans transition-colors" htmlFor="username">
+                      ชื่อผู้ใช้งาน (Username)
                     </label>
                     <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
                         <User className="w-5 h-5" />
                       </div>
                       <input
@@ -422,7 +276,7 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
                         id="username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        className="block w-full pl-10 pr-3 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
+                        className="block w-full pl-11 pr-4 py-3 border border-[var(--border-medium)] rounded-xl bg-[var(--bg-canvas)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all font-sans"
                         placeholder="กรอกชื่อผู้ใช้งาน"
                         autoComplete="username"
                         required
@@ -431,11 +285,11 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5" htmlFor="password">
-                      รหัสผ่าน
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5 font-sans transition-colors" htmlFor="password">
+                      รหัสผ่าน (Password)
                     </label>
                     <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
                         <Lock className="w-5 h-5" />
                       </div>
                       <input
@@ -443,30 +297,33 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
                         id="password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="block w-full pl-10 pr-10 py-2.5 border border-[var(--border-light)] rounded-xl bg-[var(--bg-elevated)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all"
-                        placeholder="กรอกรหัสผ่าน"
+                        className="block w-full pl-11 pr-11 py-3 border border-[var(--border-medium)] rounded-xl bg-[var(--bg-canvas)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all font-sans"
+                        placeholder="••••••••"
                         autoComplete="current-password"
                         required
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                        className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-[var(--text-muted)] hover:text-[var(--primary-color)] transition-colors"
                       >
                         {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                       </button>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={remember}
-                        onChange={(e) => setRemember(e.target.checked)}
-                        className="w-4 h-4 rounded border-[var(--border-medium)] bg-[var(--bg-overlay)] text-[var(--primary-color)] focus:ring-[var(--primary-color)] focus:ring-offset-0"
-                      />
-                      <span className="text-sm text-[var(--text-secondary)]">จดจำฉันในระบบ</span>
+                  <div className="flex items-center justify-between pt-1">
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <div className="relative flex items-center justify-center w-5 h-5">
+                        <input
+                          type="checkbox"
+                          checked={remember}
+                          onChange={(e) => setRemember(e.target.checked)}
+                          className="peer appearance-none w-5 h-5 border border-[var(--border-medium)] rounded bg-[var(--bg-canvas)] checked:bg-[var(--primary-color)] checked:border-[var(--primary-color)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/50 focus:ring-offset-0 transition-all"
+                        />
+                        <ShieldCheck className="absolute w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" />
+                      </div>
+                      <span className="text-sm font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors font-sans">จดจำฉัน</span>
                     </label>
                     <button 
                       type="button"
@@ -474,24 +331,25 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
                         setIsForgotPassword(true);
                         setAlert(null);
                       }} 
-                      className="text-sm font-medium text-[var(--primary-color)] hover:text-[var(--primary-hover)] transition-colors"
+                      className="text-sm font-medium text-[var(--primary-color)] hover:text-[var(--primary-hover)] transition-colors font-sans hover:underline underline-offset-4"
                     >
                       ลืมรหัสผ่าน?
                     </button>
                   </div>
 
-                  <div className="pt-1">
+                  <div className="pt-3">
                     <button
                       type="submit"
                       disabled={isLoading}
-                      className="w-full flex justify-center items-center gap-2 py-2.5 px-4 border border-transparent rounded-xl text-sm font-medium text-white bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-color)] focus:ring-offset-[var(--bg-surface)] transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                      className="w-full flex justify-center items-center gap-2 py-3.5 px-4 border border-transparent rounded-xl text-[15px] font-bold text-white bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary-color)] focus:ring-offset-[var(--bg-surface)] transition-all disabled:opacity-70 disabled:cursor-not-allowed font-sans relative overflow-hidden group"
                     >
+                      <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
                       {isLoading ? (
                         <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       ) : (
                         <>
                           <LogIn className="w-5 h-5" />
-                          เข้าสู่ระบบ
+                          <span>เข้าสู่ระบบ (Login)</span>
                         </>
                       )}
                     </button>
@@ -500,67 +358,37 @@ export default function Login({ onLogin }: { onLogin: (user: any, remember: bool
               )}
             </div>
             
-            <div className="bg-[var(--bg-overlay)]/30 px-6 py-3 border-t border-[var(--border-lighter)] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[var(--text-muted)]">
+            {/* Footer status bar inside card */}
+            <div className="bg-[var(--bg-elevated)]/80 backdrop-blur-xl px-6 py-4 border-t border-[var(--border-light)] flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] font-medium text-[var(--text-secondary)] font-mono transition-colors duration-500">
               <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5" />
+                <div className="flex items-center gap-1.5 bg-[var(--bg-surface)] px-2 py-1 rounded-md border border-[var(--border-light)] shadow-sm">
+                  <Clock className="w-3.5 h-3.5 text-[var(--primary-color)]" />
                   <span>{time}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-green-500/70" />
-                    <span>SECURE</span>
-                  </div>
-                  <span className="text-[var(--border-light)] text-[10px]">|</span>
-                  <div className="flex items-center gap-2" title="Powered by Vite, React & Node.js">
-                    {/* Vite logo */}
-                    <svg className="h-3.5 w-3.5 opacity-60 hover:opacity-100 transition-opacity" viewBox="0 0 256 257" fill="none">
-                      <path d="M128 0L11 202.5h234L128 0z" fill="url(#vite-g1)"/>
-                      <path d="M128 0L64 110h128L128 0z" fill="url(#vite-g2)"/>
-                      <defs>
-                        <linearGradient id="vite-g1" x1="128" y1="0" x2="128" y2="257" gradientUnits="userSpaceOnUse">
-                          <stop stopColor="#BD34FE"/>
-                          <stop offset="1" stopColor="#41B883"/>
-                        </linearGradient>
-                        <linearGradient id="vite-g2" x1="128" y1="0" x2="128" y2="110" gradientUnits="userSpaceOnUse">
-                          <stop stopColor="#FFC517"/>
-                          <stop offset="1" stopColor="#FFE15D"/>
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                    {/* React logo */}
-                    <svg className="h-3.5 w-3.5 opacity-60 hover:opacity-100 transition-opacity animate-[spin_20s_linear_infinite]" viewBox="-11.5 -10.23174 23 20.46348">
-                      <circle cx="0" cy="0" r="2.05" fill="#61dafb"/>
-                      <g stroke="#61dafb" strokeWidth="1" fill="none">
-                        <ellipse rx="11" ry="4.2"/>
-                        <ellipse rx="11" ry="4.2" transform="rotate(60)"/>
-                        <ellipse rx="11" ry="4.2" transform="rotate(120)"/>
-                      </g>
-                    </svg>
-                    {/* Node.js logo */}
-                    <svg className="h-3.5 w-3.5 opacity-60 hover:opacity-100 transition-opacity" viewBox="0 0 256 256" fill="none">
-                      <path d="M128 10L230 69v118l-102 59-102-59V69z" fill="#339933"/>
-                      <path d="M128 10v216l102-59V69z" fill="#66CC33"/>
-                      <path d="M128 128l51-30V69l-51 29V51l34-20H94l34 20v47l-51-29v29l51 30v47l-34 20h68l-34-20z" fill="#FFF"/>
-                    </svg>
-                  </div>
+                <div className="flex items-center gap-1.5 bg-[var(--bg-surface)] px-2 py-1 rounded-md border border-[var(--border-light)] shadow-sm text-[var(--success)]">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>SECURE</span>
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <Server className="w-3.5 h-3.5" />
-                <span>{os}</span>
+                <Server className="w-3.5 h-3.5 opacity-60" />
+                <span className="opacity-80 truncate max-w-[120px] sm:max-w-none">{os}</span>
               </div>
             </div>
           </div>
 
-          <div className="mt-6 text-center text-xs text-[var(--text-muted)] space-y-1.5">
-            <p>{orgName}</p>
-            <div className="flex justify-center gap-4">
-              <span className="opacity-70">{footerText}</span>
-            </div>
+          <div className="mt-8 text-center text-sm font-medium text-[var(--text-secondary)] space-y-2 font-sans transition-colors duration-500">
+            <p className="tracking-wide text-[var(--text-primary)]">{orgName}</p>
+            <p className="text-xs opacity-70">{footerText}</p>
           </div>
         </main>
       </div>
+
+      <style>{`
+        @keyframes shimmer {
+          100% { transform: translateX(100%); }
+        }
+      `}</style>
     </>
   );
 }

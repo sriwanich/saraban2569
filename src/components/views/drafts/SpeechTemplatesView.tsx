@@ -84,7 +84,7 @@ ${extraText ? `<div style="margin-top:10pt;text-indent:3em;text-align:justify;">
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="border-b border-[var(--border-light)] pb-4">
-        <h2 className="text-2xl font-noto-serif-thai font-bold text-[var(--text-primary)]">
+        <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
           คลังคำกล่าวเปิดงานและกล่าวรายงาน (100+ แบบ)
         </h2>
         <p className="text-sm text-[var(--text-secondary)] mt-1">

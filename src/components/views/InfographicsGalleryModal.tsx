@@ -155,7 +155,7 @@ export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose,
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 font-noto-serif-thai">
+              <h2 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 font-sans">
                 คลังผลงาน Infographics ทั้งหมด
               </h2>
               <p className="text-xs text-slate-500">

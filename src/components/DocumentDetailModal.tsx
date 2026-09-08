@@ -557,6 +557,118 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
     </div>
   );
 
+  const renderAttachments = () => {
+    let attachmentList: string[] = [];
+    const rawAtts: any = doc.attachments;
+    if (Array.isArray(rawAtts)) {
+      attachmentList = rawAtts.map((f: any) => typeof f === 'object' && f !== null ? (f.url || f.name || JSON.stringify(f)) : String(f || ''));
+    } else if (typeof rawAtts === 'string' && rawAtts.trim() !== '') {
+      try {
+        const parsed = JSON.parse(rawAtts);
+        if (Array.isArray(parsed)) {
+          attachmentList = parsed.map((f: any) => typeof f === 'object' && f !== null ? (f.url || f.name || JSON.stringify(f)) : String(f || ''));
+        } else {
+          attachmentList = [rawAtts];
+        }
+      } catch (e) {
+        attachmentList = [rawAtts];
+      }
+    }
+
+    return (
+      <div>
+        {attachmentList.length > 0 ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5 text-xs text-[var(--primary-color)] font-medium mb-1">
+              <Paperclip className="w-3.5 h-3.5" />
+              <span>มีไฟล์ Scan / Digital Attachments ({attachmentList.length} ไฟล์):</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {attachmentList.map((fileUrl, idx) => {
+                const safeFileUrl = typeof fileUrl === 'string' ? fileUrl : String(fileUrl || '');
+                const rawName = safeFileUrl.split('/').pop() || safeFileUrl;
+                const nameParts = rawName.split('-');
+                const fileName = nameParts.length > 2 ? nameParts.slice(2).join('-') : rawName;
+                const folderPath = safeFileUrl.includes('/') ? safeFileUrl.substring(0, safeFileUrl.lastIndexOf('/')) : '';
+                return (
+                  <div key={idx} className="flex items-center justify-between bg-[var(--bg-base)] p-2.5 rounded-lg border border-[var(--border-light)] text-xs">
+                    <div className="flex items-center gap-2 truncate max-w-[65%]">
+                      <FileText className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
+                      <div className="truncate">
+                        <div className="font-medium text-[var(--text-primary)] truncate" title={fileName}>{fileName}</div>
+                        <div className="text-[10px] text-[var(--text-muted)] font-mono">{folderPath}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <a
+                        href={`/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          const url = `/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`;
+                          try {
+                            const res = await fetch(url);
+                            if (!res.ok) throw new Error('Network error');
+                            const blob = await res.blob();
+                            const blobUrl = window.URL.createObjectURL(blob);
+                            window.open(blobUrl, '_blank');
+                            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+                          } catch(err) {
+                            window.open(url, '_blank');
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded bg-[var(--primary-color)]/10 text-[var(--primary-color)] hover:bg-[var(--primary-color)] hover:text-white transition-colors flex items-center gap-1 font-medium text-[11px]"
+                      >
+                        <ExternalLink className="w-3 h-3" /> เปิดดูไฟล์
+                      </a>
+                      <a
+                        href={`/api/files/download?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          const url = `/api/files/download?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`;
+                          try {
+                            const res = await fetch(url);
+                            if (!res.ok) throw new Error('Network error');
+                            const blob = await res.blob();
+                            const blobUrl = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = blobUrl;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            window.URL.revokeObjectURL(blobUrl);
+                          } catch(err) {
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded bg-[var(--border-lighter)] text-[var(--text-secondary)] hover:bg-[var(--border-medium)] transition-colors flex items-center gap-1 font-medium text-[11px]"
+                      >
+                        <Download className="w-3 h-3" /> ดาวน์โหลด
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-[var(--text-muted)] italic text-xs py-1">
+            <Paperclip className="w-3.5 h-3.5 text-[var(--text-muted)]" /> ไม่พบไฟล์แนบในระบบ
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const formattedRegDate = () => {
     return formatThaiDateFull(doc.registerDate);
   };
@@ -579,7 +691,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--border-light)] bg-gradient-to-b from-white/[0.02] to-transparent shrink-0">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-lg sm:text-xl font-noto-serif-thai font-semibold text-[var(--text-primary)]">รายละเอียดหนังสือราชการ</h2>
+              <h2 className="text-lg sm:text-xl font-sans font-semibold text-[var(--text-primary)]">รายละเอียดหนังสือราชการ</h2>
               <span className={`px-2 py-0.5 text-xs font-mono font-medium rounded-full border ${getStatusBadgeColor(doc.status || 'ลงทะเบียน')}`}>
                 {doc.status || 'ลงทะเบียน'}
               </span>
@@ -592,7 +704,10 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             {(user?.role === 'admin' || user?.role === 'moderator' || !user?.role) && (
               <button 
                 onClick={() => {
-                  setSelectedDepts(doc.forwardedTo ? doc.forwardedTo.split(',') : (doc.department ? [doc.department] : []));
+                  const fDepts = Array.isArray(doc.forwardedTo) 
+                    ? doc.forwardedTo 
+                    : (typeof doc.forwardedTo === 'string' && doc.forwardedTo.trim() !== '' ? doc.forwardedTo.split(',') : (doc.department ? [doc.department] : []));
+                  setSelectedDepts(fDepts);
                   setForwardNote(doc.forwardNote || '');
                   setIsForwardModalOpen(true);
                 }}
@@ -906,14 +1021,34 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
               <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pb-12 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
 
             <div className="bg-[var(--bg-overlay)] rounded-xl border border-[var(--border-light)] p-4 sm:p-6 shadow-inner space-y-4">
-              <div className="border-b border-[var(--border-lighter)] pb-3 flex justify-between items-center">
+              <div className="border-b border-[var(--border-lighter)] pb-3 flex justify-between items-center flex-wrap gap-2">
                 <span className="text-xs font-mono text-[var(--text-muted)]">สารบรรณสารสนเทศ</span>
-                <span className="text-xs font-mono font-medium text-[var(--primary-color)] bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 px-2 py-0.5 rounded">
-                  {doc.type === 'admin' ? 'ทะเบียนธุรการ' : `เลขทะเบียน: ${doc.receiveNumber || '-'}`}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    (doc.isCentral === 0 || Number(doc.isCentral) === 0)
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                      : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                  }`}>
+                    {(doc.isCentral === 0 || Number(doc.isCentral) === 0) ? (doc.department || 'ฝ่ายปฏิบัติ') : 'สารบรรณกลาง'}
+                  </span>
+                  <span className="text-xs font-mono font-medium text-[var(--primary-color)] bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 px-2 py-0.5 rounded">
+                    {doc.type === 'admin' ? 'ทะเบียนธุรการ' : `เลขทะเบียน: ${doc.receiveNumber || '-'}`}
+                  </span>
+                </div>
               </div>
               
               <div className="flex flex-col divide-y divide-[var(--border-lighter)]/40">
+                {detailRow('ระดับทะเบียน :', (
+                  (doc.isCentral === 0 || Number(doc.isCentral) === 0) ? (
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      สมุดทะเบียนหน่วยงาน {(doc.department || 'ฝ่ายปฏิบัติ')}
+                    </span>
+                  ) : (
+                    <span className="font-semibold text-blue-600 dark:text-blue-400">
+                      สมุดทะเบียนสารบรรณกลาง
+                    </span>
+                  )
+                ))}
                 {detailRow('แฟ้มจัดเก็บดิจิทัล :', <span className="font-medium text-[#cfa851]">{getFolderLabel()}</span>)}
                 {detailRow('ปีงบประมาณ :', doc.year)}
                 {detailRow('วันลงทะเบียนในระบบ :', formattedRegDate())}
@@ -961,14 +1096,20 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                     {doc.assignee && <div className="text-xs text-[var(--text-secondary)] mt-1 font-mono">ผู้ดูแล/ผู้รับผิดชอบ: {doc.assignee}</div>}
                   </div>
                 ))}
-                {doc.forwardedTo && detailRow('ส่งต่อให้ฝ่ายงาน :', (
+                {Boolean(doc.forwardedTo) && detailRow('ส่งต่อให้ฝ่ายงาน :', (
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      {doc.forwardedTo.split(',').map((d, idx) => (
-                        <span key={idx} className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/30">
-                          {d.trim()}
-                        </span>
-                      ))}
+                      {(Array.isArray(doc.forwardedTo) 
+                        ? doc.forwardedTo 
+                        : (typeof doc.forwardedTo === 'string' ? doc.forwardedTo.split(',') : [])
+                      ).map((d: any, idx: number) => {
+                        const deptName = typeof d === 'string' ? d.trim() : String(d || '');
+                        return (
+                          <span key={idx} className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                            {deptName}
+                          </span>
+                        );
+                      })}
                     </div>
                     {doc.forwardNote && (
                       <p className="text-xs text-[var(--text-secondary)] font-mono bg-purple-500/5 p-2 rounded border border-purple-500/10">
@@ -1006,97 +1147,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                   </div>
                 ))}
 
-                {detailRow('ไฟล์แนบดิจิทัล :', (
-                  <div>
-                    {doc.attachments && doc.attachments.length > 0 ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-xs text-[var(--primary-color)] font-medium mb-1">
-                          <Paperclip className="w-3.5 h-3.5" />
-                          <span>มีไฟล์ Scan / Digital Attachments ({doc.attachments.length} ไฟล์):</span>
-                        </div>
-                        <div className="grid grid-cols-1 gap-2">
-                          {doc.attachments.map((fileUrl, idx) => {
-                            const rawName = fileUrl.split('/').pop() || fileUrl;
-                            const nameParts = rawName.split('-');
-                            const fileName = nameParts.length > 2 ? nameParts.slice(2).join('-') : rawName;
-                            const folderPath = fileUrl.substring(0, fileUrl.lastIndexOf('/'));
-                            return (
-                              <div key={idx} className="flex items-center justify-between bg-[var(--bg-base)] p-2.5 rounded-lg border border-[var(--border-light)] text-xs">
-                                <div className="flex items-center gap-2 truncate max-w-[65%]">
-                                  <FileText className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
-                                  <div className="truncate">
-                                    <div className="font-medium text-[var(--text-primary)] truncate" title={fileName}>{fileName}</div>
-                                    <div className="text-[10px] text-[var(--text-muted)] font-mono">{folderPath}</div>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  <a
-                                    href={`/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={async (e) => {
-                                      e.preventDefault();
-                                      const url = `/api/files/view?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`;
-                                      try {
-                                        const res = await fetch(url);
-                                        if (!res.ok) throw new Error('Network error');
-                                        const blob = await res.blob();
-                                        const blobUrl = window.URL.createObjectURL(blob);
-                                        window.open(blobUrl, '_blank');
-                                        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
-                                      } catch(err) {
-                                        window.open(url, '_blank');
-                                      }
-                                    }}
-                                    className="px-2.5 py-1 rounded bg-[var(--primary-color)]/10 text-[var(--primary-color)] hover:bg-[var(--primary-color)] hover:text-white transition-colors flex items-center gap-1 font-medium text-[11px]"
-                                  >
-                                    <ExternalLink className="w-3 h-3" /> เปิดดูไฟล์
-                                  </a>
-                                  <a
-                                    href={`/api/files/download?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={async (e) => {
-                                      e.preventDefault();
-                                      const url = `/api/files/download?url=${encodeURIComponent(fileUrl)}&username=${encodeURIComponent(user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน')}`;
-                                      try {
-                                        const res = await fetch(url);
-                                        if (!res.ok) throw new Error('Network error');
-                                        const blob = await res.blob();
-                                        const blobUrl = window.URL.createObjectURL(blob);
-                                        const a = document.createElement('a');
-                                        a.href = blobUrl;
-                                        a.download = fileName;
-                                        document.body.appendChild(a);
-                                        a.click();
-                                        document.body.removeChild(a);
-                                        window.URL.revokeObjectURL(blobUrl);
-                                      } catch(err) {
-                                        const a = document.createElement('a');
-                                        a.href = url;
-                                        a.download = fileName;
-                                        document.body.appendChild(a);
-                                        a.click();
-                                        document.body.removeChild(a);
-                                      }
-                                    }}
-                                    className="px-2.5 py-1 rounded bg-[var(--border-lighter)] text-[var(--text-secondary)] hover:bg-[var(--border-medium)] transition-colors flex items-center gap-1 font-medium text-[11px]"
-                                  >
-                                    <Download className="w-3 h-3" /> ดาวน์โหลด
-                                  </a>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-[var(--text-muted)] italic text-xs py-1">
-                        <Paperclip className="w-3.5 h-3.5 text-[var(--text-muted)]" /> ไม่พบไฟล์แนบในระบบ
-                      </div>
-                    )}
-                  </div>
-                ))}
+                {detailRow('ไฟล์แนบดิจิทัล :', renderAttachments())}
 
                 {detailRow('ลายมือชื่อดิจิทัล (ETDA) :', (
                   <div className="space-y-4 w-full">
@@ -1359,7 +1410,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           <div className={`w-full md:w-[380px] shrink-0 min-h-0 h-full max-h-full bg-[var(--bg-elevated)]/30 overflow-y-auto p-4 sm:p-6 pb-12 flex flex-col justify-between border-t md:border-t-0 custom-scrollbar ${activeTab === 'details' ? 'hidden md:block' : ''}`}>
             <div className="space-y-5 shrink-0">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--text-primary)] font-noto-serif-thai border-b border-[var(--border-light)] pb-2 mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)] font-sans border-b border-[var(--border-light)] pb-2 mb-3 flex items-center justify-between">
                   <span>เส้นทางเดินหนังสือและการติดตามสถานะ</span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-[var(--primary-color)]">
                     {trackingLogs.length} รายการ
@@ -1568,7 +1619,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-0 sm:p-4 animate-fade-in">
           <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] sm:rounded-2xl rounded-none w-full max-w-lg h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-purple-500/10">
-              <h3 className="font-noto-serif-thai font-semibold text-base sm:text-lg text-purple-300 flex items-center gap-2">
+              <h3 className="font-sans font-semibold text-base sm:text-lg text-purple-300 flex items-center gap-2">
                 <Send className="w-5 h-5 text-purple-400" /> ส่งต่อหนังสือให้ฝ่าย / กลุ่มงาน
               </h3>
               <button 

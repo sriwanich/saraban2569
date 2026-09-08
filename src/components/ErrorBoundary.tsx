@@ -91,7 +91,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   ดูรายละเอียดข้อผิดพลาด (โหมดพัฒนา)
                 </summary>
                 <div className="mt-2 p-3 bg-red-950/30 border border-red-500/20 rounded-lg text-xs font-mono text-red-400 overflow-x-auto max-h-40">
-                  {this.state.error.toString()}
+                  {String(this.state.error || '')}
                   {this.state.errorInfo?.componentStack}
                 </div>
               </details>
