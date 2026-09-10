@@ -3,6 +3,7 @@ import {
   X, Image as ImageIcon, UploadCloud, Search, RefreshCw, 
   Check, Folder, HardDrive, Calendar, ArrowDownToLine, Sparkles, Filter, Trash2
 } from 'lucide-react';
+import { useConfirm } from '../../context/ConfirmContext';
 
 export interface UploadedImageItem {
   id: string;
@@ -27,6 +28,7 @@ export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryMod
   onUploadNew,
   currentUser
 }) => {
+  const { confirm } = useConfirm();
   const [images, setImages] = useState<UploadedImageItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,7 +59,14 @@ export const InfographicsImageGalleryModal: React.FC<InfographicsImageGalleryMod
 
   const handleDeleteImage = async (img: UploadedImageItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`ยืนยันการลบรูปภาพ "${img.originalName}" หรือไม่?\n(ลบแล้วไม่สามารถกู้คืนได้)`)) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบรูปภาพ',
+      message: `คุณต้องการลบรูปภาพ "${img.originalName}" ใช่หรือไม่? ลบแล้วไม่สามารถกู้คืนได้`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     
     setIsDeleting(true);
     try {

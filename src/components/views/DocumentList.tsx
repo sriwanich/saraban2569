@@ -48,6 +48,9 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
       .catch(() => {});
   }, []);
 
+  // Privileged check: only admin and moderator can see Central Saraban documents
+  const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
+
   // Filter docs
   const filteredDocs = documents.filter(doc => {
     const matchesSearch = 
@@ -60,7 +63,14 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
     const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
 
     const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
+
+    // Regular users MUST NOT see Central Saraban documents
+    if (!isCentralPrivileged && isCentralDoc) {
+      return false;
+    }
+
     const matchesScope = 
+      !isCentralPrivileged ? true :
       scopeFilter === 'all' ? true :
       scopeFilter === 'central' ? isCentralDoc :
       !isCentralDoc;
@@ -398,45 +408,54 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
 
       {/* Registry Level Tabs (สารบรรณกลาง VS ฝ่าย/กลุ่มงาน) */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-2 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setScopeFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              scopeFilter === 'all'
-                ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm border border-[var(--border-light)] font-bold'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
-            }`}
-          >
-            สมุดทะเบียนทั้งหมด ({documents.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setScopeFilter('central')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-              scopeFilter === 'central'
-                ? 'bg-blue-600 text-white shadow-sm font-bold'
-                : 'text-[var(--text-secondary)] hover:text-blue-600 hover:bg-blue-500/10'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${scopeFilter === 'central' ? 'bg-white' : 'bg-blue-500'}`}></span>
-            สารบรรณกลาง ({documents.filter(d => !(d.isCentral === 0 || Number(d.isCentral) === 0)).length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setScopeFilter('department')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-              scopeFilter === 'department'
-                ? 'bg-emerald-600 text-white shadow-sm font-bold'
-                : 'text-[var(--text-secondary)] hover:text-emerald-600 hover:bg-emerald-500/10'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${scopeFilter === 'department' ? 'bg-white' : 'bg-emerald-500'}`}></span>
-            ฝ่าย / กลุ่มงาน ({documents.filter(d => (d.isCentral === 0 || Number(d.isCentral) === 0)).length})
-          </button>
-        </div>
+        {isCentralPrivileged ? (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setScopeFilter('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                scopeFilter === 'all'
+                  ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm border border-[var(--border-light)] font-bold'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
+              }`}
+            >
+              สมุดทะเบียนทั้งหมด ({documents.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setScopeFilter('central')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                scopeFilter === 'central'
+                  ? 'bg-blue-600 text-white shadow-sm font-bold'
+                  : 'text-[var(--text-secondary)] hover:text-blue-600 hover:bg-blue-500/10'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${scopeFilter === 'central' ? 'bg-white' : 'bg-blue-500'}`}></span>
+              สารบรรณกลาง ({documents.filter(d => !(d.isCentral === 0 || Number(d.isCentral) === 0)).length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setScopeFilter('department')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                scopeFilter === 'department'
+                  ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                  : 'text-[var(--text-secondary)] hover:text-emerald-600 hover:bg-emerald-500/10'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${scopeFilter === 'department' ? 'bg-white' : 'bg-emerald-500'}`}></span>
+              ฝ่าย / กลุ่มงาน ({documents.filter(d => (d.isCentral === 0 || Number(d.isCentral) === 0)).length})
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>สมุดทะเบียน: {user?.department || 'ฝ่ายปฏิบัติ'} ({filteredDocs.length} รายการ)</span>
+            </div>
+          </div>
+        )}
 
-        {scopeFilter === 'department' && availableDepartments.length > 0 && (
+        {((isCentralPrivileged && scopeFilter === 'department') || !isCentralPrivileged) && availableDepartments.length > 0 && (
           <div className="flex items-center gap-2 pl-2">
             <span className="text-xs text-[var(--text-muted)] font-medium">สังกัดฝ่าย:</span>
             <select

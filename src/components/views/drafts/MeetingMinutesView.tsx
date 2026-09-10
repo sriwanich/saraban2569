@@ -4,12 +4,14 @@ import {
   Search, X, Calendar, Clock, MapPin, UserCheck, UserX, FileText
 } from 'lucide-react';
 import { MeetingItem, downloadAsDoc, thDateFull, toThaiNumeral, getLogoHTML } from './draftData';
+import { useConfirm } from '../../../context/ConfirmContext';
 
 interface Props {
   user: any;
 }
 
 export default function MeetingMinutesView({ user }: Props) {
+  const { confirm } = useConfirm();
   const [activeTab, setActiveTab] = useState<'list' | 'form'>('list');
 
   // Form State
@@ -171,7 +173,16 @@ ${agendas.map(ag => `<div style="margin-[12pt 0 6pt];">
 </div>`;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการบันทึกรายงานการประชุม',
+      message: `คุณต้องการบันทึกรายงานการประชุม "${title}" ครั้งที่ ${meetingNo} ใช่หรือไม่?`,
+      type: 'edit',
+      confirmText: 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     const newItem: MeetingItem = {
       id: Date.now(),
       no: meetingNo,
@@ -206,9 +217,17 @@ ${agendas.map(ag => `<div style="margin-[12pt 0 6pt];">
     setActiveTab('list');
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = async (id: number) => {
     const item = meetingsHistory.find(m => m.id === id);
-    if (!confirm('ต้องการลบรายงานการประชุมฉบับนี้ใช่หรือไม่?')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบรายงานการประชุม',
+      message: `ต้องการลบรายงานการประชุม "${item?.title || ''}" ฉบับนี้ใช่หรือไม่?`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     const userNameToPass = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' : 'ผู้ใช้งาน';
     const updated = meetingsHistory.filter(m => m.id !== id);
     setMeetingsHistory(updated);

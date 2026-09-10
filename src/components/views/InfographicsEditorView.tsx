@@ -49,12 +49,14 @@ import {
   loadCanvaTemplate,
   generateFullAILegend
 } from './InfographicsCanvaKit';
+import { useConfirm } from '../../context/ConfirmContext';
 
 interface InfographicsEditorViewProps {
   user: any;
 }
 
 export default function InfographicsEditorView({ user }: InfographicsEditorViewProps) {
+  const { confirm } = useConfirm();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fabricLoaded, setFabricLoaded] = useState(false);
   const [fabricError, setFabricError] = useState<string | null>(null);
@@ -2999,31 +3001,45 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
     }
   };
   
-  const handleNewProject = () => {
+  const handleNewProject = async () => {
     if (!canvas) return;
-    if (confirm('คุณต้องการสร้างกระดานแผ่นงานใหม่ใช่หรือไม่? (โปรดตรวจสอบว่าได้บันทึกงานปัจจุบันแล้ว)')) {
-      setCurrentProjectId(null);
-      setProjectName('My Infographic');
-      setBackgroundColor('#ffffff');
-      canvas.clear();
-      canvas.backgroundColor = '#ffffff';
-      canvas.requestRenderAll();
-      sessionStorage.removeItem(SESSION_STORAGE_KEY);
-      saveHistory();
-      setSaveToast({ message: 'สร้างกระดานแผ่นงานใหม่ (พื้นหลังสีขาว Default) เรียบร้อยแล้ว', type: 'success' });
-      setTimeout(() => setSaveToast(null), 3000);
-    }
+    const confirmed = await confirm({
+      title: 'ยืนยันการสร้างกระดานแผ่นงานใหม่',
+      message: 'คุณต้องการสร้างกระดานแผ่นงานใหม่ใช่หรือไม่? (โปรดตรวจสอบว่าได้บันทึกงานปัจจุบันแล้ว)',
+      type: 'warning',
+      confirmText: 'ยืนยันสร้างกระดานใหม่',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    setCurrentProjectId(null);
+    setProjectName('My Infographic');
+    setBackgroundColor('#ffffff');
+    canvas.clear();
+    canvas.backgroundColor = '#ffffff';
+    canvas.requestRenderAll();
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    saveHistory();
+    setSaveToast({ message: 'สร้างกระดานแผ่นงานใหม่ (พื้นหลังสีขาว Default) เรียบร้อยแล้ว', type: 'success' });
+    setTimeout(() => setSaveToast(null), 3000);
   };
 
-  const clearCanvas = () => {
+  const clearCanvas = async () => {
     if (!canvas) return;
-    if (confirm('คุณต้องการล้างหน้ากระดานทั้งหมดใช่หรือไม่?')) {
-      canvas.clear();
-      setBackgroundColor('#ffffff');
-      canvas.backgroundColor = '#ffffff';
-      canvas.requestRenderAll();
-      saveHistory(); // This will trigger persistence
-    }
+    const confirmed = await confirm({
+      title: 'ยืนยันการล้างหน้ากระดานทั้งหมด',
+      message: 'คุณต้องการล้างวัตถุทั้งหมดบนหน้ากระดานใช่หรือไม่? การกระทำนี้จะลบองค์ประกอบทั้งหมดบนผืนผ้าใบ',
+      type: 'delete',
+      confirmText: 'ยืนยันการล้าง',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    canvas.clear();
+    setBackgroundColor('#ffffff');
+    canvas.backgroundColor = '#ffffff';
+    canvas.requestRenderAll();
+    saveHistory(); // This will trigger persistence
   };
 
   // =========================================================

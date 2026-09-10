@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+    <defs>
+      <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#1e3a8a" />
+        <stop offset="50%" stop-color="#1e40af" />
+        <stop offset="100%" stop-color="#0f172a" />
+      </linearGradient>
+      <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#fbbf24" />
+        <stop offset="100%" stop-color="#d97706" />
+      </linearGradient>
+      <linearGradient id="docGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#ffffff" />
+        <stop offset="100%" stop-color="#f1f5f9" />
+      </linearGradient>
+      <filter id="dropShadow" x="-10%" y="-10%" width="120%" height="130%">
+        <feDropShadow dx="0" dy="10.24" stdDeviation="10.24" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+
+    <!-- Background -->
+    <rect width="512" height="512" rx="112.64" fill="url(#bgGrad)" />
+
+    <!-- Outer Decorative Border for non-maskable -->
+    <rect x="20.48" y="20.48" width="471.04" height="471.04" rx="92.16" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="7.68" />
+
+    <g transform="translate(256, 256)">
+      <!-- Main Document Icon -->
+      <g filter="url(#dropShadow)" transform="translate(0, -8.6016)">
+        <!-- Back document page -->
+        <rect x="-137.6256" y="-163.4304" width="232.2432" height="309.6576" rx="25.804799999999997" fill="#93c5fd" opacity="0.6" transform="rotate(-6)" />
+        
+        <!-- Front document page -->
+        <rect x="-120.42240000000001" y="-154.8288" width="240.84480000000002" height="318.25919999999996" rx="25.804799999999997" fill="url(#docGrad)" stroke="#cbd5e1" stroke-width="8.6016" />
+        
+        <!-- Header ribbon on document -->
+        <rect x="-103.21919999999999" y="-137.6256" width="206.43839999999997" height="43.008" rx="12.902399999999998" fill="#1e40af" />
+        
+        <!-- Document content lines -->
+        <rect x="-94.6176" y="-68.8128" width="189.2352" height="17.2032" rx="6.451199999999999" fill="#94a3b8" />
+        <rect x="-94.6176" y="-34.4064" width="150.528" height="17.2032" rx="6.451199999999999" fill="#cbd5e1" />
+        <rect x="-94.6176" y="0" width="180.63359999999997" height="17.2032" rx="6.451199999999999" fill="#cbd5e1" />
+        <rect x="-94.6176" y="34.4064" width="120.42240000000001" height="17.2032" rx="6.451199999999999" fill="#cbd5e1" />
+
+        <!-- Gold Official Seal Badge -->
+        <circle cx="60.211200000000005" cy="94.6176" r="64.512" fill="url(#goldGrad)" stroke="#ffffff" stroke-width="10.752" filter="url(#dropShadow)" />
+        <circle cx="60.211200000000005" cy="94.6176" r="47.3088" fill="none" stroke="#ffffff" stroke-width="5.16096" stroke-dasharray="12.902399999999998 8.6016" />
+        <!-- Star in badge -->
+        <polygon points="60.211200000000005,55.9104 70.9632,86.016 98.9184,86.016 77.4144,103.21919999999999 86.016,133.32479999999998 60.211200000000005,116.1216 34.4064,133.32479999999998 43.008,103.21919999999999 21.504,86.016 49.4592,86.016" fill="#ffffff" />
+      </g>
+
+      <!-- Bottom Badge: EDMS Text -->
+      <g transform="translate(0, 163.4304)">
+        <rect x="-150.528" y="-34.4064" width="301.056" height="68.8128" rx="34.4064" fill="#0284c7" stroke="#ffffff" stroke-width="6.451199999999999" />
+        <text x="0" y="15.052800000000001" font-family="system-ui, -apple-system, sans-serif" font-size="38.7072" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="4.3008">SARABAN</text>
+      </g>
+    </g>
+  </svg>

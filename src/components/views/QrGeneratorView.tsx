@@ -10,6 +10,7 @@ import {
   Star, Upload, FileDown, CopyPlus, CheckCheck, Search, Tag, SlidersHorizontal, RotateCcw, Info
 } from 'lucide-react';
 import { DocumentItem } from '../../types';
+import { useConfirm } from '../../context/ConfirmContext';
 
 interface QrGeneratorViewProps {
   user?: any;
@@ -19,6 +20,7 @@ interface QrGeneratorViewProps {
 }
 
 export default function QrGeneratorView({ user, documents = [], initialDocId, onViewDoc }: QrGeneratorViewProps) {
+  const { confirm } = useConfirm();
   // Navigation tabs inside Enterprise QR Studio
   const [activeTab, setActiveTab] = useState<'create' | 'analytics' | 'bulk' | 'templates' | 'sticker' | 'test'>('create');
 
@@ -443,7 +445,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
   // Delete Dynamic QR
   const handleDeleteDynamicQr = async (slug: string) => {
-    if (!confirm('ยืนยันที่จะลบ Dynamic QR และข้อมูลสถิติทั้งหมดใช่หรือไม่? การลบนี้ไม่สามารถกู้คืนได้')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบ Dynamic QR Code',
+      message: 'ยืนยันที่จะลบ Dynamic QR และข้อมูลสถิติทั้งหมดใช่หรือไม่? การลบนี้ไม่สามารถกู้คืนได้',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/qr-generator/dynamic/${slug}`, {
         method: 'DELETE'
@@ -1046,7 +1055,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
   // Overwrite Template Style with Current Canvas Design
   const handleOverwriteTemplateStyle = async (tpl: any) => {
-    if (!confirm(`ยืนยันการบันทึกสไตล์และดีไซน์ปัจจุบันทับลงในแม่แบบ "${tpl.name}" ใช่หรือไม่?`)) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการบันทึกสไตล์ทับแม่แบบ',
+      message: `ยืนยันการบันทึกสไตล์และดีไซน์ปัจจุบันทับลงในแม่แบบ "${tpl.name}" ใช่หรือไม่?`,
+      type: 'edit',
+      confirmText: 'ยืนยันบันทึกทับ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const updatedStyle = {
         fgColor,
@@ -1163,7 +1179,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
   // Delete template
   const handleDeleteTemplate = async (id: string, name?: string) => {
-    if (!confirm(`ยืนยันการลบแม่แบบ "${name || 'นี้'}" ออกจากระบบถาวรหรือไม่?`)) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบแม่แบบ QR Code',
+      message: `ยืนยันการลบแม่แบบ "${name || 'นี้'}" ออกจากระบบถาวรหรือไม่?`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       await fetch(`/api/qr-generator/templates/${id}`, { method: 'DELETE' });
       const updated = savedTemplates.filter((t: any) => t.id !== id);
@@ -1228,7 +1251,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
   // Reset / Restore Official Government Presets
   const handleResetOfficialTemplates = async () => {
-    if (!confirm('ยืนยันที่จะคืนค่าแม่แบบมาตรฐานของทางราชการทั้งหมดใช่หรือไม่?')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการคืนค่าแม่แบบมาตรฐานราชการ',
+      message: 'ยืนยันที่จะคืนค่าแม่แบบมาตรฐานของทางราชการทั้งหมดใช่หรือไม่? การตั้งค่าที่กำหนดเองอาจถูกเขียนทับ',
+      type: 'warning',
+      confirmText: 'ยืนยันคืนค่ามาตรฐาน',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch('/api/qr-generator/templates/reset', { method: 'POST' });
       if (res.ok) {
@@ -1437,28 +1467,31 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     setStampSuccess(false);
 
     try {
-      // Simulate calling doc stamp endpoint
       const response = await fetch(`/api/documents/${selectedDocId}/stamp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           qrCodeImage: generatedDataUrl,
-          stampedBy: user?.username || 'ผู้ดูแลระบบ',
+          stampedBy: user?.username || user?.firstName || 'ผู้ดูแลระบบ',
           positionX: 450,
           positionY: 50
         })
       });
 
-      if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok && data.success) {
         setStampSuccess(true);
-        setTimeout(() => setStampSuccess(false), 3000);
-        showToast('success', `ประทับตรายืนยัน QR ในเอกสาร [${selectedDoc?.docNumber || ' EDMS '}] เรียบร้อยแล้ว!`);
+        setTimeout(() => setStampSuccess(false), 4000);
+        const docLabel = selectedDoc?.docNumber || selectedDoc?.title || 'EDMS';
+        showToast('success', data.message || `ประทับตรายืนยัน QR ในเอกสาร [${docLabel}] เรียบร้อยแล้ว!`);
       } else {
-        showToast('error', 'ไม่สามารถบันทึกตราลงเอกสารได้');
+        const errorMsg = data?.error || 'ไม่สามารถบันทึกตราลงเอกสารได้';
+        showToast('error', errorMsg);
       }
     } catch (err: any) {
       console.error(err);
-      showToast('error', 'เกิดข้อผิดพลาดในการประทับตรา');
+      showToast('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์เพื่อประทับตรา');
     } finally {
       setIsSavingToDoc(false);
     }

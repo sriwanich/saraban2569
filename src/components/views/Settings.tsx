@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark } from 'lucide-react';
+import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark, Sliders, ChevronRight, ChevronDown, Check } from 'lucide-react';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../../utils/featureFlags';
 import CustomNumberingSettings from '../CustomNumberingSettings';
+import { useConfirm } from '../../context/ConfirmContext';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
@@ -12,6 +13,7 @@ interface SettingsProps {
 }
 
 export default function Settings(props: SettingsProps) {
+  const { confirm } = useConfirm();
   const { onSettingsUpdated } = props;
   const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
 
@@ -31,6 +33,7 @@ export default function Settings(props: SettingsProps) {
     }
   }, [props.user?.role, props.hasPermission, activeTab]);
   const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'customNumbering' | 'departments' | 'positions'>('docSettings');
+  const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   
   // Deduplication state
   const [dedupStats, setDedupStats] = useState<any>(null);
@@ -261,13 +264,20 @@ export default function Settings(props: SettingsProps) {
     if (props.user?.role !== 'admin') return;
     const actionText = targetValue === 1 ? 'เปิดใช้งานสิทธิ์ทั้งหมด' : 'ปิดใช้งานสิทธิ์ทั้งหมด';
     const roleName = targetRole === 'admin' ? 'Admin' : targetRole === 'moderator' ? 'Moderator' : 'User';
-    if (!window.confirm(`คุณต้องการ${actionText} สำหรับบทบาท "${roleName}" ใช่หรือไม่?`)) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการเปลี่ยนสิทธิ์การเข้าถึงทั้งหมด',
+      message: `คุณต้องการ${actionText} สำหรับบทบาท "${roleName}" ใช่หรือไม่?`,
+      type: 'warning',
+      confirmText: 'ยืนยันดำเนินการ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
 
     const allKeys = [
       'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
       'admin_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
       'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin',
-      'manage_users', 'system_settings', 'backup_restore', 'audit_logs'
+      'manage_users', 'system_settings', 'backup_restore', 'audit_logs', 'manage_changelog'
     ];
 
     setIsLoadingPermissions(true);
@@ -399,9 +409,15 @@ export default function Settings(props: SettingsProps) {
   };
 
   const handleExecuteDedup = async () => {
-    if (!confirm('ยืนยันการรวมไฟล์ซ้ำทั้งหมดในเซิร์ฟเวอร์? ระบบจะรวมไฟล์ซ้ำ และสร้าง Pointer เชื่อมโยงไปยังไฟล์ต้นฉบับเพื่อประหยัดพื้นที่คลาวด์')) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: 'ยืนยันการรวมไฟล์ซ้ำบนระบบคลาวด์',
+      message: 'ยืนยันการรวมไฟล์ซ้ำทั้งหมดในเซิร์ฟเวอร์? ระบบจะรวมไฟล์ซ้ำ และสร้าง Pointer เชื่อมโยงไปยังไฟล์ต้นฉบับเพื่อประหยัดพื้นที่คลาวด์',
+      type: 'warning',
+      confirmText: 'ยืนยันการรวมไฟล์',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsExecutingDedup(true);
     setDedupMsg(null);
     try {
@@ -791,6 +807,15 @@ export default function Settings(props: SettingsProps) {
   const handleAddDeptSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDeptData.name || !newDeptData.name.trim()) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการเพิ่มกลุ่มงาน/ฝ่ายงาน',
+      message: `คุณต้องการเพิ่มแผนก/กลุ่มงาน "${newDeptData.name.trim()}" ใช่หรือไม่?`,
+      type: 'info',
+      confirmText: 'ยืนยันการเพิ่ม',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsAddingDept(true);
     try {
       const res = await fetch('/api/departments', {
@@ -862,6 +887,15 @@ export default function Settings(props: SettingsProps) {
   const handleAddPosSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPosData.name || !newPosData.name.trim()) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการเพิ่มตำแหน่งงาน',
+      message: `คุณต้องการเพิ่มตำแหน่งงาน "${newPosData.name.trim()}" ใช่หรือไม่?`,
+      type: 'info',
+      confirmText: 'ยืนยันการเพิ่ม',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsAddingPos(true);
     try {
       const res = await fetch('/api/positions', {
@@ -937,6 +971,15 @@ export default function Settings(props: SettingsProps) {
       alert('กรุณากรอกข้อมูล ชื่อผู้ใช้, รหัสผ่าน และชื่อเจ้าหน้าที่ ให้ครบถ้วน');
       return;
     }
+
+    const confirmed = await confirm({
+      title: 'ยืนยันการเพิ่มเจ้าหน้าที่ใหม่',
+      message: `คุณต้องการบันทึกข้อมูลเจ้าหน้าที่ "${newUser.firstName} ${newUser.lastName || ''}" (ชื่อผู้ใช้: ${newUser.username}) ใช่หรือไม่?`,
+      type: 'info',
+      confirmText: 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
 
     setIsSubmittingUser(true);
     try {
@@ -1057,97 +1100,259 @@ export default function Settings(props: SettingsProps) {
     }
   };
 
+  const canManageSystem = !props.user?.role || (props.hasPermission ? props.hasPermission('system_settings') : props.user?.role === 'admin');
+  const canManageUsers = !props.user?.role || (props.hasPermission ? props.hasPermission('manage_users') : (props.user?.role === 'admin' || props.user?.role === 'moderator'));
+  const canBackup = !props.user?.role || (props.hasPermission ? props.hasPermission('backup_restore') : props.user?.role === 'admin');
+
+  interface NavItem {
+    id: 'system' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control';
+    label: string;
+    sublabel: string;
+    icon: React.ComponentType<{ className?: string }>;
+    visible: boolean;
+    badge?: string;
+  }
+
+  interface NavCategory {
+    category: string;
+    items: NavItem[];
+  }
+
+  const navCategories: NavCategory[] = [
+    {
+      category: 'ทั่วไป',
+      items: [
+        {
+          id: 'system',
+          label: 'ข้อมูลองค์กร',
+          sublabel: 'ชื่อหน่วยงาน, ตราครุฑ, Gemini AI',
+          icon: SettingsIcon,
+          visible: canManageSystem
+        },
+        {
+          id: 'system_doc',
+          label: 'งานสารบรรณ',
+          sublabel: 'ปี พ.ศ., เลขหนังสือ, แผนก, ตำแหน่ง',
+          icon: Calendar,
+          visible: canManageSystem,
+          badge: departments.length > 0 ? `${departments.length} แผนก` : undefined
+        },
+        {
+          id: 'smtp',
+          label: 'อีเมล (SMTP)',
+          sublabel: 'การส่งแจ้งเตือน และเทมเพลต OTP',
+          icon: Mail,
+          visible: canManageSystem
+        }
+      ]
+    },
+    {
+      category: 'ความปลอดภัย',
+      items: [
+        {
+          id: 'users',
+          label: props.user?.role === 'moderator' ? 'บุคลากรในฝ่าย' : 'ข้อมูลบุคลากร',
+          sublabel: 'รายชื่อเจ้าหน้าที่, สังกัดฝ่าย, รหัสผ่าน',
+          icon: Shield,
+          visible: canManageUsers,
+          badge: users.length > 0 ? `${users.length} คน` : undefined
+        },
+        {
+          id: 'permissions',
+          label: 'สิทธิ์การใช้งาน',
+          sublabel: 'กำหนดสิทธิ์ 4 บทบาท และฟังก์ชัน',
+          icon: ShieldCheck,
+          visible: true
+        }
+      ]
+    },
+    {
+      category: 'พื้นที่จัดเก็บ',
+      items: [
+        {
+          id: 'backup',
+          label: 'สำรองข้อมูล',
+          sublabel: 'Export/Import ฐานข้อมูลและระบบ',
+          icon: Database,
+          visible: canBackup
+        },
+        {
+          id: 'dedup',
+          label: 'จัดการไฟล์ซ้ำ',
+          sublabel: 'สแกนไฟล์ซ้ำเพื่อประหยัดพื้นที่จัดเก็บ',
+          icon: HardDrive,
+          visible: canBackup
+        }
+      ]
+    }
+  ];
+
+  const allVisibleNavItems: NavItem[] = navCategories.flatMap(c => c.items).filter(i => i.visible);
+  const currentTabMeta: NavItem = allVisibleNavItems.find(i => i.id === activeTab) || allVisibleNavItems[0] || {
+    id: 'system',
+    label: 'ตั้งค่าระบบ',
+    sublabel: 'จัดการข้อมูลพื้นฐานของระบบ',
+    icon: SettingsIcon,
+    visible: true
+  };
+  const currentCategory = navCategories.find(c => c.items.some(i => i.id === activeTab))?.category || 'การตั้งค่าระบบ';
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h2 className="text-2xl font-sans font-semibold text-[var(--text-primary)]">ตั้งค่าระบบ</h2>
-          <p className="text-[var(--text-secondary)] mt-1 text-sm">จัดการข้อมูลพื้นฐานและสิทธิ์การใช้งานของระบบ</p>
+    <div className="space-y-6 animate-fade-in pb-12">
+      {/* Executive Header */}
+      <div className="relative overflow-hidden bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl p-5 sm:p-6 shadow-xs">
+        <div className="absolute -right-16 -top-16 w-64 h-64 bg-[var(--primary-color)]/5 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[var(--primary-color)] to-[var(--primary-hover)] text-white flex items-center justify-center shadow-md shrink-0">
+              <Sliders className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-sans font-bold text-[var(--text-primary)] tracking-tight">
+                  ตั้งค่าระบบและผู้ดูแล
+                </h1>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                  <Shield className="w-3 h-3" />
+                  {props.user?.role === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : props.user?.role === 'moderator' ? 'สารบรรณฝ่าย (Moderator)' : 'ผู้ใช้งาน (User)'}
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-[var(--text-secondary)] mt-1">
+                ศูนย์ควบคุมการตั้งค่าระบบ สิทธิ์การเข้าถึง อัตลักษณ์องค์กร และฐานข้อมูลสารบรรณอิเล็กทรอนิกส์
+              </p>
+            </div>
+          </div>
+
+          {/* Quick status chips */}
+          <div className="flex items-center gap-2 flex-wrap pt-2 md:pt-0 border-t md:border-t-0 border-[var(--border-lighter)]">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-xs text-[var(--text-secondary)]">
+              <Calendar className="w-3.5 h-3.5 text-[var(--primary-color)]" />
+              <span className="font-medium">ปี พ.ศ. {currentYear}</span>
+            </div>
+            {users.length > 0 && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-xs text-[var(--text-secondary)]">
+                <UserIcon className="w-3.5 h-3.5 text-[var(--primary-color)]" />
+                <span className="font-medium">{users.length} บุคลากร</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-[var(--border-light)] pb-4 overflow-x-auto scrollbar-none whitespace-nowrap">
-        {(!props.user?.role || (props.hasPermission ? props.hasPermission('system_settings') : props.user?.role === 'admin')) && (
-          <>
-            <button 
-              onClick={() => setActiveTab('system')}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
-                activeTab === 'system' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <SettingsIcon className="w-4 h-4" /> ตั้งค่าข้อมูลพื้นฐาน
-            </button>
-            <button 
-              onClick={() => setActiveTab('smtp')}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
-                activeTab === 'smtp' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <SettingsIcon className="w-4 h-4" /> ตั้งค่า SMTP
-            </button>
-            <button 
-              onClick={() => setActiveTab('system_doc')}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
-                activeTab === 'system_doc' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <Calendar className="w-4 h-4" /> ตั้งค่าระบบสารบรรณ
-            </button>
-          </>
-        )}
+      {/* Main Responsive Layout */}
+      <div className="space-y-6">
+        
+        {/* Horizontal Segmented Navigation Ribbon (All Screens) */}
+        <div className="w-full overflow-x-auto scrollbar-none pb-2 -mb-2">
+          <div className="flex items-end gap-4 min-w-max px-1">
+            {navCategories.map((cat, catIdx) => {
+              const visibleItems = cat.items.filter(i => i.visible);
+              if (visibleItems.length === 0) return null;
+              return (
+                <div key={catIdx} className="flex flex-col gap-2">
+                  <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider pl-2 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--border-light)]"></span>
+                    {cat.category}
+                  </span>
+                  <div className="flex items-center bg-[var(--bg-surface)]/40 p-1 rounded-2xl border border-[var(--border-lighter)] shadow-[inset_0_1px_4px_rgba(0,0,0,0.02)] gap-1">
+                    {visibleItems.map(item => {
+                      const ItemIcon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setActiveTab(item.id)}
+                          className={`group relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 cursor-pointer outline-none select-none ${
+                            isActive
+                              ? 'bg-[var(--bg-overlay)] text-[var(--primary-color)] shadow-sm ring-1 ring-[var(--border-light)]'
+                              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-overlay)]/50'
+                          }`}
+                        >
+                          <ItemIcon className={`w-4 h-4 transition-transform duration-300 ${isActive ? 'text-[var(--primary-color)] scale-110' : 'text-[var(--text-muted)] group-hover:scale-110'}`} />
+                          <span className="tracking-wide">{item.label}</span>
+                          
+                          {/* Badge Overlay */}
+                          {item.badge && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold transition-colors ${
+                              isActive ? 'bg-[var(--primary-color)]/10 text-[var(--primary-color)]' : 'bg-[var(--border-light)] text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
+                            }`}>
+                              {item.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-        {(!props.user?.role || (props.hasPermission ? props.hasPermission('manage_users') : (props.user?.role === 'admin' || props.user?.role === 'moderator'))) && (
-          <button 
-            onClick={() => setActiveTab('users')}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
-              activeTab === 'users' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <Shield className="w-4 h-4" /> {props.user?.role === 'moderator' ? 'จัดการบุคลากรในฝ่าย' : 'จัดการข้อมูลบุคลากร'}
-          </button>
-        )}
+        {/* Content Section */}
+        <section className="space-y-5">
+          {/* Active Section Banner */}
+          <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center shrink-0 border border-[var(--primary-color)]/20">
+                <currentTabMeta.icon className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-[11px] font-bold text-[var(--primary-color)] uppercase tracking-wider">
+                  {currentCategory}
+                </div>
+                <h2 className="text-lg sm:text-xl font-sans font-bold text-[var(--text-primary)]">
+                  {currentTabMeta.label}
+                </h2>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  {currentTabMeta.sublabel}
+                </p>
+              </div>
+            </div>
 
-        <button 
-          onClick={() => setActiveTab('permissions')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
-            activeTab === 'permissions' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" /> กำหนดสิทธิ์ผู้ใช้งาน (Role & Permission)
-        </button>
+            {/* Contextual Quick Actions */}
+            <div className="flex items-center gap-2 shrink-0">
+              {activeTab === 'system' && (
+                <button
+                  type="button"
+                  onClick={saveSystemSettings}
+                  disabled={isSavingSystem}
+                  className="inline-flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition shadow-xs cursor-pointer disabled:opacity-70"
+                >
+                  {isSavingSystem ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>บันทึกข้อมูลพื้นฐาน</span>
+                </button>
+              )}
 
-        {(!props.user?.role || (props.hasPermission ? props.hasPermission('backup_restore') : props.user?.role === 'admin')) && (
-          <>
-            <button 
-              onClick={() => setActiveTab('backup')}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
-                activeTab === 'backup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <Database className="w-4 h-4" /> สำรองและคืนค่าข้อมูล
-            </button>
-            <button 
-              onClick={() => setActiveTab('dedup')}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 cursor-pointer ${
-                activeTab === 'dedup' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <HardDrive className="w-4 h-4" /> จัดการไฟล์ซ้ำ
-            </button>
-          </>
-        )}
-      </div>
+              {activeTab === 'smtp' && (
+                <button
+                  type="button"
+                  onClick={saveSystemSettings}
+                  disabled={isSavingSystem}
+                  className="inline-flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition shadow-xs cursor-pointer disabled:opacity-70"
+                >
+                  {isSavingSystem ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>บันทึกข้อมูล SMTP</span>
+                </button>
+              )}
 
-      {/* Datalist for Position Autocomplete from MySQL / Local DB */}
-      <datalist id="positions-list">
-        {positions.map((p: any) => (
-          <option key={p.id} value={p.name}>{p.description ? `${p.name} - ${p.description}` : p.name}</option>
-        ))}
-      </datalist>
+              {activeTab === 'users' && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(true)}
+                  className="inline-flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition shadow-xs cursor-pointer active:scale-95"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>เพิ่มเจ้าหน้าที่</span>
+                </button>
+              )}
+            </div>
+          </div>
 
-      {/* Content */}
-      <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl p-6 shadow-lg">
+          {/* Active Tab Main Card */}
+          <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl p-4 sm:p-6 lg:p-7 shadow-xs">
         {activeTab === 'system' && (
           <div className="max-w-4xl space-y-6 animate-fade-in">
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
@@ -1583,38 +1788,64 @@ export default function Settings(props: SettingsProps) {
 
         {activeTab === 'system_doc' && (
           <div className="space-y-6 animate-fade-in">
-            <div className="flex gap-2 border-b border-[var(--border-light)] pb-4 overflow-x-auto scrollbar-none whitespace-nowrap">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[var(--bg-canvas)] p-1.5 rounded-xl border border-[var(--border-light)] shadow-2xs">
               <button 
+                type="button"
                 onClick={() => setActiveSystemDocTab('docSettings')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-                  activeSystemDocTab === 'docSettings' ? 'bg-[var(--bg-surface)] border border-[var(--border-medium)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+                className={`px-3 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeSystemDocTab === 'docSettings' 
+                    ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] font-semibold shadow-xs border border-[var(--border-medium)]' 
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-overlay)]'
                 }`}
               >
-                <SettingsIcon className="w-4 h-4" /> ตั้งค่าระบบสารบรรณ
+                <SettingsIcon className="w-4 h-4 shrink-0" />
+                <span className="truncate">ปีการใช้งาน</span>
               </button>
               <button 
+                type="button"
                 onClick={() => setActiveSystemDocTab('customNumbering')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-                  activeSystemDocTab === 'customNumbering' ? 'bg-[var(--bg-surface)] border border-[var(--border-medium)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+                className={`px-3 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeSystemDocTab === 'customNumbering' 
+                    ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] font-semibold shadow-xs border border-[var(--border-medium)]' 
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-overlay)]'
                 }`}
               >
-                <Hash className="w-4 h-4" /> รูปแบบเลขหนังสือและรหัสแฟ้ม
+                <Hash className="w-4 h-4 shrink-0" />
+                <span className="truncate">เลขหนังสือ & แฟ้ม</span>
               </button>
               <button 
+                type="button"
                 onClick={() => setActiveSystemDocTab('departments')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-                  activeSystemDocTab === 'departments' ? 'bg-[var(--bg-surface)] border border-[var(--border-medium)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+                className={`px-3 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeSystemDocTab === 'departments' 
+                    ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] font-semibold shadow-xs border border-[var(--border-medium)]' 
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-overlay)]'
                 }`}
               >
-                <Building2 className="w-4 h-4" /> จัดการข้อมูลแผนก/ฝ่าย
+                <Building2 className="w-4 h-4 shrink-0" />
+                <span className="truncate">แผนก/กลุ่มงาน</span>
+                {departments.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[var(--bg-overlay)] text-[var(--text-muted)] border border-[var(--border-lighter)] hidden md:inline">
+                    {departments.length}
+                  </span>
+                )}
               </button>
               <button 
+                type="button"
                 onClick={() => setActiveSystemDocTab('positions')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shrink-0 ${
-                  activeSystemDocTab === 'positions' ? 'bg-[var(--bg-surface)] border border-[var(--border-medium)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] hover:text-[var(--text-primary)]'
+                className={`px-3 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeSystemDocTab === 'positions' 
+                    ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] font-semibold shadow-xs border border-[var(--border-medium)]' 
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-overlay)]'
                 }`}
               >
-                <Briefcase className="w-4 h-4" /> จัดการตำแหน่ง
+                <Briefcase className="w-4 h-4 shrink-0" />
+                <span className="truncate">ตำแหน่งงาน</span>
+                {positions.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[var(--bg-overlay)] text-[var(--text-muted)] border border-[var(--border-lighter)] hidden md:inline">
+                    {positions.length}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -1937,17 +2168,16 @@ export default function Settings(props: SettingsProps) {
               return (
                 <>
                   {/* Desktop Table Layout (Visible on md screens and up) */}
-                  <div className="hidden md:block overflow-x-auto rounded-xl border border-[var(--border-light)] bg-[var(--bg-surface)] shadow-xs">
+                  <div className="hidden md:block overflow-x-auto rounded-2xl border border-[var(--border-light)] bg-[var(--bg-surface)] shadow-xs">
                     <table className="w-full text-left border-collapse">
                       <thead>
-                        <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-light)] text-[var(--text-secondary)] text-xs font-semibold uppercase tracking-wider">
-                          <th className="py-3 px-4">ชื่อผู้ใช้งาน</th>
-                          <th className="py-3 px-4">อีเมล</th>
-                          <th className="py-3 px-4">ชื่อ-นามสกุล</th>
-                          <th className="py-3 px-4">ตำแหน่ง</th>
-                          <th className="py-3 px-4">ฝ่าย/กลุ่มงาน</th>
-                          <th className="py-3 px-4">สิทธิ์การใช้งาน</th>
-                          <th className="py-3 px-4 text-right">การจัดการ</th>
+                        <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-light)]">
+                          <th className="py-3.5 px-5 text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">บัญชีผู้ใช้</th>
+                          <th className="py-3.5 px-5 text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">ข้อมูลติดต่อ</th>
+                          <th className="py-3.5 px-5 text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">ชื่อ - นามสกุล</th>
+                          <th className="py-3.5 px-5 text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">ฝ่าย & ตำแหน่ง</th>
+                          <th className="py-3.5 px-5 text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">สิทธิ์ระบบ</th>
+                          <th className="py-3.5 px-5 text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider text-right">จัดการ</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1957,46 +2187,44 @@ export default function Settings(props: SettingsProps) {
                           const canEditThisUser = !isCurrentModerator || !isEditingAdmin;
 
                           return (
-                      <tr key={user.id} className={`border-b border-[var(--border-lighter)] hover:bg-[var(--border-lighter)]/50 transition-colors group ${!canEditThisUser ? 'opacity-80' : ''}`}>
-                        <td className="py-3 px-4">
-                          <div className="font-mono text-sm text-[var(--primary-color)] font-semibold">{user.username || '-'}</div>
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                              <Lock className="w-2.5 h-2.5" /> Argon2id
-                            </span>
-                            {user.role === 'admin' && (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/15 text-amber-500 text-[10px] font-bold rounded">
-                                <Crown className="w-2.5 h-2.5" /> Admin
-                              </span>
-                            )}
-                            {user.role === 'moderator' && (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-500/15 text-blue-500 text-[10px] font-bold rounded">
-                                <ShieldCheck className="w-2.5 h-2.5" /> Moderator
-                              </span>
-                            )}
+                      <tr key={user.id} className={`border-b border-[var(--border-lighter)] last:border-b-0 hover:bg-[var(--bg-overlay)] transition-colors group ${!canEditThisUser ? 'opacity-80' : ''}`}>
+                        <td className="py-3.5 px-5 align-top">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--primary-color)]/20 to-[var(--primary-hover)]/20 text-[var(--primary-color)] flex items-center justify-center shrink-0 font-bold text-sm shadow-inner">
+                              {(user.firstName || user.username || 'U').charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="font-sans font-bold text-sm text-[var(--text-primary)]">@{user.username || '-'}</div>
+                              <div className="inline-flex items-center gap-1 mt-1 text-[10px] text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-mono font-medium border border-emerald-500/20">
+                                <Lock className="w-2.5 h-2.5" /> Argon2id
+                              </div>
+                            </div>
                           </div>
                         </td>
-                        <td className="py-3 px-4">
-                          <input 
-                            type="email"
-                            value={user.email || ""}
-                            disabled={!canEditThisUser}
-                            onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, email: e.target.value } : u))}
-                            onBlur={(e) => updateUser(user.id, "email", e.target.value)}
-                            className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                            placeholder="อีเมล"
-                          />
+                        <td className="py-3.5 px-5 align-top">
+                          <div className="relative group/input">
+                            <Mail className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2 group-hover/input:text-[var(--primary-color)] transition-colors" />
+                            <input 
+                              type="email"
+                              value={user.email || ""}
+                              disabled={!canEditThisUser}
+                              onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, email: e.target.value } : u))}
+                              onBlur={(e) => updateUser(user.id, "email", e.target.value)}
+                              className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded-lg pl-8 pr-3 py-1.5 outline-none text-xs text-[var(--text-primary)] transition-all w-full focus:shadow-sm ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                              placeholder="อีเมลติดต่อ"
+                            />
+                          </div>
                         </td>
-                        <td className="py-3 px-4">
-                          <div className="flex gap-1.5">
+                        <td className="py-3.5 px-5 align-top">
+                          <div className="flex flex-col gap-1.5">
                             <input 
                               type="text"
                               value={user.firstName || ''}
                               disabled={!canEditThisUser}
                               onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, firstName: e.target.value } : u))}
                               onBlur={(e) => updateUser(user.id, 'firstName', e.target.value)}
-                              className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-1/2 ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                              placeholder="ชื่อ"
+                              className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded-lg px-2.5 py-1 outline-none text-xs font-medium text-[var(--text-primary)] transition-all w-full focus:shadow-sm ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                              placeholder="ชื่อจริง"
                             />
                             <input 
                               type="text"
@@ -2004,82 +2232,91 @@ export default function Settings(props: SettingsProps) {
                               disabled={!canEditThisUser}
                               onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, lastName: e.target.value } : u))}
                               onBlur={(e) => updateUser(user.id, 'lastName', e.target.value)}
-                              className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded px-2 py-1 outline-none text-[var(--text-primary)] transition-colors w-1/2 ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                              className={`bg-transparent border border-transparent hover:border-[var(--border-medium)] focus:border-[var(--primary-color)] focus:bg-[var(--bg-canvas)] rounded-lg px-2.5 py-1 outline-none text-xs text-[var(--text-secondary)] transition-all w-full focus:shadow-sm ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                               placeholder="นามสกุล"
                             />
                           </div>
                         </td>
-                        <td className="py-3 px-4">
-                          <select 
-                            value={user.position || ''}
-                            disabled={!canEditThisUser}
-                            onChange={(e) => updateUser(user.id, 'position', e.target.value)}
-                            className={`bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                          >
-                            <option value="">-- เลือกตำแหน่ง (ตาราง positions) --</option>
-                            {positions.map((pos: any) => (
-                              <option key={pos.id} value={pos.name}>{pos.name}</option>
-                            ))}
-                            {user.position && !positions.some(p => p.name === user.position) && (
-                              <option value={user.position}>{user.position}</option>
-                            )}
-                          </select>
+                        <td className="py-3.5 px-5 align-top">
+                          <div className="flex flex-col gap-2">
+                            <select 
+                              value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
+                              disabled={!canEditThisUser}
+                              onChange={(e) => updateUser(user.id, 'department', e.target.value)}
+                              className={`bg-transparent hover:bg-[var(--bg-canvas)] border border-transparent hover:border-[var(--border-light)] rounded-lg px-2 py-1 outline-none text-xs font-medium text-[var(--text-primary)] focus:border-[var(--primary-color)] transition-all w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                            >
+                              {departments.length === 0 ? (
+                                <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
+                              ) : (
+                                departments.map((dept: any) => (
+                                  <option key={dept.id} value={dept.name}>{dept.name}</option>
+                                ))
+                              )}
+                            </select>
+                            <select 
+                              value={user.position || ''}
+                              disabled={!canEditThisUser}
+                              onChange={(e) => updateUser(user.id, 'position', e.target.value)}
+                              className={`bg-transparent hover:bg-[var(--bg-canvas)] border border-transparent hover:border-[var(--border-light)] rounded-lg px-2 py-1 outline-none text-[11px] text-[var(--text-secondary)] focus:border-[var(--primary-color)] transition-all w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                            >
+                              <option value="">-- ไม่ระบุตำแหน่ง --</option>
+                              {positions.map((pos: any) => (
+                                <option key={pos.id} value={pos.name}>{pos.name}</option>
+                              ))}
+                              {user.position && !positions.some(p => p.name === user.position) && (
+                                <option value={user.position}>{user.position}</option>
+                              )}
+                            </select>
+                          </div>
                         </td>
-                        <td className="py-3 px-4">
-                          <select 
-                            value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
-                            disabled={!canEditThisUser}
-                            onChange={(e) => updateUser(user.id, 'department', e.target.value)}
-                            className={`bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                          >
-                            {departments.length === 0 ? (
-                              <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
-                            ) : (
-                              departments.map((dept: any) => (
-                                <option key={dept.id} value={dept.name}>{dept.name}</option>
-                              ))
-                            )}
-                          </select>
-                        </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3.5 px-5 align-top">
                           <select 
                             value={user.role || 'user'}
                             disabled={!canEditThisUser}
                             onChange={(e) => updateUser(user.id, 'role', e.target.value)}
-                            className={`bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded px-2 py-1 outline-none text-[var(--text-primary)] text-sm focus:border-[var(--primary-color)] font-medium ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                            className={`bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 outline-none text-xs font-bold ${
+                              user.role === 'admin' ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20' : 
+                              user.role === 'moderator' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/20' : 
+                              'text-[var(--text-primary)]'
+                            } focus:border-[var(--primary-color)] transition-colors ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                           >
-                            <option value="user">ผู้ใช้งานทั่วไป (User)</option>
-                            <option value="moderator">ผู้ตรวจสอบ/เจ้าหน้าที่สารบรรณ (Moderator)</option>
+                            <option value="user">ผู้ใช้งานทั่วไป</option>
+                            <option value="moderator">ผู้ตรวจสอบ/สารบรรณ</option>
                             {(props.user?.role === 'admin' || user.role === 'admin') && (
-                              <option value="admin">ผู้ดูแลระบบ (Admin)</option>
+                              <option value="admin">ผู้ดูแลระบบ</option>
                             )}
                           </select>
                         </td>
-                        <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                        <td className="py-3.5 px-5 text-right align-top">
+                          <div className="flex items-center justify-end gap-1.5 pt-1">
                             {canEditThisUser ? (
                               <>
                                 <button
                                   onClick={() => setResetPassUser(user)}
                                   title="เปลี่ยนรหัสผ่าน (Argon2id)"
-                                  className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-lg transition-colors cursor-pointer"
+                                  className="p-2 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/15 rounded-xl transition-colors cursor-pointer"
                                 >
                                   <Key className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => confirmDeleteUser(user)}
                                   title="ลบข้อมูลเจ้าหน้าที่"
-                                  className="p-1.5 text-[var(--text-secondary)] hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                                  className="p-2 text-[var(--text-secondary)] hover:text-rose-500 hover:bg-rose-500/15 rounded-xl transition-colors cursor-pointer"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </>
                             ) : (
-                              <span className="text-[11px] text-[var(--text-muted)] italic px-2 py-1 bg-[var(--bg-canvas)] rounded border border-[var(--border-lighter)]">
-                                สงวนสิทธิ์สำหรับ Admin
+                              <span className="text-[10px] text-[var(--text-muted)] font-medium italic px-2 py-1 bg-[var(--bg-canvas)] rounded-md border border-[var(--border-lighter)]">
+                                Admin Only
                               </span>
                             )}
                           </div>
+                          {isSavingUser === String(user.id) && (
+                            <div className="text-[10px] text-[var(--primary-color)] font-medium mt-2 animate-pulse pr-1">
+                              บันทึก...
+                            </div>
+                          )}
                         </td>
                       </tr>
                           );
@@ -2098,160 +2335,169 @@ export default function Settings(props: SettingsProps) {
                   return (
                   <div 
                     key={user.id} 
-                    className={`bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 shadow-xs space-y-3.5 ${!canEditThisUser ? 'opacity-85' : ''}`}
+                    className={`bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 shadow-sm space-y-4 ${!canEditThisUser ? 'opacity-85' : ''}`}
                   >
                     {/* Card Top Row: User Avatar, Username & Actions */}
-                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-[var(--border-lighter)]">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-9 h-9 rounded-xl bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center shrink-0 font-bold text-sm">
+                    <div className="flex items-center justify-between gap-3 pb-3 border-b border-[var(--border-lighter)]">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--primary-color)]/20 to-[var(--primary-hover)]/20 text-[var(--primary-color)] flex items-center justify-center shrink-0 font-bold text-base shadow-inner">
                           {(user.firstName || user.username || 'U').charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono text-xs font-bold text-[var(--primary-color)] truncate">@{user.username}</span>
+                            <span className="font-sans text-sm font-bold text-[var(--text-primary)] truncate">@{user.username}</span>
                             {user.role === 'admin' && (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-amber-500/10 text-amber-500 text-[10px] font-bold rounded-md shrink-0">
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded-md shrink-0 border border-amber-500/20">
                                 <Crown className="w-2.5 h-2.5" /> Admin
                               </span>
                             )}
                             {user.role === 'moderator' && (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-blue-500/10 text-blue-500 text-[10px] font-bold rounded-md shrink-0">
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[9px] font-bold rounded-md shrink-0 border border-blue-500/20">
                                 <ShieldCheck className="w-2.5 h-2.5" /> Moderator
                               </span>
                             )}
                           </div>
-                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded font-mono mt-0.5">
+                          <span className="inline-flex items-center gap-1 text-[9px] text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-mono mt-1 border border-emerald-500/20 font-medium">
                             <Lock className="w-2.5 h-2.5" /> Argon2id
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex flex-col items-end gap-2 shrink-0">
                         {canEditThisUser ? (
-                          <>
+                          <div className="flex gap-1">
                             <button
                               onClick={() => setResetPassUser(user)}
-                              className="p-2 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-xl transition active:scale-95 cursor-pointer"
+                              className="p-2 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/15 rounded-xl transition cursor-pointer"
                               title="เปลี่ยนรหัสผ่าน"
                             >
                               <Key className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => confirmDeleteUser(user)}
-                              className="p-2 text-[var(--text-secondary)] hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition active:scale-95 cursor-pointer"
+                              className="p-2 text-[var(--text-secondary)] hover:text-rose-500 hover:bg-rose-500/15 rounded-xl transition cursor-pointer"
                               title="ลบข้อมูล"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
-                          </>
+                          </div>
                         ) : (
-                          <span className="text-[10px] text-[var(--text-muted)] italic px-2 py-0.5 bg-[var(--bg-canvas)] rounded border border-[var(--border-lighter)]">
+                          <span className="text-[10px] text-[var(--text-muted)] font-medium italic px-2 py-1 bg-[var(--bg-canvas)] rounded-md border border-[var(--border-lighter)]">
                             Admin Only
                           </span>
                         )}
-                      </div>
-                    </div>
-                    <div className="mb-2">
-                      <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">อีเมล</label>
-                      <input
-                        type="email"
-                        value={user.email || ""}
-                        disabled={!canEditThisUser}
-                        onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, email: e.target.value } : u))}
-                        onBlur={(e) => updateUser(user.id, "email", e.target.value)}
-                        className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                        placeholder="user@example.com"
-                      />
-                    </div>
-
-                    {/* Editable Form Fields Grid */}
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">ชื่อ</label>
-                        <input 
-                          type="text"
-                          value={user.firstName || ''}
-                          disabled={!canEditThisUser}
-                          onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, firstName: e.target.value } : u))}
-                          onBlur={(e) => updateUser(user.id, 'firstName', e.target.value)}
-                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                          placeholder="ชื่อ"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">นามสกุล</label>
-                        <input 
-                          type="text"
-                          value={user.lastName || ''}
-                          disabled={!canEditThisUser}
-                          onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, lastName: e.target.value } : u))}
-                          onBlur={(e) => updateUser(user.id, 'lastName', e.target.value)}
-                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                          placeholder="นามสกุล"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">ตำแหน่ง (ตาราง positions)</label>
-                      <select 
-                        value={user.position || ''}
-                        disabled={!canEditThisUser}
-                        onChange={(e) => updateUser(user.id, 'position', e.target.value)}
-                        className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                      >
-                        <option value="">-- เลือกตำแหน่ง --</option>
-                        {positions.map((pos: any) => (
-                          <option key={pos.id} value={pos.name}>{pos.name}</option>
-                        ))}
-                        {user.position && !positions.some(p => p.name === user.position) && (
-                          <option value={user.position}>{user.position}</option>
+                        {isSavingUser === String(user.id) && (
+                          <div className="text-[9px] text-[var(--primary-color)] font-medium animate-pulse">
+                            กำลังบันทึก...
+                          </div>
                         )}
-                      </select>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="space-y-3">
                       <div>
-                        <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">ฝ่าย / กลุ่มงาน</label>
-                        <select 
-                          value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
-                          disabled={!canEditThisUser}
-                          onChange={(e) => updateUser(user.id, 'department', e.target.value)}
-                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
-                        >
-                          {departments.length === 0 ? (
-                            <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
-                          ) : (
-                            departments.map((dept: any) => (
-                              <option key={dept.id} value={dept.name}>{dept.name}</option>
-                            ))
-                          )}
-                        </select>
+                        <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 px-1">อีเมลติดต่อ</label>
+                        <div className="relative group/input">
+                          <Mail className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="email"
+                            value={user.email || ""}
+                            disabled={!canEditThisUser}
+                            onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, email: e.target.value } : u))}
+                            onBlur={(e) => updateUser(user.id, "email", e.target.value)}
+                            className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl pl-9 pr-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-all ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                            placeholder="user@example.com"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Editable Form Fields Grid */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 px-1">ชื่อ</label>
+                          <input 
+                            type="text"
+                            value={user.firstName || ''}
+                            disabled={!canEditThisUser}
+                            onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, firstName: e.target.value } : u))}
+                            onBlur={(e) => updateUser(user.id, 'firstName', e.target.value)}
+                            className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs font-medium text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-all ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                            placeholder="ชื่อจริง"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 px-1">นามสกุล</label>
+                          <input 
+                            type="text"
+                            value={user.lastName || ''}
+                            disabled={!canEditThisUser}
+                            onChange={(e) => setUsers(users.map(u => String(u.id) === String(user.id) ? { ...u, lastName: e.target.value } : u))}
+                            onBlur={(e) => updateUser(user.id, 'lastName', e.target.value)}
+                            className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-all ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                            placeholder="นามสกุล"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 px-1">ฝ่าย / กลุ่มงาน</label>
+                          <select 
+                            value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
+                            disabled={!canEditThisUser}
+                            onChange={(e) => updateUser(user.id, 'department', e.target.value)}
+                            className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs font-medium text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-all ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                          >
+                            {departments.length === 0 ? (
+                              <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
+                            ) : (
+                              departments.map((dept: any) => (
+                                <option key={dept.id} value={dept.name}>{dept.name}</option>
+                              ))
+                            )}
+                          </select>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 px-1">ตำแหน่ง</label>
+                          <select 
+                            value={user.position || ''}
+                            disabled={!canEditThisUser}
+                            onChange={(e) => updateUser(user.id, 'position', e.target.value)}
+                            className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-all ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                          >
+                            <option value="">-- ไม่ระบุตำแหน่ง --</option>
+                            {positions.map((pos: any) => (
+                              <option key={pos.id} value={pos.name}>{pos.name}</option>
+                            ))}
+                            {user.position && !positions.some(p => p.name === user.position) && (
+                              <option value={user.position}>{user.position}</option>
+                            )}
+                          </select>
+                        </div>
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">สิทธิ์การใช้งาน</label>
+                        <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 px-1">สิทธิ์การใช้งาน (Role)</label>
                         <select 
                           value={user.role || 'user'}
                           disabled={!canEditThisUser}
                           onChange={(e) => updateUser(user.id, 'role', e.target.value)}
-                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs font-semibold text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
+                          className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs font-bold ${
+                            user.role === 'admin' ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20' : 
+                            user.role === 'moderator' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/20' : 
+                            'text-[var(--text-primary)]'
+                          } focus:border-[var(--primary-color)] outline-none transition-colors ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                         >
                           <option value="user">ผู้ใช้งานทั่วไป (User)</option>
-                          <option value="moderator">ผู้ตรวจสอบ/เจ้าหน้าที่สารบรรณ (Moderator)</option>
+                          <option value="moderator">ผู้ตรวจสอบ/สารบรรณ (Moderator)</option>
                           {(props.user?.role === 'admin' || user.role === 'admin') && (
                             <option value="admin">ผู้ดูแลระบบ (Admin)</option>
                           )}
                         </select>
                       </div>
                     </div>
-
-                    {isSavingUser === String(user.id) && (
-                      <div className="text-[10px] text-[var(--primary-color)] font-medium text-right animate-pulse pt-1">
-                        กำลังบันทึกการเปลี่ยนแปลง...
-                      </div>
-                    )}
                   </div>
                   );
                 })}
@@ -2395,6 +2641,12 @@ export default function Settings(props: SettingsProps) {
                   title: 'ดูประวัติบันทึกระบบ (Security Audit History Logs)',
                   desc: 'สิทธิ์ในการสืบค้นประวัติการเข้าใช้งาน การแก้ไข และกิจกรรมความปลอดภัยเชิงลึก',
                   note: 'ใช้สำหรับการตรวจสอบเชิงกฎหมายและ IT Audit'
+                },
+                {
+                  key: 'manage_changelog',
+                  title: 'จัดการประวัติเวอร์ชันระบบ (Changelog & Release Notes Management)',
+                  desc: 'สิทธิ์ในการสร้าง แก้ไข ลบ บันทึกประวัติการเปลี่ยนแปลงของระบบ (Changelog) และแนบรูปภาพพรีวิวฟังก์ชัน',
+                  note: 'สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น'
                 }
               ]
             }
@@ -3430,10 +3682,10 @@ export default function Settings(props: SettingsProps) {
             </div>
           </div>
         )}
-
-
-
+          </div>
+        </section>
       </div>
+
       {/* Add User Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">

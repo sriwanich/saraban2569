@@ -5,6 +5,7 @@ import {
   AlignJustify, Crown, Building, HelpCircle, X, Search
 } from 'lucide-react';
 import { CustomOrderItem, downloadAsDoc, thDateFull, toThaiNumeral, getSingleSealHTML, getLogoHTML } from './draftData';
+import { useConfirm } from '../../../context/ConfirmContext';
 
 interface Props {
   user: any;
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function CustomOrderView({ user, onSendToSignQueue }: Props) {
+  const { confirm } = useConfirm();
   const [docType, setDocType] = useState<string>('คำสั่ง');
   const [docNum, setDocNum] = useState<string>('๑๕/๒๕๖๙');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -111,11 +113,20 @@ ${sealHTML ? `<div style="text-align:center;margin-bottom:8pt;">${sealHTML}</div
 </div>`;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!subject) {
       alert('กรุณากรอกเรื่องก่อนบันทึก');
       return;
     }
+
+    const confirmed = await confirm({
+      title: `ยืนยันการบันทึก${docType}`,
+      message: `คุณต้องการบันทึก${docType} เรื่อง "${subject}" ใช่หรือไม่?`,
+      type: 'edit',
+      confirmText: 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
 
     const newItem: CustomOrderItem = {
       id: Date.now(),
@@ -159,9 +170,17 @@ ${sealHTML ? `<div style="text-align:center;margin-bottom:8pt;">${sealHTML}</div
     alert('บันทึกคำสั่ง/ประกาศเรียบร้อยแล้ว');
   };
 
-  const handleDelete = (id: number) => {
-    if (!confirm('ต้องการลบรายการนี้ใช่หรือไม่?')) return;
+  const handleDelete = async (id: number) => {
     const item = customOrders.find(o => o.id === id);
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบรายการ',
+      message: `ต้องการลบรายการ "${item?.subject || ''}" ใช่หรือไม่?`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     const updated = customOrders.filter(o => o.id !== id);
     setCustomOrders(updated);
     localStorage.setItem('moi_custom_orders', JSON.stringify(updated));

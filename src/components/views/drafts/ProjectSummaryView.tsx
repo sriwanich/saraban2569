@@ -5,6 +5,7 @@ import {
   HelpCircle, ChevronRight, Users, FolderOpen, Edit3, Loader2
 } from 'lucide-react';
 import { thDate, downloadAsDoc, getLogoHTML } from './draftData';
+import { useConfirm } from '../../../context/ConfirmContext';
 
 export interface ProjectSummaryItem {
   id?: number;
@@ -125,6 +126,7 @@ interface Props {
 }
 
 export default function ProjectSummaryView({ user }: Props) {
+  const { confirm } = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isAiGenerating, setIsAiGenerating] = useState(false);
@@ -419,6 +421,15 @@ export default function ProjectSummaryView({ user }: Props) {
       return;
     }
 
+    const confirmed = await confirm({
+      title: editingId ? 'ยืนยันการบันทึกแก้ไขสรุปโครงการ' : 'ยืนยันการบันทึกสรุปโครงการใหม่',
+      message: `คุณต้องการบันทึกรายงานสรุปโครงการ "${name}" ใช่หรือไม่?`,
+      type: editingId ? 'edit' : 'info',
+      confirmText: 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     let htmlToSave = generatedHtml;
     if (!htmlToSave) {
       htmlToSave = buildManualSummaryHtml();
@@ -506,7 +517,15 @@ export default function ProjectSummaryView({ user }: Props) {
 
   const handleDeleteSaved = async (id?: number) => {
     if (!id) return;
-    if (!confirm('คุณต้องการลบรายงานสรุปโครงการนี้ใช่หรือไม่?')) return;
+    const item = savedSummaries.find(s => s.id === id);
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบรายงานสรุปโครงการ',
+      message: `คุณต้องการลบรายงานสรุปโครงการ "${item?.name || ''}" นี้ใช่หรือไม่?`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       await fetch(`/api/project-summaries/${id}`, { method: 'DELETE' });
     } catch (err) {}

@@ -9,6 +9,7 @@ import {
 import { LETTER_TYPES, buildOfficialDoc, downloadAsDoc, thDate, DraftItem } from './draftData';
 import { parseDocNumberStructure, parseFileCodeFromDoc, DEFAULT_FILE_CODES } from '../../../lib/fileCodeUtils';
 import { useRealtimeSync } from '../../../utils/realtimeSync';
+import { useConfirm } from '../../../context/ConfirmContext';
 
 interface Props {
   user: any;
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export default function DraftLettersView({ user, onSendToSignQueue, prefillData }: Props) {
+  const { confirm } = useConfirm();
   const [activeTab, setActiveTab] = useState<'new' | 'history'>('new');
   const [selectedType, setSelectedType] = useState<string>('external');
   const [selectedTitle, setSelectedTypeTitle] = useState<string>('หนังสือภายนอก');
@@ -239,6 +241,16 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
       alert('กรุณากรอกเรื่องก่อนบันทึก');
       return;
     }
+
+    const confirmed = await confirm({
+      title: 'ยืนยันการบันทึกร่างหนังสือราชการ',
+      message: `คุณต้องการบันทึกร่างหนังสือเรื่อง "${subject}" ใช่หรือไม่?`,
+      type: 'edit',
+      confirmText: 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     const newItem: DraftItem = {
       id: Date.now(),
       type: selectedType,
@@ -306,7 +318,14 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
   };
 
   const handleDeleteDraft = async (id: number) => {
-    if (!confirm('ต้องการลบร่างหนังสือฉบับนี้ใช่หรือไม่?')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบร่างหนังสือราชการ',
+      message: 'ต้องการลบร่างหนังสือฉบับนี้ใช่หรือไม่? การลบไม่สามารถเรียกคืนได้',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     
     const itemToDelete = draftsHistory.find(d => d.id === id);
     const userNameToPass = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' : 'ผู้ใช้งาน';

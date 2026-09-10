@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu } from 'lucide-react';
+import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu, Sparkles } from 'lucide-react';
+import ChangelogModal from './ChangelogModal';
+import VersionBadge from './VersionBadge';
 
 interface LoginProps {
   onLogin: (user: any, rememberMe: boolean) => void;
@@ -10,6 +12,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -27,9 +30,32 @@ export default function Login({ onLogin }: LoginProps) {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    // Load saved username and remember state
+    const savedUsername = localStorage.getItem('rememberedUsername');
+    const savedRemember = localStorage.getItem('rememberMe') === 'true';
+    
+    if (savedUsername && savedRemember) {
+      setUsername(savedUsername);
+      setRemember(true);
+    } else if (savedUsername) {
+      setUsername(savedUsername);
+      setRemember(false);
+    }
+
     // Initial Theme Setup
     const isDarkMode = document.documentElement.classList.contains('dark');
     setIsDark(isDarkMode);
+
+    // Auto-Login Support (Development Only)
+    if (import.meta.env.VITE_AUTO_LOGIN_USER && import.meta.env.VITE_AUTO_LOGIN_PASS) {
+      console.log('Auto-login detected, attempting login...');
+      setUsername(import.meta.env.VITE_AUTO_LOGIN_USER);
+      setPassword(import.meta.env.VITE_AUTO_LOGIN_PASS);
+      // Trigger submit automatically after short delay to let state update
+      setTimeout(() => {
+        handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+      }, 500);
+    }
 
     const ua = navigator.userAgent;
     let currentOs = 'Unknown OS';
@@ -88,6 +114,13 @@ export default function Login({ onLogin }: LoginProps) {
 
       const data = await response.json();
       if (response.ok) {
+        if (remember) {
+          localStorage.setItem('rememberedUsername', username);
+          localStorage.setItem('rememberMe', 'true');
+        } else {
+          localStorage.removeItem('rememberedUsername');
+          localStorage.setItem('rememberMe', 'false');
+        }
         onLogin(data.user, remember);
       } else {
         setAlert({ type: 'error', message: data.error || 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
@@ -110,23 +143,31 @@ export default function Login({ onLogin }: LoginProps) {
     setAlert(null);
     
     try {
-      const response = await fetch('/api/password/forgot', {
+      const response = await fetch('/api/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: resetEmail })
       });
       
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error('เซิร์ฟเวอร์ตอบกลับข้อมูลไม่ถูกต้อง');
+      }
+
       if (response.ok) {
         setResetStatus('success');
-        setAlert({ type: 'success', message: 'ส่งลิงก์รีเซ็ตรหัสผ่านไปยังอีเมลของคุณแล้ว' });
+        setAlert({ type: 'success', message: 'ส่งรหัส OTP ไปยังอีเมลของคุณแล้ว' });
       } else {
         setResetStatus('idle');
-        setAlert({ type: 'error', message: data.error || 'ไม่พบอีเมลนี้ในระบบ' });
+        setAlert({ type: 'error', message: data.message || data.error || 'ไม่พบอีเมลนี้ในระบบ' });
       }
     } catch (error) {
+      console.error('Forgot password error:', error);
       setResetStatus('idle');
-      setAlert({ type: 'error', message: 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์' });
+      setAlert({ type: 'error', message: `เกิดข้อผิดพลาด: ${error instanceof Error ? error.message : 'Unknown error'}` });
     }
   };
 
@@ -159,10 +200,10 @@ export default function Login({ onLogin }: LoginProps) {
         <main className="w-full max-w-[440px] relative z-10 animate-slide-up flex flex-col">
           
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-[var(--bg-surface)] backdrop-blur-md border border-[var(--glass-border)] shadow-glow mb-4 p-3 relative group overflow-hidden transition-colors duration-500">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-[var(--bg-surface)] backdrop-blur-md border border-[var(--glass-border)] shadow-glow mb-4 p-1 relative group overflow-hidden transition-colors duration-500">
               <div className="absolute inset-0 bg-gradient-to-tr from-[var(--primary-color)]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
               {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="w-full h-full object-contain relative z-10" />
+                <img src={logoUrl} alt="Logo" className="w-full h-full object-cover relative z-10" />
               ) : (
                 <Building2 className="w-10 h-10 text-[var(--primary-color)] relative z-10" />
               )}
@@ -170,9 +211,21 @@ export default function Login({ onLogin }: LoginProps) {
             <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)] drop-shadow-sm font-sans transition-colors duration-500">
               EDMS <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-indigo-500 dark:from-blue-400 dark:to-amber-200">Saraban</span>
             </h1>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mt-2 tracking-wide uppercase font-sans transition-colors duration-500">
-              ระบบสารบรรณอิเล็กทรอนิกส์อัจฉริยะ
-            </p>
+            <div className="mt-3 px-4 py-1.5 rounded-full bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 inline-block">
+              <p className="text-sm font-bold text-[var(--primary-color)] tracking-wider">
+                ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ {(() => {
+                  try {
+                    const saved = localStorage.getItem('moi_settings');
+                    if (saved) {
+                      const parsed = JSON.parse(saved);
+                      const year = parsed.currentYear || '';
+                      return year ? `ปี ${year}` : '';
+                    }
+                  } catch (e) {}
+                  return '';
+                })()}
+              </p>
+            </div>
           </div>
 
           <div className="bg-[var(--bg-surface)]/80 dark:bg-[var(--bg-surface)]/60 backdrop-blur-2xl rounded-3xl overflow-hidden shadow-card border border-[var(--glass-border)] relative transition-colors duration-500">
@@ -377,12 +430,23 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
           </div>
 
-          <div className="mt-8 text-center text-sm font-medium text-[var(--text-secondary)] space-y-2 font-sans transition-colors duration-500">
+          <div className="mt-8 text-center text-sm font-medium text-[var(--text-secondary)] space-y-2 font-sans transition-colors duration-500 flex flex-col items-center">
             <p className="tracking-wide text-[var(--text-primary)]">{orgName}</p>
-            <p className="text-xs opacity-70">{footerText}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs opacity-70">{footerText}</p>
+              <span className="text-xs opacity-40">•</span>
+              <VersionBadge variant="footer" onClick={() => setIsChangelogOpen(true)} />
+            </div>
           </div>
         </main>
       </div>
+
+      {/* Changelog Modal for Login Page */}
+      <ChangelogModal
+        isOpen={isChangelogOpen}
+        onClose={() => setIsChangelogOpen(false)}
+        currentUser={null}
+      />
 
       <style>{`
         @keyframes shimmer {

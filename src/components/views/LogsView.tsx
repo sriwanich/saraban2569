@@ -5,8 +5,10 @@ import {
   Globe, X, ChevronLeft, ChevronRight, Filter, ShieldAlert, CheckCircle2, FileEdit, Send, Sparkles
 } from 'lucide-react';
 import { SystemLog } from '../../types';
+import { useConfirm } from '../../context/ConfirmContext';
 
 export default function LogsView({ user }: { user?: any }) {
+  const { confirm } = useConfirm();
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -638,19 +640,25 @@ export default function LogsView({ user }: { user?: any }) {
                         {(user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ') && (
                           <button
                             onClick={async () => {
-                              if (confirm('ยืนยันการลบรายการประวัตินี้?')) {
-                                try {
-                                  const res = await fetch(`/api/logs/${log.id}`, { method: 'DELETE' });
-                                  if (res.ok) {
-                                    fetchLogs();
-                                    setToastMessage({ type: 'success', text: 'ลบรายการเรียบร้อยแล้ว' });
-                                    setTimeout(() => setToastMessage(null), 4000);
-                                  } else {
-                                    setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการลบรายการ' });
-                                  }
-                                } catch (err) {
-                                  setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' });
+                              const confirmed = await confirm({
+                                title: 'ยืนยันการลบรายการประวัติ',
+                                message: `คุณต้องการลบรายการประวัติ "${log.action}" (${log.details || ''}) ใช่หรือไม่?`,
+                                type: 'delete',
+                                confirmText: 'ยืนยันการลบ',
+                                cancelText: 'ยกเลิก'
+                              });
+                              if (!confirmed) return;
+                              try {
+                                const res = await fetch(`/api/logs/${log.id}`, { method: 'DELETE' });
+                                if (res.ok) {
+                                  fetchLogs();
+                                  setToastMessage({ type: 'success', text: 'ลบรายการเรียบร้อยแล้ว' });
+                                  setTimeout(() => setToastMessage(null), 4000);
+                                } else {
+                                  setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการลบรายการ' });
                                 }
+                              } catch (err) {
+                                setToastMessage({ type: 'error', text: 'เกิดข้อผิดพลาดในการเชื่อมต่อ' });
                               }
                             }}
                             className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"

@@ -85,6 +85,7 @@ export interface User {
   department?: string;
   role: 'admin' | 'moderator' | 'user';
   isArgon2?: boolean;
+  emailNotifications?: boolean;
   avatar?: string;
 }
 
@@ -332,6 +333,37 @@ export interface ScheduledReservation {
   lastRunAt?: string | null;
   nextRunAt?: string | null;
   createdAt?: string;
+}
+
+export type ChangelogType = 'major' | 'minor' | 'patch' | 'hotfix';
+export type ChangelogCategory = 'feature' | 'improvement' | 'fix' | 'security' | 'other';
+
+export interface ChangelogChangeItem {
+  category: ChangelogCategory | string;
+  categoryLabel: string;
+  items: string[];
+}
+
+export interface ChangelogImage {
+  url: string;
+  caption?: string;
+  name?: string;
+}
+
+export interface ChangelogItem {
+  id: string;
+  version: string;
+  title: string;
+  releaseDate: string;
+  type: ChangelogType;
+  summary: string;
+  changes: ChangelogChangeItem[];
+  images: (string | ChangelogImage)[];
+  author?: string;
+  isLatest?: boolean;
+  isPublished?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export function formatThaiDateString(dateStr?: string): string {

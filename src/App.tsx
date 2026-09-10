@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import Login from './components/Login';
-import Dashboard from './components/Dashboard';
-import { PublicInfographicsViewer } from './components/views/PublicInfographicsViewer';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ConfirmProvider } from './context/ConfirmContext';
+
+const Login = lazy(() => import('./components/Login'));
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const PublicInfographicsViewer = lazy(() => import('./components/views/PublicInfographicsViewer').then(m => ({ default: m.PublicInfographicsViewer })));
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -128,37 +130,51 @@ export default function App() {
     setIsLoggedIn(false);
   };
 
+  const Loading = () => <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center text-[var(--text-primary)]">กำลังโหลด...</div>;
+
   if (isPublicInfographic) {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลสื่อ Infographic">
-        <PublicInfographicsViewer />
+        <ConfirmProvider>
+          <Suspense fallback={<Loading />}>
+            <PublicInfographicsViewer />
+          </Suspense>
+        </ConfirmProvider>
       </ErrorBoundary>
     );
   }
 
   if (isCheckingAuth) {
-    return <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center text-[var(--text-primary)]">กำลังโหลด...</div>;
+    return <Loading />;
   }
 
   if (isLoggedIn) {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการโหลดหน้าจอการทำงาน">
-        <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />
+        <ConfirmProvider>
+          <Suspense fallback={<Loading />}>
+            <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />
+          </Suspense>
+        </ConfirmProvider>
       </ErrorBoundary>
     );
   }
 
   return (
     <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในหน้าต่างเข้าสู่ระบบ">
-      <Login onLogin={(u, rememberMe) => {
-        setUser(u);
-        setIsLoggedIn(true);
-        if (rememberMe) {
-          localStorage.setItem('edms_user_data', JSON.stringify(u));
-        } else {
-          sessionStorage.setItem('edms_user_data', JSON.stringify(u));
-        }
-      }} />
+      <ConfirmProvider>
+        <Suspense fallback={<Loading />}>
+          <Login onLogin={(u, rememberMe) => {
+            setUser(u);
+            setIsLoggedIn(true);
+            if (rememberMe) {
+              localStorage.setItem('edms_user_data', JSON.stringify(u));
+            } else {
+              sessionStorage.setItem('edms_user_data', JSON.stringify(u));
+            }
+          }} />
+        </Suspense>
+      </ConfirmProvider>
     </ErrorBoundary>
   );
 }

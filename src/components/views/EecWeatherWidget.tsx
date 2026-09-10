@@ -48,7 +48,7 @@ export default function EecWeatherWidget({ onDraftAlertDoc, defaultExpanded = fa
       setWeatherData(data);
       setLastRefreshed(new Date());
     } catch (err) {
-      console.error('Error loading Rayong weather data:', err);
+      console.warn('Notice loading Rayong weather data:', err);
     } finally {
       if (!isSilent) setIsLoading(false);
     }
@@ -76,11 +76,11 @@ export default function EecWeatherWidget({ onDraftAlertDoc, defaultExpanded = fa
     loadWeather();
   }, [loadWeather]);
 
-  // Auto refresh interval (every 30 seconds)
+  // Auto refresh interval (every 5 minutes to prevent rate limits)
   useEffect(() => {
     const interval = setInterval(() => {
       loadWeather(true);
-    }, 30000);
+    }, 300000);
     return () => clearInterval(interval);
   }, [loadWeather]);
 

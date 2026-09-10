@@ -3,6 +3,7 @@ import {
   Type as FontIcon, Upload, Plus, Search, X, Check, 
   Sparkles, RefreshCw, Globe, FileText, Trash2, FolderUp 
 } from 'lucide-react';
+import { useConfirm } from '../../context/ConfirmContext';
 
 export interface FontOption {
   name: string;
@@ -125,6 +126,7 @@ interface FontSelectorProps {
 }
 
 export function FontSelector({ currentFont, onSelectFont }: FontSelectorProps) {
+  const { confirm } = useConfirm();
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'thai' | 'english' | 'custom' | 'system'>('all');
@@ -272,9 +274,16 @@ export function FontSelector({ currentFont, onSelectFont }: FontSelectorProps) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleRemoveCustomFont = (fontName: string, e: React.MouseEvent) => {
+  const handleRemoveCustomFont = async (fontName: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`คุณต้องการลบฟอนต์อัปโหลด "${fontName}" ใช่หรือไม่?`)) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบฟอนต์อัปโหลด',
+      message: `คุณต้องการลบฟอนต์อัปโหลด "${fontName}" ใช่หรือไม่?`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
 
     setCustomFonts(prev => {
       const updated = prev.filter(f => f.name !== fontName);

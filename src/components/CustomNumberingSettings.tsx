@@ -25,8 +25,10 @@ import {
   Play
 } from 'lucide-react';
 import { ReservedNumber, ScheduledReservation, formatThaiDateString } from '../types';
+import { useConfirm } from '../context/ConfirmContext';
 
 export default function CustomNumberingSettings() {
+  const { confirm } = useConfirm();
   const [activeSubTab, setActiveSubTab] = useState<'rules' | 'fileCodes' | 'reserved' | 'scheduled'>('rules');
   const [systemCurrentYear, setSystemCurrentYear] = useState<string>(() => {
     try {
@@ -254,7 +256,14 @@ export default function CustomNumberingSettings() {
   };
 
   const handleDeleteSchedule = async (id: number, name: string) => {
-    if (!window.confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบการตั้งเวลาจองอัตโนมัติ "${name}"?`)) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบการตั้งเวลาจองอัตโนมัติ',
+      message: `คุณแน่ใจหรือไม่ว่าต้องการลบการตั้งเวลาจองอัตโนมัติ "${name}"?`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/scheduled-reservations/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -289,6 +298,17 @@ export default function CustomNumberingSettings() {
   // Save/Update Rule
   const handleSaveRule = async (e: React.FormEvent) => {
     e.preventDefault();
+    const confirmed = await confirm({
+      title: editingRule ? 'ยืนยันการบันทึกแก้ไขกฎการออกเลข' : 'ยืนยันการเพิ่มกฎการออกเลขใหม่',
+      message: editingRule 
+        ? `คุณต้องการบันทึกการแก้ไขกฎ "${ruleFormData.docType}" (${ruleFormData.prefixPattern}) ใช่หรือไม่?`
+        : `คุณต้องการเพิ่มกฎการออกเลขสำหรับประเภท "${ruleFormData.docType}" ใช่หรือไม่?`,
+      type: editingRule ? 'edit' : 'info',
+      confirmText: editingRule ? 'ยืนยันบันทึกแก้ไข' : 'ยืนยันเพิ่มกฎ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     try {
       const url = editingRule ? `/api/numbering-rules/${editingRule.id}` : '/api/numbering-rules';
       const method = editingRule ? 'PUT' : 'POST';
@@ -312,7 +332,14 @@ export default function CustomNumberingSettings() {
   };
 
   const handleDeleteRule = async (id: number) => {
-    if (!window.confirm('คุณต้องการลบกฎการออกเลขนี้ใช่หรือไม่?')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบกฎการออกเลข',
+      message: 'คุณต้องการลบกฎการออกเลขนี้ใช่หรือไม่? การลบอาจส่งผลต่อรูปแบบการออกเลขของเอกสารใหม่',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/numbering-rules/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -327,6 +354,14 @@ export default function CustomNumberingSettings() {
   // Save File Code
   const handleSaveFileCode = async (e: React.FormEvent) => {
     e.preventDefault();
+    const confirmed = await confirm({
+      title: 'ยืนยันการเพิ่มรหัสหมวดแฟ้ม',
+      message: `คุณต้องการบันทึกรหัสหมวดแฟ้ม "${fileCodeFormData.code} - ${fileCodeFormData.name}" ใช่หรือไม่?`,
+      type: 'info',
+      confirmText: 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch('/api/file-codes', {
         method: 'POST',
@@ -345,7 +380,14 @@ export default function CustomNumberingSettings() {
   };
 
   const handleDeleteFileCode = async (id: number) => {
-    if (!window.confirm('คุณต้องการลบรหัสหมวดแฟ้มนี้ใช่หรือไม่?')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบรหัสหมวดแฟ้ม',
+      message: 'คุณต้องการลบรหัสหมวดแฟ้มนี้ใช่หรือไม่?',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/file-codes/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -360,6 +402,14 @@ export default function CustomNumberingSettings() {
   // Reserve Numbers
   const handleReserveNumbers = async (e: React.FormEvent) => {
     e.preventDefault();
+    const confirmed = await confirm({
+      title: 'ยืนยันการจองเลขหนังสือ',
+      message: `คุณต้องการสำรอง/จองเลขหนังสือประเภท "${reserveFormData.docType}" จำนวน ${reserveFormData.count} เลข ใช่หรือไม่?`,
+      type: 'info',
+      confirmText: 'ยืนยันการจองเลข',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch('/api/reserved-numbers/reserve', {
         method: 'POST',

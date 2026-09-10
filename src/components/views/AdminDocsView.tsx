@@ -13,11 +13,16 @@ interface Props {
   onToggleFavorite?: (doc: DocumentItem) => void;
 }
 
-export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite }: Props) {
+export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite }: Props) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'central' | 'department'>('all');
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedYear, setSelectedYear] = useState('all');
   const [folders, setFolders] = useState<Folder[]>([]);
+
+  // Privileged check: only admin and moderator can see Central Saraban administrative documents
+  const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
 
   // Fetch folders list for filtering and labeling
   useEffect(() => {
@@ -37,15 +42,33 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
 
   const adminDocs = documents.filter(d => d.type === 'admin');
 
+  // Available departments from admin docs
+  const availableDepartments = Array.from(new Set(adminDocs.map(d => d.department).filter(Boolean))) as string[];
+
   // Filter documents
   const filteredDocs = adminDocs.filter(doc => {
+    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
+
+    // Regular users MUST NOT see Central Saraban administrative documents
+    if (!isCentralPrivileged && isCentralDoc) {
+      return false;
+    }
+
+    const matchesScope = 
+      !isCentralPrivileged ? true :
+      scopeFilter === 'all' ? true :
+      scopeFilter === 'central' ? isCentralDoc :
+      !isCentralDoc;
+
     const matchesCategory = categoryFilter === 'all' || doc.category === categoryFilter;
     const matchesSearch = searchQuery.trim() === '' || 
       doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       doc.docNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (doc.content && doc.content.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
-    return matchesCategory && matchesSearch && matchesYear;
+    const matchesDept = selectedDeptFilter === 'all' || doc.department === selectedDeptFilter;
+
+    return matchesScope && matchesCategory && matchesSearch && matchesYear && matchesDept;
   });
 
   // Unique years list for filter
@@ -108,6 +131,72 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
         >
           <Plus className="w-4 h-4" /> ลงทะเบียนเอกสารธุรการ
         </button>
+      </div>
+
+      {/* Scope Filter Tabs (สารบรรณกลาง VS ฝ่าย/กลุ่มงาน) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-2 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl">
+        {isCentralPrivileged ? (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setScopeFilter('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                scopeFilter === 'all'
+                  ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm border border-[var(--border-light)] font-bold'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
+              }`}
+            >
+              เอกสารธุรการทั้งหมด ({adminDocs.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setScopeFilter('central')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                scopeFilter === 'central'
+                  ? 'bg-blue-600 text-white shadow-sm font-bold'
+                  : 'text-[var(--text-secondary)] hover:text-blue-600 hover:bg-blue-500/10'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${scopeFilter === 'central' ? 'bg-white' : 'bg-blue-500'}`}></span>
+              สารบรรณกลาง ({adminDocs.filter(d => !(d.isCentral === 0 || Number(d.isCentral) === 0)).length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setScopeFilter('department')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                scopeFilter === 'department'
+                  ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                  : 'text-[var(--text-secondary)] hover:text-emerald-600 hover:bg-emerald-500/10'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${scopeFilter === 'department' ? 'bg-white' : 'bg-emerald-500'}`}></span>
+              ฝ่าย / กลุ่มงาน ({adminDocs.filter(d => (d.isCentral === 0 || Number(d.isCentral) === 0)).length})
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>เอกสารธุรการ: {user?.department || 'ฝ่ายปฏิบัติ'} ({filteredDocs.length} รายการ)</span>
+            </div>
+          </div>
+        )}
+
+        {((isCentralPrivileged && scopeFilter === 'department') || !isCentralPrivileged) && availableDepartments.length > 1 && (
+          <div className="flex items-center gap-2 pl-2">
+            <span className="text-xs text-[var(--text-muted)] font-medium">สังกัดฝ่าย:</span>
+            <select
+              value={selectedDeptFilter}
+              onChange={(e) => setSelectedDeptFilter(e.target.value)}
+              className="bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-primary)] rounded-lg px-2.5 py-1 text-xs outline-none focus:border-[var(--primary-color)] cursor-pointer"
+            >
+              <option value="all">ทุกฝ่ายงาน</option>
+              {availableDepartments.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Stats row */}
@@ -255,15 +344,26 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
                 </div>
 
                 <div className="space-y-1.5">
-                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-relaxed">
-                    {row.title}
-                  </h4>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!(row.isCentral === 0 || Number(row.isCentral) === 0) ? (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                        สารบรรณกลาง
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        ฝ่าย/กลุ่มงาน
+                      </span>
+                    )}
                     {getCategoryBadge(row.category)}
                     <span className="text-[11px] px-2 py-0.5 rounded border border-amber-500/20 bg-amber-500/10 text-amber-400 font-medium">
                       📁 {getFolderName(row)}
                     </span>
                   </div>
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-relaxed">
+                    {row.title}
+                  </h4>
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border-lighter)]/40">
@@ -318,7 +418,20 @@ export default function AdminDocsView({ documents, onViewDoc, onCreateDoc, onEdi
                 filteredDocs.map((row) => (
                   <tr key={row.id} className="hover:bg-[var(--border-lighter)]/40 transition-colors group">
                     <td className="p-3.5 font-mono font-medium text-[var(--text-primary)] align-top whitespace-nowrap">
-                      {row.docNumber}
+                      <div className="flex flex-col gap-1">
+                        <span>{row.docNumber}</span>
+                        {!(row.isCentral === 0 || Number(row.isCentral) === 0) ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 w-fit">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                            สารบรรณกลาง
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 w-fit">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            ฝ่าย/กลุ่มงาน
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3.5 align-top">
                       {getCategoryBadge(row.category)}

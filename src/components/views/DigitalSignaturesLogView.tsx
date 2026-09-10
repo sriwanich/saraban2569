@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Trash2, RefreshCw, ShieldCheck, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { useConfirm } from '../../context/ConfirmContext';
 
 export default function DigitalSignaturesLogView({ user }: { user?: any }) {
+  const { confirm } = useConfirm();
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -26,7 +28,14 @@ export default function DigitalSignaturesLogView({ user }: { user?: any }) {
   }, []);
 
   const deleteLog = async (id: string) => {
-    if (!confirm('ยืนยันการลบรายการประวัตินี้?')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบประวัติลายมือชื่อดิจิทัล',
+      message: 'คุณต้องการลบรายการประวัติการลงลายมือชื่อดิจิทัลนี้ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนคืนได้',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/digital-signatures/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -41,7 +50,14 @@ export default function DigitalSignaturesLogView({ user }: { user?: any }) {
   };
 
   const clearAll = async () => {
-    if (!confirm('ยืนยันการลบประวัติทั้งหมด?')) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบประวัติลายมือชื่อทั้งหมด',
+      message: 'คุณต้องการล้างประวัติการลงลายมือชื่อดิจิทัลทั้งหมดในระบบใช่หรือไม่? ข้อมูลทั้งหมดจะถูกลบอย่างถาวร',
+      type: 'delete',
+      confirmText: 'ยืนยันการล้างทั้งหมด',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch('/api/digital-signatures', { method: 'DELETE' });
       if (res.ok) {

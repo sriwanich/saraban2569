@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, TrackingLog, Folder, DigitalSignatureRecord, formatThaiDate, formatThaiDateFull, formatThaiDateTime } from '../types';
-import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode, FileCode, Tag } from 'lucide-react';
+import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode, FileCode, Tag, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import AiCrossReferencePanel, { DetectionResult } from './ai-cross-reference-panel';
 import VersionControlPanel from './VersionControlPanel';
 import DigitalSignatureModal from './DigitalSignatureModal';
 import { parseFileCodeFromDoc, parseDocNumberStructure } from '../lib/fileCodeUtils';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Props {
   doc: DocumentItem;
@@ -19,12 +20,89 @@ interface Props {
 }
 
 export default function DocumentDetailModal({ doc, allDocuments, onClose, user, onStatusUpdated, onEdit, onSelectDoc }: Props) {
+  const { confirm } = useConfirm();
   const [activeTab, setActiveTab] = useState<'details' | 'tracking' | 'versions' | 'reads'>('details');
   const [trackingLogs, setTrackingLogs] = useState<TrackingLog[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [newStatus, setNewStatus] = useState(doc.status || 'ลงทะเบียน');
   const [comments, setComments] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Attachments State & Deletion
+  const [currentAttachments, setCurrentAttachments] = useState<string[]>([]);
+
+  useEffect(() => {
+    let list: string[] = [];
+    const rawAtts: any = doc.attachments;
+    if (Array.isArray(rawAtts)) {
+      list = rawAtts.map((f: any) => typeof f === 'object' && f !== null ? (f.url || f.name || JSON.stringify(f)) : String(f || ''));
+    } else if (typeof rawAtts === 'string' && rawAtts.trim() !== '') {
+      try {
+        const parsed = JSON.parse(rawAtts);
+        if (Array.isArray(parsed)) {
+          list = parsed.map((f: any) => typeof f === 'object' && f !== null ? (f.url || f.name || JSON.stringify(f)) : String(f || ''));
+        } else {
+          list = [rawAtts];
+        }
+      } catch (e) {
+        list = [rawAtts];
+      }
+    }
+    setCurrentAttachments(list.filter(Boolean));
+  }, [doc.attachments]);
+
+  const handleDeleteAttachment = async (fileUrlToRemove: string) => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบไฟล์แนบ',
+      message: 'คุณต้องการลบไฟล์แนบนี้ออกจากเอกสารและเซิร์ฟเวอร์หรือไม่? การดำเนินการนี้จะไม่สามารถย้อนคืนได้',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบไฟล์',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน';
+    try {
+      // 1. Physically delete from server (both query string and JSON body for proxy safety)
+      const deleteUrl = `/api/upload?url=${encodeURIComponent(fileUrlToRemove)}&username=${encodeURIComponent(username)}`;
+      const delRes = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: fileUrlToRemove, username })
+      });
+      if (!delRes.ok) {
+        await fetch('/api/upload/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: fileUrlToRemove, username })
+        });
+      }
+
+      // 2. Update doc attachments in DB
+      const updatedList = currentAttachments.filter(u => u !== fileUrlToRemove);
+      setCurrentAttachments(updatedList);
+
+      const rawFileName = decodeURIComponent(fileUrlToRemove.split('/').pop() || fileUrlToRemove);
+      const cleanFileName = rawFileName.replace(/^\d{10,15}-\d{4,10}-/, '');
+
+      const updatedDocData = {
+        ...doc,
+        attachments: updatedList,
+        changeSummary: `ลบไฟล์แนบ: ${cleanFileName}`
+      };
+
+      await fetch(`/api/documents/${doc.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedDocData)
+      });
+
+      if (onStatusUpdated) onStatusUpdated();
+    } catch (err) {
+      console.error('Failed to delete attachment:', err);
+      alert('เกิดข้อผิดพลาดในการลบไฟล์ โปรดลองอีกครั้ง');
+    }
+  };
 
   // Read Receipts States
   const [readsList, setReadsList] = useState<any[]>([]);
@@ -134,6 +212,19 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
   const handleProgressDocWorkflow = async (action: 'approve' | 'reject' | 'escalate') => {
     if (!docWorkflow) return;
+
+    const actionLabel = action === 'approve' ? 'อนุมัติ/ส่งต่อ' : action === 'reject' ? 'ตีกลับเรื่อง' : 'แจ้งเตือนเร่งรัด SLA';
+    const actionType = action === 'reject' ? 'delete' : action === 'approve' ? 'save' : 'send';
+    const confirmed = await confirm({
+      title: `ยืนยันการดำเนินการ: ${actionLabel}`,
+      message: `คุณต้องการบันทึกการดำเนินการ "${actionLabel}" สำหรับหนังสือฉบับนี้ใช่หรือไม่?`,
+      type: actionType,
+      itemDetail: doc.title ? `เรื่อง: ${doc.title}` : undefined,
+      confirmText: `ยืนยัน${actionLabel}`,
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsSubmittingWfAction(true);
     try {
       const updaterName = user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ';
@@ -184,6 +275,18 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
   const handleAssignDocWorkflow = async () => {
     if (!selectedWorkflowTplId) return;
+
+    const tpl = workflowTemplates.find(t => t.id === selectedWorkflowTplId);
+    const confirmed = await confirm({
+      title: 'ยืนยันการเริ่มต้น Workflow',
+      message: `คุณต้องการเริ่มเส้นทางดำเนินเรื่อง "${tpl?.name || 'Workflow มาตรฐาน'}" สำหรับหนังสือฉบับนี้ใช่หรือไม่?`,
+      type: 'send',
+      itemDetail: doc.title ? `เรื่อง: ${doc.title}` : undefined,
+      confirmText: 'ยืนยันเริ่มเส้นทาง',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsAssigningWorkflowDoc(true);
     try {
       const updaterName = user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ';
@@ -415,6 +518,17 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
       alert('กรุณาเลือกฝ่ายงานที่ต้องการส่งต่ออย่างน้อย 1 ฝ่าย');
       return;
     }
+
+    const confirmed = await confirm({
+      title: 'ยืนยันการส่งต่อหนังสือราชการ',
+      message: `คุณต้องการส่งต่อหนังสือไปยังฝ่าย: ${selectedDepts.join(', ')} ใช่หรือไม่?`,
+      type: 'send',
+      itemDetail: doc.title ? `เรื่อง: ${doc.title}` : undefined,
+      confirmText: 'ยืนยันส่งต่อหนังสือ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsForwarding(true);
     try {
       const forwardedByName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'สารบรรณกลาง';
@@ -452,6 +566,17 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
   const handleDepartmentReceive = async () => {
     if (!user || !user.department) return;
+
+    const confirmed = await confirm({
+      title: 'ยืนยันการลงรับหนังสือราชการ',
+      message: `คุณต้องการลงรับหนังสือเรื่อง "${doc.title || 'ฉบับนี้'}" เข้าสู่แฟ้มฝ่ายงาน "${user.department}" ใช่หรือไม่?`,
+      type: 'save',
+      itemDetail: doc.docNumber ? `เลขที่หนังสือ: ${doc.docNumber}` : undefined,
+      confirmText: 'ยืนยันการลงรับ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsReceivingDept(true);
     try {
       const forwardedByName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน';
@@ -495,6 +620,17 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   const handleUpdateStatus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStatus) return;
+
+    const confirmed = await confirm({
+      title: 'ยืนยันการบันทึกสถานะหนังสือ',
+      message: `คุณต้องการปรับปรุงสถานะหนังสือเป็น "${newStatus}" ใช่หรือไม่?`,
+      type: 'edit',
+      itemDetail: comments ? `บันทึกหมายเหตุ: ${comments}` : undefined,
+      confirmText: 'ยืนยันการปรับปรุงสถานะ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsSubmitting(true);
 
     try {
@@ -558,22 +694,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   );
 
   const renderAttachments = () => {
-    let attachmentList: string[] = [];
-    const rawAtts: any = doc.attachments;
-    if (Array.isArray(rawAtts)) {
-      attachmentList = rawAtts.map((f: any) => typeof f === 'object' && f !== null ? (f.url || f.name || JSON.stringify(f)) : String(f || ''));
-    } else if (typeof rawAtts === 'string' && rawAtts.trim() !== '') {
-      try {
-        const parsed = JSON.parse(rawAtts);
-        if (Array.isArray(parsed)) {
-          attachmentList = parsed.map((f: any) => typeof f === 'object' && f !== null ? (f.url || f.name || JSON.stringify(f)) : String(f || ''));
-        } else {
-          attachmentList = [rawAtts];
-        }
-      } catch (e) {
-        attachmentList = [rawAtts];
-      }
-    }
+    const attachmentList = currentAttachments;
 
     return (
       <div>
@@ -586,13 +707,13 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             <div className="grid grid-cols-1 gap-2">
               {attachmentList.map((fileUrl, idx) => {
                 const safeFileUrl = typeof fileUrl === 'string' ? fileUrl : String(fileUrl || '');
-                const rawName = safeFileUrl.split('/').pop() || safeFileUrl;
-                const nameParts = rawName.split('-');
-                const fileName = nameParts.length > 2 ? nameParts.slice(2).join('-') : rawName;
+                const rawName = decodeURIComponent(safeFileUrl.split('/').pop() || safeFileUrl);
+                const match = rawName.match(/^\d{10,15}-\d{4,10}-(.+)$/);
+                const fileName = match ? match[1] : rawName;
                 const folderPath = safeFileUrl.includes('/') ? safeFileUrl.substring(0, safeFileUrl.lastIndexOf('/')) : '';
                 return (
                   <div key={idx} className="flex items-center justify-between bg-[var(--bg-base)] p-2.5 rounded-lg border border-[var(--border-light)] text-xs">
-                    <div className="flex items-center gap-2 truncate max-w-[65%]">
+                    <div className="flex items-center gap-2 truncate max-w-[55%]">
                       <FileText className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
                       <div className="truncate">
                         <div className="font-medium text-[var(--text-primary)] truncate" title={fileName}>{fileName}</div>
@@ -654,6 +775,14 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                       >
                         <Download className="w-3 h-3" /> ดาวน์โหลด
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAttachment(safeFileUrl)}
+                        className="px-2 py-1 rounded bg-rose-500/10 text-rose-600 hover:bg-rose-500 hover:text-white transition-colors flex items-center gap-1 font-medium text-[11px] cursor-pointer"
+                        title="ลบไฟล์แนบนี้ออกจากเอกสารและเซิร์ฟเวอร์"
+                      >
+                        <Trash2 className="w-3 h-3" /> ลบไฟล์
+                      </button>
                     </div>
                   </div>
                 );

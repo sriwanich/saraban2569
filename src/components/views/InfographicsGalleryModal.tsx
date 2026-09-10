@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { InfographicShareSettings } from './InfographicsShareModal';
 import { useRealtimeSync } from '../../utils/realtimeSync';
+import { useConfirm } from '../../context/ConfirmContext';
 
 interface Project extends InfographicShareSettings {}
 
@@ -15,6 +16,7 @@ interface GalleryModalProps {
 }
 
 export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose, onLoad, onShare, currentUser }) => {
+  const { confirm } = useConfirm();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,9 +54,17 @@ export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose,
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (confirm('ยืนยันการลบโปรเจกต์นี้? การกระทำนี้ไม่สามารถย้อนกลับได้')) {
-      try {
-        const params = new URLSearchParams();
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบโปรเจกต์',
+      message: 'ยืนยันการลบโปรเจกต์นี้? การกระทำนี้ไม่สามารถย้อนกลับได้',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    try {
+      const params = new URLSearchParams();
         if (currentUser) {
           params.append('userId', String(currentUser.id || ''));
           params.append('userRole', String(currentUser.role || ''));
@@ -66,7 +76,6 @@ export const InfographicsGalleryModal: React.FC<GalleryModalProps> = ({ onClose,
       } catch (err) {
         console.error(err);
       }
-    }
   };
 
   const handleShareClick = (e: React.MouseEvent, p: Project) => {

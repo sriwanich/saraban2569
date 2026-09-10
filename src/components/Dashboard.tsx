@@ -17,13 +17,17 @@ import SmartAiAssistantView from './views/SmartAiAssistantView';
 import DigitalSignatureView from './DigitalSignatureView';
 import RecycleBinView from './views/RecycleBinView';
 import QrGeneratorView from './views/QrGeneratorView';
+import ChangelogModal from './ChangelogModal';
+import VersionBadge from './VersionBadge';
 
 const InfographicsEditorView = React.lazy(() => import('./views/InfographicsEditorView'));
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 import { useRealtimeSync } from '../utils/realtimeSync';
+import { useConfirm } from '../context/ConfirmContext';
 
 export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDark }: { onLogout: () => void, theme: ThemeMode, setTheme: (mode: ThemeMode) => void, user: any, isSystemDark?: boolean }) {
+  const { confirm } = useConfirm();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return localStorage.getItem('edms_sidebar_collapsed') === 'true';
@@ -36,6 +40,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   };
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [isChangelogModalOpen, setIsChangelogModalOpen] = useState(false);
 
   // Feature flags control from settings
   const [enabledFeatures, setEnabledFeatures] = useState<Record<string, boolean>>(() => {
@@ -67,8 +72,23 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [currentUser, setCurrentUser] = useState(user);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [positionsList, setPositionsList] = useState<any[]>([]);
-  const [departmentsList, setDepartmentsList] = useState<any[]>([]);
+  const [positionsList, setPositionsList] = useState<any[]>([
+    { id: 1, name: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด', description: 'ผู้บริหารระดับสูงประจำสำนักงาน ปภ.จังหวัด' },
+    { id: 2, name: 'นักวิเคราะห์นโยบายและแผนชำนาญการพิเศษ', description: 'หัวหน้ากลุ่มงาน/ฝ่ายยุทธศาสตร์และการจัดการ' },
+    { id: 3, name: 'นักวิเคราะห์นโยบายและแผนชำนาญการ', description: 'ฝ่ายยุทธศาสตร์และการจัดการ' },
+    { id: 4, name: 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยชำนาญงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' },
+    { id: 5, name: 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยปฏิบัติงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' },
+    { id: 6, name: 'เจ้าพนักงานสงเคราะห์ผู้ประสบภัยชำนาญงาน', description: 'ฝ่ายสงเคราะห์ผู้ประสบภัย' },
+    { id: 7, name: 'เจ้าพนักงานการเงินและบัญชีชำนาญงาน', description: 'ฝ่ายบริหารงานทั่วไป' },
+    { id: 8, name: 'เจ้าพนักงานธุรการชำนาญงาน', description: 'ฝ่ายบริหารงานทั่วไป' },
+    { id: 9, name: 'นายช่างเครื่องกลชำนาญงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' }
+  ]);
+  const [departmentsList, setDepartmentsList] = useState<any[]>([
+    { id: 1, name: 'ฝ่ายบริหารงานทั่วไป', description: 'งานธุรการ สารบรรณ การเงิน พัสดุ และการบริหารทั่วไป' },
+    { id: 2, name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานนโยบาย แผนงาน โครงการ และการบริหารความเสี่ยง' },
+    { id: 3, name: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'งานป้องกันและบรรเทาสาธารณภัย กู้ภัย การฝึกซ้อม และการเผชิญเหตุ' },
+    { id: 4, name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'งานช่วยเหลือ เยียวยา และฟื้นฟูผู้ประสบสาธารณภัย' }
+  ]);
   const [rolePermissions, setRolePermissions] = useState<any[]>([]);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -76,6 +96,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     lastName: user?.lastName || '',
     position: user?.position || '',
     department: user?.department || '',
+    emailNotifications: user?.emailNotifications !== undefined ? user.emailNotifications : true,
     currentPassword: '',
     password: '',
     confirmPassword: '',
@@ -93,21 +114,28 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       password: '',
       confirmPassword: '',
       avatar: user?.avatar || ''
-    });
+    , emailNotifications: profileForm.emailNotifications});
   }, [user]);
 
   const fetchMeta = async () => {
     try {
-      const [posRes, deptRes, permRes] = await Promise.all([
-        fetch('/api/positions'),
-        fetch('/api/departments'),
-        fetch(`/api/role-permissions?t=${Date.now()}`, { cache: 'no-store' })
+      const results = await Promise.allSettled([
+        fetch('/api/positions').then(async res => res.ok ? res.json() : null),
+        fetch('/api/departments').then(async res => res.ok ? res.json() : null),
+        fetch(`/api/role-permissions?t=${Date.now()}`, { cache: 'no-store' }).then(async res => res.ok ? res.json() : null)
       ]);
-      if (posRes.ok && posRes.headers.get('content-type')?.includes('application/json')) setPositionsList(await posRes.json());
-      if (deptRes.ok && deptRes.headers.get('content-type')?.includes('application/json')) setDepartmentsList(await deptRes.json());
-      if (permRes.ok && permRes.headers.get('content-type')?.includes('application/json')) setRolePermissions(await permRes.json());
+
+      if (results[0].status === 'fulfilled' && Array.isArray(results[0].value) && results[0].value.length > 0) {
+        setPositionsList(results[0].value);
+      }
+      if (results[1].status === 'fulfilled' && Array.isArray(results[1].value) && results[1].value.length > 0) {
+        setDepartmentsList(results[1].value);
+      }
+      if (results[2].status === 'fulfilled' && Array.isArray(results[2].value) && results[2].value.length > 0) {
+        setRolePermissions(results[2].value);
+      }
     } catch (err) {
-      console.error('Error fetching meta lists:', err);
+      console.warn('Meta lists fetch fallback active:', err);
     }
   };
 
@@ -187,6 +215,16 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         return;
       }
     }
+
+    const confirmed = await confirm({
+      title: 'ยืนยันการบันทึกข้อมูลส่วนตัว',
+      message: 'คุณต้องการบันทึกการแก้ไขข้อมูลโปรไฟล์ผู้ใช้งานใช่หรือไม่?',
+      type: 'edit',
+      confirmText: 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsSavingProfile(true);
     try {
       const payload = {
@@ -302,7 +340,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         setNotifications(updated);
       }
     } catch (err) {
-      console.error('Error fetching notifications:', err);
+      console.warn('Warning: Could not fetch notifications (possibly disconnected):', err);
     }
   };
 
@@ -342,11 +380,19 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [logoUrl, setLogoUrl] = useState('https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg');
   const [currentYear, setCurrentYear] = useState<number>(2569);
 
-  const isCentralUser = currentUser?.role === 'admin' || currentUser?.isCentral === 1 || (currentUser?.role === 'moderator' && hasPermission('view_all_docs'));
+  const isCentralPrivileged = currentUser?.role === 'admin' || currentUser?.role === 'moderator';
+  const isCentralUser = isCentralPrivileged;
 
   const isDocForUserDepartment = (doc: DocumentItem) => {
-    if (isCentralUser || !currentUser?.department) return true;
-    if (doc.type === 'admin') return true;
+    if (isCentralPrivileged) return true;
+
+    // Regular users MUST NOT see Central Saraban documents (isCentral === 1)
+    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
+    if (isCentralDoc) {
+      return false;
+    }
+
+    if (!currentUser?.department) return false;
 
     const userDept = currentUser.department.trim();
     const userName = currentUser.username;
@@ -373,17 +419,26 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         username: currentUser?.username || ''
       }).toString();
       const res = await fetch(`/api/documents?${queryParams}`);
-      if (res.ok) {
-        const data: DocumentItem[] = await res.json();
-        setInboxDocs(data.filter(d => d.type === 'inbox'));
-        setOutboxDocs(data.filter(d => d.type === 'outbox'));
-        setAdminDocs(data.filter(d => d.type === 'admin'));
-        setHasInboxLoaded(true);
-        setHasOutboxLoaded(true);
-        setHasAdminLoaded(true);
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setInboxDocs(data.filter(d => d.type === 'inbox'));
+          setOutboxDocs(data.filter(d => d.type === 'outbox'));
+          setAdminDocs(data.filter(d => d.type === 'admin'));
+          setHasInboxLoaded(true);
+          setHasOutboxLoaded(true);
+          setHasAdminLoaded(true);
+          return;
+        }
       }
+      setHasInboxLoaded(true);
+      setHasOutboxLoaded(true);
+      setHasAdminLoaded(true);
     } catch (err) {
-      console.error('Error fetching documents:', err);
+      console.warn('Documents fetch fallback active:', err);
+      setHasInboxLoaded(true);
+      setHasOutboxLoaded(true);
+      setHasAdminLoaded(true);
     }
   };
 
@@ -393,14 +448,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (!currentUser?.username) return;
     try {
       const res = await fetch(`/api/favorites?username=${encodeURIComponent(currentUser.username)}`);
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
-        if (data.favorites) {
+        if (data && Array.isArray(data.favorites)) {
           setFavorites(data.favorites.map((f: any) => f.docId));
         }
       }
     } catch (err) {
-      console.error('Error fetching favorites:', err);
+      console.warn('Favorites fetch fallback active:', err);
     }
   };
 
@@ -712,7 +767,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'admin_docs':
         return renderGuardedView('admin_docs', 'ระบบงานธุรการและแบบฟอร์ม', (
           <AdminDocsView 
-            documents={documents} 
+            documents={documents.filter(isDocForUserDepartment)} 
             onViewDoc={setSelectedDoc}
             onCreateDoc={() => { setCreateDocType('admin'); setIsCreateModalOpen(true); }}
             onEditDoc={handleEditDoc}
@@ -759,7 +814,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'workflow':
         return renderGuardedView('workflow_sla', 'ติดตามกระบวนการและ SLA', (
           <WorkflowSlaView 
-            documents={documents} 
+            documents={documents.filter(isDocForUserDepartment)} 
             user={currentUser} 
             onViewDoc={setSelectedDoc} 
           />
@@ -767,7 +822,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'folders':
         return renderGuardedView('digital_folders', 'แฟ้มเอกสารดิจิทัล', (
           <FoldersView 
-            documents={documents} 
+            documents={documents.filter(isDocForUserDepartment)} 
             onViewDoc={setSelectedDoc}
             onRefreshDocs={refreshData}
             user={currentUser}
@@ -778,7 +833,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         return renderGuardedView('digital_signatures', 'ศูนย์ลงนามดิจิทัล ETDA', (
           <DigitalSignatureView 
             user={currentUser} 
-            documents={documents} 
+            documents={documents.filter(isDocForUserDepartment)} 
             onViewDoc={handleViewDoc} 
             onRefreshData={refreshData} 
           />
@@ -787,7 +842,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         return renderGuardedView('qr_generator', 'เครื่องมือสร้าง QR Code สารบรรณ', (
           <QrGeneratorView 
             user={currentUser} 
-            documents={documents} 
+            documents={documents.filter(isDocForUserDepartment)} 
             onViewDoc={handleViewDoc} 
           />
         ));
@@ -906,6 +961,23 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
              );
            })}
          </nav>
+
+          {/* Sidebar Version / Changelog Footer */}
+          <div className={`p-3 border-t border-[var(--border-light)] shrink-0 bg-[var(--bg-surface)] ${isSidebarCollapsed ? 'lg:px-1.5' : ''}`}>
+            {isSidebarCollapsed ? (
+              <button
+                type="button"
+                onClick={() => setIsChangelogModalOpen(true)}
+                className="hidden lg:flex w-10 h-10 mx-auto rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--primary-color)] hover:text-white items-center justify-center text-[var(--primary-color)] transition-colors border border-[var(--border-light)] shadow-xs cursor-pointer"
+                title="ดูประวัติการอัปเดตเวอร์ชัน (Changelog)"
+              >
+                <Sparkles className="w-4 h-4" />
+              </button>
+            ) : null}
+            <div className={`${isSidebarCollapsed ? 'lg:hidden' : ''}`}>
+              <VersionBadge variant="sidebar" onClick={() => setIsChangelogModalOpen(true)} />
+            </div>
+          </div>
       </aside>
 
       {/* Main Content */}
@@ -940,6 +1012,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                   }
                 </span>
               </div>
+
            </div>
 
            <div className="flex items-center gap-3 lg:gap-5 relative shrink-0">
@@ -1074,7 +1147,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                            password: '',
                            confirmPassword: '',
                            avatar: currentUser?.avatar || ''
-                         });
+                         , emailNotifications: profileForm.emailNotifications});
                          setIsProfileModalOpen(true);
                        }}
                        className="w-full text-left px-4 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--border-lighter)] flex items-center gap-2.5 transition-colors"
@@ -1092,6 +1165,15 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                           <SettingsIcon className="w-4 h-4 text-[var(--primary-color)]" /> ไปยังตั้งค่าระบบ
                         </button>
                       )}
+                      <button
+                        onClick={() => {
+                          setIsProfileDropdownOpen(false);
+                          setIsChangelogModalOpen(true);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--border-lighter)] flex items-center gap-2.5 transition-colors"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-500" /> ประวัติเวอร์ชัน & Changelog
+                      </button>
                      <div className="my-1 border-t border-[var(--border-lighter)]" />
                      <button
                        onClick={() => {
@@ -1201,7 +1283,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                     type="text"
                     required
                     value={profileForm.firstName}
-                    onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })}
+                    onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value , emailNotifications: profileForm.emailNotifications})}
                     className="w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
                     placeholder="ชื่อจริง..."
                   />
@@ -1312,6 +1394,23 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                 </div>
               </div>
 
+              
+              <div className="flex items-center justify-between p-4 bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-xl mt-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)]">รับการแจ้งเตือนทางอีเมล</h4>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">ระบบจะส่งอีเมลแจ้งเตือนเมื่อมีการมอบหมายงานหรืออัปเดตสถานะเอกสาร</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={profileForm.emailNotifications}
+                    onChange={(e) => setProfileForm({ ...profileForm, emailNotifications: e.target.checked })}
+                  />
+                  <div className="w-11 h-6 bg-[var(--border-medium)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                </label>
+              </div>
+
               <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-light)]">
                 <button
                   type="button"
@@ -1353,6 +1452,23 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                 คุณต้องการลบหนังสือราชการฉบับนี้ออกจากสารบบ EDMS ใช่หรือไม่? การดำเนินการนี้จะไม่สามารถย้อนคืนได้
               </p>
 
+              
+              <div className="flex items-center justify-between p-4 bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-xl mt-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)]">รับการแจ้งเตือนทางอีเมล</h4>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">ระบบจะส่งอีเมลแจ้งเตือนเมื่อมีการมอบหมายงานหรืออัปเดตสถานะเอกสาร</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={profileForm.emailNotifications}
+                    onChange={(e) => setProfileForm({ ...profileForm, emailNotifications: e.target.checked })}
+                  />
+                  <div className="w-11 h-6 bg-[var(--border-medium)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary-color)]"></div>
+                </label>
+              </div>
+
               <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-light)]">
                 <button
                   type="button"
@@ -1376,6 +1492,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         </div>
       )}
 
+      {/* Changelog & Release Notes Modal */}
+      <ChangelogModal
+        isOpen={isChangelogModalOpen}
+        onClose={() => setIsChangelogModalOpen(false)}
+        currentUser={currentUser}
+        hasPermission={hasPermission}
+      />
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {

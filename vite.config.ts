@@ -8,11 +8,13 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg', 'vite.svg', 'icons/*.png'],
       workbox: {
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         maximumFileSizeToCacheInBytes: 5000000,
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         // Prevent service worker from intercepting /api or /uploads requests and fallback to SPA
         navigateFallbackDenylist: [/^\/api/, /^\/uploads/],
         runtimeCaching: [
@@ -31,6 +33,7 @@ export default defineConfig({
         ]
       },
       manifest: {
+        id: '/',
         name: 'e-Saraban PWA Enterprise',
         short_name: 'e-Saraban',
         description: 'Enterprise PWA Electronic Document Management System & QR Portal',
@@ -41,13 +44,20 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         icons: [
-          {
-            src: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable'
-          }
+          { src: '/icons/icon-72x72.png', sizes: '72x72', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-96x96.png', sizes: '96x96', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-128x128.png', sizes: '128x128', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-144x144.png', sizes: '144x144', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-152x152.png', sizes: '152x152', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-180x180.png', sizes: '180x180', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512x512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
+      },
+      devOptions: {
+        enabled: true,
+        type: 'module'
       }
     })
   ],

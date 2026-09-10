@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from './ai-cross-reference-panel';
 import { DEFAULT_FILE_CODES, parseFileCodeFromDoc, parseDocNumberStructure, FileCodeItem } from '../lib/fileCodeUtils';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Props {
   initialData?: DocumentItem;
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function DocumentFormModal({ initialData, defaultType, documents, currentYear, user, onClose, onSave }: Props) {
+  const { confirm } = useConfirm();
   const [numberingRules, setNumberingRules] = useState<any[]>([]);
   const [reservedNumbers, setReservedNumbers] = useState<any[]>([]);
   const [fileCodes, setFileCodes] = useState<FileCodeItem[]>(DEFAULT_FILE_CODES);
@@ -129,7 +131,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       };
     }
     const activeType = defaultType || 'inbox';
-    const initIsCentral = (user?.role === 'admin' || user?.role === 'moderator' || user?.isCentral === 1) ? 1 : 0;
+    const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
+    const initIsCentral = isCentralPrivileged ? 1 : 0;
     const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป');
     return {
       receiveNumber: '',
@@ -516,7 +519,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const isCirc = false;
       const initCat = 'order';
       const initYear = effectiveYear;
-      const initIsCentral = (user?.role === 'admin' || user?.role === 'moderator' || user?.isCentral === 1) ? 1 : 0;
+      const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
+      const initIsCentral = isCentralPrivileged ? 1 : 0;
       const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป');
 
       setFormData(prev => ({
@@ -684,22 +688,28 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     setIsUploading(true);
 
     try {
+      const filesArr = Array.from(filesToUpload);
+      const originalFileNames = filesArr.map(f => f.name);
+
       const uploadData = new FormData();
       // Append text fields FIRST so multer can parse them before receiving files
       const docType = formData.type || 'inbox';
       const category = formData.category || '';
       uploadData.append('docType', docType);
       uploadData.append('category', category);
+      uploadData.append('originalNames', JSON.stringify(originalFileNames));
+      uploadData.append('fileNames', JSON.stringify(originalFileNames));
       
-      Array.from(filesToUpload).forEach(file => {
-        uploadData.append('files', file);
+      filesArr.forEach(file => {
+        uploadData.append('files', file, file.name);
       });
 
-      // Also pass parameters via query string to guarantee availability
+      // Also pass parameters via query string to guarantee availability on production servers/proxies
       const queryParams = new URLSearchParams({
         docType: docType,
         category: category,
-        uploadedBy: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน'
+        uploadedBy: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน',
+        fileNames: JSON.stringify(originalFileNames)
       });
 
       const response = await fetch(`/api/upload?${queryParams.toString()}`, {
@@ -717,7 +727,9 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
           }));
         }
       } else {
-        alert('เกิดข้อผิดพลาดในการอัปโหลดไฟล์');
+        const errorText = await response.text();
+        console.error('Upload failed:', response.status, errorText);
+        alert(`เกิดข้อผิดพลาดในการอัปโหลดไฟล์: ${response.statusText || 'Unknown Error'}`);
       }
     } catch (err) {
       console.error('File upload error:', err);
@@ -751,7 +763,37 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     setIsDragging(false);
   };
 
-  const removeAttachment = (indexToRemove: number) => {
+  const removeAttachment = async (indexToRemove: number) => {
+    const fileUrlToRemove = formData.attachments?.[indexToRemove];
+    if (fileUrlToRemove) {
+      const username = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งาน';
+      try {
+        // Send via both query param (in case production proxy strips DELETE body) and JSON body
+        const deleteUrl = `/api/upload?url=${encodeURIComponent(fileUrlToRemove)}&username=${encodeURIComponent(username)}`;
+        const res = await fetch(deleteUrl, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: fileUrlToRemove,
+            username
+          })
+        });
+
+        // Fallback to POST /api/upload/delete if DELETE method is blocked by reverse proxy
+        if (!res.ok) {
+          await fetch('/api/upload/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: fileUrlToRemove,
+              username
+            })
+          });
+        }
+      } catch (err) {
+        console.error('Failed to delete attachment from server:', err);
+      }
+    }
     setFormData(prev => ({
       ...prev,
       attachments: (prev.attachments || []).filter((_, idx) => idx !== indexToRemove)
@@ -760,6 +802,20 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const isEdit = Boolean(initialData);
+    const confirmed = await confirm({
+      title: isEdit ? 'ยืนยันการบันทึกการแก้ไขหนังสือราชการ' : 'ยืนยันการลงทะเบียนและบันทึกหนังสือราชการ',
+      message: isEdit
+        ? `คุณต้องการบันทึกการแก้ไขข้อมูลหนังสือราชการเลขที่ "${formData.docNumber || 'ฉบับนี้'}" ใช่หรือไม่?`
+        : `คุณต้องการบันทึกและออกเลขทะเบียนหนังสือราชการเรื่อง "${formData.title || 'ฉบับนี้'}" เข้าสู่ระบบสารบรรณใช่หรือไม่?`,
+      type: isEdit ? 'edit' : 'save',
+      itemDetail: formData.title ? `เรื่อง: ${formData.title}` : undefined,
+      confirmText: isEdit ? 'ยืนยันการแก้ไข' : 'ยืนยันการบันทึก',
+      cancelText: 'ยกเลิก'
+    });
+
+    if (!confirmed) return;
 
     // Save "from" and "to" to organizations table
     if (formData.from && formData.from.trim() !== '') {
@@ -785,9 +841,10 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       }
     }
 
-    const resolvedIsCentral = formData.isCentral !== undefined 
-      ? Number(formData.isCentral) 
-      : ((user?.role === 'admin' || user?.role === 'moderator' || user?.isCentral === 1) ? 1 : 0);
+    const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
+    const resolvedIsCentral = isCentralPrivileged 
+      ? (formData.isCentral !== undefined ? Number(formData.isCentral) : 1)
+      : 0;
 
     const resolvedDept = (formData.department || (resolvedIsCentral === 0 ? user?.department : 'ฝ่ายบริหารงานทั่วไป') || '').trim();
 
@@ -1263,10 +1320,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors font-semibold text-blue-600 dark:text-blue-400"
                   >
                     <option value="ลงทะเบียน">ลงทะเบียน</option>
-                    <option value="เสนอผู้บริหาร">เสนอผู้บริหาร</option>
-                    <option value="ส่งต่อกลุ่มงาน">ส่งต่อกลุ่มงาน/ฝ่ายปฏิบัติ</option>
-                    <option value="เสร็จสิ้น">เสร็จสิ้น (ยุติเรื่อง)</option>
-                    <option value="ไม่อนุมัติ">ไม่อนุมัติ/ยกเลิก</option>
+                    <option value="ส่งต่อกลุ่มงาน">ส่งต่อผู้รับผิดชอบหลัก</option>
                   </select>
                 </div>
               </div>
@@ -1307,16 +1361,30 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                           const fullName = `${u.firstName} ${u.lastName}`.trim();
                           return fullName === selectedName;
                         });
+                        
+                        // Update department if assignee changes (or force update)
+                        const newDept = matchedUser?.department || formData.department;
+                        
                         setFormData(prev => ({
                           ...prev,
                           assignee: selectedName,
-                          department: (matchedUser?.department && !prev.department) ? matchedUser.department : prev.department
+                          department: newDept
                         }));
+
+                        // If status is "ลงทะเบียน" and an assignee is chosen, auto-switch to "ส่งต่อผู้รับผิดชอบหลัก"
+                        if (formData.status === 'ลงทะเบียน' && selectedName) {
+                          handleChange('status', 'ส่งต่อกลุ่มงาน');
+                        }
                       }}
                       className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors"
                     >
                       <option value="">-- เลือกผู้รับผิดชอบหลักจากระบบ --</option>
-                      {usersList.map(u => {
+                      {usersList
+                        .filter(u => {
+                          if (user?.role === 'admin' || user?.role === 'moderator') return true;
+                          return u.department === user?.department;
+                        })
+                        .map(u => {
                         const fullName = `${u.firstName} ${u.lastName}`.trim();
                         const label = u.position ? `${fullName} - ${u.position}` : fullName;
                         return (
@@ -1432,9 +1500,9 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {formData.attachments.map((fileUrl, idx) => {
-                      const rawName = fileUrl.split('/').pop() || fileUrl;
-                      const nameParts = rawName.split('-');
-                      const fileName = nameParts.length > 2 ? nameParts.slice(2).join('-') : rawName;
+                      const rawName = decodeURIComponent(fileUrl.split('/').pop() || fileUrl);
+                      const match = rawName.match(/^\d{10,15}-\d{4,10}-(.+)$/);
+                      const fileName = match ? match[1] : rawName;
                       return (
                         <div 
                           key={idx} 

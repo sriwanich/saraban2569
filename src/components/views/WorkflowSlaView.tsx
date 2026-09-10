@@ -10,6 +10,7 @@ import {
   SLAStatus, formatThaiDateTime, formatThaiDateMedium 
 } from '../../types';
 import { useRealtimeSync } from '../../utils/realtimeSync';
+import { useConfirm } from '../../context/ConfirmContext';
 
 interface WorkflowSlaViewProps {
   documents: DocumentItem[];
@@ -18,6 +19,7 @@ interface WorkflowSlaViewProps {
 }
 
 export default function WorkflowSlaView({ documents, user, onViewDoc }: WorkflowSlaViewProps) {
+  const { confirm } = useConfirm();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'designer' | 'tracking'>('dashboard');
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowInstances, setWorkflowInstances] = useState<WorkflowInstance[]>([]);
@@ -182,7 +184,14 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
 
   // Delete/Cancel Workflow Instance
   const handleDeleteInstance = async (id: string, docNumber: string) => {
-    if (!confirm(`คุณต้องการยกเลิกเส้นทาง Workflow ของหนังสือเลขที่ "${docNumber}" ใช่หรือไม่?`)) return;
+    const confirmed = await confirm({
+      title: 'ยืนยันการยกเลิก Workflow',
+      message: `คุณต้องการยกเลิกเส้นทาง Workflow ของหนังสือเลขที่ "${docNumber}" ใช่หรือไม่?`,
+      type: 'delete',
+      confirmText: 'ยืนยันยกเลิก',
+      cancelText: 'ปิด'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/workflows/instances/${id}`, {
         method: 'DELETE',
@@ -977,7 +986,14 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
                     </button>
                     <button
                       onClick={async () => {
-                        if (!confirm(`ลบแม่แบบ "${tpl.name}" ใช่หรือไม่?`)) return;
+                        const confirmed = await confirm({
+                          title: 'ยืนยันการลบแม่แบบ Workflow',
+                          message: `คุณต้องการลบแม่แบบ "${tpl.name}" ออกจากระบบใช่หรือไม่?`,
+                          type: 'delete',
+                          confirmText: 'ยืนยันการลบ',
+                          cancelText: 'ยกเลิก'
+                        });
+                        if (!confirmed) return;
                         try {
                           await fetch(`/api/workflows/templates/${tpl.id}`, { method: 'DELETE' });
                           showToast('ลบแม่แบบเรียบร้อยแล้ว');
