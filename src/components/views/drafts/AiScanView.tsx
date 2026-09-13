@@ -279,7 +279,7 @@ export default function AiScanView({ user, onSendToDraft, onSaveToRegistry }: Pr
                   className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none cursor-pointer"
                 >
                   <option value="auto">🔍 อัตโนมัติ (ให้ AI วิเคราะห์จากประเภทจริง)</option>
-                  <option value="หนังสือภายนอก">หนังสือภายนอก</option>
+                  <option value="หนังสือส่ง">หนังสือส่ง</option>
                   <option value="หนังสือภายใน">หนังสือภายใน</option>
                   <option value="บันทึกข้อความ">บันทึกข้อความ</option>
                   <option value="คำสั่ง">คำสั่ง</option>

@@ -469,7 +469,7 @@ export default function DigitalSignatureModal({ doc, user, onClose, onSignedSucc
                         type="text"
                         value={signerDepartment}
                         onChange={(e) => setSignerDepartment(e.target.value)}
-                        placeholder="เช่น ฝ่ายบริหารงานทั่วไป"
+                        placeholder="เช่น ฝ่ายยุทธศาสตร์และการจัดการ"
                         className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm rounded-xl border border-[var(--border-medium)] bg-[var(--bg-canvas)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                       />
                     </div>

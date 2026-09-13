@@ -7,12 +7,12 @@ export interface FileCodeItem {
 }
 
 export const DEFAULT_FILE_CODES: FileCodeItem[] = [
-  { id: 1, code: '0021', name: 'งานบริหารทั่วไปและสารบรรณกลาง', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานบริหารทั่วไป งานสารบรรณกลาง สารบรรณจังหวัด' },
+  { id: 1, code: '0021', name: 'งานบริหารทั่วไปและสารบรรณกลาง', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานบริหารทั่วไป งานสารบรรณกลาง สารบรรณจังหวัด' },
   { id: 2, code: '0021.1', name: 'งานยุทธศาสตร์และแผนงาน', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'แผนป้องกันและบรรเทาสาธารณภัย โครงการยุทธศาสตร์' },
   { id: 3, code: '0021.2', name: 'งานสงเคราะห์และช่วยเหลือผู้ประสบภัย', department: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'การให้ความช่วยเหลือ เงินชดเชย ผู้ประสบภัยพิบัติ' },
   { id: 4, code: '0021.3', name: 'งานป้องกัน ปฏิบัติการ และกู้ภัย', department: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'งานบรรเทาสาธารณภัย เครื่องจักรกล อุปกรณ์กู้ภัย' },
-  { id: 5, code: '0022', name: 'งานการเงิน บัญชี และงบประมาณ', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานเบิกจ่าย งบประมาณ บัญชี และการเงิน' },
-  { id: 6, code: '0023', name: 'งานพัสดุและอาคารสถานที่', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานจัดซื้อจัดจ้าง พัสดุ คุรุภัณฑ์ และอาคารสถานที่' }
+  { id: 5, code: '0022', name: 'งานการเงิน บัญชี และงบประมาณ', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานเบิกจ่าย งบประมาณ บัญชี และการเงิน' },
+  { id: 6, code: '0023', name: 'งานพัสดุและอาคารสถานที่', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานจัดซื้อจัดจ้าง พัสดุ คุรุภัณฑ์ และอาคารสถานที่' }
 ];
 
 /**
@@ -30,7 +30,7 @@ export function parseFileCodeFromDoc(
     return {
       code: doc.fileCode.trim(),
       name: doc.fileCodeName || (found ? found.name : 'หมวดแฟ้มสารบรรณ'),
-      department: found ? found.department : (doc.department || 'ฝ่ายบริหารงานทั่วไป')
+      department: found ? found.department : (doc.department || 'ฝ่ายยุทธศาสตร์และการจัดการ')
     };
   }
 
@@ -43,7 +43,7 @@ export function parseFileCodeFromDoc(
       return {
         code: codeFromNote,
         name: found ? found.name : 'หมวดแฟ้มสารบรรณ',
-        department: found ? found.department : (doc.department || 'ฝ่ายบริหารงานทั่วไป')
+        department: found ? found.department : (doc.department || 'ฝ่ายยุทธศาสตร์และการจัดการ')
       };
     }
   }
@@ -70,7 +70,7 @@ export function parseFileCodeFromDoc(
       return {
         code,
         name: found ? found.name : 'หมวดแฟ้มสารบรรณ',
-        department: found ? found.department : (doc.department || 'ฝ่ายบริหารงานทั่วไป')
+        department: found ? found.department : (doc.department || 'ฝ่ายยุทธศาสตร์และการจัดการ')
       };
     }
   }
@@ -91,7 +91,7 @@ export function parseFileCodeFromDoc(
   return {
     code: '0021',
     name: 'งานบริหารทั่วไปและสารบรรณกลาง',
-    department: 'ฝ่ายบริหารงานทั่วไป'
+    department: 'ฝ่ายยุทธศาสตร์และการจัดการ'
   };
 }
 

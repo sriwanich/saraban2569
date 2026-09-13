@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  FileText, Sparkles, Award, FileEdit, Volume2, Users, BarChart3
+  FileText, Sparkles, Award, FileEdit, Volume2, Users, BarChart3, BookOpen
 } from 'lucide-react';
 
 import DraftLettersView from './drafts/DraftLettersView';
@@ -10,6 +10,7 @@ import CustomOrderView from './drafts/CustomOrderView';
 import SpeechTemplatesView from './drafts/SpeechTemplatesView';
 import MeetingMinutesView from './drafts/MeetingMinutesView';
 import ProjectSummaryView from './drafts/ProjectSummaryView';
+import OfficialRuleCheckerTab from './drafts/OfficialRuleCheckerTab';
 
 interface Props {
   user: any;
@@ -37,6 +38,7 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
   const tabs = [
     { id: 'draft', label: 'ร่างหนังสือราชการ', icon: FileText },
     { id: 'aiscan', label: 'AI สแกนเอกสาร', icon: Sparkles, badge: 'AI' },
+    { id: 'rulecheck', label: 'ตรวจระเบียบสารบรรณ', icon: BookOpen, badge: 'ใหม่' },
     { id: 'order', label: 'คำสั่ง / ประกาศ', icon: Award, badge: '40+ แบบ' },
     { id: 'customorder', label: 'สร้างคำสั่ง/ประกาศเอง', icon: FileEdit },
     { id: 'speech', label: 'คำกล่าว / รายงาน', icon: Volume2, badge: '100+ แบบ' },
@@ -56,10 +58,10 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
   }, [enabledFeatures, activeSubTab, filteredTabs]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:space-y-8 animate-fade-in pb-10">
       {/* Navigation Sub-Pills */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-2 shadow-sm">
-        <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar p-1">
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-3 shadow-sm relative z-10">
+        <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar p-1">
           {filteredTabs.map(tab => {
             const Icon = tab.icon;
             const isActive = activeSubTab === tab.id;
@@ -67,17 +69,17 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
               <button
                 key={tab.id}
                 onClick={() => setActiveSubTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-xs whitespace-nowrap transition-all duration-200 cursor-pointer ${
+                className={`flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-sm whitespace-nowrap transition-all duration-300 cursor-pointer ${
                   isActive
-                    ? 'bg-[var(--primary-color)] text-white shadow-md font-semibold'
-                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
+                    ? 'bg-gradient-to-r from-[var(--primary-color)] to-[var(--primary-dark)] text-white shadow-md shadow-[var(--primary-color)]/20 hover:shadow-lg hover:shadow-[var(--primary-color)]/30 hover:-translate-y-0.5'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] hover:shadow-sm'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-[var(--text-muted)]'}`} />
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-[var(--text-muted)]'}`} />
                 <span>{tab.label}</span>
                 {tab.badge && (
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                    isActive ? 'bg-white/20 text-white' : 'bg-[var(--primary-color)]/10 text-[var(--primary-color)]'
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider shadow-sm ${
+                    isActive ? 'bg-white/25 text-white' : 'bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20'
                   }`}>
                     {tab.badge}
                   </span>
@@ -103,6 +105,12 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
             user={user}
             onSendToDraft={handleSendFromAiToDraft}
             onSaveToRegistry={onSaveToRegistry}
+          />
+        )}
+
+        {activeSubTab === 'rulecheck' && (
+          <OfficialRuleCheckerTab
+            user={user}
           />
         )}
 

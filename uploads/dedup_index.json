@@ -1,0 +1,81 @@
+{
+  "lastScanned": "2026-09-10T08:51:04.143Z",
+  "totalFiles": 11,
+  "totalSizeBytes": 1054767,
+  "totalSizeFormatted": "1.01 MB",
+  "uniqueMasterFiles": 5,
+  "uniqueSizeBytes": 213045,
+  "uniqueSizeFormatted": "208.05 KB",
+  "duplicateCount": 6,
+  "potentialSavedSpaceBytes": 841722,
+  "potentialSavedSpaceFormatted": "821.99 KB",
+  "pointerCount": 6,
+  "autoDedupOnUpload": true,
+  "groups": [
+    {
+      "hash": "0ae981dc81e28f4f3bf64b70cf14d82d2c63a34c773c27138a36f2539705c66a",
+      "fileSize": 140287,
+      "fileSizeFormatted": "137 KB",
+      "masterFile": {
+        "url": "/uploads/pointers/0ae981dc81e28f4f_1788856957187-24817750-logo.webp",
+        "filename": "0ae981dc81e28f4f_1788856957187-24817750-logo.webp",
+        "path": "/app/applet/uploads/pointers/0ae981dc81e28f4f_1788856957187-24817750-logo.webp",
+        "ino": 59194,
+        "referencedDocs": []
+      },
+      "duplicatesCount": 6,
+      "duplicates": [
+        {
+          "url": "/uploads/system/1788856957187-24817750-logo.webp",
+          "filename": "1788856957187-24817750-logo.webp",
+          "path": "/app/applet/uploads/system/1788856957187-24817750-logo.webp",
+          "ino": 59194,
+          "isHardLinked": true,
+          "referencedDocs": []
+        },
+        {
+          "url": "/uploads/system/ddpm-logo.svg",
+          "filename": "ddpm-logo.svg",
+          "path": "/app/applet/uploads/system/ddpm-logo.svg",
+          "ino": 59194,
+          "isHardLinked": true,
+          "referencedDocs": []
+        },
+        {
+          "url": "/uploads/system/logo.png",
+          "filename": "logo.png",
+          "path": "/app/applet/uploads/system/logo.png",
+          "ino": 59194,
+          "isHardLinked": true,
+          "referencedDocs": []
+        },
+        {
+          "url": "/uploads/system/logo.svg",
+          "filename": "logo.svg",
+          "path": "/app/applet/uploads/system/logo.svg",
+          "ino": 59194,
+          "isHardLinked": true,
+          "referencedDocs": []
+        },
+        {
+          "url": "/uploads/system/logo.webp",
+          "filename": "logo.webp",
+          "path": "/app/applet/uploads/system/logo.webp",
+          "ino": 59194,
+          "isHardLinked": true,
+          "referencedDocs": []
+        },
+        {
+          "url": "/uploads/system/logo_1.png",
+          "filename": "logo_1.png",
+          "path": "/app/applet/uploads/system/logo_1.png",
+          "ino": 59194,
+          "isHardLinked": true,
+          "referencedDocs": []
+        }
+      ],
+      "savedSpaceBytes": 841722,
+      "savedSpaceFormatted": "821.99 KB"
+    }
+  ]
+}

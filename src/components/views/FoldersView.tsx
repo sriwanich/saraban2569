@@ -221,25 +221,30 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-sans font-semibold text-[var(--text-primary)] flex items-center gap-2">
-            จัดการแฟ้มเอกสารดิจิทัล
-          </h2>
-          <p className="text-[var(--text-secondary)] mt-1 text-sm">
-            จัดการระบบสารบบแฟ้มดิจิทัลเพื่อคัดแยก จัดเก็บ บันทึกประกาศ หรือติดตามหนังสือรับรองแยกเป็นรายแฟ้มแผนก
-          </p>
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-[var(--primary-color)]/10 to-transparent rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20 transition-all duration-700 group-hover:from-[var(--primary-color)]/20" />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 relative z-10">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <h2 className="text-3xl font-sans font-extrabold text-[var(--text-primary)] tracking-tight">
+                จัดการแฟ้มเอกสารดิจิทัล
+              </h2>
+            </div>
+            <p className="text-[var(--text-secondary)] text-sm font-medium">
+              จัดการระบบสารบบแฟ้มดิจิทัลเพื่อคัดแยก จัดเก็บ บันทึกประกาศ หรือติดตามหนังสือรับรองแยกเป็นรายแฟ้มแผนก
+            </p>
+          </div>
+          {activeFolder && (
+            <button
+              onClick={() => setActiveFolder(null)}
+              className="flex items-center justify-center gap-2 bg-[var(--bg-overlay)] hover:bg-[var(--bg-surface)] border border-[var(--border-light)] hover:border-[var(--primary-color)]/40 text-[var(--text-primary)] px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm active:scale-[0.98] shrink-0 cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4 shrink-0" /> ย้อนกลับไปยังรายการแฟ้ม
+            </button>
+          )}
         </div>
-        {activeFolder && (
-          <button
-            onClick={() => setActiveFolder(null)}
-            className="flex items-center gap-1 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-overlay)] border border-[var(--border-light)] px-3 py-1.5 rounded-lg transition-all"
-          >
-            <ChevronLeft className="w-4 h-4" /> ย้อนกลับไปยังรายการแฟ้ม
-          </button>
-        )}
       </div>
 
       {activeFolder ? (

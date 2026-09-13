@@ -246,7 +246,7 @@ export default function ChangelogModal({
       const matchSummary = (item.summary || '').toLowerCase().includes(q);
       const matchChanges = (item.changes || []).some(c => 
         c.categoryLabel.toLowerCase().includes(q) || 
-        c.items.some(i => i.toLowerCase().includes(q))
+        (c.items || []).some(i => i.toLowerCase().includes(q))
       );
       return matchVersion || matchTitle || matchSummary || matchChanges;
     }
@@ -327,11 +327,11 @@ export default function ChangelogModal({
     if (item.author) text += `ผู้เผยแพร่: ${item.author}\n`;
     if (item.summary) text += `\nสรุปภาพรวม:\n${item.summary}\n`;
     
-    if (item.changes && item.changes.length > 0) {
+    if (Array.isArray(item.changes) && item.changes.length > 0) {
       text += `\nรายละเอียดการเปลี่ยนแปลง:\n`;
       item.changes.forEach(cat => {
         text += `\n${cat.categoryLabel}\n`;
-        cat.items.forEach(i => {
+        (cat.items || []).forEach(i => {
           if (i.trim()) text += ` • ${i}\n`;
         });
       });
@@ -636,10 +636,10 @@ export default function ChangelogModal({
                                     {totalChanges} รายการ
                                   </span>
                                 )}
-                                {item.images && item.images.length > 0 && (
+                                {Array.isArray(item.images) && item.images.length > 0 && (
                                   <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 text-[10px] font-medium" title="มีรูปภาพประกอบ">
                                     <ImageIcon className="w-3 h-3" />
-                                    {item.images.length}
+                                    {item.images?.length}
                                   </span>
                                 )}
                               </div>
@@ -773,7 +773,7 @@ export default function ChangelogModal({
                       <Layers className="w-3.5 h-3.5 text-blue-500" />
                       <span>หมวดหมู่การเปลี่ยนแปลง:</span>
                       <strong className="text-[var(--text-primary)]">
-                        {selectedChangelog.changes?.length || 0} หมวด
+                        {Array.isArray(selectedChangelog.changes) ? selectedChangelog.changes.length : 0} หมวด
                       </strong>
                     </span>
                   </div>
@@ -793,7 +793,7 @@ export default function ChangelogModal({
                 </div>
 
                 {/* Categorized Changes Section */}
-                {selectedChangelog.changes && selectedChangelog.changes.length > 0 && (
+                {Array.isArray(selectedChangelog.changes) && selectedChangelog.changes.length > 0 && (
                   <section className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold font-sans text-[var(--text-primary)] flex items-center gap-2">
@@ -806,7 +806,7 @@ export default function ChangelogModal({
                     </div>
 
                     <div className="grid grid-cols-1 gap-4">
-                      {selectedChangelog.changes.map((cat, idx) => {
+                      {(Array.isArray(selectedChangelog.changes) ? selectedChangelog.changes : []).map((cat, idx) => {
                         const meta = getCategoryMeta(cat.category, cat.categoryLabel);
                         const CatIcon = meta.icon;
 
@@ -825,12 +825,12 @@ export default function ChangelogModal({
                                 </h5>
                               </div>
                               <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[var(--bg-surface)] text-[var(--text-muted)] border border-[var(--border-light)]">
-                                {cat.items.length} รายการ
+                                {cat.items?.length || 0} รายการ
                               </span>
                             </div>
 
                             <ul className="space-y-2.5 pl-1">
-                              {cat.items.map((item, itemIdx) => (
+                              {(cat.items || []).filter(i => i.trim()).map((item, itemIdx) => (
                                 <li 
                                   key={itemIdx} 
                                   className="flex items-start gap-3 text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed group"

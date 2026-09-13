@@ -185,22 +185,25 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
       )}
 
       {/* Title Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)] flex items-center gap-2">
-            <Trash2 className="w-6 h-6 text-rose-500" />
-            <span>ถังขยะเอกสาร (Recycle Bin)</span>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-rose-500/10 to-transparent rounded-full blur-[80px] pointer-events-none -mr-10 -mt-10 transition-all duration-700 group-hover:from-rose-500/20" />
+        <div className="relative z-10">
+          <h1 className="text-2xl lg:text-3xl font-bold font-sans text-[var(--text-primary)] flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/20">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <span>ถังขยะเอกสาร <span className="text-rose-500 font-normal">Recycle Bin</span></span>
           </h1>
-          <p className="text-sm text-[var(--text-secondary)] mt-1">
-            กู้คืนเอกสารที่ถูกลบชั่วคราว หรือลบออกถาวรจากระบบ
+          <p className="text-sm text-[var(--text-secondary)] mt-2 font-medium">
+            กู้คืนเอกสารที่ถูกลบชั่วคราว หรือลบออกถาวรจากระบบอย่างปลอดภัย
           </p>
         </div>
         <button 
           onClick={fetchRecycleBin} 
           disabled={loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[var(--bg-overlay)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] rounded-lg transition-colors disabled:opacity-50"
+          className="relative z-10 inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] hover:border-slate-300 dark:hover:border-slate-700 text-[var(--text-primary)] rounded-xl transition-all shadow-sm hover:shadow-md disabled:opacity-50"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           <span>โหลดข้อมูลใหม่</span>
         </button>
       </div>
@@ -217,35 +220,35 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
       </div>
 
       {/* Filters and Search Bar */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-4 rounded-xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="relative w-full md:max-w-md">
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] p-5 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col md:flex-row items-center justify-between gap-4 transition-all">
+        <div className="relative w-full md:max-w-md group">
           <input
             type="text"
             placeholder="ค้นหาชื่อเอกสาร, เลขที่, ผู้ลบ..."
             value={searchTerm}
             onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg pl-9 pr-4 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors"
+            className="w-full bg-white dark:bg-slate-900/50 border border-[var(--border-light)] rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] focus:ring-4 focus:ring-[var(--primary-color)]/10 transition-all shadow-sm"
           />
-          <span className="absolute left-3 top-3 text-[var(--text-muted)]">
+          <span className="absolute left-3.5 top-3 text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
             <Search className="w-4 h-4" />
           </span>
           {searchTerm && (
             <button
               onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
-              className="absolute right-3 top-3 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              className="absolute right-3 top-3 text-[var(--text-muted)] hover:text-rose-500 transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
           )}
         </div>
 
-        <div className="text-xs text-[var(--text-muted)] shrink-0">
+        <div className="text-sm text-[var(--text-secondary)] shrink-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-4 py-2 rounded-xl border border-[var(--border-light)] font-medium">
           พบทั้งหมด <span className="font-bold text-[var(--text-primary)]">{filteredItems.length}</span> รายการ
         </div>
       </div>
 
       {/* Items Table / Card Layout */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden transition-all">
         {loading && items.length === 0 ? (
           <div className="p-12 text-center text-sm text-[var(--text-muted)]">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto text-[var(--primary-color)]/70 mb-3" />

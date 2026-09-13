@@ -1531,54 +1531,58 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       )}
 
       {/* Upper header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[var(--bg-surface)] p-6 rounded-2xl border border-[var(--border-light)] shadow-sm">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-2.5">
-            <QrCode className="w-8 h-8 text-blue-600" />
-            <span>ระบบสร้าง QR Code (QR Studio v1.0)</span>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-[var(--bg-overlay)] backdrop-blur-2xl p-6 rounded-3xl border border-[var(--border-light)] shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-blue-500/10 to-transparent rounded-full blur-[80px] pointer-events-none -mr-10 -mt-10 transition-all duration-700 group-hover:from-blue-500/20" />
+        
+        <div className="space-y-2 relative z-10">
+          <h1 className="text-2xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/20">
+              <QrCode className="w-6 h-6" />
+            </div>
+            <span className="tracking-tight">ระบบสร้าง QR Code <span className="text-blue-500 text-lg">v2.0</span></span>
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            ระบบความสมบูรณ์แบบเพื่อการยืนยันตัวตนหนังสือราชการ ย่อลิงก์ ติดตามสถิติสแกนแบบ Real-Time และพิมพ์ชุดสติ๊กเกอร์สารบรรณ
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium max-w-xl leading-relaxed">
+            ระบบศูนย์กลางการสร้าง QR Code ยืนยันตัวตนเอกสาร สร้างลิงก์ย่ออัจฉริยะ ติดตามสถิติแบบเรียลไทม์ และออกสติ๊กเกอร์สารบรรณ
           </p>
         </div>
 
         {/* Tab Selection */}
-        <div className="flex flex-wrap gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+        <div className="flex flex-wrap gap-1 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md p-1.5 rounded-2xl border border-[var(--border-light)] shadow-sm relative z-10">
           <button
             onClick={() => setActiveTab('create')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'create' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'create' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
           >
             สร้าง & ดีไซน์ QR
           </button>
           <button
             onClick={() => setActiveTab('analytics')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'analytics' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'analytics' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
           >
-            วิเคราะห์ & ติดตามสถิติ
+            วิเคราะห์สถิติ
           </button>
           <button
             onClick={() => setActiveTab('bulk')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'bulk' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'bulk' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
           >
-            สร้างแบบกลุ่ม (Bulk)
+            สร้างกลุ่ม (Bulk)
           </button>
           <button
             onClick={() => setActiveTab('templates')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'templates' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'templates' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
           >
             แม่แบบ (Templates)
           </button>
           <button
             onClick={() => setActiveTab('sticker')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'sticker' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'sticker' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
           >
-            พิมพ์แผ่นตรา A4
+            พิมพ์ตรา A4
           </button>
           <button
             onClick={() => setActiveTab('test')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'test' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'test' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
           >
-            เครื่องจำลองสแกน
+            จำลองสแกน
           </button>
         </div>
       </div>
@@ -1587,7 +1591,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       {activeTab === 'create' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Design Controls Panel */}
-          <div className="lg:col-span-7 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6 overflow-y-auto max-h-[85vh]">
+          <div className="lg:col-span-7 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 overflow-y-auto max-h-[85vh] custom-scrollbar">
             
             {/* Generation Mode Select */}
             <div className="space-y-2">
@@ -2374,7 +2378,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             </div>
 
             {/* Right Column: Analytics Charts and Stats Detail */}
-            <div className="lg:col-span-8 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6">
+            <div className="lg:col-span-8 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-8">
               {!analyticsSlug ? (
                 <div className="flex flex-col items-center justify-center p-16 text-center space-y-3">
                   <BarChart2 className="w-16 h-16 text-slate-300 animate-pulse" />

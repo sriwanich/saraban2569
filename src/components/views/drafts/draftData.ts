@@ -2,6 +2,7 @@
 
 export interface DraftItem {
   id: number;
+  dbId?: number;
   type: string;
   docType: string;
   docNum: string;
@@ -11,6 +12,7 @@ export interface DraftItem {
   urgency: string;
   secrecy: string;
   body: string;
+  content?: string;
   signer: string;
   signerPos: string;
   ref?: string;
@@ -74,7 +76,76 @@ export interface AiScanResult {
 // ── Thai Formatting Helpers ──
 export function toThaiNumeral(s: string | number | null | undefined): string {
   if (s === null || s === undefined) return '';
-  return String(s).replace(/[0-9]/g, d => '๐๑๒๓๔๕๖๗๘๙'[parseInt(d, 10)]);
+  return String(s).replace(/[0-9]/g, d => '๐๑๒๓๔๕๖๗๘๙'[parseInt(d, 10)] || d);
+}
+
+export function toArabicNumeral(s: string | number | null | undefined): string {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[๐-๙]/g, d => {
+    const idx = '๐๑๒๓๔๕๖๗๘๙'.indexOf(d);
+    return idx !== -1 ? String(idx) : d;
+  });
+}
+
+export function convertHtmlDigitsToThai(html: string): string {
+  if (!html) return '';
+  // Convert digits that are outside HTML tags (<...>) and outside character entities (&...;)
+  return html.replace(/(<[^>]+>)|(&[a-zA-Z0-9#]+;)|([0-9]+)/g, (match, tag, entity, digits) => {
+    if (tag) return tag;
+    if (entity) return entity;
+    return toThaiNumeral(digits);
+  });
+}
+
+export function convertHtmlDigitsToArabic(html: string): string {
+  if (!html) return '';
+  return html.replace(/(<[^>]+>)|(&[a-zA-Z0-9#]+;)|([๐-๙]+)/g, (match, tag, entity, digits) => {
+    if (tag) return tag;
+    if (entity) return entity;
+    return toArabicNumeral(digits);
+  });
+}
+
+export function countArabicDigitsInHtml(html: string): number {
+  if (!html) return 0;
+  let count = 0;
+  html.replace(/(<[^>]+>)|(&[a-zA-Z0-9#]+;)|([0-9])/g, (match, tag, entity, digit) => {
+    if (digit) count++;
+    return match;
+  });
+  return count;
+}
+
+export function convertDomElementToThaiNumerals(element: HTMLElement | null): number {
+  if (!element) return 0;
+  let convertedCount = 0;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue && /[0-9]/.test(node.nodeValue)) {
+      const original = node.nodeValue;
+      const matches = original.match(/[0-9]/g);
+      if (matches) convertedCount += matches.length;
+      node.nodeValue = toThaiNumeral(original);
+    }
+  }
+  return convertedCount;
+}
+
+export function convertDomElementToArabicNumerals(element: HTMLElement | null): number {
+  if (!element) return 0;
+  let convertedCount = 0;
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue && /[๐-๙]/.test(node.nodeValue)) {
+      const original = node.nodeValue;
+      const matches = original.match(/[๐-๙]/g);
+      if (matches) convertedCount += matches.length;
+      node.nodeValue = toArabicNumeral(original);
+    }
+  }
+  return convertedCount;
 }
 
 export function thDate(isoDate: string | null | undefined): string {
@@ -101,7 +172,7 @@ export function thDateFull(isoDate: string | null | undefined): string {
 
 export function getLogoHTML(size = 80): string {
   const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
-  const logo = localStorage.getItem('moi_logo') || localStorage.getItem('moi_schoolLogo') || settings.logoUrl || null;
+  const logo = localStorage.getItem('moi_logo') || localStorage.getItem('moi_schoolLogo') || settings.logoUrl || '/public/ddpm-logo.svg';
   if (logo) {
     return `<div style="text-align:center;margin-bottom:6px;">
       <img src="${logo}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;object-fit:contain;display:inline-block;" alt="ตราประจำหน่วยงาน">
@@ -163,7 +234,7 @@ export function downloadAsDoc(bodyHTML: string, filename = 'document') {
 
 // ── Letter Templates Definition ──
 export const LETTER_TYPES = [
-  { icon: 'FileText', title: 'หนังสือภายนอก', desc: 'ติดต่อราชการกับหน่วยงานอื่น', template: 'external' },
+  { icon: 'FileText', title: 'หนังสือส่ง', desc: 'ติดต่อราชการกับหน่วยงานอื่น (หนังสือส่ง)', template: 'external' },
   { icon: 'Mail', title: 'หนังสือภายใน', desc: 'บันทึกข้อความภายในหน่วยงาน', template: 'internal' },
   { icon: 'Award', title: 'หนังสือประทับตรา', desc: 'หนังสือประทับตราแทนลงชื่อ', template: 'stamp' },
   { icon: 'CheckSquare', title: 'หนังสือรับรอง', desc: 'ออกหนังสือรับรองบุคคล/หน่วยงาน', template: 'cert' },
@@ -178,7 +249,8 @@ export const LETTER_TYPES = [
 
 // ── Official Letter Document HTML Builder ──
 export function buildOfficialDoc({
-  docType, docNum, date, to, subject, ref, att, body, signer, signerPos, urgency, secrecy, orgName
+  docType, docNum, date, to, subject, ref, att, body, signer, signerPos, urgency, secrecy, orgName,
+  deptContact, phone, fax, email
 }: {
   docType?: string;
   docNum?: string;
@@ -193,12 +265,16 @@ export function buildOfficialDoc({
   urgency?: string;
   secrecy?: string;
   orgName?: string;
+  deptContact?: string;
+  phone?: string;
+  fax?: string;
+  email?: string;
 }): string {
   if (docType && (docType.includes('ภายใน') || docType.includes('บันทึก'))) {
-    return buildMemoDoc({ docNum, date, to, subject, body, signer, signerPos, urgency, secrecy, orgName });
+    return buildMemoDoc({ docNum, date, to, subject, body, signer, signerPos, urgency, secrecy, orgName, deptContact, phone, fax, email });
   }
 
-  const school = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด';
+  const school = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
   const docNumThai = toThaiNumeral(docNum || 'มท ๐๖๑๘/..........');
   const dateThai = thDateFull(date);
 
@@ -209,6 +285,11 @@ export function buildOfficialDoc({
     ? `<div style="color:#dc2626;font-size:32pt;font-weight:900;line-height:1;margin:0 0 2pt;">${urgency}</div>` : '';
 
   const sealHTML = getSingleSealHTML(113);
+
+  const subjectThai = toThaiNumeral(subject || '');
+  const refThai = ref ? toThaiNumeral(ref) : '';
+  const attThai = att ? toThaiNumeral(att) : '';
+  const toThai = to ? toThaiNumeral(to) : '...';
 
   return `<div style="font-family:'TH SarabunPSK','Sarabun',sans-serif;font-size:16pt;line-height:1.5;max-width:800px;margin:0 auto;padding:0;color:#000;">
 ${secrecyStamp}
@@ -232,10 +313,10 @@ ${secrecyStamp}
 </table>
 
 <table width="100%" cellpadding="0" cellspacing="0" style="border:none;border-collapse:collapse;margin-top:8pt;font-size:16pt;line-height:1.5;">
-  <tr><td style="border:none;padding:0 0 4pt 0;">เรื่อง&nbsp;&nbsp;${subject || ''}</td></tr>
-  <tr><td style="border:none;padding:0 0 4pt 0;">เรียน&nbsp;&nbsp;${to || '...'}</td></tr>
-  ${ref ? `<tr><td style="border:none;padding:0 0 4pt 0;">อ้างถึง&nbsp;&nbsp;${ref}</td></tr>` : ''}
-  ${att ? `<tr><td style="border:none;padding:0 0 4pt 0;">สิ่งที่ส่งมาด้วย&nbsp;&nbsp;${att}</td></tr>` : ''}
+  <tr><td style="border:none;padding:0 0 4pt 0;">เรื่อง&nbsp;&nbsp;${subjectThai}</td></tr>
+  <tr><td style="border:none;padding:0 0 4pt 0;">เรียน&nbsp;&nbsp;${toThai}</td></tr>
+  ${refThai ? `<tr><td style="border:none;padding:0 0 4pt 0;">อ้างถึง&nbsp;&nbsp;${refThai}</td></tr>` : ''}
+  ${attThai ? `<tr><td style="border:none;padding:0 0 4pt 0;">สิ่งที่ส่งมาด้วย&nbsp;&nbsp;${attThai}</td></tr>` : ''}
 </table>
 
 <div style="font-size:16pt;line-height:1.5;margin-top:6pt;text-align:justify;">
@@ -253,11 +334,23 @@ ${secrecyStamp}
     </td>
   </tr>
 </table>
+
+<table width="100%" cellpadding="0" cellspacing="0" style="border:none;border-collapse:collapse;margin-top:24pt;font-size:15pt;line-height:1.4;">
+  <tr>
+    <td style="border:none;padding:0;">
+      <div>${deptContact || 'ฝ่ายยุทธศาสตร์และการจัดการ'}</div>
+      <div>โทรศัพท์ ${phone ? toThaiNumeral(phone) : '๐ ๓๘๖๙ ๔๑๐๙'}</div>
+      <div>โทรสาร ${fax ? toThaiNumeral(fax) : '๐ ๓๘๖๙ ๔๑๑๐'}</div>
+      <div>ไปรษณีย์อิเล็กทรอนิกส์ ${email || 'rayong_dpm@moi.go.th'}</div>
+    </td>
+  </tr>
+</table>
 </div>`;
 }
 
 export function buildMemoDoc({
-  docNum, date, to, subject, body, signer, signerPos, urgency, secrecy, orgName
+  docNum, date, to, subject, body, signer, signerPos, urgency, secrecy, orgName,
+  deptContact, phone, fax, email
 }: {
   docNum?: string;
   date?: string;
@@ -269,10 +362,20 @@ export function buildMemoDoc({
   urgency?: string;
   secrecy?: string;
   orgName?: string;
+  deptContact?: string;
+  phone?: string;
+  fax?: string;
+  email?: string;
 }): string {
-  const school = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด';
+  const school = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
   const docNumThai = toThaiNumeral(docNum || 'มท ๐๖๑๘/..........');
   const dateThai = thDateFull(date);
+
+  const secrecyStamp = secrecy && secrecy !== 'ไม่ลับ'
+    ? `<div style="text-align:center;color:#dc2626;font-size:20pt;font-weight:900;letter-spacing:6pt;line-height:1.1;margin:0 0 4pt;">${secrecy}</div>` : '';
+
+  const urgStamp = urgency && urgency !== 'ปกติ'
+    ? `<span style="color:#dc2626;font-size:20pt;font-weight:900;margin-right:8pt;">${urgency}</span>` : '';
 
   const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
   const garudaSrc = localStorage.getItem('moi_garudaCustom') || localStorage.getItem('moi_garuda15') || localStorage.getItem('moi_garuda30') || settings.garuda15Url || settings.garuda30Url || null;
@@ -280,7 +383,11 @@ export function buildMemoDoc({
     ? `<img src="${garudaSrc}" width="57" height="57" style="width:57px;height:57px;object-fit:contain;" alt="ตราครุฑ">`
     : `<div style="width:57px;height:57px;border:1px dashed #ccc;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:#bbb;">ครุฑ ๑.๕ ซม.</div>`;
 
+  const subjectThai = toThaiNumeral(subject || '');
+  const toThai = to ? toThaiNumeral(to) : '...';
+
   return `<div style="font-family:'TH SarabunPSK','Sarabun',sans-serif;font-size:16pt;line-height:1.5;max-width:800px;margin:0 auto;color:#000;">
+${secrecyStamp}
 <table width="100%" cellpadding="0" cellspacing="0" style="border:none;border-collapse:collapse;">
   <tr>
     <td style="border:none;width:90px;vertical-align:top;padding:0;">${seal}</td>
@@ -292,12 +399,12 @@ export function buildMemoDoc({
 </table>
 
 <div style="margin-top:6pt;line-height:1.6;">
-  <span style="font-size:20pt;font-weight:700;">ส่วนราชการ</span>&nbsp;&nbsp;กลุ่มงานยุทธศาสตร์และจัดการ&nbsp;&nbsp;${school}
+  <span style="font-size:20pt;font-weight:700;">ส่วนราชการ</span>&nbsp;&nbsp;${deptContact || 'ฝ่ายยุทธศาสตร์และการจัดการ'}&nbsp;&nbsp;${school}&nbsp;&nbsp;โทร.&nbsp;${phone ? toThaiNumeral(phone) : '๐ ๓๘๖๙ ๔๑๐๙'}
 </div>
 <table width="100%" cellpadding="0" cellspacing="0" style="border:none;border-collapse:collapse;line-height:1.6;">
   <tr>
     <td style="border:none;padding:0;width:55%;">
-      <span style="font-size:20pt;font-weight:700;">ที่</span>&nbsp;&nbsp;${docNumThai}
+      ${urgStamp}<span style="font-size:20pt;font-weight:700;">ที่</span>&nbsp;&nbsp;${docNumThai}
     </td>
     <td style="border:none;padding:0;">
       <span style="font-size:20pt;font-weight:700;">วันที่</span>&nbsp;&nbsp;${dateThai}
@@ -305,9 +412,9 @@ export function buildMemoDoc({
   </tr>
 </table>
 <div style="line-height:1.6;">
-  <span style="font-size:20pt;font-weight:700;">เรื่อง</span>&nbsp;&nbsp;${subject || ''}
+  <span style="font-size:20pt;font-weight:700;">เรื่อง</span>&nbsp;&nbsp;${subjectThai}
 </div>
-<div style="margin-top:8pt;">เรียน&nbsp;&nbsp;${to || '...'}</div>
+<div style="margin-top:8pt;">เรียน&nbsp;&nbsp;${toThai}</div>
 
 <div style="margin-top:6pt;text-align:justify;">${body || ''}</div>
 
@@ -518,3 +625,146 @@ export const SPEECH_DATA = [
     ]
   }
 ];
+
+// ── Official Standard Phrases for Thai Bureaucracy ──
+export const OFFICIAL_STANDARD_PHRASES = {
+  openings: [
+    { label: 'ด้วย (เรื่องใหม่)', text: 'ด้วย ฝ่ายยุทธศาสตร์และการจัดการ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง มีภารกิจในการ' },
+    { label: 'ตามที่...ความละเอียดแจ้งแล้ว นั้น (เรื่องเดิม)', text: 'ตามที่ ได้มีการแจ้งเรื่องการดำเนินงานด้านการป้องกันและบรรเทาสาธารณภัย ความละเอียดแจ้งแล้ว นั้น' },
+    { label: 'ตามหนังสือที่อ้างถึง (อ้างอิงหนังสือ)', text: 'ตามหนังสือที่อ้างถึง ได้แจ้งกำหนดการและการเตรียมความพร้อมในการปฏิบัติราชการ ความละเอียดแจ้งแล้ว นั้น' },
+    { label: 'เนื่องด้วย (ระบุเหตุผลความจำเป็น)', text: 'เนื่องด้วย ในช่วงฤดูมรสุมมีแนวโน้มการเกิดสถานการณ์อุทกภัยและวาตภัยในพื้นที่ จึงมีความจำเป็นต้อง' },
+    { label: 'สืบเนื่องจากการประชุม (มติที่ประชุม)', text: 'สืบเนื่องจากการประชุมคณะกรรมการศูนย์บัญชาการเหตุการณ์จังหวัดระยอง เมื่อวันที่ ได้มีมติเห็นชอบให้' }
+  ],
+  transitions: [
+    { label: 'ในการนี้...ใคร่ขอความอนุเคราะห์', text: 'ในการนี้ จึงใคร่ขอความอนุเคราะห์จากท่าน โปรดพิจารณาให้ความอนุเคราะห์' },
+    { label: 'ในการนี้...ขอเรียนเชิญเข้าร่วมประชุม', text: 'ในการนี้ จึงขอเรียนเชิญท่านหรือผู้แทนที่มีอำนาจตัดสินใจ เข้าร่วมการประชุมดังกล่าว ในวัน' },
+    { label: 'เพื่อประโยชน์ในการประสานงาน', text: 'เพื่อประโยชน์ในการประสานการปฏิบัติราชการและการบูรณาการร่วมกันระหว่างหน่วยงาน จึงขอความร่วมมือ' },
+    { label: 'เพื่อให้การดำเนินงานเป็นไปด้วยความเรียบร้อย', text: 'เพื่อให้การดำเนินงานด้านการป้องกันและบรรเทาสาธารณภัยเป็นไปด้วยความเรียบร้อย มีประสิทธิภาพ และบรรลุวัตถุประสงค์ จึงขอ' }
+  ],
+  closings: [
+    { label: 'จึงเรียนมาเพื่อโปรดพิจารณา (มาตรฐาน)', text: 'จึงเรียนมาเพื่อโปรดพิจารณา' },
+    { label: 'จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ (ขออนุมัติ)', text: 'จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ' },
+    { label: 'จึงเรียนมาเพื่อโปรดทราบ (แจ้งทราบ)', text: 'จึงเรียนมาเพื่อโปรดทราบ' },
+    { label: 'จึงเรียนมาเพื่อโปรดให้ความอนุเคราะห์ (ขอความร่วมมือ)', text: 'จึงเรียนมาเพื่อโปรดให้ความอนุเคราะห์ และขอขอบคุณมา ณ โอกาสนี้' },
+    { label: 'จึงเรียนมาเพื่อโปรดประสานการปฏิบัติต่อไป (ส่งต่อเรื่อง)', text: 'จึงเรียนมาเพื่อโปรดประสานการปฏิบัติต่อไป' }
+  ]
+};
+
+// ── Realistic Preset Official Templates ──
+export interface PresetOfficialTemplate {
+  id: string;
+  name: string;
+  category: string;
+  docType: string;
+  urgency: string;
+  secrecy: string;
+  subject: string;
+  to: string;
+  ref?: string;
+  att?: string;
+  body: string;
+  signer: string;
+  signerPos: string;
+}
+
+export const PRESET_OFFICIAL_TEMPLATES: PresetOfficialTemplate[] = [
+  {
+    id: 'req_speaker',
+    name: 'หนังสือขอความอนุเคราะห์วิทยากร',
+    category: 'หนังสือภายนอก',
+    docType: 'หนังสือส่ง',
+    urgency: 'ปกติ',
+    secrecy: 'ไม่ลับ',
+    subject: 'ขอความอนุเคราะห์วิทยากรบรรยายการฝึกอบรมการป้องกันและบรรเทาสาธารณภัย',
+    to: 'ผู้ว่าราชการจังหวัดระยอง / หัวหน้าส่วนราชการ',
+    att: 'กำหนดการฝึกอบรม จำนวน ๑ ฉบับ',
+    body: `<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ด้วย สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้กำหนดจัดโครงการฝึกอบรมเพิ่มประสิทธิภาพการป้องกันและระงับอัคคีภัยเบื้องต้น ประจำปีงบประมาณ พ.ศ. ๒๕๖๙ ในวันที่ ๑๕ พฤษภาคม ๒๕๖๙ ณ อาคารอเนกประสงค์ ศูนย์ราชการจังหวัดระยอง โดยมีกลุ่มเป้าหมายเป็นเจ้าหน้าที่และอาสาสมัครในพื้นที่ จำนวน ๖๐ คน</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ในการนี้ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง พิจารณาเห็นว่าหน่วยงานของท่านมีบุคลากรที่มีความรู้ ความเชี่ยวชาญ และประสบการณ์ด้านการระงับเหตุอัคคีภัยและการช่วยเหลือผู้ประสบภัยเป็นอย่างดียิ่ง จึงใคร่ขอความอนุเคราะห์บุคลากรในสังกัดของท่าน จำนวน ๒ ท่าน ไปเป็นวิทยากรบรรยายและฝึกปฏิบัติในวัน เวลา และสถานที่ดังกล่าว โดยมีกำหนดการตามสิ่งที่ส่งมาด้วย</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;">จึงเรียนมาเพื่อโปรดพิจารณาให้ความอนุเคราะห์ และขอขอบคุณมา ณ โอกาสนี้</p>`,
+    signer: 'นายสมชาย มุ่งมั่นพัฒนา',
+    signerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'
+  },
+  {
+    id: 'invite_disaster_meeting',
+    name: 'หนังสือขอเชิญประชุมคณะกรรมการศูนย์บัญชาการเหตุการณ์',
+    category: 'หนังสือภายนอก',
+    docType: 'หนังสือส่ง',
+    urgency: 'ด่วนมาก',
+    secrecy: 'ไม่ลับ',
+    subject: 'ขอเชิญประชุมเตรียมความพร้อมรับสถานการณ์อุทกภัย วาตภัย และดินโคลนถล่ม',
+    to: 'คณะกรรมการศูนย์บัญชาการเหตุการณ์จังหวัดระยอง ทุกท่าน',
+    ref: 'แผนการป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง พ.ศ. ๒๕๖๔ - ๒๕๗๐',
+    att: 'ระเบียบวาระการประชุม จำนวน ๑ ชุด',
+    body: `<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ด้วย กรมอุตุนิยมวิทยาได้คาดหมายสภาวะอากาศว่าจะมีฝนตกหนักถึงหนักมากในพื้นที่ภาคตะวันออก อันอาจก่อให้เกิดน้ำท่วมฉับพลัน น้ำป่าไหลหลาก และดินโคลนถล่มในหลายพื้นที่ของจังหวัดระยอง ซึ่งอาจส่งผลกระทบต่อความปลอดภัยและทรัพย์สินของประชาชน</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ในการนี้ เพื่อเป็นการเตรียมความพร้อมในการติดตามสถานการณ์ วางแผนจัดสรรทรัพยากร เครื่องจักรกลกู้ภัย และกำลังพลในการเผชิญเหตุได้อย่างทันท่วงที จึงขอเรียนเชิญท่านหรือผู้แทนที่มีอำนาจตัดสินใจ เข้าร่วมการประชุมคณะกรรมการศูนย์บัญชาการเหตุการณ์จังหวัดระยอง ในวันศุกร์ที่ ๒๐ มีนาคม ๒๕๖๙ เวลา ๐๙.๓๐ น. ณ ห้องประชุมภักดีศรีสงคราม ศาลากลางจังหวัดระยอง</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;">จึงเรียนมาเพื่อโปรดทราบและเข้าร่วมการประชุมตามวัน เวลา และสถานที่ดังกล่าว โดยพร้อมเพรียงกัน</p>`,
+    signer: 'นายสมชาย มุ่งมั่นพัฒนา',
+    signerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'
+  },
+  {
+    id: 'memo_procure_disaster',
+    name: 'บันทึกขออนุมัติดำเนินการจัดซื้อเครื่องมืออุปกรณ์กู้ภัย',
+    category: 'หนังสือภายใน',
+    docType: 'บันทึกข้อความ',
+    urgency: 'ปกติ',
+    secrecy: 'ไม่ลับ',
+    subject: 'ขออนุมัติดำเนินการจัดซื้อเครื่องสูบน้ำและอุปกรณ์กู้ภัยทางน้ำ ประจำปีงบประมาณ พ.ศ. ๒๕๖๙',
+    to: 'ผู้ว่าราชการจังหวัดระยอง (ผ่านหัวหน้าสำนักงาน ปภ.จังหวัดระยอง)',
+    body: `<p style="text-indent: 2.5em; margin-bottom: 0.8em;"><b>๑. เรื่องเดิม</b> ด้วย ฝ่ายยุทธศาสตร์และการจัดการ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้รับจัดสรรงบประมาณรายจ่ายประจำปี พ.ศ. ๒๕๖๙ แผนงานบูรณาการบริหารจัดการทรัพยากรน้ำ โครงการเพิ่มประสิทธิภาพการเผชิญเหตุอุทกภัย เพื่อจัดซื้อครุภัณฑ์กู้ภัยประจำจุดเสี่ยง</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;"><b>๒. ข้อเท็จจริง</b> ปัจจุบันอุปกรณ์กู้ภัยทางน้ำและเครื่องสูบน้ำแบบเคลื่อนที่เร็วของสำนักงานฯ บางส่วนได้ผ่านการใช้งานมาเป็นเวลานานและชำรุดตามสภาพ เพื่อให้มีความพร้อมสูงสุดในการเข้าช่วยเหลือประชาชนในพื้นที่น้ำท่วมขัง จึงมีความจำเป็นต้องจัดซื้อเครื่องสูบน้ำขนาด ๘ นิ้ว พร้อมอุปกรณ์ประจำเครื่อง จำนวน ๒ ชุด ภายในวงเงินงบประมาณ ๔๕๐,๐๐๐ บาท (สี่แสนห้าหมื่นบาทถ้วน) ตามพระราชบัญญัติการจัดซื้อจัดจ้างและการบริหารพัสดุภาครัฐ พ.ศ. ๒๕๖๐</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;"><b>๓. ข้อพิจารณาและข้อเสนอ</b> ฝ่ายยุทธศาสตร์และการจัดการ ได้จัดทำรายละเอียดคุณลักษณะเฉพาะ (TOR) และราคากลางเรียบร้อยแล้ว จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติให้ดำเนินการจัดซื้อตามระเบียบพัสดุภาครัฐต่อไป</p>`,
+    signer: 'นางสาวกานดา รักชาติยิ่ง',
+    signerPos: 'นักวิเคราะห์นโยบายและแผนชำนาญการ'
+  },
+  {
+    id: 'memo_official_travel',
+    name: 'บันทึกขออนุมัติเดินทางไปปฏิบัติราชการ',
+    category: 'หนังสือภายใน',
+    docType: 'บันทึกข้อความ',
+    urgency: 'ปกติ',
+    secrecy: 'ไม่ลับ',
+    subject: 'ขออนุมัติเดินทางไปปฏิบัติราชการตรวจสอบพื้นที่เสี่ยงภัยดินโคลนถล่ม',
+    to: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+    body: `<p style="text-indent: 2.5em; margin-bottom: 0.8em;"><b>๑. ความเป็นมา</b> ด้วย ศูนย์เตือนภัยพิบัติแห่งชาติได้แจ้งเตือนความเสี่ยงการเกิดดินโคลนถล่มและน้ำป่าไหลหลากในพื้นที่ลาดชันเชิงเขา อำเภอเขาชะเมา และอำเภอแกลง จังหวัดระยอง</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;"><b>๒. ข้อเท็จจริง</b> เพื่อเป็นการตรวจสอบระบบแจ้งเตือนภัยประจำหมู่บ้าน (Early Warning) และสำรวจจุดอพยพประชาชนให้มีความพร้อมใช้งาน จึงมีความจำเป็นต้องเดินทางไปปฏิบัติราชการในพื้นที่ดังกล่าว ในวันที่ ๑๘-๑๙ มีนาคม ๒๕๖๙ โดยมีคณะผู้เดินทางประกอบด้วยข้าพเจ้าพร้อมด้วยเจ้าหน้าที่ชุดเผชิญเหตุ รวม ๔ ท่าน โดยใช้ยานพาหนะส่วนกลาง หมายเลขทะเบียน กข ๙๙๙๙ ระยอง</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;"><b>๓. ข้อเสนอ</b> จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติให้เดินทางไปปฏิบัติราชการตามกำหนดเวลาดังกล่าว และขออนุมัติเบิกจ่ายค่าเบี้ยเลี้ยง ค่าที่พัก และค่าน้ำมันเชื้อเพลิงตามระเบียบทางราชการ</p>`,
+    signer: 'นายธีระพล วิทยาการ',
+    signerPos: 'นายช่างเครื่องกลชำนาญงาน'
+  },
+  {
+    id: 'circular_disaster_alert',
+    name: 'หนังสือเวียน (ว.) แจ้งเตือนภัยและเฝ้าระวัง',
+    category: 'หนังสือเวียน',
+    docType: 'หนังสือเวียน (ว.)',
+    urgency: 'ด่วนที่สุด',
+    secrecy: 'ไม่ลับ',
+    subject: 'แจ้งเตือนเฝ้าระวังสถานการณ์น้ำท่วมฉับพลันและคลื่นลมแรงในพื้นที่ชายฝั่ง',
+    to: 'นายอำเภอ ทุกอำเภอ และนายกองค์กรปกครองส่วนท้องถิ่น ทุกแห่งในจังหวัดระยอง',
+    body: `<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ด้วย กองอำนวยการป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้ติดตามสภาวะอากาศร่วมกับกรมอุตุนิยมวิทยา พบว่าความกดอากาศต่ำกำลังแรงส่งผลให้เกิดฝนตกหนักอย่างต่อเนื่อง ระหว่างวันที่ ๑๒ - ๑๖ เมษายน ๒๕๖๙ มีปริมาณฝนสะสมสูง อาจทำให้เกิดน้ำท่วมขังในเขตชุมชนเมืองและคลื่นลมแรงบริเวณชายฝั่งทะเล</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ในการนี้ กองอำนวยการป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง จึงขอให้อำเภอและองค์กรปกครองส่วนท้องถิ่นทุกแห่ง ดำเนินการดังนี้<br/>
+๑. จัดตั้งชุดปฏิบัติการเฝ้าระวังและเตรียมความพร้อมตลอด ๒๔ ชั่วโมง<br/>
+๒. ตรวจสอบสิ่งกีดขวางทางน้ำ ท่อระบายน้ำ และติดตั้งเครื่องสูบน้ำในจุดเสี่ยงภัยล่วงหน้า<br/>
+๓. ประชาสัมพันธ์แจ้งเตือนชาวเรือและเรือประมงขนาดเล็กให้งดออกจากฝั่งจนกว่าสถานการณ์จะคลี่คลาย<br/>
+๔. หากเกิดสถานการณ์สาธารณภัยในพื้นที่ ให้รายงานเหตุด่วนสาธารณภัยให้กองอำนวยการฯ จังหวัด ทราบทันที</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;">จึงเรียนมาเพื่อโปรดพิจารณาดำเนินการโดยด่วนที่สุด</p>`,
+    signer: 'นายสมชาย มุ่งมั่นพัฒนา',
+    signerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'
+  },
+  {
+    id: 'cert_training_attend',
+    name: 'หนังสือรับรองการผ่านการฝึกอบรม',
+    category: 'หนังสือรับรอง',
+    docType: 'หนังสือรับรอง',
+    urgency: 'ปกติ',
+    secrecy: 'ไม่ลับ',
+    subject: 'หนังสือรับรองการผ่านการฝึกอบรมหลักสูตรอาสาสมัครกู้ชีพกู้ภัยเบื้องต้น',
+    to: 'ผู้ที่เกี่ยวข้อง',
+    body: `<p style="text-align: center; font-size: 18pt; font-weight: bold; margin-bottom: 1.5em;">หนังสือรับรองฉบับนี้ให้ไว้เพื่อรับรองว่า</p>
+<p style="text-align: center; font-size: 18pt; font-weight: bold; margin-bottom: 1em;">นายวิชัย ชัยชนะเลิศ</p>
+<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ได้ผ่านการฝึกอบรมหลักสูตร "อาสาสมัครป้องกันภัยฝ่ายพลเรือนและการกู้ชีพกู้ภัยทางน้ำขั้นพื้นฐาน" ประจำปีงบประมาณ พ.ศ. ๒๕๖๙ จัดโดยสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ระหว่างวันที่ ๑ - ๕ กุมภาพันธ์ ๒๕๖๙ รวมระยะเวลาการฝึกอบรมทั้งสิ้น ๓๐ ชั่วโมง และมีผลการทดสอบผ่านเกณฑ์มาตรฐานที่กำหนดทุกประการ</p>
+<p style="text-indent: 2.5em; margin-bottom: 1.5em;">ให้ไว้ ณ วันที่ ๑๐ กุมภาพันธ์ พุทธศักราช ๒๕๖๙</p>`,
+    signer: 'นายสมชาย มุ่งมั่นพัฒนา',
+    signerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'
+  }
+];
+

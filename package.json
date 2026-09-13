@@ -21,6 +21,7 @@
     "express": "^5.2.1",
     "firebase": "^12.16.0",
     "lucide-react": "^0.344.0",
+    "motion": "^13.2.0",
     "multer": "^2.2.0",
     "mysql2": "^3.23.1",
     "nodemailer": "^9.0.3",
@@ -28,7 +29,8 @@
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-image-crop": "^11.1.2"
+    "react-image-crop": "^11.1.2",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",

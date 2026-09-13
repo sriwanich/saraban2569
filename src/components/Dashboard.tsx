@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Menu, X, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion } from 'motion/react';
+import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3 } from 'lucide-react';
+import WorkflowSlaView from './views/WorkflowSlaView';
+import AnalyticsView from './views/AnalyticsView';
 
 import { db } from '../firebase';
 import { DocumentItem, DocType } from '../types';
@@ -12,15 +15,18 @@ import DocumentDetailModal from './DocumentDetailModal';
 import AdminDocsView from './views/AdminDocsView';
 import FoldersView from './views/FoldersView';
 import DraftDocsView from './views/DraftDocsView';
-import WorkflowSlaView from './views/WorkflowSlaView';
 import SmartAiAssistantView from './views/SmartAiAssistantView';
+import NotificationsView from './views/NotificationsView';
 import DigitalSignatureView from './DigitalSignatureView';
 import RecycleBinView from './views/RecycleBinView';
 import QrGeneratorView from './views/QrGeneratorView';
+import UrgentIncidentReportView from './views/disaster/UrgentIncidentReportView';
 import ChangelogModal from './ChangelogModal';
 import VersionBadge from './VersionBadge';
+import { LoadingIndicator } from './LoadingIndicator';
+import { lazyWithRetry } from '../utils/lazyWithRetry';
 
-const InfographicsEditorView = React.lazy(() => import('./views/InfographicsEditorView'));
+const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'));
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 import { useRealtimeSync } from '../utils/realtimeSync';
@@ -79,15 +85,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 4, name: 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยชำนาญงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' },
     { id: 5, name: 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยปฏิบัติงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' },
     { id: 6, name: 'เจ้าพนักงานสงเคราะห์ผู้ประสบภัยชำนาญงาน', description: 'ฝ่ายสงเคราะห์ผู้ประสบภัย' },
-    { id: 7, name: 'เจ้าพนักงานการเงินและบัญชีชำนาญงาน', description: 'ฝ่ายบริหารงานทั่วไป' },
-    { id: 8, name: 'เจ้าพนักงานธุรการชำนาญงาน', description: 'ฝ่ายบริหารงานทั่วไป' },
+    { id: 7, name: 'เจ้าพนักงานการเงินและบัญชีชำนาญงาน', description: 'ฝ่ายยุทธศาสตร์และการจัดการ' },
+    { id: 8, name: 'เจ้าพนักงานธุรการชำนาญงาน', description: 'ฝ่ายยุทธศาสตร์และการจัดการ' },
     { id: 9, name: 'นายช่างเครื่องกลชำนาญงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' }
   ]);
   const [departmentsList, setDepartmentsList] = useState<any[]>([
-    { id: 1, name: 'ฝ่ายบริหารงานทั่วไป', description: 'งานธุรการ สารบรรณ การเงิน พัสดุ และการบริหารทั่วไป' },
-    { id: 2, name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานนโยบาย แผนงาน โครงการ และการบริหารความเสี่ยง' },
-    { id: 3, name: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'งานป้องกันและบรรเทาสาธารณภัย กู้ภัย การฝึกซ้อม และการเผชิญเหตุ' },
-    { id: 4, name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'งานช่วยเหลือ เยียวยา และฟื้นฟูผู้ประสบสาธารณภัย' }
+    { id: 1, name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานธุรการ สารบรรณ การเงิน พัสดุ นโยบาย แผนงาน และยุทธศาสตร์' },
+    { id: 2, name: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'งานป้องกันและบรรเทาสาธารณภัย กู้ภัย การฝึกซ้อม และการเผชิญเหตุ' },
+    { id: 3, name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'งานช่วยเหลือ เยียวยา และฟื้นฟูผู้ประสบสาธารณภัย' }
   ]);
   const [rolePermissions, setRolePermissions] = useState<any[]>([]);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -114,7 +119,9 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       password: '',
       confirmPassword: '',
       avatar: user?.avatar || ''
-    , emailNotifications: profileForm.emailNotifications});
+    ,
+    emailNotifications: profileForm.emailNotifications
+  });
   }, [user]);
 
   const fetchMeta = async () => {
@@ -146,6 +153,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const hasPermission = (key: string): boolean => {
     if (!currentUser?.role) return false;
     
+    // Urgent Incidents specific permission
+    if (key === 'urgent_incidents') {
+      return currentUser.role === 'admin' || currentUser.role === 'moderator' || currentUser.department === 'ฝ่ายสงเคราะห์ผู้ประสบภัย';
+    }
+
     // Hardcoded minimums to prevent lockout
     if (currentUser.role === 'admin' && (key === 'system_settings' || key === 'manage_users')) {
       return true;
@@ -162,7 +174,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       return [
         'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
         'admin_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
-        'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin', 'manage_users'
+        'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin', 'manage_users', 'urgent_incidents'
       ].includes(key);
     }
     if (currentUser.role === 'user') {
@@ -284,7 +296,70 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [docToEdit, setDocToEdit] = useState<DocumentItem | null>(null);
 
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [dropdownFilter, setDropdownFilter] = useState<'unread' | 'all'>('unread');
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('dismissed_notifications') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'dismissed_notifications') {
+        try {
+          setDismissedIds(JSON.parse(e.newValue || '[]'));
+        } catch {}
+      }
+      if (e.key === 'read_notifications') {
+        try {
+          const readIds = JSON.parse(e.newValue || '[]');
+          setNotifications(prev => prev.map(n => ({ ...n, read: readIds.includes(n.id) })));
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  const visibleNotifications = useMemo(() => {
+    return notifications.filter(n => !dismissedIds.includes(n.id));
+  }, [notifications, dismissedIds]);
+
+  const unreadNotifications = useMemo(() => {
+    return visibleNotifications.filter(n => !n.read);
+  }, [visibleNotifications]);
+
+  const unreadCount = unreadNotifications.length;
+
+  const handleDismissNotification = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setDismissedIds(prev => {
+      const updated = prev.includes(id) ? prev : [...prev, id];
+      localStorage.setItem('dismissed_notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleClearReadNotifications = () => {
+    const readItemIds = notifications.filter(n => n.read).map(n => n.id);
+    setDismissedIds(prev => {
+      const updated = Array.from(new Set([...prev, ...readItemIds]));
+      localStorage.setItem('dismissed_notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleClearAllNotifications = () => {
+    const allIds = notifications.map(n => n.id);
+    setDismissedIds(prev => {
+      const updated = Array.from(new Set([...prev, ...allIds]));
+      localStorage.setItem('dismissed_notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   const formatThaiRelativeTime = (dateString: string): string => {
     try {
@@ -344,7 +419,6 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
 
   const markAsRead = (id: string) => {
     const readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
@@ -377,8 +451,19 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
 
   const [orgName, setOrgName] = useState('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
   const [headerOrgName, setHeaderOrgName] = useState('');
-  const [logoUrl, setLogoUrl] = useState('https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg');
-  const [currentYear, setCurrentYear] = useState<number>(2569);
+  const [logoUrl, setLogoUrl] = useState('/public/ddpm-logo.svg');
+  const [currentYear, setCurrentYear] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('moi_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.currentYear) {
+          return Number(parsed.currentYear);
+        }
+      }
+    } catch (e) {}
+    return 2569;
+  });
 
   const isCentralPrivileged = currentUser?.role === 'admin' || currentUser?.role === 'moderator';
   const isCentralUser = isCentralPrivileged;
@@ -386,17 +471,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const isDocForUserDepartment = (doc: DocumentItem) => {
     if (isCentralPrivileged) return true;
 
-    // Regular users MUST NOT see Central Saraban documents (isCentral === 1)
-    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
-    if (isCentralDoc) {
-      return false;
-    }
-
     if (!currentUser?.department) return false;
 
     const userDept = currentUser.department.trim();
     const userName = currentUser.username;
     const userFirstName = currentUser.firstName;
+    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
 
     const matchesDept = 
       doc.department === userDept ||
@@ -406,6 +486,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       (doc.assignee && ((userName && doc.assignee.includes(userName)) || (userFirstName && doc.assignee.includes(userFirstName)))) ||
       (doc.forwardedTo && doc.forwardedTo.includes(userDept)) ||
       (doc.departmentReceives && Array.isArray(doc.departmentReceives) && doc.departmentReceives.some(r => r.department === userDept));
+
+    if (isCentralDoc) {
+      const matchesForward = doc.forwardedTo && doc.forwardedTo.includes(userDept);
+      const matchesReceive = doc.departmentReceives && Array.isArray(doc.departmentReceives) && doc.departmentReceives.some(r => r.department === userDept);
+      return Boolean(matchesForward || matchesReceive);
+    }
 
     return Boolean(matchesDept);
   };
@@ -643,11 +729,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
     { id: 'favorites', icon: Pin, label: 'เอกสารสำคัญปักหมุด' },
     { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร', permKey: 'draft_docs' },
-    { id: 'workflow', icon: GitMerge, label: 'Workflow & SLA', permKey: 'workflow_sla' },
     { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล', permKey: 'digital_folders' },
+    { id: 'workflow_sla', icon: Workflow, label: 'ผังการเดินเอกสาร & SLA', permKey: 'workflow_sla' },
     { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
     { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
-    { id: 'recycle_bin', icon: Trash2, label: 'ถังขยะเอกสาร', permKey: 'recycle_bin' },
+    { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents' },
+    { id: 'analytics', icon: BarChart3, label: 'แดชบอร์ดวิเคราะห์', permKey: 'analytics' },
   ];
 
   const navItems = baseNavItems.filter(item => {
@@ -780,10 +867,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'infographics':
         return renderGuardedView('infographics', 'เครื่องมือออกแบบ Infographics', (
           <React.Suspense fallback={
-            <div className="p-12 text-center space-y-3 my-12">
-              <div className="w-8 h-8 border-3 border-[var(--primary-color)] border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-sm text-[var(--text-secondary)] font-medium">กำลังโหลดเครื่องมือออกแบบ Infographics...</p>
-            </div>
+            <LoadingIndicator fullScreen={false} message="กำลังโหลดเครื่องมือออกแบบ Infographics..." />
           }>
             <InfographicsEditorView user={currentUser} />
           </React.Suspense>
@@ -811,14 +895,6 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             }}
           />
         ));
-      case 'workflow':
-        return renderGuardedView('workflow_sla', 'ติดตามกระบวนการและ SLA', (
-          <WorkflowSlaView 
-            documents={documents.filter(isDocForUserDepartment)} 
-            user={currentUser} 
-            onViewDoc={setSelectedDoc} 
-          />
-        ));
       case 'folders':
         return renderGuardedView('digital_folders', 'แฟ้มเอกสารดิจิทัล', (
           <FoldersView 
@@ -827,6 +903,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             onRefreshDocs={refreshData}
             user={currentUser}
             hasPermission={hasPermission}
+          />
+        ));
+      case 'workflow_sla':
+        return renderGuardedView('workflow_sla', 'ผังการเดินเอกสารและติดตาม SLA (Workflow & SLA Tracking Center)', (
+          <WorkflowSlaView 
+            documents={documents.filter(isDocForUserDepartment)} 
+            user={currentUser} 
+            onViewDoc={handleViewDoc} 
           />
         ));
       case 'digital_signatures':
@@ -846,6 +930,17 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             onViewDoc={handleViewDoc} 
           />
         ));
+      case 'urgent_incidents':
+        return renderGuardedView('urgent_incidents', 'รายงานเหตุด่วนสาธารณภัย', (
+          <UrgentIncidentReportView user={currentUser} />
+        ));
+      case 'analytics':
+        return renderGuardedView('analytics', 'แดชบอร์ดวิเคราะห์', (
+          <AnalyticsView 
+            documents={documents.filter(isDocForUserDepartment)} 
+            onViewDoc={handleViewDoc}
+          />
+        ));
       case 'recycle_bin':
         return renderGuardedView('recycle_bin', 'ถังขยะเอกสารและการกู้คืน', (
           <RecycleBinView 
@@ -861,46 +956,20 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} />;
       case 'notifications':
         return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h2 className="text-2xl font-sans font-semibold text-[var(--text-primary)]">การแจ้งเตือนทั้งหมด</h2>
-                <p className="text-[var(--text-secondary)] mt-1 text-sm">รายการอัพเดทและข้อความแจ้งเตือนต่างๆ</p>
-              </div>
-              {unreadCount > 0 && (
-                <button 
-                  onClick={markAllAsRead}
-                  className="bg-[var(--primary-dark)] hover:bg-[var(--primary-hover)] border border-[var(--primary-color)]/30 text-[var(--primary-color)] px-4 py-2 rounded-lg font-medium transition-colors text-sm"
-                >
-                  อ่านทั้งหมดแล้ว
-                </button>
-              )}
-            </div>
-            <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl overflow-hidden shadow-lg">
-              {notifications.length === 0 ? (
-                <div className="p-8 text-center text-[var(--text-secondary)]">ไม่มีการแจ้งเตือน</div>
-              ) : (
-                <div className="divide-y divide-[var(--border-lighter)]">
-                  {notifications.map(notification => (
-                    <div 
-                      key={notification.id} 
-                      onClick={() => handleNotificationClick(notification)}
-                      className={`p-6 cursor-pointer transition-colors ${notification.read ? 'hover:bg-[var(--border-lighter)]' : 'bg-[var(--primary-color)]/10 hover:bg-[var(--primary-color)]/20'}`}
-                    >
-                      <div className="flex gap-4">
-                        {!notification.read && <div className="w-2.5 h-2.5 rounded-full bg-[var(--primary-color)] mt-1.5 shrink-0" />}
-                        <div>
-                          <h4 className={`text-base ${notification.read ? 'text-[var(--text-primary)]' : 'text-[var(--text-primary)] font-medium'}`}>{notification.title}</h4>
-                          <p className="text-sm text-[var(--text-secondary)] mt-1.5">{notification.message}</p>
-                          <span className="text-xs text-[var(--text-muted)] mt-3 block">{notification.timeFormatted}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          <NotificationsView
+            user={currentUser}
+            notifications={visibleNotifications}
+            documents={documents}
+            onViewDoc={handleViewDoc}
+            onMarkAsRead={markAsRead}
+            onMarkAllAsRead={markAllAsRead}
+            onRefresh={fetchNotifications}
+            onNavigateToAi={(prompt, doc) => {
+              setActiveTab('ai_assistant');
+            }}
+            onDismiss={handleDismissNotification}
+            onClearRead={handleClearReadNotifications}
+          />
         );
       default:
         return <Overview documents={documents} onCreateDoc={() => setIsCreateModalOpen(true)} onViewDoc={setSelectedDoc} />;
@@ -908,39 +977,51 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-base)] text-[var(--text-primary)] font-sans flex">
+    <div className="min-h-screen bg-[var(--bg-base)] text-[var(--text-primary)] font-sans flex selection:bg-[var(--primary-color)] selection:text-white">
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside className={`
-        fixed top-0 left-0 bottom-0 bg-[var(--bg-surface)] border-r border-[var(--border-light)] z-50
-        transform transition-all duration-300 ease-in-out shadow-2xl lg:shadow-none
+        fixed top-0 left-0 bottom-0 bg-[var(--bg-surface)]/80 backdrop-blur-3xl border-r border-[var(--border-light)] z-50
+        transform transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] shadow-[4px_0_32px_rgba(0,0,0,0.03)]
         lg:translate-x-0 lg:static lg:flex-shrink-0 flex flex-col
-        ${isSidebarCollapsed ? 'lg:w-[72px]' : 'w-[280px] lg:w-[260px]'}
+        ${isSidebarCollapsed ? 'lg:w-[84px]' : 'w-[280px] lg:w-[280px]'}
         ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
          {/* Logo / Header */}
-         <div className={`h-16 flex items-center justify-between border-b border-[var(--border-light)] shrink-0 transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-0 lg:justify-center' : 'px-5'}`}>
-            <div className={`flex items-center gap-3 w-full ${isSidebarCollapsed ? 'lg:justify-center' : ''}`}>
-               <div className="w-8 h-8 rounded-lg border border-[var(--border-medium)] bg-[var(--bg-elevated)] flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
-                 <img src={logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg'} className="w-[80%] h-[80%] object-contain" alt="Logo" />
+         <div className={`h-[72px] flex items-center justify-between border-b border-[var(--border-light)] shrink-0 transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-0 lg:justify-center' : 'px-5'}`}>
+            <div className={`flex items-center gap-3.5 w-full ${isSidebarCollapsed ? 'lg:justify-center' : ''}`}>
+               <div className="relative w-10 h-10 rounded-xl border border-[var(--primary-color)]/20 bg-gradient-to-b from-[var(--primary-color)]/10 to-transparent flex items-center justify-center overflow-hidden shrink-0 shadow-sm group">
+                 <div className="absolute inset-0 bg-[var(--primary-color)]/10 opacity-0 group-hover:opacity-100 text-[var(--text-primary)] font-semibold transition-opacity duration-300" />
+                 <img
+                   src={logoUrl || '/public/ddpm-logo.svg'}
+                   className="w-3/4 h-3/4 object-contain relative z-10 drop-shadow-sm"
+                   alt="Logo"
+                   onError={(e) => {
+                     if ((e.target as HTMLImageElement).src.indexOf('ddpm-logo.svg') === -1) {
+                       (e.target as HTMLImageElement).src = '/public/ddpm-logo.svg';
+                     }
+                   }}
+                 />
                </div>
-               <span className={`font-sans font-bold tracking-wide text-[var(--text-primary)] text-[0.95rem] truncate flex-1 transition-all duration-200 ${isSidebarCollapsed ? 'lg:hidden' : ''}`} title={headerOrgName || orgName}>
-                 {headerOrgName || orgName}
-               </span>
+               <div className={`min-w-0 flex-1 transition-all duration-300 ${isSidebarCollapsed ? 'lg:hidden lg:opacity-0' : 'opacity-100 text-[var(--text-primary)] font-semibold'}`}>
+                 <div className="font-sans font-bold tracking-tight text-[var(--text-primary)] text-sm truncate" title={headerOrgName || orgName}>
+                   {headerOrgName || orgName}
+                 </div>
+               </div>
             </div>
-            <button className={`lg:hidden text-[var(--text-secondary)] p-1.5 hover:bg-[var(--border-lighter)] rounded-lg transition-colors ml-2 ${isSidebarCollapsed ? 'lg:hidden' : ''}`} onClick={() => setIsMobileMenuOpen(false)}>
+            <button className={`lg:hidden text-[var(--text-secondary)] p-2 hover:bg-[var(--bg-elevated)] rounded-xl transition-colors ml-2 ${isSidebarCollapsed ? 'lg:hidden' : ''}`} onClick={() => setIsMobileMenuOpen(false)}>
               <X className="w-5 h-5" />
             </button>
          </div>
          {/* Nav Links */}
-         <nav className={`flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-2' : ''}`}>
+         <nav className={`flex-1 p-3.5 space-y-1.5 overflow-y-auto custom-scrollbar transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-2' : ''}`}>
            {navItems.map((item) => {
              const isActive = activeTab === item.id;
              return (
@@ -952,26 +1033,30 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                    setActiveTab(item.id);
                    setIsMobileMenuOpen(false); 
                  }} 
-                 className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-200 ${isActive ? 'bg-[var(--primary-color)] text-white font-medium shadow-sm shadow-[var(--primary-color)]/20' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] font-medium'} ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 lg:w-10 lg:h-10 lg:mx-auto' : ''}`}
+                 className={`group relative flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-sm font-medium transition-all duration-300 ${
+                   isActive 
+                     ? 'bg-gradient-to-r from-[var(--primary-color)] to-blue-600 text-white shadow-lg shadow-[var(--primary-color)]/25 border border-white/10' 
+                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
+                 } ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 lg:w-11 lg:h-11 lg:mx-auto' : ''}`}
                  title={item.label}
                >
-                 <item.icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-[var(--text-muted)]'}`} />
-                 <span className={`truncate transition-all duration-200 ${isSidebarCollapsed ? 'lg:hidden' : ''}`}>{item.label}</span>
+                 <item.icon className={`w-[18px] h-[18px] shrink-0 transition-transform duration-300 group-hover:scale-110 ${isActive ? 'text-white drop-shadow-md' : 'text-[var(--text-muted)] group-hover:text-[var(--primary-color)]'}`} />
+                 <span className={`truncate transition-all duration-300 ${isSidebarCollapsed ? 'lg:hidden lg:opacity-0 lg:w-0' : 'opacity-100 text-[var(--text-primary)] font-semibold'}`}>{item.label}</span>
                </a>
              );
            })}
          </nav>
 
           {/* Sidebar Version / Changelog Footer */}
-          <div className={`p-3 border-t border-[var(--border-light)] shrink-0 bg-[var(--bg-surface)] ${isSidebarCollapsed ? 'lg:px-1.5' : ''}`}>
+          <div className={`p-4 border-t border-[var(--border-light)] shrink-0 bg-[var(--bg-surface)] ${isSidebarCollapsed ? 'lg:px-2' : ''}`}>
             {isSidebarCollapsed ? (
               <button
                 type="button"
                 onClick={() => setIsChangelogModalOpen(true)}
-                className="hidden lg:flex w-10 h-10 mx-auto rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--primary-color)] hover:text-white items-center justify-center text-[var(--primary-color)] transition-colors border border-[var(--border-light)] shadow-xs cursor-pointer"
+                className="hidden lg:flex w-11 h-11 mx-auto rounded-xl bg-[var(--bg-elevated)] hover:bg-[var(--primary-color)] hover:text-white items-center justify-center text-[var(--primary-color)] transition-all duration-300 border border-[var(--border-light)] shadow-sm cursor-pointer hover:shadow-md hover:shadow-[var(--primary-color)]/20"
                 title="ดูประวัติการอัปเดตเวอร์ชัน (Changelog)"
               >
-                <Sparkles className="w-4 h-4" />
+                <Sparkles className="w-5 h-5" />
               </button>
             ) : null}
             <div className={`${isSidebarCollapsed ? 'lg:hidden' : ''}`}>
@@ -983,10 +1068,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden bg-[var(--bg-base)]">
         {/* Topbar */}
-        <header className="h-16 shrink-0 bg-[var(--bg-surface)]/70 backdrop-blur-xl border-b border-[var(--border-light)] flex items-center justify-between px-3 sm:px-5 lg:px-8 z-30 sticky top-0 shadow-sm">
-           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 mr-3">
+        <header className="h-[72px] shrink-0 bg-[var(--bg-surface)]/80 backdrop-blur-3xl border-b border-[var(--border-light)] flex items-center justify-between px-4 sm:px-6 lg:px-8 z-30 sticky top-0 shadow-sm transition-all duration-300">
+           <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 mr-4">
              <button 
-               className="lg:hidden text-[var(--text-primary)] p-2 hover:bg-[var(--border-lighter)] active:scale-95 rounded-xl transition-all shrink-0 -ml-1 touch-target-min flex items-center justify-center" 
+               className="lg:hidden text-[var(--text-primary)] p-2 hover:bg-[var(--bg-elevated)] active:scale-95 rounded-xl transition-all shrink-0 -ml-2 touch-target-min flex items-center justify-center" 
                onClick={() => setIsMobileMenuOpen(true)}
                aria-label="เปิดเมนูการใช้งาน"
              >
@@ -996,128 +1081,254 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
               {/* Desktop Sidebar Collapse Button */}
               <button 
                 onClick={toggleSidebar}
-                className="hidden lg:flex text-[var(--text-primary)] p-2 hover:bg-[var(--border-lighter)] active:scale-95 rounded-xl transition-all shrink-0 -ml-1"
+                className="hidden lg:flex text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2 hover:bg-[var(--bg-elevated)] active:scale-95 rounded-xl transition-all shrink-0 -ml-2"
                 title={isSidebarCollapsed ? "ขยายเมนู" : "ย่อเมนู"}
               >
                 <Menu className="w-5 h-5" />
               </button>
              
              {/* Header Title Badge */}
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-light)] min-w-0 max-w-[220px] sm:max-w-full transition-colors shadow-sm">
+              <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-gradient-to-r from-[var(--bg-elevated)] to-[var(--bg-surface)] border border-[var(--border-light)] min-w-0 max-w-[240px] sm:max-w-full transition-colors shadow-xs">
                 <Building2 className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
-                <span className="text-xs sm:text-sm font-semibold text-[var(--text-primary)] font-sans truncate">
+                <span className="text-xs sm:text-sm font-semibold text-[var(--text-primary)] font-sans truncate tracking-tight">
                   {currentUser?.role === 'admin'
                     ? `EDMS: ${headerOrgName || orgName || 'ส่วนกลาง'}`
                     : `EDMS: ${currentUser?.department || 'ฝ่ายงาน'}`
                   }
                 </span>
               </div>
-
            </div>
 
-           <div className="flex items-center gap-3 lg:gap-5 relative shrink-0">
-             <div className="flex bg-[var(--bg-elevated)] rounded-full p-0.5 border border-[var(--border-light)]">
+           <div className="flex items-center gap-2 sm:gap-4 relative shrink-0">
+             <div className="flex bg-[var(--bg-elevated)] rounded-xl p-1 border border-[var(--border-light)] shadow-inner">
                <button
                  onClick={() => setTheme('light')}
-                 className={`p-1.5 sm:p-2 rounded-full transition-colors ${theme === 'light' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                 className={`p-1.5 sm:p-2 rounded-lg transition-all duration-200 ${theme === 'light' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm scale-105' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                  title="โหมดสว่าง (Light Mode)"
                >
-                 <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                 <Sun className="w-4 h-4" />
                </button>
                <button
                  onClick={() => setTheme('dark')}
-                 className={`p-1.5 sm:p-2 rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                 className={`p-1.5 sm:p-2 rounded-lg transition-all duration-200 ${theme === 'dark' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm scale-105' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                  title="โหมดมืด (Dark Mode)"
                >
-                 <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                 <Moon className="w-4 h-4" />
                </button>
                <button
                  onClick={() => setTheme('auto')}
-                 className={`p-1.5 sm:p-2 rounded-full transition-colors ${theme === 'auto' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                 className={`p-1.5 sm:p-2 rounded-lg transition-all duration-200 ${theme === 'auto' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-sm scale-105' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                  title={`โหมดอัตโนมัติ (ปัจจุบัน: ${isSystemDark ? 'โหมดมืด' : 'โหมดสว่าง'})`}
                >
-                 <Monitor className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                 <Monitor className="w-4 h-4" />
                </button>
              </div>
              
              <div className="relative">
-               <button 
-                 onClick={() => setIsNotificationOpen(!isNotificationOpen)}
-                 className="relative text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2 hover:bg-[var(--border-light)] rounded-full transition-colors"
-               >
-                 <Bell className="w-5 h-5" />
-                 {unreadCount > 0 && (
-                   <span className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full border border-[var(--bg-surface)] shadow-sm"></span>
-                 )}
-               </button>
+                <button 
+                  onClick={() => {
+                    const next = !isNotificationOpen;
+                    setIsNotificationOpen(next);
+                    if (next) {
+                      setDropdownFilter(unreadCount > 0 ? "unread" : "unread");
+                    }
+                  }}
+                  className="relative text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2.5 hover:bg-[var(--bg-elevated)] rounded-xl transition-all duration-200 cursor-pointer"
+                  title="การแจ้งเตือน"
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full border-2 border-[var(--bg-surface)] flex items-center justify-center shadow-sm animate-pulse">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </button>
 
-               {/* Notification Dropdown */}
-               {isNotificationOpen && (
-                 <>
-                   <div 
-                     className="fixed inset-0 z-40" 
-                     onClick={() => setIsNotificationOpen(false)}
-                   />
-                   <div className="absolute right-0 mt-2 w-80 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl shadow-xl z-50 overflow-hidden">
-                     <div className="p-4 border-b border-[var(--border-light)] flex items-center justify-between bg-[var(--bg-surface)]/50">
-                       <h3 className="font-sans font-medium text-[var(--text-primary)]">การแจ้งเตือน</h3>
-                       {unreadCount > 0 && (
-                         <button 
-                           onClick={markAllAsRead}
-                           className="text-xs text-[var(--primary-color)] hover:text-[var(--primary-color)] transition-colors"
-                         >
-                           อ่านทั้งหมด
-                         </button>
-                       )}
-                     </div>
-                     <div className="max-h-[320px] overflow-y-auto custom-scrollbar">
-                       {notifications.length === 0 ? (
-                         <div className="p-6 text-center text-[var(--text-secondary)] text-sm">ไม่มีการแจ้งเตือน</div>
-                       ) : (
-                         notifications.map(notification => (
-                           <div 
-                             key={notification.id} 
-                             onClick={() => handleNotificationClick(notification)}
-                             className={`p-4 border-b border-[var(--border-lighter)] cursor-pointer transition-colors ${notification.read ? 'hover:bg-[var(--border-lighter)]' : 'bg-[var(--primary-color)]/10 hover:bg-[var(--primary-color)]/20'}`}
-                           >
-                             <div className="flex gap-3">
-                               {!notification.read && <div className="w-2 h-2 rounded-full bg-[var(--primary-color)] mt-1.5 shrink-0" />}
-                               <div>
-                                 <h4 className={`text-sm ${notification.read ? 'text-[var(--text-primary)]' : 'text-[var(--text-primary)] font-medium'}`}>{notification.title}</h4>
-                                 <p className="text-xs text-[var(--text-secondary)] mt-1 line-clamp-2">{notification.message}</p>
-                                 <span className="text-[10px] text-[var(--text-muted)] mt-2 block">{notification.timeFormatted}</span>
-                               </div>
-                             </div>
-                           </div>
-                         ))
-                       )}
-                     </div>
-                     <div className="p-3 border-t border-[var(--border-light)] bg-[var(--bg-surface)]/50 text-center">
-                       <button 
-                         onClick={() => {
-                           setActiveTab('notifications');
-                           setIsNotificationOpen(false);
-                         }}
-                         className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                       >
-                         ดูการแจ้งเตือนทั้งหมด
-                       </button>
-                     </div>
-                   </div>
-                 </>
-               )}
-             </div>
+                {/* Notification Dropdown */}
+                {isNotificationOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setIsNotificationOpen(false)}
+                    />
+                    <div className="absolute right-0 mt-3 w-80 sm:w-96 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-2xl shadow-2xl z-50 overflow-hidden transform origin-top-right animate-in zoom-in-95 duration-200">
+                      
+                      {/* Header with Sub-tabs and Actions */}
+                      <div className="p-3 border-b border-[var(--border-light)] bg-[var(--bg-surface)]/90 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDropdownFilter("unread")}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                              dropdownFilter === "unread"
+                                ? "bg-indigo-600 text-white shadow-xs"
+                                : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                            }`}
+                          >
+                            <span>ยังไม่อ่าน</span>
+                            {unreadCount > 0 && (
+                              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                                dropdownFilter === "unread" ? "bg-white/25 text-white" : "bg-red-500 text-white"
+                              }`}>
+                                {unreadCount}
+                              </span>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setDropdownFilter("all")}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                              dropdownFilter === "all"
+                                ? "bg-indigo-600 text-white shadow-xs"
+                                : "text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                            }`}
+                          >
+                            <span>ทั้งหมด</span>
+                            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-semibold ${
+                              dropdownFilter === "all" ? "bg-white/25 text-white" : "bg-[var(--border-light)] text-[var(--text-muted)]"
+                            }`}>
+                              {visibleNotifications.length}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Dropdown Quick Actions */}
+                        <div className="flex items-center gap-1">
+                          {unreadCount > 0 ? (
+                            <button 
+                              onClick={markAllAsRead}
+                              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 transition-colors px-2 py-1 rounded-lg hover:bg-indigo-500/10 cursor-pointer"
+                              title="ทำเครื่องหมายว่าอ่านทั้งหมดแล้ว"
+                            >
+                              อ่านทั้งหมด
+                            </button>
+                          ) : visibleNotifications.some(n => n.read) ? (
+                            <button 
+                              onClick={handleClearReadNotifications}
+                              className="text-xs font-semibold text-[var(--text-secondary)] hover:text-red-500 transition-colors px-2 py-1 rounded-lg hover:bg-red-500/10 cursor-pointer flex items-center gap-1"
+                              title="ล้างรายการที่อ่านแล้วออกจากหน้านี้"
+                            >
+                              <span>ล้างที่อ่านแล้ว</span>
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Dropdown Notification Items List */}
+                      <div className="max-h-[360px] overflow-y-auto custom-scrollbar divide-y divide-[var(--border-lighter)]">
+                        {(() => {
+                          const itemsToDisplay = dropdownFilter === "unread" ? unreadNotifications : visibleNotifications;
+                          
+                          if (itemsToDisplay.length === 0) {
+                            if (dropdownFilter === "unread") {
+                              return (
+                                <div className="p-8 text-center text-[var(--text-secondary)] text-xs flex flex-col items-center gap-2">
+                                  <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                                    <CheckCheck className="w-5 h-5" />
+                                  </div>
+                                  <span className="font-bold text-sm text-[var(--text-primary)]">ไม่มีการแจ้งเตือนค้าง</span>
+                                  <span className="text-[11px] text-[var(--text-muted)]">คุณได้จัดการหรืออ่านการแจ้งเตือนทั้งหมดแล้ว</span>
+                                  {visibleNotifications.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDropdownFilter("all")}
+                                      className="mt-1 text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                                    >
+                                      ดูประวัติการแจ้งเตือน ({visibleNotifications.length})
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="p-8 text-center text-[var(--text-secondary)] text-xs flex flex-col items-center gap-2">
+                                <Bell className="w-8 h-8 text-[var(--border-medium)] opacity-40" />
+                                <span className="font-bold text-sm text-[var(--text-primary)]">ไม่มีรายการแจ้งเตือน</span>
+                                <span className="text-[11px] text-[var(--text-muted)]">ไม่มีประวัติการแจ้งเตือนในระบบ</span>
+                              </div>
+                            );
+                          }
+
+                          return itemsToDisplay.slice(0, 15).map(notification => {
+                            const isUrgent = notification.type === "urgent" || notification.priority === "ด่วนที่สุด" || notification.priority === "ด่วนมาก";
+                            return (
+                              <div 
+                                key={notification.id} 
+                                onClick={() => handleNotificationClick(notification)}
+                                className={`p-3.5 cursor-pointer transition-all duration-200 group relative ${
+                                  notification.read 
+                                    ? "hover:bg-[var(--bg-elevated)]" 
+                                    : isUrgent 
+                                    ? "bg-red-500/5 hover:bg-red-500/10 border-l-4 border-l-red-500" 
+                                    : "bg-[var(--primary-color)]/5 hover:bg-[var(--primary-color)]/10 border-l-4 border-l-indigo-500"
+                                }`}
+                              >
+                                <div className="flex gap-3 items-start">
+                                  {!notification.read && (
+                                    <div className="w-2 h-2 rounded-full bg-indigo-600 mt-1.5 shrink-0 shadow-[0_0_8px_rgba(79,70,229,0.8)]" />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-1.5">
+                                      <h4 className={`text-xs tracking-tight truncate ${notification.read ? "text-[var(--text-primary)] font-medium" : "text-[var(--text-primary)] font-bold"}`}>
+                                        {notification.title}
+                                      </h4>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        {notification.docNumber && (
+                                          <span className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold px-1 rounded bg-indigo-500/10">
+                                            {notification.docNumber}
+                                          </span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleDismissNotification(notification.id, e)}
+                                          className="p-1 rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 opacity-60 hover:opacity-100 transition-all cursor-pointer"
+                                          title="ซ่อนการแจ้งเตือนนี้"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <p className="text-[11px] text-[var(--text-secondary)] mt-1 line-clamp-2 leading-relaxed">{notification.message}</p>
+                                    <div className="flex items-center justify-between mt-1.5">
+                                      <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-wide">{notification.timeFormatted || notification.time}</span>
+                                      {notification.read && (
+                                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">อ่านแล้ว</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+
+                      {/* Footer */}
+                      <div 
+                        className="p-3 border-t border-[var(--border-light)] bg-[var(--bg-surface)]/80 text-center hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
+                        onClick={() => {
+                          setActiveTab("notifications");
+                          setIsNotificationOpen(false);
+                        }}
+                      >
+                        <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700">ดูศูนย์การแจ้งเตือนทั้งหมด</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
 
              <div className="relative">
                <div 
                  onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
-                 className="flex items-center gap-3 pl-3 lg:pl-6 border-l border-[var(--border-light)] cursor-pointer hover:opacity-80 transition-opacity select-none"
+                 className="flex items-center gap-3.5 pl-3 sm:pl-5 lg:pl-6 border-l border-[var(--border-light)] cursor-pointer hover:opacity-80 transition-opacity select-none group"
                >
                  <div className="hidden lg:block text-right">
-                   <div className="text-[0.9rem] font-medium text-[var(--text-primary)]">{currentUser?.firstName} {currentUser?.lastName}</div>
-                   <div className="text-[0.75rem] text-[var(--text-muted)] mt-0.5">{currentUser?.position || currentUser?.role || 'User'}</div>
+                   <div className="text-[0.9rem] font-semibold tracking-tight text-[var(--text-primary)] group-hover:text-[var(--primary-color)] transition-colors">{currentUser?.firstName} {currentUser?.lastName}</div>
+                   <div className="text-[0.75rem] text-[var(--text-muted)] mt-0.5 font-medium">{currentUser?.position || currentUser?.role || 'User'}</div>
                  </div>
-                 <button className="w-9 h-9 rounded-full bg-[var(--primary-color)] flex items-center justify-center border border-[var(--primary-color)]/50 shadow-sm shrink-0 overflow-hidden">
+                 <button className="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--primary-color)] to-[var(--primary-dark)] flex items-center justify-center shadow-md shrink-0 overflow-hidden ring-2 ring-white/10 dark:ring-black/20 group-hover:ring-[var(--primary-color)]/30 transition-all duration-300">
                    {currentUser?.avatar ? (
                      <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
                    ) : (
@@ -1130,10 +1341,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                {isProfileDropdownOpen && (
                  <>
                    <div className="fixed inset-0 z-40" onClick={() => setIsProfileDropdownOpen(false)} />
-                   <div className="absolute right-0 mt-2 w-64 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl shadow-xl z-50 py-2 animate-fade-in">
-                     <div className="px-4 py-3 border-b border-[var(--border-lighter)] lg:hidden">
-                       <div className="font-medium text-[var(--text-primary)]">{currentUser?.firstName} {currentUser?.lastName}</div>
-                       <div className="text-xs text-[var(--text-muted)] mt-0.5">{currentUser?.position || currentUser?.role || 'User'}</div>
+                   <div className="absolute right-0 mt-3 w-64 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-2xl shadow-2xl z-50 py-2 animate-in zoom-in-95 duration-200 origin-top-right">
+                     <div className="px-5 py-4 border-b border-[var(--border-light)] lg:hidden bg-gradient-to-br from-[var(--bg-elevated)] to-[var(--bg-surface)]">
+                       <div className="font-semibold text-[var(--text-primary)]">{currentUser?.firstName} {currentUser?.lastName}</div>
+                       <div className="text-xs text-[var(--text-secondary)] font-medium mt-1">{currentUser?.position || currentUser?.role || 'User'}</div>
                      </div>
                      <button
                        onClick={() => {
@@ -1146,13 +1357,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                            currentPassword: '',
                            password: '',
                            confirmPassword: '',
-                           avatar: currentUser?.avatar || ''
-                         , emailNotifications: profileForm.emailNotifications});
+                           avatar: currentUser?.avatar || '',
+                           emailNotifications: profileForm.emailNotifications
+                         });
                          setIsProfileModalOpen(true);
                        }}
-                       className="w-full text-left px-4 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--border-lighter)] flex items-center gap-2.5 transition-colors"
+                       className="w-full text-left px-5 py-3 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] flex items-center gap-3 transition-colors"
                      >
-                       <User className="w-4 h-4 text-[var(--primary-color)]" /> จัดการโปรไฟล์ส่วนตัว
+                       <User className="w-4 h-4 text-[var(--text-secondary)]" /> จัดการโปรไฟล์ส่วนตัว
                      </button>
                       {currentUser?.role === 'admin' && (
                         <button
@@ -1160,9 +1372,9 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                             setIsProfileDropdownOpen(false);
                             setActiveTab('settings');
                           }}
-                          className="w-full text-left px-4 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--border-lighter)] flex items-center gap-2.5 transition-colors"
+                          className="w-full text-left px-5 py-3 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] flex items-center gap-3 transition-colors"
                         >
-                          <SettingsIcon className="w-4 h-4 text-[var(--primary-color)]" /> ไปยังตั้งค่าระบบ
+                          <SettingsIcon className="w-4 h-4 text-[var(--text-secondary)]" /> ไปยังตั้งค่าระบบ
                         </button>
                       )}
                       <button
@@ -1194,7 +1406,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-8 scroll-smooth custom-scrollbar">
            <div className="max-w-[1600px] w-full mx-auto">
-             {renderContent()}
+             <motion.div 
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            >
+              {renderContent()}
+            </motion.div>
            </div>
         </div>
       </main>
@@ -1258,7 +1477,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                     ) : (
                       <User className="w-12 h-12 text-[var(--text-muted)]" />
                     )}
-                    <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-white">
+                    <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 text-[var(--text-primary)] font-semibold flex flex-col items-center justify-center cursor-pointer transition-opacity text-white">
                       <Camera className="w-6 h-6 mb-1" />
                       <span className="text-[10px]">เปลี่ยนรูป</span>
                       <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} />
@@ -1283,7 +1502,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                     type="text"
                     required
                     value={profileForm.firstName}
-                    onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value , emailNotifications: profileForm.emailNotifications})}
+                    onChange={(e) => setProfileForm({ ...profileForm, firstName: e.target.value })}
                     className="w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
                     placeholder="ชื่อจริง..."
                   />

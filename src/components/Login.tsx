@@ -200,12 +200,25 @@ export default function Login({ onLogin }: LoginProps) {
         <main className="w-full max-w-[440px] relative z-10 animate-slide-up flex flex-col">
           
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-[var(--bg-surface)] backdrop-blur-md border border-[var(--glass-border)] shadow-glow mb-4 p-1 relative group overflow-hidden transition-colors duration-500">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-[var(--bg-surface)] backdrop-blur-md border border-[var(--glass-border)] shadow-glow mb-4 p-1.5 relative group overflow-hidden transition-colors duration-500">
               <div className="absolute inset-0 bg-gradient-to-tr from-[var(--primary-color)]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
               {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="w-full h-full object-cover relative z-10" />
+                <img
+                  src={logoUrl}
+                  alt="Logo"
+                  className="w-full h-full object-contain relative z-10 drop-shadow-sm"
+                  onError={(e) => {
+                    if ((e.target as HTMLImageElement).src.indexOf('ddpm-logo.svg') === -1) {
+                      (e.target as HTMLImageElement).src = '/public/ddpm-logo.svg';
+                    }
+                  }}
+                />
               ) : (
-                <Building2 className="w-10 h-10 text-[var(--primary-color)] relative z-10" />
+                <img
+                  src="/public/ddpm-logo.svg"
+                  alt="Logo"
+                  className="w-full h-full object-contain relative z-10 drop-shadow-sm"
+                />
               )}
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-[var(--text-primary)] drop-shadow-sm font-sans transition-colors duration-500">

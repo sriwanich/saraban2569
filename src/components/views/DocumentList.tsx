@@ -52,46 +52,58 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
 
   // Filter docs
-  const filteredDocs = documents.filter(doc => {
-    const matchesSearch = 
-      doc.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      (doc.receiveNumber && doc.receiveNumber.includes(searchTerm)) ||
-      doc.docNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.from.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.to.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
+  const filteredDocs = React.useMemo(() => {
+    return documents.filter(doc => {
+      const matchesSearch = 
+        doc.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        (doc.receiveNumber && doc.receiveNumber.includes(searchTerm)) ||
+        doc.docNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        doc.from.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        doc.to.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
 
-    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
+      const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
 
-    // Regular users MUST NOT see Central Saraban documents
-    if (!isCentralPrivileged && isCentralDoc) {
-      return false;
-    }
+      // Regular users MUST NOT see Central Saraban documents UNLESS forwarded to or received by their department
+      if (!isCentralPrivileged && isCentralDoc) {
+        const userDept = user?.department;
+        const isForwardedToMe = userDept && doc.forwardedTo && doc.forwardedTo.includes(userDept);
+        const hasMyDeptReceive = userDept && doc.departmentReceives && doc.departmentReceives.some(r => r.department === userDept);
+        if (!isForwardedToMe && !hasMyDeptReceive) {
+          return false;
+        }
+      }
 
-    const matchesScope = 
-      !isCentralPrivileged ? true :
-      scopeFilter === 'all' ? true :
-      scopeFilter === 'central' ? isCentralDoc :
-      !isCentralDoc;
+      const matchesScope = 
+        !isCentralPrivileged ? true :
+        scopeFilter === 'all' ? true :
+        scopeFilter === 'central' ? isCentralDoc :
+        !isCentralDoc;
 
-    const matchesDept = 
-      selectedDeptFilter === 'all' ? true :
-      (doc.department === selectedDeptFilter || (doc.departmentReceives && doc.departmentReceives.some(r => r.department === selectedDeptFilter)));
+      const matchesDept = 
+        selectedDeptFilter === 'all' ? true :
+        (doc.department === selectedDeptFilter || (doc.departmentReceives && doc.departmentReceives.some(r => r.department === selectedDeptFilter)));
 
-    return matchesSearch && matchesYear && matchesScope && matchesDept;
-  });
+      return matchesSearch && matchesYear && matchesScope && matchesDept;
+    });
+  }, [documents, searchTerm, selectedYear, scopeFilter, selectedDeptFilter, isCentralPrivileged, user?.department]);
 
-  const sortedFilteredDocs = [...filteredDocs].sort((a, b) => {
-    return Number(b.receiveNumber) - Number(a.receiveNumber);
-  });
+  const sortedFilteredDocs = React.useMemo(() => {
+    return [...filteredDocs].sort((a, b) => {
+      return Number(b.receiveNumber) - Number(a.receiveNumber);
+    });
+  }, [filteredDocs]);
 
-  const paginatedDocs = sortedFilteredDocs.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const paginatedDocs = React.useMemo(() => {
+    return sortedFilteredDocs.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  }, [sortedFilteredDocs, currentPage, pageSize]);
+
   const totalPages = Math.ceil(sortedFilteredDocs.length / pageSize);
 
   // Extract unique years & departments
-  const availableYears = Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => b.localeCompare(a));
-  const availableDepartments = Array.from(new Set(documents.map(d => d.department).filter(Boolean))) as string[];
+  const availableYears = React.useMemo(() => Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => b.localeCompare(a)), [documents]);
+  const availableDepartments = React.useMemo(() => Array.from(new Set(documents.map(d => d.department).filter(Boolean))) as string[], [documents]);
 
   const canDeleteDoc = (row: DocumentItem) => {
     if (hasPermission) {
@@ -339,70 +351,73 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-10">
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-sans font-bold text-[var(--text-primary)]">{title}</h1>
-            <span className="px-3 py-0.5 text-xs font-semibold rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20 font-mono">
-              {filteredDocs.length} ฉบับ
-            </span>
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-[var(--primary-color)]/10 to-transparent rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20 transition-all duration-700 group-hover:from-[var(--primary-color)]/20" />
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-sans font-extrabold text-[var(--text-primary)] tracking-tight">{title}</h1>
+              <span className="px-3 py-1 text-xs font-semibold rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20 font-mono shadow-sm">
+                {filteredDocs.length} ฉบับ
+              </span>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)] font-medium">
+              ทะเบียนหนังสือดิจิทัลประจำ {user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}
+            </p>
           </div>
-          <p className="text-sm text-[var(--text-secondary)] mt-1">
-            ทะเบียนหนังสือดิจิทัลประจำ {user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}
-          </p>
-        </div>
-        
-        {/* Actions bar */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Year Filter */}
-          <select
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(e.target.value)}
-            className="bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-primary)] rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--primary-color)] cursor-pointer"
-          >
-            <option value="all">ทุกปีงบประมาณ</option>
-            {availableYears.map(y => (
-              <option key={y} value={y}>ปี พ.ศ. {y}</option>
-            ))}
-          </select>
+          
+          {/* Actions bar */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Year Filter */}
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-[var(--text-primary)] rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-[var(--primary-color)] cursor-pointer hover:border-[var(--primary-color)]/40 hover:shadow-sm transition-all"
+            >
+              <option value="all">ทุกปีงบประมาณ</option>
+              {availableYears.map(y => (
+                <option key={y} value={y}>ปี พ.ศ. {y}</option>
+              ))}
+            </select>
 
-          {/* Search Box */}
-          <div className="flex items-center gap-2 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 focus-within:border-[var(--primary-color)] transition-colors w-full sm:w-64">
-            <Search className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
-            <input 
-              type="text" 
-              placeholder="ค้นหาเลขรับ, ที่, เรื่อง, จาก, ถึง..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] w-full" 
-            />
-            {searchTerm && (
-              <button onClick={() => setSearchTerm('')} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                <X className="w-3.5 h-3.5" />
+            {/* Search Box */}
+            <div className="flex items-center gap-2 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] rounded-xl px-4 py-2.5 focus-within:border-[var(--primary-color)] transition-all hover:border-[var(--primary-color)]/40 hover:shadow-sm w-full sm:w-64">
+              <Search className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
+              <input 
+                type="text" 
+                placeholder="ค้นหาเลขรับ, ที่, เรื่อง, จาก..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="bg-transparent border-none outline-none text-sm font-semibold text-[var(--text-primary)] placeholder-[var(--text-muted)] w-full" 
+              />
+              {searchTerm && (
+                <button onClick={() => setSearchTerm('')} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <button 
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--primary-color)]/40 transition-all text-sm font-bold shrink-0 cursor-pointer shadow-sm hover:shadow-md"
+              title="พิมพ์ทะเบียนหนังสือ"
+            >
+              <Printer className="w-4 h-4" />
+              <span className="hidden sm:inline">พิมพ์ทะเบียน</span>
+            </button>
+
+            {onCreateDoc && (
+              <button 
+                onClick={onCreateDoc}
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--primary-color)] to-[var(--primary-dark)] hover:from-[var(--primary-hover)] hover:to-[var(--primary-color)] text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/20 hover:shadow-xl hover:shadow-[var(--primary-color)]/30 hover:-translate-y-0.5 active:scale-[0.98] shrink-0 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span>ลงทะเบียนหนังสือ</span>
               </button>
             )}
           </div>
-
-          <button 
-            onClick={handlePrint}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-lighter)] transition-colors text-sm font-medium shrink-0 cursor-pointer"
-            title="พิมพ์ทะเบียนหนังสือ"
-          >
-            <Printer className="w-4 h-4" />
-            <span className="hidden sm:inline">พิมพ์ทะเบียน</span>
-          </button>
-
-          {onCreateDoc && (
-            <button 
-              onClick={onCreateDoc}
-              className="flex items-center gap-1.5 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm shrink-0 border border-[var(--primary-color)]/30 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>ลงทะเบียนหนังสือ</span>
-            </button>
-          )}
         </div>
       </div>
 

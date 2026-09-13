@@ -15,6 +15,7 @@ export const DEFAULT_ENABLED_FEATURES: Record<string, boolean> = {
   meeting: true,
   summary: true,
   workflow: true,
+  workflow_sla: true,
   version_control: true,
   qr_generator: true,
 };

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { DocumentItem, TrackingLog, Folder, DigitalSignatureRecord, formatThaiDate, formatThaiDateFull, formatThaiDateTime } from '../types';
-import { X, Printer, Clock, Paperclip, Send, ChevronRight, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode, FileCode, Tag, Trash2 } from 'lucide-react';
+import { DocumentItem, Folder, DigitalSignatureRecord, formatThaiDate, formatThaiDateFull, formatThaiDateTime, WorkflowInstance, WorkflowStepInstance } from '../types';
+import { X, Printer, Paperclip, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode, FileCode, Tag, Trash2, Clock, History, Stamp } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import AiCrossReferencePanel, { DetectionResult } from './ai-cross-reference-panel';
 import VersionControlPanel from './VersionControlPanel';
 import DigitalSignatureModal from './DigitalSignatureModal';
+import DigitalSealStamper from './DigitalSealStamper';
 import { parseFileCodeFromDoc, parseDocNumberStructure } from '../lib/fileCodeUtils';
 import { useConfirm } from '../context/ConfirmContext';
 
@@ -21,12 +22,55 @@ interface Props {
 
 export default function DocumentDetailModal({ doc, allDocuments, onClose, user, onStatusUpdated, onEdit, onSelectDoc }: Props) {
   const { confirm } = useConfirm();
-  const [activeTab, setActiveTab] = useState<'details' | 'tracking' | 'versions' | 'reads'>('details');
-  const [trackingLogs, setTrackingLogs] = useState<TrackingLog[]>([]);
+  const [activeTab, setActiveTab] = useState<'details' | 'workflow' | 'versions' | 'reads'>('details');
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [newStatus, setNewStatus] = useState(doc.status || 'ลงทะเบียน');
-  const [comments, setComments] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sysVersion, setSysVersion] = useState<string>('v2.6.0');
+  const [isSealModalOpen, setIsSealModalOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchLatestVersion = async () => {
+      try {
+        const res = await fetch('/api/changelogs/latest', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.version) {
+            setSysVersion(data.version);
+          }
+        }
+      } catch (e) {
+        // Keep default fallback
+      }
+    };
+    fetchLatestVersion();
+  }, []);
+
+  // Workflow Status State
+  const [workflowInstance, setWorkflowInstance] = useState<WorkflowInstance | null>(null);
+  const [isLoadingWorkflow, setIsLoadingWorkflow] = useState(false);
+
+  useEffect(() => {
+    const fetchWorkflow = async () => {
+      setIsLoadingWorkflow(true);
+      try {
+        const res = await fetch('/api/workflows/instances');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            const matched = data.find((inst: any) => String(inst.docId) === String(doc.id));
+            if (matched) {
+              setWorkflowInstance(matched);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching workflow instance in detail:', err);
+      } finally {
+        setIsLoadingWorkflow(false);
+      }
+    };
+    fetchWorkflow();
+  }, [doc.id]);
 
   // Attachments State & Deletion
   const [currentAttachments, setCurrentAttachments] = useState<string[]>([]);
@@ -168,13 +212,6 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
   const [isDetecting, setIsDetecting] = useState<boolean>(false);
 
-  // Forwarding state
-  const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
-  const [departmentsList, setDepartmentsList] = useState<{ id: string; name: string }[]>([]);
-  const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
-  const [forwardNote, setForwardNote] = useState('');
-  const [isForwarding, setIsForwarding] = useState(false);
-
   // Department receive state
   const [isReceivingDept, setIsReceivingDept] = useState(false);
 
@@ -185,143 +222,6 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   // Document Verification QR Code State
   const [docQrCode, setDocQrCode] = useState<string>('');
   const [docVerifyUrl, setDocVerifyUrl] = useState<string>('');
-
-  // Workflow & SLA State
-  const [docWorkflow, setDocWorkflow] = useState<any | null>(null);
-  const [workflowTemplates, setWorkflowTemplates] = useState<any[]>([]);
-  const [selectedWorkflowTplId, setSelectedWorkflowTplId] = useState<string>('');
-  const [isAssigningWorkflowDoc, setIsAssigningWorkflowDoc] = useState(false);
-  const [wfActionNote, setWfActionNote] = useState('');
-  const [isSubmittingWfAction, setIsSubmittingWfAction] = useState(false);
-
-  const fetchDocWorkflow = async () => {
-    try {
-      const [resInst, resTpl] = await Promise.all([
-        fetch('/api/workflows/instances').then(r => r.json()).catch(() => []),
-        fetch('/api/workflows/templates').then(r => r.json()).catch(() => [])
-      ]);
-      if (Array.isArray(resTpl)) setWorkflowTemplates(resTpl);
-      if (Array.isArray(resInst)) {
-        const found = resInst.find((i: any) => String(i.docId) === String(doc.id) || i.docNumber === doc.docNumber);
-        setDocWorkflow(found || null);
-      }
-    } catch (err) {
-      console.error('Error fetching doc workflow:', err);
-    }
-  };
-
-  const handleProgressDocWorkflow = async (action: 'approve' | 'reject' | 'escalate') => {
-    if (!docWorkflow) return;
-
-    const actionLabel = action === 'approve' ? 'อนุมัติ/ส่งต่อ' : action === 'reject' ? 'ตีกลับเรื่อง' : 'แจ้งเตือนเร่งรัด SLA';
-    const actionType = action === 'reject' ? 'delete' : action === 'approve' ? 'save' : 'send';
-    const confirmed = await confirm({
-      title: `ยืนยันการดำเนินการ: ${actionLabel}`,
-      message: `คุณต้องการบันทึกการดำเนินการ "${actionLabel}" สำหรับหนังสือฉบับนี้ใช่หรือไม่?`,
-      type: actionType,
-      itemDetail: doc.title ? `เรื่อง: ${doc.title}` : undefined,
-      confirmText: `ยืนยัน${actionLabel}`,
-      cancelText: 'ยกเลิก'
-    });
-    if (!confirmed) return;
-
-    setIsSubmittingWfAction(true);
-    try {
-      const updaterName = user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ';
-      if (action === 'escalate') {
-        await fetch(`/api/workflows/instances/${docWorkflow.id}/escalate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            note: wfActionNote || 'แจ้งเตือนเร่งรัดหนังสือค้างโต๊ะ ตามกำหนด SLA',
-            user: updaterName
-          })
-        });
-      } else {
-        await fetch(`/api/workflows/instances/${docWorkflow.id}/step`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action,
-            note: wfActionNote,
-            user: updaterName
-          })
-        });
-      }
-
-      // Sync tracking history
-      await fetch('/api/tracking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          docId: doc.id,
-          docType: doc.type,
-          status: action === 'approve' ? 'อนุมัติ/ส่งต่อ' : action === 'reject' ? 'ตีกลับเรื่อง' : 'เร่งรัด SLA',
-          comments: `[Workflow SLA] ${wfActionNote || (action === 'approve' ? 'ผ่านการพิจารณาขั้นตอนเสนอเรื่อง' : action === 'reject' ? 'ตีกลับแก้ไขหนังสือ' : 'แจ้งเตือนเร่งรัดค้างโต๊ะตาม SLA')}`,
-          updatedBy: updaterName
-        })
-      });
-
-      setWfActionNote('');
-      await fetchDocWorkflow();
-      await fetchTracking();
-      if (onStatusUpdated) onStatusUpdated();
-    } catch (err) {
-      console.error('Error progressing doc workflow:', err);
-    } finally {
-      setIsSubmittingWfAction(false);
-    }
-  };
-
-  const handleAssignDocWorkflow = async () => {
-    if (!selectedWorkflowTplId) return;
-
-    const tpl = workflowTemplates.find(t => t.id === selectedWorkflowTplId);
-    const confirmed = await confirm({
-      title: 'ยืนยันการเริ่มต้น Workflow',
-      message: `คุณต้องการเริ่มเส้นทางดำเนินเรื่อง "${tpl?.name || 'Workflow มาตรฐาน'}" สำหรับหนังสือฉบับนี้ใช่หรือไม่?`,
-      type: 'send',
-      itemDetail: doc.title ? `เรื่อง: ${doc.title}` : undefined,
-      confirmText: 'ยืนยันเริ่มเส้นทาง',
-      cancelText: 'ยกเลิก'
-    });
-    if (!confirmed) return;
-
-    setIsAssigningWorkflowDoc(true);
-    try {
-      const updaterName = user?.firstName ? `${user.firstName} ${user.lastName}` : 'ผู้ดูแลระบบ';
-      const res = await fetch('/api/workflows/instances', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          docId: doc.id,
-          templateId: selectedWorkflowTplId,
-          user: updaterName
-        })
-      });
-      if (res.ok) {
-        const tpl = workflowTemplates.find(t => t.id === selectedWorkflowTplId);
-        await fetch('/api/tracking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            docId: doc.id,
-            docType: doc.type,
-            status: 'เริ่ม Workflow',
-            comments: `[Workflow SLA] เริ่มต้นเส้นทางเสนออนุมัติ: ${tpl?.name || 'Workflow มาตรฐาน'}`,
-            updatedBy: updaterName
-          })
-        });
-        await fetchDocWorkflow();
-        await fetchTracking();
-        if (onStatusUpdated) onStatusUpdated();
-      }
-    } catch (err) {
-      console.error('Error assigning doc workflow:', err);
-    } finally {
-      setIsAssigningWorkflowDoc(false);
-    }
-  };
 
   const fetchDocQrCode = async () => {
     try {
@@ -348,19 +248,6 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
     }
   };
 
-  // Fetch tracking history for this document
-  const fetchTracking = async () => {
-    try {
-      const res = await fetch(`/api/tracking/${doc.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setTrackingLogs(data);
-      }
-    } catch (err) {
-      console.error('Error fetching tracking logs:', err);
-    }
-  };
-
   // Fetch folders and departments
   useEffect(() => {
     const fetchFolders = async () => {
@@ -374,23 +261,9 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
         console.error('Error fetching folders:', err);
       }
     };
-    const fetchDepts = async () => {
-      try {
-        const res = await fetch('/api/departments');
-        if (res.ok) {
-          const data = await res.json();
-          setDepartmentsList(data);
-        }
-      } catch (err) {
-        console.error('Error fetching departments:', err);
-      }
-    };
     fetchFolders();
-    fetchDepts();
-    fetchTracking();
     fetchDocSignatures();
     fetchDocQrCode();
-    fetchDocWorkflow();
     handleRunAiCrossRef();
   }, [doc.id]);
 
@@ -512,58 +385,6 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
     alert(`กำลังนำท่านไปยังเอกสาร ID: ${targetDocId}`);
   };
 
-  const handleForwardToDepartments = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedDepts.length === 0) {
-      alert('กรุณาเลือกฝ่ายงานที่ต้องการส่งต่ออย่างน้อย 1 ฝ่าย');
-      return;
-    }
-
-    const confirmed = await confirm({
-      title: 'ยืนยันการส่งต่อหนังสือราชการ',
-      message: `คุณต้องการส่งต่อหนังสือไปยังฝ่าย: ${selectedDepts.join(', ')} ใช่หรือไม่?`,
-      type: 'send',
-      itemDetail: doc.title ? `เรื่อง: ${doc.title}` : undefined,
-      confirmText: 'ยืนยันส่งต่อหนังสือ',
-      cancelText: 'ยกเลิก'
-    });
-    if (!confirmed) return;
-
-    setIsForwarding(true);
-    try {
-      const forwardedByName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'สารบรรณกลาง';
-      const res = await fetch('/api/documents/forward', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          docId: doc.id,
-          docType: doc.type,
-          targetDepartments: selectedDepts,
-          forwardNote: forwardNote,
-          forwardedBy: forwardedByName
-        })
-      });
-
-      if (res.ok) {
-        doc.forwardedTo = selectedDepts.join(',');
-        doc.forwardNote = forwardNote;
-        doc.forwardedBy = forwardedByName;
-        doc.status = 'ส่งต่อกลุ่มงาน';
-        setNewStatus('ส่งต่อกลุ่มงาน');
-        setIsForwardModalOpen(false);
-        await fetchTracking();
-        if (onStatusUpdated) onStatusUpdated();
-      } else {
-        alert('เกิดข้อผิดพลาดในการส่งต่อหนังสือ');
-      }
-    } catch (err) {
-      console.error('Error forwarding document:', err);
-      alert('ไม่สามารถส่งต่อหนังสือได้');
-    } finally {
-      setIsForwarding(false);
-    }
-  };
-
   const handleDepartmentReceive = async () => {
     if (!user || !user.department) return;
 
@@ -602,7 +423,6 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           receivedAt: new Date().toISOString(),
           receivedBy: forwardedByName
         });
-        await fetchTracking();
         alert(`ลงรับหนังสือสำเร็จ เลขรับของฝ่ายคือ ${data.receiveNumber}/${doc.year}`);
         if (onStatusUpdated) onStatusUpdated();
       } else {
@@ -614,51 +434,6 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
       alert('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้');
     } finally {
       setIsReceivingDept(false);
-    }
-  };
-
-  const handleUpdateStatus = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newStatus) return;
-
-    const confirmed = await confirm({
-      title: 'ยืนยันการบันทึกสถานะหนังสือ',
-      message: `คุณต้องการปรับปรุงสถานะหนังสือเป็น "${newStatus}" ใช่หรือไม่?`,
-      type: 'edit',
-      itemDetail: comments ? `บันทึกหมายเหตุ: ${comments}` : undefined,
-      confirmText: 'ยืนยันการปรับปรุงสถานะ',
-      cancelText: 'ยกเลิก'
-    });
-    if (!confirmed) return;
-
-    setIsSubmitting(true);
-
-    try {
-      const updaterName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้ใช้งานระบบ';
-      const response = await fetch('/api/tracking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          docId: doc.id,
-          docType: doc.type,
-          status: newStatus,
-          comments: comments || `อัปเดตสถานะเป็น: ${newStatus}`,
-          updatedBy: updaterName
-        })
-      });
-
-      if (response.ok) {
-        setComments('');
-        doc.status = newStatus; // Local state sync
-        await fetchTracking();
-        if (onStatusUpdated) {
-          onStatusUpdated();
-        }
-      }
-    } catch (err) {
-      console.error('Error updating status:', err);
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -830,22 +605,13 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {(user?.role === 'admin' || user?.role === 'moderator' || !user?.role) && (
-              <button 
-                onClick={() => {
-                  const fDepts = Array.isArray(doc.forwardedTo) 
-                    ? doc.forwardedTo 
-                    : (typeof doc.forwardedTo === 'string' && doc.forwardedTo.trim() !== '' ? doc.forwardedTo.split(',') : (doc.department ? [doc.department] : []));
-                  setSelectedDepts(fDepts);
-                  setForwardNote(doc.forwardNote || '');
-                  setIsForwardModalOpen(true);
-                }}
-                className="p-1.5 sm:p-2 text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-lg transition-colors flex items-center gap-1.5 text-xs sm:text-sm border border-purple-500/30 cursor-pointer font-medium"
-                title="ส่งต่อหนังสือให้ฝ่าย/กลุ่มงานปฏิบัติ"
-              >
-                <Send className="w-4 h-4" /> <span className="hidden sm:inline">ส่งต่อให้ฝ่าย</span>
-              </button>
-            )}
+            <button
+              onClick={() => setIsSealModalOpen(true)}
+              className="p-1.5 sm:p-2 text-rose-500 hover:text-rose-600 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg transition-colors flex items-center gap-1.5 text-xs sm:text-sm border border-rose-500/30 cursor-pointer font-medium"
+              title="ประทับตราดิจิทัลและเขียนเกษียนสั่งการ"
+            >
+              <Stamp className="w-4 h-4" /> <span className="hidden sm:inline">ประทับตรา & เกษียน</span>
+            </button>
             {onEdit && (
               <button 
                 onClick={() => onEdit(doc)}
@@ -884,37 +650,33 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
           `}</style>
           
           {/* Tabs Bar */}
-          <div className="flex bg-[var(--bg-surface)] border-b border-[var(--border-light)] shrink-0 px-2 sm:px-4 pt-1">
+          <div className="flex bg-[var(--bg-overlay)] backdrop-blur-xl border-b border-[var(--border-light)] shrink-0 px-2 sm:px-4 pt-2 overflow-x-auto custom-scrollbar gap-2">
             <button 
               onClick={() => setActiveTab('details')} 
-              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'details' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
+              className={`py-2.5 px-5 text-sm font-bold transition-all flex items-center gap-2 rounded-t-2xl shrink-0 ${activeTab === 'details' ? 'bg-[var(--bg-canvas)] text-[var(--primary-color)] border border-b-0 border-[var(--border-light)] shadow-[0_-4px_10px_rgb(0,0,0,0.02)]' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/5'}`}
             >
               <FileText className="w-4 h-4" />
               <span>รายละเอียดเอกสาร</span>
             </button>
             <button 
-              onClick={() => setActiveTab('tracking')} 
-              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'tracking' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
+              onClick={() => {
+                setActiveTab('workflow');
+                fetchReads();
+              }} 
+              className={`py-2.5 px-5 text-sm font-bold transition-all flex items-center gap-2 rounded-t-2xl shrink-0 ${activeTab === 'workflow' ? 'bg-[var(--bg-canvas)] text-amber-600 dark:text-amber-400 border border-b-0 border-[var(--border-light)] shadow-[0_-4px_10px_rgb(0,0,0,0.02)]' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/5'}`}
             >
-              <Clock className="w-4 h-4" />
-              <span>ติดตามสถานะ</span>
+              <GitBranch className={`w-4 h-4 ${activeTab === 'workflow' ? 'text-amber-500' : ''}`} />
+              <span>สถานะการเสนอ & การอ่าน</span>
+              <span className={`ml-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold ${activeTab === 'workflow' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-[var(--bg-overlay)] text-[var(--text-secondary)] border border-[var(--border-light)]'}`}>
+                {readsList.filter(r => r.status === 'read' || r.status === 'reading').length}/{readsList.length || 1}
+              </span>
             </button>
             <button 
               onClick={() => setActiveTab('versions')} 
-              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'versions' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
+              className={`py-2.5 px-5 text-sm font-bold transition-all flex items-center gap-2 rounded-t-2xl shrink-0 ${activeTab === 'versions' ? 'bg-[var(--bg-canvas)] text-blue-600 dark:text-blue-400 border border-b-0 border-[var(--border-light)] shadow-[0_-4px_10px_rgb(0,0,0,0.02)]' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/5'}`}
             >
-              <GitBranch className="w-4 h-4 text-blue-500" />
-              <span>ประวัติเวอร์ชัน (Version Control)</span>
-            </button>
-            <button 
-              onClick={() => {
-                setActiveTab('reads');
-                fetchReads();
-              }} 
-              className={`py-2.5 px-4 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 border-b-2 ${activeTab === 'reads' ? 'text-[var(--primary-color)] border-[var(--primary-color)] font-semibold' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)]'}`}
-            >
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span>สถานะการอ่าน ({readsList.filter(r => r.status === 'read' || r.status === 'reading').length}/{readsList.length || 1})</span>
+              <History className={`w-4 h-4 ${activeTab === 'versions' ? 'text-blue-500' : ''}`} />
+              <span>ประวัติเวอร์ชัน</span>
             </button>
           </div>
 
@@ -932,222 +694,222 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
             </div>
           )}
 
-          {activeTab === 'reads' && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-slate-50 dark:bg-slate-900/40 space-y-6">
-              {/* Stats Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 shadow-sm">
-                  <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">สมาชิกทั้งหมด</div>
-                  <div className="text-2xl font-bold text-slate-800 dark:text-slate-100 mt-1">{readsList.length} คน</div>
-                </div>
-                
-                <div className="bg-gradient-to-br from-amber-500/5 to-amber-500/10 dark:from-amber-950/10 dark:to-amber-900/10 p-4 rounded-xl border border-amber-500/20 shadow-sm flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-amber-600 dark:text-amber-400 font-medium font-semibold">✓✓ เปิดแล้ว</div>
-                    <div className="text-2xl font-bold text-amber-700 dark:text-amber-400 mt-1">
-                      {readsList.filter(r => r.status === 'read').length} คน
-                    </div>
+          {activeTab === 'workflow' && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-[var(--bg-canvas)]">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Workflow Progress Status Section */}
+              <div className="bg-[var(--bg-overlay)] backdrop-blur-xl rounded-3xl border border-[var(--border-light)] p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-4 animate-in fade-in-50 duration-200 h-fit">
+                <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-3">
+                  <div className="flex items-center gap-2">
+                    <GitBranch className="w-5 h-5 text-amber-500" />
+                    <span className="font-bold text-sm sm:text-base text-[var(--text-primary)]">สถานะการเสนอหนังสือ (Workflow Progress)</span>
                   </div>
-                  <span className="text-[10px] font-bold text-amber-600 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/20">LINE Style</span>
-                </div>
-
-                <div className="bg-gradient-to-br from-green-500/5 to-green-500/10 dark:from-green-950/10 dark:to-green-900/10 p-4 rounded-xl border border-green-500/20 shadow-sm flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-green-600 dark:text-green-400 font-medium font-semibold">กำลังอ่าน</div>
-                    <div className="text-2xl font-bold text-green-700 dark:text-green-400 mt-1">
-                      {readsList.filter(r => r.status === 'reading').length} คน
-                    </div>
-                  </div>
-                  <span className="flex h-2 w-2 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                  </span>
-                </div>
-
-                <div className="bg-gradient-to-br from-blue-500/5 to-blue-500/10 dark:from-blue-950/10 dark:to-blue-900/10 p-4 rounded-xl border border-blue-500/20 shadow-sm">
-                  <div className="text-xs text-blue-600 dark:text-blue-400 font-medium font-semibold">✓ ส่งแล้ว (ยังไม่เปิด)</div>
-                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-400 mt-1">
-                    {readsList.filter(r => r.status === 'sent').length} คน
-                  </div>
-                </div>
-              </div>
-
-              {/* Search and Filters bar */}
-              <div className="bg-[var(--bg-surface)] p-4 rounded-xl border border-[var(--border-light)] shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-                {/* Search */}
-                <div className="relative w-full md:max-w-xs">
-                  <input
-                    type="text"
-                    placeholder="ค้นหาชื่อ, กลุ่มงาน, ตำแหน่ง..."
-                    value={readsSearch}
-                    onChange={(e) => setReadsSearch(e.target.value)}
-                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg pl-9 pr-4 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors"
-                  />
-                  <span className="absolute left-3 top-2.5 text-[var(--text-muted)]">
-                    <User className="w-3.5 h-3.5" />
-                  </span>
-                  {readsSearch && (
-                    <button
-                      onClick={() => setReadsSearch('')}
-                      className="absolute right-2.5 top-2.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                  {workflowInstance && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      workflowInstance.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' :
+                      workflowInstance.status === 'rejected' ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30' :
+                      'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                    }`}>
+                      {workflowInstance.status === 'completed' ? '🟢 เสร็จสิ้นการดำเนินการ' :
+                       workflowInstance.status === 'rejected' ? '🔴 ปฏิเสธ/ส่งกลับแก้ไข' :
+                       '⚡ อยู่ระหว่างเสนอพิจารณา'}
+                    </span>
                   )}
                 </div>
 
-                {/* Filters */}
-                <div className="flex gap-1.5 overflow-x-auto w-full md:w-auto shrink-0 pb-1 md:pb-0">
-                  {(['all', 'read', 'reading', 'sent'] as const).map((type) => {
-                    const label = {
-                      all: 'ทั้งหมด',
-                      read: '✓✓ เปิดแล้ว',
-                      reading: 'กำลังอ่าน',
-                      sent: '✓ ส่งแล้ว'
-                    }[type];
-                    
-                    const count = type === 'all' 
-                      ? readsList.length 
-                      : readsList.filter(r => r.status === type).length;
+                {isLoadingWorkflow ? (
+                  <div className="py-8 text-center text-xs text-[var(--text-muted)]">กำลังดึงข้อมูลขั้นตอนการดำเนินการตามเส้นทาง...</div>
+                ) : workflowInstance ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      <div className="space-y-1">
+                        <p className="text-[var(--text-secondary)] font-medium">เส้นทางสายงาน (Template):</p>
+                        <p className="font-bold text-slate-800 dark:text-slate-100">{workflowInstance.templateName || 'กำหนดเอง'}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[var(--text-secondary)] font-medium">เวลาเริ่มเสนอ & SLA:</p>
+                        <p className="font-semibold font-mono text-[var(--text-primary)]">
+                          {formatThaiDate(workflowInstance.startedAt)} {workflowInstance.dueAt && `| SLA ครบกำหนด: ${formatThaiDate(workflowInstance.dueAt)}`}
+                        </p>
+                      </div>
+                    </div>
 
-                    return (
-                      <button
-                        key={type}
-                        onClick={() => setReadsFilter(type)}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                          readsFilter === type
-                            ? 'bg-[var(--primary-color)] text-white shadow-sm font-bold'
-                            : 'bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)]'
-                        }`}
-                      >
-                        {label} ({count})
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                    <div className="space-y-2 pt-2">
+                      <p className="text-xs font-bold text-[var(--text-secondary)]">
+                        ขั้นตอนการดำเนินงานตามลำดับชั้น ({workflowInstance.currentStepIndex + 1}/{workflowInstance.steps?.length || 1}):
+                      </p>
 
-              {/* Readers List */}
-              <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm overflow-hidden divide-y divide-[var(--border-lighter)]/40">
-                {isFetchingReads ? (
-                  <div className="p-8 text-center text-xs text-[var(--text-muted)]">กำลังดึงข้อมูลสถานะการเปิดอ่าน...</div>
-                ) : readsList.filter(u => {
-                  const searchLower = readsSearch.toLowerCase();
-                  const matchesSearch = u.fullName.toLowerCase().includes(searchLower) || 
-                                        u.username.toLowerCase().includes(searchLower) ||
-                                        (u.department && u.department.toLowerCase().includes(searchLower)) ||
-                                        (u.position && u.position.toLowerCase().includes(searchLower));
-                  
-                  if (!matchesSearch) return false;
-                  if (readsFilter === 'all') return true;
-                  return u.status === readsFilter;
-                }).length > 0 ? (
-                  readsList.filter(u => {
-                    const searchLower = readsSearch.toLowerCase();
-                    const matchesSearch = u.fullName.toLowerCase().includes(searchLower) || 
-                                          u.username.toLowerCase().includes(searchLower) ||
-                                          (u.department && u.department.toLowerCase().includes(searchLower)) ||
-                                          (u.position && u.position.toLowerCase().includes(searchLower));
-                    
-                    if (!matchesSearch) return false;
-                    if (readsFilter === 'all') return true;
-                    return u.status === readsFilter;
-                  }).map((reader) => {
-                    const initials = reader.fullName ? reader.fullName.substring(0, 2) : reader.username.substring(0, 2);
-                    const formatReadTime = (dateString: string | null) => {
-                      if (!dateString) return '';
-                      try {
-                        const d = new Date(dateString);
-                        if (isNaN(d.getTime())) return '';
-                        const hh = String(d.getHours()).padStart(2, '0');
-                        const mm = String(d.getMinutes()).padStart(2, '0');
-                        return `อ่านเมื่อ ${hh}:${mm}`;
-                      } catch (e) {
-                        return '';
-                      }
-                    };
-                    
-                    return (
-                      <div key={reader.username} className="p-3.5 sm:px-6 flex items-center justify-between gap-4 hover:bg-[var(--border-lighter)]/20 transition-colors">
-                        <div className="flex items-center gap-3 min-w-0">
-                          {reader.avatar ? (
-                            <img
-                              src={reader.avatar}
-                              alt={reader.fullName}
-                              className="w-9 h-9 rounded-full object-cover shrink-0 border border-[var(--primary-color)]/30 shadow-xs"
-                            />
-                          ) : (
-                            <div className="w-9 h-9 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center font-bold text-xs shrink-0 border border-[var(--primary-color)]/20 shadow-xs">
-                              {initials}
-                            </div>
-                          )}
-                          
-                          <div className="min-w-0">
-                            <div className="font-semibold text-xs sm:text-sm text-[var(--text-primary)] truncate flex items-center gap-1.5">
-                              <span>{reader.fullName}</span>
-                              {reader.username === user?.username && (
-                                <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 py-0.2 rounded font-medium">คุณ</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-1">
+                        {workflowInstance.steps?.map((st, idx) => {
+                          const isCurrent = idx === workflowInstance.currentStepIndex && workflowInstance.status === 'active';
+                          const isPast = idx < workflowInstance.currentStepIndex || workflowInstance.status === 'completed';
+                          const isRejected = st.status === 'rejected';
+
+                          return (
+                            <div 
+                              key={idx} 
+                              className={`p-3 rounded-xl border text-xs space-y-2 relative transition-all ${
+                                isCurrent 
+                                  ? 'bg-amber-500/10 border-amber-500/40 text-amber-950 dark:text-amber-200 ring-2 ring-amber-500/20 shadow-sm'
+                                  : isPast
+                                  ? 'bg-emerald-500/5 border-emerald-500/30 text-emerald-950 dark:text-emerald-200'
+                                  : isRejected
+                                  ? 'bg-red-500/10 border-red-500/30 text-red-950 dark:text-red-200'
+                                  : 'bg-[var(--bg-canvas)] border-[var(--border-lighter)] text-[var(--text-muted)] opacity-70'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-[10px] px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10">
+                                  ขั้นที่ {st.stepNumber}
+                                </span>
+                                {isPast ? (
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                ) : isCurrent ? (
+                                  <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                  </span>
+                                ) : (
+                                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                                )}
+                              </div>
+
+                              <div>
+                                <p className="font-bold line-clamp-1 text-[11px]">{st.title}</p>
+                                <p className="text-[10px] text-[var(--text-muted)] line-clamp-1">{st.assignedRole}</p>
+                                {st.assignee && (
+                                  <p className="text-[9px] text-[var(--text-muted)] mt-0.5 italic">({st.assignee})</p>
+                                )}
+                              </div>
+
+                              {st.actionNote && (
+                                <div className="pt-1.5 border-t border-black/5 dark:border-white/5 text-[10px] italic text-[var(--text-secondary)] line-clamp-3">
+                                  "{st.actionNote}"
+                                  {st.actionBy && <span className="block text-right text-[9px] not-italic mt-0.5 text-slate-400">— {st.actionBy}</span>}
+                                </div>
                               )}
                             </div>
-                            <div className="text-[11px] text-[var(--text-secondary)] font-medium truncate mt-0.5">
-                              {reader.position || 'ตำแหน่งปฏิบัติการ'} {reader.department ? `· ${reader.department}` : ''}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="shrink-0 text-right">
-                          {reader.status === 'read' && (
-                            <div className="flex flex-col items-end">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                                <span>✓✓ เปิดแล้ว</span>
-                              </span>
-                              <span className="text-[10px] text-amber-500/80 font-mono mt-1">
-                                {formatReadTime(reader.readAt)} น.
-                              </span>
-                            </div>
-                          )}
-
-                          {reader.status === 'reading' && (
-                            <div className="flex flex-col items-end">
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg bg-green-500/10 text-green-500 border border-green-500/20">
-                                <span className="flex h-1.5 w-1.5 relative">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
-                                </span>
-                                <span>กำลังอ่าน</span>
-                              </span>
-                              <span className="text-[10px] text-green-500/80 font-mono mt-1">
-                                กำลังเปิดดูอยู่ขณะนี้
-                              </span>
-                            </div>
-                          )}
-
-                          {reader.status === 'sent' && (
-                            <div className="flex flex-col items-end">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-500/10 text-slate-400 border border-slate-500/10">
-                                <span>✓ ส่งแล้ว</span>
-                              </span>
-                              <span className="text-[10px] text-slate-400/80 font-mono mt-1">
-                                ยังไม่เปิดอ่าน
-                              </span>
-                            </div>
-                          )}
-                        </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })
+                    </div>
+                  </div>
                 ) : (
-                  <div className="p-12 text-center text-xs text-[var(--text-muted)] italic">
-                    ไม่พบข้อมูลผู้ใช้ที่สอดคล้องกับการค้นหา
+                  <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/20 text-center text-xs text-slate-500 dark:text-slate-400 italic">
+                    เอกสารนี้ได้รับการลงทะเบียนโดยไม่ได้ผ่านเส้นทาง Workflow ลำดับชั้นเสนอพิจารณาในระบบ
                   </div>
                 )}
+              </div>
+
+                {/* Read Status Section (Right Column) */}
+                <div className="bg-[var(--bg-overlay)] backdrop-blur-xl rounded-3xl border border-[var(--border-light)] p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-4 animate-in fade-in-50 duration-200 h-fit flex flex-col max-h-full">
+                  <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-3 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                      <span className="font-bold text-base text-[var(--text-primary)]">สถานะการอ่าน (Read Status)</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 shrink-0">
+                    <div className="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center justify-center text-center">
+                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{readsList.filter(r => r.status === 'read' || r.status === 'reading').length}</div>
+                      <div className="text-[10px] font-bold text-emerald-600/80 uppercase">เปิดอ่านแล้ว</div>
+                    </div>
+                    <div className="bg-[var(--bg-canvas)] p-3 rounded-xl border border-[var(--border-light)] flex flex-col items-center justify-center text-center">
+                      <div className="text-2xl font-bold text-[var(--text-primary)]">{readsList.length}</div>
+                      <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase">ผู้รับทั้งหมด</div>
+                    </div>
+                  </div>
+
+                  {/* Readers List */}
+                  <div className="border border-[var(--border-light)] rounded-2xl overflow-hidden divide-y divide-[var(--border-lighter)]/40 mt-2 flex-1 min-h-0 flex flex-col">
+                    {isFetchingReads ? (
+                      <div className="p-8 text-center text-xs text-[var(--text-muted)]">กำลังดึงข้อมูล...</div>
+                    ) : readsList.length > 0 ? (
+                      <div className="overflow-y-auto custom-scrollbar flex-1 min-h-[250px]">
+                        {readsList.map((reader) => {
+                          const initials = reader.fullName ? reader.fullName.substring(0, 2) : reader.username.substring(0, 2);
+                          const formatReadTime = (dateString: string | null) => {
+                            if (!dateString) return '';
+                            try {
+                              const d = new Date(dateString);
+                              if (isNaN(d.getTime())) return '';
+                              const hh = String(d.getHours()).padStart(2, '0');
+                              const mm = String(d.getMinutes()).padStart(2, '0');
+                              return `${hh}:${mm} น.`;
+                            } catch (e) {
+                              return '';
+                            }
+                          };
+                          
+                          return (
+                            <div key={reader.username} className="p-3 flex items-center justify-between gap-3 hover:bg-[var(--border-lighter)]/20 transition-colors">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                {reader.avatar ? (
+                                  <img
+                                    src={reader.avatar}
+                                    alt={reader.fullName}
+                                    className="w-8 h-8 rounded-full object-cover shrink-0 border border-[var(--border-light)] shadow-xs"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center font-bold text-[10px] shrink-0 border border-[var(--primary-color)]/20 shadow-xs">
+                                    {initials}
+                                  </div>
+                                )}
+                                
+                                <div className="min-w-0">
+                                  <div className="font-bold text-[11px] text-[var(--text-primary)] truncate">
+                                    {reader.fullName}
+                                  </div>
+                                  <div className="text-[10px] text-[var(--text-secondary)] font-medium truncate">
+                                    {reader.department || 'บุคลากร'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 text-right">
+                                {reader.status === 'read' && (
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-[10px] font-bold text-amber-500">✓✓ เปิดแล้ว</span>
+                                    <span className="text-[9px] text-amber-500/80 font-mono mt-0.5">{formatReadTime(reader.readAt)}</span>
+                                  </div>
+                                )}
+                                {reader.status === 'reading' && (
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-[10px] font-bold text-green-500 flex items-center gap-1">
+                                      <span className="flex h-1.5 w-1.5 relative">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+                                      </span>
+                                      กำลังอ่าน
+                                    </span>
+                                  </div>
+                                )}
+                                {reader.status === 'sent' && (
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-[10px] font-bold text-blue-500">✓ ส่งแล้ว</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-6 text-center text-[10px] text-[var(--text-muted)] italic">
+                        ยังไม่มีข้อมูลการส่งให้ผู้อื่นอ่าน
+                      </div>
+                    )}
+                  </div>
+                </div>
+
               </div>
             </div>
           )}
 
-          <div className={`flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden ${(activeTab === 'versions' || activeTab === 'reads') ? 'hidden' : ''}`}>
+          <div className={`flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden ${activeTab !== 'details' ? 'hidden' : ''}`}>
               {/* Column 1: Document Sheet Details */}
-              <div className={`flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pb-12 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar ${activeTab === 'tracking' ? 'hidden md:block' : ''}`}>
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 pb-12 border-b md:border-b-0 md:border-r border-[var(--border-lighter)] custom-scrollbar">
 
             <div className="bg-[var(--bg-overlay)] rounded-xl border border-[var(--border-light)] p-4 sm:p-6 shadow-inner space-y-4">
               <div className="border-b border-[var(--border-lighter)] pb-3 flex justify-between items-center flex-wrap gap-2">
@@ -1225,49 +987,7 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                     {doc.assignee && <div className="text-xs text-[var(--text-secondary)] mt-1 font-mono">ผู้ดูแล/ผู้รับผิดชอบ: {doc.assignee}</div>}
                   </div>
                 ))}
-                {Boolean(doc.forwardedTo) && detailRow('ส่งต่อให้ฝ่ายงาน :', (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {(Array.isArray(doc.forwardedTo) 
-                        ? doc.forwardedTo 
-                        : (typeof doc.forwardedTo === 'string' ? doc.forwardedTo.split(',') : [])
-                      ).map((d: any, idx: number) => {
-                        const deptName = typeof d === 'string' ? d.trim() : String(d || '');
-                        return (
-                          <span key={idx} className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/30">
-                            {deptName}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    {doc.forwardNote && (
-                      <p className="text-xs text-[var(--text-secondary)] font-mono bg-purple-500/5 p-2 rounded border border-purple-500/10">
-                        คำสั่งการ/ข้อความส่งต่อ: "{doc.forwardNote}" ({doc.forwardedBy || 'สารบรรณกลาง'})
-                      </p>
-                    )}
-                  </div>
-                ))}
                 
-                {doc.forwardedTo && user?.department && doc.forwardedTo.includes(user.department) && user?.role !== 'admin' && detailRow('การลงรับของฝ่าย :', (
-                  <div className="space-y-1.5">
-                    {doc.departmentReceives?.find(r => r.department === user.department) ? (
-                      <div className="text-sm text-green-500 font-medium flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4" /> 
-                        รับแล้ว (เลขรับฝ่าย: {doc.departmentReceives.find(r => r.department === user.department)?.receiveNumber}/{doc.departmentReceives.find(r => r.department === user.department)?.year})
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={handleDepartmentReceive}
-                        disabled={isReceivingDept}
-                        className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-                      >
-                        <CheckCircle2 className="w-4 h-4" /> 
-                        {isReceivingDept ? 'กำลังลงรับ...' : 'ลงรับหนังสือของฝ่าย'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-
                 {detailRow('หมายเหตุ :', doc.note || '-')}
                 
                 {doc.content && detailRow('เนื้อหาสาระสำคัญ :', (
@@ -1401,128 +1121,10 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
                   </div>
                 ))}
 
-                {detailRow('สถานะการเสนออนุมัติ & SLA :', (
-                  <div className="space-y-3 w-full">
-                    {docWorkflow ? (
-                      <div className="p-4 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/20 dark:bg-blue-950/20 space-y-3 text-xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200 dark:border-blue-900 pb-2">
-                          <div className="flex items-center gap-2">
-                            <GitBranch className="w-4 h-4 text-[var(--primary-color)]" />
-                            <span className="font-bold text-slate-800 dark:text-slate-100 text-sm">
-                              {docWorkflow.templateName || 'Workflow มาตรฐาน'}
-                            </span>
-                          </div>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                            docWorkflow.slaStatus === 'OVERDUE' ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 animate-pulse' :
-                            docWorkflow.slaStatus === 'WARNING' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' :
-                            'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          }`}>
-                            {docWorkflow.slaStatus === 'OVERDUE' ? '🔴 เกินกำหนด SLA (ค้างโต๊ะ)' :
-                             docWorkflow.slaStatus === 'WARNING' ? '🟡 ใกล้ครบกำหนด SLA' : '🟢 ดำเนินการตามปกติ'}
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-600 dark:text-slate-300 font-mono">
-                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">กำหนดส่งตาม SLA</p>
-                            <p className="font-semibold text-blue-600 dark:text-blue-400">{formatThaiDateTime(docWorkflow.dueAt)}</p>
-                          </div>
-                          <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">ผู้พิจารณาปัจจุบัน</p>
-                            <p className="font-semibold text-slate-800 dark:text-slate-200">
-                              {docWorkflow.steps[docWorkflow.currentStepIndex]?.title || 'ส่งมอบแล้ว'} ({docWorkflow.assignee})
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Steps overview */}
-                        <div className="space-y-1.5 pt-1">
-                          <p className="font-bold text-slate-700 dark:text-slate-300 text-[11px]">ลำดับการเสนออนุมัติ:</p>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            {docWorkflow.steps.map((st: any, idx: number) => {
-                              const isCurrent = idx === docWorkflow.currentStepIndex && docWorkflow.status === 'active';
-                              const isDone = idx < docWorkflow.currentStepIndex || docWorkflow.status === 'completed';
-                              return (
-                                <div key={idx} className={`p-2 rounded-lg border text-[11px] ${
-                                  isCurrent ? 'bg-blue-100/70 border-blue-400 text-blue-900 dark:bg-blue-900/60 dark:text-blue-200 font-bold ring-1 ring-blue-400' :
-                                  isDone ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' :
-                                  'bg-slate-100 border-slate-200 text-slate-400 dark:bg-slate-900 dark:border-slate-800'
-                                }`}>
-                                  <div className="flex items-center justify-between">
-                                    <span>ขั้นที่ {st.stepNumber}: {st.title}</span>
-                                    {isDone && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
-                                  </div>
-                                  <div className="text-[10px] opacity-80 mt-0.5">{st.assignedRole}</div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Inline progress action */}
-                        {docWorkflow.status === 'active' && (
-                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                            <input
-                              type="text"
-                              placeholder="ระบุข้อความสั่งการ/ความเห็นอนุมัติ..."
-                              value={wfActionNote}
-                              onChange={e => setWfActionNote(e.target.value)}
-                              className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-slate-800 dark:text-slate-100"
-                            />
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleProgressDocWorkflow('escalate')}
-                                disabled={isSubmittingWfAction}
-                                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer"
-                              >
-                                <Clock className="w-3.5 h-3.5" /> เร่งรัด SLA
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleProgressDocWorkflow('approve')}
-                                disabled={isSubmittingWfAction}
-                                className="px-4 py-1.5 rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" /> อนุมัติ / ส่งต่อขั้นตอน
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-900/20 text-center space-y-3">
-                        <p className="text-xs text-slate-500 dark:text-slate-400 italic">
-                          ยังไม่ได้มอบหมายเส้นทางเสนออนุมัติ (Workflow) ให้หนังสือฉบับนี้
-                        </p>
-                        <div className="flex flex-col sm:flex-row items-center justify-center gap-2 max-w-md mx-auto">
-                          <select
-                            value={selectedWorkflowTplId}
-                            onChange={e => setSelectedWorkflowTplId(e.target.value)}
-                            className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-slate-800 dark:text-slate-100"
-                          >
-                            <option value="">-- เลือกแม่แบบ Workflow --</option>
-                            {workflowTemplates.map(t => (
-                              <option key={t.id} value={t.id}>
-                                {t.name} ({t.steps.length} ขั้นตอน)
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            onClick={handleAssignDocWorkflow}
-                            disabled={!selectedWorkflowTplId || isAssigningWorkflowDoc}
-                            className="w-full sm:w-auto px-4 py-2 text-xs font-bold rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white shadow-md transition-all shrink-0 cursor-pointer disabled:opacity-50"
-                          >
-                            {isAssigningWorkflowDoc ? 'กำลังมอบหมาย...' : 'เริ่ม Workflow'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
               </div>
             </div>
+
+
 
             {/* AI Duplicate & Cross-Reference Detector Section */}
             <div className="mt-5">
@@ -1534,319 +1136,42 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
               />
             </div>
           </div>
-
-          {/* Column 2: Status Tracking timeline & Update action */}
-          <div className={`w-full md:w-[380px] shrink-0 min-h-0 h-full max-h-full bg-[var(--bg-elevated)]/30 overflow-y-auto p-4 sm:p-6 pb-12 flex flex-col justify-between border-t md:border-t-0 custom-scrollbar ${activeTab === 'details' ? 'hidden md:block' : ''}`}>
-            <div className="space-y-5 shrink-0">
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--text-primary)] font-sans border-b border-[var(--border-light)] pb-2 mb-3 flex items-center justify-between">
-                  <span>เส้นทางเดินหนังสือและการติดตามสถานะ</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-[var(--primary-color)]">
-                    {trackingLogs.length} รายการ
-                  </span>
-                </h3>
-
-                {/* Workflow & SLA Live Card in Tracking Panel */}
-                {docWorkflow ? (
-                  <div className="mb-4 p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/80 bg-blue-50/40 dark:bg-blue-950/30 space-y-2.5 text-xs shadow-xs">
-                    <div className="flex items-center justify-between gap-1 border-b border-blue-200/80 dark:border-blue-900/80 pb-2">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-100">
-                        <GitBranch className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
-                        <span className="line-clamp-1">{docWorkflow.templateName || 'Workflow SLA'}</span>
-                      </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                        docWorkflow.slaStatus === 'OVERDUE' ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 animate-pulse' :
-                        docWorkflow.slaStatus === 'WARNING' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' :
-                        'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                      }`}>
-                        {docWorkflow.slaStatus === 'OVERDUE' ? '🔴 เกินกำหนด SLA' :
-                         docWorkflow.slaStatus === 'WARNING' ? '🟡 ใกล้ครบกำหนด' : '🟢 ดำเนินการตามปกติ'}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300">
-                        <span className="text-slate-400 font-medium">เวลาคงเหลือ SLA:</span>
-                        {(() => {
-                          const due = new Date(docWorkflow.dueAt).getTime();
-                          const now = new Date().getTime();
-                          const diffMs = due - now;
-                          if (docWorkflow.status === 'completed') {
-                            return <span className="font-bold text-emerald-600">เสร็จสิ้นแล้ว</span>;
-                          }
-                          if (diffMs < 0) {
-                            const hours = Math.floor(Math.abs(diffMs) / (1000 * 60 * 60));
-                            return <span className="font-bold text-red-600 dark:text-red-400">ช้าเกิน {hours} ชม.</span>;
-                          }
-                          const hours = Math.floor(diffMs / (1000 * 60 * 60));
-                          return <span className="font-bold text-blue-600 dark:text-blue-400">เหลือ {hours} ชม.</span>;
-                        })()}
-                      </div>
-
-                      <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-0.5">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase">ขั้นตอนปัจจุบัน</div>
-                        <div className="font-semibold text-slate-800 dark:text-slate-200 text-xs">
-                          {docWorkflow.steps[docWorkflow.currentStepIndex]?.title || 'ส่งมอบแล้ว'} ({docWorkflow.assignee})
-                        </div>
-                      </div>
-                    </div>
-
-                    {docWorkflow.status === 'active' && (
-                      <div className="pt-2 border-t border-blue-200/60 dark:border-blue-900/60 space-y-2">
-                        <input
-                          type="text"
-                          placeholder="ข้อความสั่งการ/ความเห็นอนุมัติ..."
-                          value={wfActionNote}
-                          onChange={e => setWfActionNote(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-slate-800 dark:text-slate-100"
-                        />
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleProgressDocWorkflow('escalate')}
-                            disabled={isSubmittingWfAction}
-                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-semibold text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
-                          >
-                            <Clock className="w-3.5 h-3.5" /> เร่งรัด SLA
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleProgressDocWorkflow('approve')}
-                            disabled={isSubmittingWfAction}
-                            className="px-3 py-1.5 rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white font-semibold text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> อนุมัติ / ส่งต่อ
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="mb-4 p-3 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 text-center space-y-2">
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                      ยังไม่ได้ผูก Workflow ให้หนังสือเรื่องนี้
-                    </p>
-                    <div className="flex items-center gap-1.5 justify-center">
-                      <select
-                        value={selectedWorkflowTplId}
-                        onChange={e => setSelectedWorkflowTplId(e.target.value)}
-                        className="text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1.5 text-slate-800 dark:text-slate-100 max-w-[180px]"
-                      >
-                        <option value="">-- เลือก Workflow --</option>
-                        {workflowTemplates.map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={handleAssignDocWorkflow}
-                        disabled={!selectedWorkflowTplId || isAssigningWorkflowDoc}
-                        className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg bg-[var(--primary-color)] hover:opacity-90 text-white cursor-pointer disabled:opacity-50 shrink-0"
-                      >
-                        เริ่ม
-                      </button>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Timeline display */}
-                <div className="relative pl-5 border-l-2 border-[var(--border-lighter)] space-y-4 mt-2">
-                  {trackingLogs.map((log, index) => {
-                    const isLast = index === trackingLogs.length - 1;
-                    const isWfLog = log.comments?.includes('[Workflow') || log.status?.includes('Workflow') || log.status?.includes('อนุมัติ');
-                    return (
-                      <div key={log.id || index} className="relative group">
-                        {/* Dot */}
-                        <div className={`absolute -left-[26px] top-1 w-3.5 h-3.5 rounded-full border-2 bg-[var(--bg-surface)] transition-colors ${
-                          isWfLog ? 'border-blue-500 bg-blue-100 dark:bg-blue-900' :
-                          isLast ? 'border-green-400 ring-4 ring-green-400/10' : 'border-[var(--border-medium)]'
-                        }`} />
-                        
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-xs flex-wrap gap-1">
-                            <span className={`px-1.5 py-0.5 rounded text-[0.68rem] font-medium border ${
-                              isWfLog ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300' :
-                              getStatusBadgeColor(log.status)
-                            }`}>
-                              {log.status}
-                            </span>
-                            <span className="text-[10px] text-[var(--text-muted)] font-mono">
-                              {log.updatedAt ? formatThaiDateTime(log.updatedAt) : ''}
-                            </span>
-                          </div>
-                          <p className="text-xs text-[var(--text-primary)] font-medium leading-normal">{log.comments}</p>
-                          <div className="flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
-                            <User className="w-3 h-3 opacity-60 shrink-0" />
-                            <span>โดย: {log.updatedBy}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {trackingLogs.length === 0 && (
-                    <div className="text-xs text-[var(--text-muted)] py-4 text-center">ไม่มีข้อมูลการติดตามการเดินเอกสาร</div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Status Update Form */}
-            <form onSubmit={handleUpdateStatus} className="border-t border-[var(--border-light)] pt-4 mt-6 space-y-3.5 shrink-0 pb-6">
-              <h4 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[var(--primary-color)]" /> ดำเนินการ/สั่งการเดินหนังสือ
-              </h4>
-              
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-[var(--text-muted)]">เปลี่ยนสถานะหนังสือเป็น :</label>
-                <select
-                  value={newStatus}
-                  onChange={(e) => setNewStatus(e.target.value)}
-                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors font-medium text-blue-400"
-                >
-                  <option value="ลงทะเบียน">ลงทะเบียน</option>
-                  <option value="เสนอผู้บริหาร">เสนอผู้บริหาร</option>
-                  <option value="ส่งต่อกลุ่มงาน">ส่งต่อกลุ่มงาน</option>
-                  <option value="เสร็จสิ้น">เสร็จสิ้น (ยุติเรื่อง)</option>
-                  <option value="ไม่อนุมัติ">ไม่อนุมัติ/ยกเลิก</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-[var(--text-muted)]">บันทึกข้อความสั่งการ / ความคิดเห็นเพิ่มเติม :</label>
-                <textarea
-                  rows={2}
-                  value={comments}
-                  onChange={(e) => setComments(e.target.value)}
-                  placeholder="เช่น มอบฝ่ายยุทธศาสตร์เร่งดำเนินการด่วน..."
-                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors placeholder-[var(--text-muted)] resize-none"
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full flex items-center justify-center gap-2 bg-[var(--primary-color)]/10 hover:bg-[var(--primary-color)]/20 text-[var(--primary-color)] border border-[var(--primary-color)]/30 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>{isSubmitting ? 'กำลังบันทึก...' : 'บันทึกสถานะการส่งหนังสือ'}</span>
-              </button>
-            </form>
+        </div>
+            {/* Footer Meta */}
+          <div className="p-3 sm:p-4 border-t border-[var(--border-light)] bg-[var(--bg-surface)] flex items-center justify-between text-xs text-[var(--text-secondary)] shrink-0">
+            <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> สถิติลงทะเบียนเมื่อ {formattedRegDate()}</span>
+            <span className="hidden sm:inline text-[var(--text-muted)] text-[10px]">ระบบ EDMS {sysVersion}</span>
           </div>
+
+          {isSigModalOpen && (
+            <DigitalSignatureModal
+              doc={doc}
+              user={user}
+              onClose={() => setIsSigModalOpen(false)}
+              onSignedSuccess={async (newSig) => {
+                setIsSigModalOpen(false);
+                await fetchDocSignatures();
+                // sync doc status
+                doc.status = 'ลงนามดิจิทัลแล้ว';
+                if (onStatusUpdated) onStatusUpdated();
+              }}
+            />
+          )}
+
+          {isSealModalOpen && (
+            <DigitalSealStamper
+              doc={doc}
+              user={user}
+              onClose={() => setIsSealModalOpen(false)}
+              onSaveStamp={(stampInfo) => {
+                // Update local document status
+                doc.status = 'ประทับตราแล้ว';
+                if (onStatusUpdated) onStatusUpdated();
+              }}
+            />
+          )}
         </div>
       </div>
-
-        {/* Footer Meta */}
-        <div className="p-3 sm:p-4 border-t border-[var(--border-light)] bg-[var(--bg-surface)] flex items-center justify-between text-xs text-[var(--text-secondary)] shrink-0">
-          <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> สถิติลงทะเบียนเมื่อ {formattedRegDate()}</span>
-          <span className="hidden sm:inline text-[var(--text-muted)] text-[10px]">ระบบ EDMS v2.1</span>
-        </div>
-      </div>
-
-      {/* Modal Forwarding to Department */}
-      {isForwardModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-0 sm:p-4 animate-fade-in">
-          <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] sm:rounded-2xl rounded-none w-full max-w-lg h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-purple-500/10">
-              <h3 className="font-sans font-semibold text-base sm:text-lg text-purple-300 flex items-center gap-2">
-                <Send className="w-5 h-5 text-purple-400" /> ส่งต่อหนังสือให้ฝ่าย / กลุ่มงาน
-              </h3>
-              <button 
-                onClick={() => setIsForwardModalOpen(false)}
-                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-1.5 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleForwardToDepartments} className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-2 uppercase tracking-wider">
-                  เลือกฝ่ายงานปลายทางที่ต้องการส่งต่อ : <span className="text-red-400">*</span>
-                </label>
-                <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar p-2 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-lg">
-                  {departmentsList.map((dept) => {
-                    const isChecked = selectedDepts.includes(dept.name);
-                    return (
-                      <label 
-                        key={dept.id} 
-                        className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                          isChecked 
-                            ? 'bg-purple-500/10 border-purple-500/40 text-[var(--text-primary)] font-medium' 
-                            : 'bg-[var(--bg-overlay)] border-[var(--border-lighter)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)]'
-                        }`}
-                      >
-                        <input 
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedDepts(prev => [...prev, dept.name]);
-                            } else {
-                              setSelectedDepts(prev => prev.filter(d => d !== dept.name));
-                            }
-                          }}
-                          className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500"
-                        />
-                        <span className="text-xs sm:text-sm">{dept.name}</span>
-                      </label>
-                    );
-                  })}
-                  {departmentsList.length === 0 && (
-                    <div className="text-xs text-[var(--text-muted)] text-center py-3">ไม่พบรายการฝ่ายงาน</div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
-                  คำสั่งการ / ข้อความหมายเหตุเพิ่มเติมถึงฝ่ายงาน :
-                </label>
-                <textarea 
-                  rows={3}
-                  value={forwardNote}
-                  onChange={(e) => setForwardNote(e.target.value)}
-                  placeholder="เช่น มอบหมายฝ่ายยุทธศาสตร์ฯ พิจารณาดำเนินการภายใน 3 วัน..."
-                  className="w-full bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-lg p-3 text-xs text-[var(--text-primary)] outline-none focus:border-purple-500 transition-colors placeholder-[var(--text-muted)] resize-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[var(--border-light)]">
-                <button 
-                  type="button"
-                  onClick={() => setIsForwardModalOpen(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button 
-                  type="submit"
-                  disabled={isForwarding || selectedDepts.length === 0}
-                  className="px-5 py-2 rounded-lg text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white transition-colors shadow-md disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{isForwarding ? 'กำลังส่งต่อ...' : 'ยืนยันการส่งต่อหนังสือ'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isSigModalOpen && (
-        <DigitalSignatureModal
-          doc={doc}
-          user={user}
-          onClose={() => setIsSigModalOpen(false)}
-          onSignedSuccess={async (newSig) => {
-            setIsSigModalOpen(false);
-            await fetchDocSignatures();
-            // sync doc status
-            doc.status = 'ลงนามดิจิทัลแล้ว';
-            if (onStatusUpdated) onStatusUpdated();
-          }}
-        />
-      )}
     </div>
   );
 }

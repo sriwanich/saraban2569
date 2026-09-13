@@ -49,9 +49,14 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
   const filteredDocs = adminDocs.filter(doc => {
     const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
 
-    // Regular users MUST NOT see Central Saraban administrative documents
+    // Regular users MUST NOT see Central Saraban administrative documents UNLESS forwarded to or received by their department
     if (!isCentralPrivileged && isCentralDoc) {
-      return false;
+      const userDept = user?.department;
+      const isForwardedToMe = userDept && doc.forwardedTo && doc.forwardedTo.includes(userDept);
+      const hasMyDeptReceive = userDept && doc.departmentReceives && doc.departmentReceives.some(r => r.department === userDept);
+      if (!isForwardedToMe && !hasMyDeptReceive) {
+        return false;
+      }
     }
 
     const matchesScope = 
@@ -109,28 +114,31 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in">
       {/* Header section */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
-              ระบบงานธุรการ (คำสั่ง / ประกาศ / หนังสือรับรอง)
-            </h2>
-            <span className="px-3 py-0.5 text-xs font-semibold rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20 font-mono">
-              {filteredDocs.length} รายการ
-            </span>
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-[var(--primary-color)]/10 to-transparent rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20 transition-all duration-700 group-hover:from-[var(--primary-color)]/20" />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 relative z-10">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <h2 className="text-3xl font-sans font-extrabold text-[var(--text-primary)] tracking-tight">
+                ระบบงานธุรการ (คำสั่ง / ประกาศ)
+              </h2>
+              <span className="px-3 py-1 text-xs font-semibold rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20 font-mono shadow-sm">
+                {filteredDocs.length} รายการ
+              </span>
+            </div>
+            <p className="text-[var(--text-secondary)] text-sm font-medium">
+              ทะเบียนและคลังจัดเก็บคำสั่ง ประกาศ และหนังสือรับรองราชการดิจิทัลอย่างเป็นระบบ
+            </p>
           </div>
-          <p className="text-[var(--text-secondary)] mt-1 text-sm">
-            ทะเบียนและคลังจัดเก็บคำสั่ง ประกาศ และหนังสือรับรองราชการดิจิทัลอย่างเป็นระบบ
-          </p>
+          <button
+            onClick={onCreateDoc}
+            className="flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--primary-color)] to-[var(--primary-dark)] hover:from-[var(--primary-hover)] hover:to-[var(--primary-color)] text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/20 hover:shadow-xl hover:shadow-[var(--primary-color)]/30 hover:-translate-y-0.5 active:scale-[0.98] shrink-0 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" /> ลงทะเบียนเอกสารธุรการ
+          </button>
         </div>
-        <button
-          onClick={onCreateDoc}
-          className="flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-4 py-2.5 rounded-lg font-medium transition-colors shadow-sm border border-[var(--primary-color)]/30 shrink-0 cursor-pointer text-sm"
-        >
-          <Plus className="w-4 h-4" /> ลงทะเบียนเอกสารธุรการ
-        </button>
       </div>
 
       {/* Scope Filter Tabs (สารบรรณกลาง VS ฝ่าย/กลุ่มงาน) */}
@@ -201,51 +209,51 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
 
       {/* Stats row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] p-4 rounded-xl flex items-center gap-4 shadow-sm hover:border-[var(--border-light)] transition-colors">
-          <div className="p-3 bg-[var(--primary-color)]/10 text-[var(--primary-color)] rounded-xl shrink-0">
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] p-5 rounded-3xl flex items-center gap-4 shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300">
+          <div className="p-3.5 bg-[var(--primary-color)]/10 text-[var(--primary-color)] rounded-2xl shrink-0 shadow-sm">
             <FileText className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-2xl font-bold font-mono text-[var(--text-primary)]">
+            <div className="text-3xl font-extrabold font-mono text-[var(--text-primary)]">
               {adminDocs.length}
             </div>
-            <div className="text-xs text-[var(--text-secondary)] font-medium">เอกสารธุรการทั้งหมด</div>
+            <div className="text-xs text-[var(--text-secondary)] font-medium mt-1">เอกสารธุรการทั้งหมด</div>
           </div>
         </div>
 
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] p-4 rounded-xl flex items-center gap-4 shadow-sm hover:border-violet-500/30 transition-colors">
-          <div className="p-3 bg-violet-500/10 text-violet-400 rounded-xl shrink-0">
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-violet-500/15 dark:border-violet-500/20 p-5 rounded-3xl flex items-center gap-4 shadow-sm hover:shadow-[0_8px_30px_rgb(139,92,246,0.1)] hover:-translate-y-1 transition-all duration-300">
+          <div className="p-3.5 bg-violet-500/10 text-violet-400 rounded-2xl shrink-0 shadow-sm">
             <Tag className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-2xl font-bold font-mono text-[var(--text-primary)]">
+            <div className="text-3xl font-extrabold font-mono text-[var(--text-primary)]">
               {adminDocs.filter(d => d.category === 'order').length}
             </div>
-            <div className="text-xs text-[var(--text-secondary)] font-medium">คำสั่ง สนง.ปภ. ระยอง</div>
+            <div className="text-xs text-[var(--text-secondary)] font-medium mt-1">คำสั่ง สนง.ปภ. ระยอง</div>
           </div>
         </div>
 
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] p-4 rounded-xl flex items-center gap-4 shadow-sm hover:border-emerald-500/30 transition-colors">
-          <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl shrink-0">
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-emerald-500/15 dark:border-emerald-500/20 p-5 rounded-3xl flex items-center gap-4 shadow-sm hover:shadow-[0_8px_30px_rgb(16,185,129,0.1)] hover:-translate-y-1 transition-all duration-300">
+          <div className="p-3.5 bg-emerald-500/10 text-emerald-400 rounded-2xl shrink-0 shadow-sm">
             <CheckCircle2 className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-2xl font-bold font-mono text-[var(--text-primary)]">
+            <div className="text-3xl font-extrabold font-mono text-[var(--text-primary)]">
               {adminDocs.filter(d => d.category === 'announcement').length}
             </div>
-            <div className="text-xs text-[var(--text-secondary)] font-medium">ประกาศ สนง.ปภ. ระยอง</div>
+            <div className="text-xs text-[var(--text-secondary)] font-medium mt-1">ประกาศ สนง.ปภ. ระยอง</div>
           </div>
         </div>
 
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] p-4 rounded-xl flex items-center gap-4 shadow-sm hover:border-orange-500/30 transition-colors">
-          <div className="p-3 bg-orange-500/10 text-orange-400 rounded-xl shrink-0">
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-orange-500/15 dark:border-orange-500/20 p-5 rounded-3xl flex items-center gap-4 shadow-sm hover:shadow-[0_8px_30px_rgb(249,115,22,0.1)] hover:-translate-y-1 transition-all duration-300">
+          <div className="p-3.5 bg-orange-500/10 text-orange-400 rounded-2xl shrink-0 shadow-sm">
             <FileText className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-2xl font-bold font-mono text-[var(--text-primary)]">
+            <div className="text-3xl font-extrabold font-mono text-[var(--text-primary)]">
               {adminDocs.filter(d => d.category === 'certificate').length}
             </div>
-            <div className="text-xs text-[var(--text-secondary)] font-medium">หนังสือรับรอง</div>
+            <div className="text-xs text-[var(--text-secondary)] font-medium mt-1">หนังสือรับรอง</div>
           </div>
         </div>
       </div>

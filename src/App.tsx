@@ -1,10 +1,10 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfirmProvider } from './context/ConfirmContext';
-
-const Login = lazy(() => import('./components/Login'));
-const Dashboard = lazy(() => import('./components/Dashboard'));
-const PublicInfographicsViewer = lazy(() => import('./components/views/PublicInfographicsViewer').then(m => ({ default: m.PublicInfographicsViewer })));
+import { LoadingIndicator } from './components/LoadingIndicator';
+import Login from './components/Login';
+import Dashboard from './components/Dashboard';
+import { PublicInfographicsViewer } from './components/views/PublicInfographicsViewer';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -39,8 +39,8 @@ export default function App() {
     }
     setIsCheckingAuth(false);
     
-    // Fetch global settings for Favicon & Title
-    const fetchGlobalSettings = async () => {
+    // Fetch global settings for Favicon & Title with auto-retry and cached fallback
+    const fetchGlobalSettings = async (retryCount = 0) => {
       try {
         const res = await fetch('/api/settings');
         if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
@@ -72,7 +72,19 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.error('Failed to fetch global settings:', err);
+        // Attempt retry if dev server is warming up
+        if (retryCount < 3) {
+          setTimeout(() => fetchGlobalSettings(retryCount + 1), (retryCount + 1) * 1000);
+        } else {
+          // Graceful fallback to local cache
+          try {
+            const cached = localStorage.getItem('moi_settings');
+            if (cached) {
+              const data = JSON.parse(cached);
+              if (data.orgName) document.title = `${data.orgName} - ระบบสารบรรณอิเล็กทรอนิกส์`;
+            }
+          } catch (_) {}
+        }
       }
     };
     fetchGlobalSettings();
@@ -130,31 +142,27 @@ export default function App() {
     setIsLoggedIn(false);
   };
 
-  const Loading = () => <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center text-[var(--text-primary)]">กำลังโหลด...</div>;
+  const Loading = () => <LoadingIndicator message="กำลังเริ่มต้นระบบสารบรรณ..." />;
 
   if (isPublicInfographic) {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลสื่อ Infographic">
         <ConfirmProvider>
-          <Suspense fallback={<Loading />}>
-            <PublicInfographicsViewer />
-          </Suspense>
+          <PublicInfographicsViewer />
         </ConfirmProvider>
       </ErrorBoundary>
     );
   }
 
   if (isCheckingAuth) {
-    return <Loading />;
+    return <LoadingIndicator message="กำลังตรวจสอบความปลอดภัยและสิทธิ์การเข้าใช้งาน..." />;
   }
 
   if (isLoggedIn) {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการโหลดหน้าจอการทำงาน">
         <ConfirmProvider>
-          <Suspense fallback={<Loading />}>
-            <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />
-          </Suspense>
+          <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />
         </ConfirmProvider>
       </ErrorBoundary>
     );
@@ -163,17 +171,15 @@ export default function App() {
   return (
     <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในหน้าต่างเข้าสู่ระบบ">
       <ConfirmProvider>
-        <Suspense fallback={<Loading />}>
-          <Login onLogin={(u, rememberMe) => {
-            setUser(u);
-            setIsLoggedIn(true);
-            if (rememberMe) {
-              localStorage.setItem('edms_user_data', JSON.stringify(u));
-            } else {
-              sessionStorage.setItem('edms_user_data', JSON.stringify(u));
-            }
-          }} />
-        </Suspense>
+        <Login onLogin={(u, rememberMe) => {
+          setUser(u);
+          setIsLoggedIn(true);
+          if (rememberMe) {
+            localStorage.setItem('edms_user_data', JSON.stringify(u));
+          } else {
+            sessionStorage.setItem('edms_user_data', JSON.stringify(u));
+          }
+        }} />
       </ConfirmProvider>
     </ErrorBoundary>
   );

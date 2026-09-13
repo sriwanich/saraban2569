@@ -392,3 +392,21 @@ CREATE TABLE IF NOT EXISTS infographics (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- Table for Changelogs & Release Notes
+CREATE TABLE IF NOT EXISTS changelogs (
+  id VARCHAR(100) PRIMARY KEY,
+  version VARCHAR(50) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  releaseDate VARCHAR(50) NOT NULL,
+  type VARCHAR(50) DEFAULT 'minor',
+  summary TEXT,
+  changes LONGTEXT,
+  images LONGTEXT,
+  author VARCHAR(255),
+  isLatest TINYINT(1) DEFAULT 0,
+  isPublished TINYINT(1) DEFAULT 1,
+  createdAt VARCHAR(50),
+  updatedAt VARCHAR(50)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

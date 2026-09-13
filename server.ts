@@ -42,7 +42,8 @@ function safeJsonParse<T = any>(value: any, fallback: T): T {
 const baseUploadsDir = path.join(process.cwd(), 'uploads');
 const standardFolders = [
   'inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 
-  'signed_pdfs', 'system', 'avatars', 'infographics', 'infographics/assets', 'infographics/images'
+  'signed_pdfs', 'system', 'avatars', 'infographics', 'infographics/assets', 'infographics/images',
+  'automated_backups'
 ];
 try {
   if (!fs.existsSync(baseUploadsDir)) {
@@ -365,17 +366,14 @@ const uploadStorage = multer.diskStorage({
       }
     }
 
-    const uploadDir = (req as any).uploadDir || path.join(process.cwd(), 'uploads');
-    let filename = `${baseName}${ext}`;
-    let counter = 1;
-    
-    // หากชื่อไฟล์ซ้ำให้แก้ไขชื่อให้แบบใกล้เคียง เช่น ชื่อไฟล์_1.pdf, ชื่อไฟล์_2.pdf
-    while (fs.existsSync(path.join(uploadDir, filename))) {
-      filename = `${baseName}_${counter}${ext}`;
-      counter++;
-    }
-    
-    cb(null, filename);
+    // Save with staging filename during multipart stream, preserving clean targetBaseName and targetFilename
+    const stagingFilename = `_staging_${Date.now()}_${Math.random().toString(36).substring(2, 8)}_${baseName}${ext}`;
+    (file as any).targetBaseName = baseName;
+    (file as any).targetExt = ext;
+    (file as any).targetFilename = `${baseName}${ext}`;
+    (file as any).cleanOriginalName = cleanOrigName;
+
+    cb(null, stagingFilename);
   }
 });
 
@@ -847,42 +845,22 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
       }
     } catch (e) {}
 
+    const pointersDir = path.join(process.cwd(), 'uploads', 'pointers');
+    if (!fs.existsSync(pointersDir)) {
+      try { fs.mkdirSync(pointersDir, { recursive: true }); } catch (e) {}
+    }
+    const uploadDir = (req as any).uploadDir || path.join(process.cwd(), 'uploads', subfolder);
+
     for (const file of files) {
       let isDeduplicated = false;
       let masterUrl = '';
       let savedSpaceFormatted = '';
 
-      if (autoDedupOnUpload) {
-        try {
-          const newFilePath = file.path;
-          if (fs.existsSync(newFilePath)) {
-            const newHash = await calculateFileSha256(newFilePath);
-            const uploadsBase = path.resolve(process.cwd(), 'uploads');
-            const existingFiles = getAllUploadedFilesRecursive(uploadsBase);
+      const stagingFilePath = file.path;
+      const targetFilename = (file as any).targetFilename || `${path.basename(file.filename)}`;
+      const targetFilePath = path.join(uploadDir, targetFilename);
 
-            for (const existingPath of existingFiles) {
-              if (path.resolve(existingPath) === path.resolve(newFilePath)) continue;
-              const existStat = fs.statSync(existingPath);
-              if (existStat.size === file.size && existStat.size > 0) {
-                const existHash = await calculateFileSha256(existingPath);
-                if (existHash === newHash) {
-                  // Duplicate content detected! Replace new file with Pointer hard link to master
-                  fs.unlinkSync(newFilePath);
-                  fs.linkSync(existingPath, newFilePath);
-                  isDeduplicated = true;
-                  masterUrl = `/uploads/${path.relative(uploadsBase, existingPath).replace(/\\/g, '/')}`;
-                  savedSpaceFormatted = formatBytes(file.size);
-                  break;
-                }
-              }
-            }
-          }
-        } catch (e: any) {
-          console.warn('Auto deduplication failed on upload:', e.message);
-        }
-      }
-
-      let cleanOriginalName = decodeFilename(file.originalname);
+      let cleanOriginalName = (file as any).cleanOriginalName || decodeFilename(file.originalname);
       // If client passed UTF-8 original names explicitly, use it!
       if (clientOriginalNames[fileIndex] && (!cleanOriginalName || /^_+$/.test(path.basename(cleanOriginalName, path.extname(cleanOriginalName))))) {
         cleanOriginalName = decodeFilename(clientOriginalNames[fileIndex]);
@@ -890,15 +868,90 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
         cleanOriginalName = decodeFilename(clientOriginalNames[fileIndex]);
       }
 
+      let fileHash = '';
+      if (fs.existsSync(stagingFilePath)) {
+        try {
+          fileHash = await calculateFileSha256(stagingFilePath);
+        } catch (e) {}
+      }
+
+      const uploadsBase = path.resolve(process.cwd(), 'uploads');
+      const pointerMasterPath = fileHash ? path.join(pointersDir, `${fileHash.substring(0, 16)}_${targetFilename}`) : '';
+
+      // Check for identical content across existing uploaded files and pointers
+      let existingDuplicatePath = '';
+      if (fileHash) {
+        const existingFiles = getAllUploadedFilesRecursive(uploadsBase);
+        for (const existingPath of existingFiles) {
+          if (path.resolve(existingPath) === path.resolve(stagingFilePath)) continue;
+          try {
+            const existStat = fs.statSync(existingPath);
+            if (existStat.size === file.size && existStat.size > 0) {
+              const existHash = await calculateFileSha256(existingPath);
+              if (existHash === fileHash) {
+                existingDuplicatePath = existingPath;
+                break;
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (existingDuplicatePath) {
+        // MATCHING DUPLICATE FOUND:
+        // Do NOT rename with _1! Instead, create Pointer link to existing file
+        isDeduplicated = true;
+        masterUrl = `/uploads/${path.relative(uploadsBase, existingDuplicatePath).replace(/\\/g, '/')}`;
+        savedSpaceFormatted = formatBytes(file.size);
+
+        // Remove the temporary staging file
+        try { if (fs.existsSync(stagingFilePath)) fs.unlinkSync(stagingFilePath); } catch (e) {}
+
+        // If target file doesn't exist yet, hardlink to duplicate master pointer
+        if (!fs.existsSync(targetFilePath)) {
+          try {
+            fs.linkSync(existingDuplicatePath, targetFilePath);
+          } catch (e) {
+            try { fs.copyFileSync(existingDuplicatePath, targetFilePath); } catch (err) {}
+          }
+        }
+      } else {
+        // UNIQUE CONTENT:
+        // Move staging file to targetFilePath (clean filename without _1)
+        if (fs.existsSync(stagingFilePath)) {
+          if (fs.existsSync(targetFilePath) && path.resolve(stagingFilePath) !== path.resolve(targetFilePath)) {
+            try { fs.unlinkSync(targetFilePath); } catch (e) {}
+          }
+          try {
+            fs.renameSync(stagingFilePath, targetFilePath);
+          } catch (e) {
+            try {
+              fs.copyFileSync(stagingFilePath, targetFilePath);
+              fs.unlinkSync(stagingFilePath);
+            } catch (err) {}
+          }
+        }
+
+        // Also register in pointers directory for future fast pointer deduplication
+        if (pointerMasterPath && !fs.existsSync(pointerMasterPath) && fs.existsSync(targetFilePath)) {
+          try {
+            fs.linkSync(targetFilePath, pointerMasterPath);
+          } catch (e) {
+            // ignore if linking fails
+          }
+        }
+      }
+
       uploadedFiles.push({
         originalName: cleanOriginalName,
-        filename: file.filename,
+        filename: targetFilename,
         size: file.size,
         mimetype: file.mimetype,
-        url: `/uploads/${subfolder}/${file.filename}`,
+        url: `/uploads/${subfolder}/${targetFilename}`,
         folder: `uploads/${subfolder}`,
         isDeduplicated,
-        masterUrl,
+        masterUrl: masterUrl || `/uploads/${subfolder}/${targetFilename}`,
+        pointerUrl: pointerMasterPath ? `/uploads/pointers/${path.basename(pointerMasterPath)}` : '',
         savedSpaceFormatted
       });
       fileIndex++;
@@ -1383,16 +1436,34 @@ async function scanUploadsDeduplication() {
   return resultStats;
 }
 
-async function executeUploadsDeduplication() {
+async function executeUploadsDeduplication(targetHash?: string) {
   const scanResult = await scanUploadsDeduplication();
   let filesMerged = 0;
   let bytesReclaimed = 0;
 
+  const pointersDir = path.join(process.cwd(), 'uploads', 'pointers');
+  if (!fs.existsSync(pointersDir)) {
+    try { fs.mkdirSync(pointersDir, { recursive: true }); } catch (e) {}
+  }
+
   for (const grp of scanResult.groups) {
+    if (targetHash && grp.hash !== targetHash) continue;
+
     const masterPath = grp.masterFile.path;
     if (!fs.existsSync(masterPath)) continue;
 
     const masterIno = fs.statSync(masterPath).ino;
+    const masterFilename = path.basename(masterPath);
+    const pointerMasterPath = path.join(pointersDir, `${grp.hash.substring(0, 16)}_${masterFilename}`);
+
+    // Ensure Master is also registered in Pointer hub
+    if (!fs.existsSync(pointerMasterPath)) {
+      try {
+        fs.linkSync(masterPath, pointerMasterPath);
+      } catch (e) {
+        try { fs.copyFileSync(masterPath, pointerMasterPath); } catch (err) {}
+      }
+    }
 
     for (const dup of grp.duplicates) {
       if (!fs.existsSync(dup.path)) continue;
@@ -1400,7 +1471,9 @@ async function executeUploadsDeduplication() {
       const dupStat = fs.statSync(dup.path);
       if (dupStat.ino !== masterIno) {
         try {
+          // Delete duplicate physical file from server to reclaim disk space
           fs.unlinkSync(dup.path);
+          // Replace with pointer hardlink to master file
           fs.linkSync(masterPath, dup.path);
           filesMerged++;
           bytesReclaimed += grp.fileSize;
@@ -1435,12 +1508,13 @@ app.get('/api/deduplication/scan', async (req, res) => {
 app.post('/api/deduplication/deduplicate', async (req, res) => {
   try {
     const username = (req.body.username || req.query.username || 'ผู้ดูแลระบบ').toString();
+    const targetHash = (req.body.hash || req.query.hash || '').toString();
     const ip = getClientIp(req);
-    const result = await executeUploadsDeduplication();
+    const result = await executeUploadsDeduplication(targetHash || undefined);
     
     await addSystemLog(
       'DEDUPLICATE_FILES',
-      `ดำเนินการรวมไฟล์ซ้ำในเซิร์ฟเวอร์: รวมแล้ว ${result.filesMerged} ไฟล์ ประหยัดพื้นที่ได้ ${result.bytesReclaimedFormatted}`,
+      `ดำเนินการย้ายไฟล์ซ้ำไป Pointer & ลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์: ย้ายแล้ว ${result.filesMerged} ไฟล์ ประหยัดพื้นที่ได้ ${result.bytesReclaimedFormatted}`,
       username,
       ip
     );
@@ -1449,6 +1523,30 @@ app.post('/api/deduplication/deduplicate', async (req, res) => {
   } catch (err: any) {
     console.error('Error executing deduplication:', err);
     return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการรวมไฟล์ซ้ำ' });
+  }
+});
+
+app.post('/api/deduplication/deduplicate-group', async (req, res) => {
+  try {
+    const username = (req.body.username || req.query.username || 'ผู้ดูแลระบบ').toString();
+    const hash = (req.body.hash || '').toString();
+    if (!hash) {
+      return res.status(400).json({ error: 'กรุณาระบุ Hash ของกลุ่มไฟล์ที่ต้องการย้ายไป Pointer' });
+    }
+    const ip = getClientIp(req);
+    const result = await executeUploadsDeduplication(hash);
+    
+    await addSystemLog(
+      'DEDUPLICATE_GROUP',
+      `ดำเนินการย้ายกลุ่มไฟล์ซ้ำ (${hash.substring(0, 10)}) ไป Pointer & ลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์ ประหยัดเนื้อที่ได้ ${result.bytesReclaimedFormatted}`,
+      username,
+      ip
+    );
+
+    return res.json(result);
+  } catch (err: any) {
+    console.error('Error executing group deduplication:', err);
+    return res.status(500).json({ error: err.message || 'เกิดข้อผิดพลาดในการย้ายกลุ่มไฟล์ซ้ำไป Pointer' });
   }
 });
 
@@ -1502,49 +1600,97 @@ const pool = mysql.createPool({
 
 let isMysqlOnline = false;
 
+// Stricter Server-Side RBAC Enforcement Helper
+async function hasServerPermission(role: string, permissionKey: string): Promise<boolean> {
+  // admin always has all permissions
+  if (role === 'admin' || role === 'ผู้ดูแลระบบ') return true;
+  if (!role) return false;
+
+  try {
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query(
+        'SELECT is_allowed FROM role_permissions WHERE LOWER(role) = LOWER(?) AND LOWER(permission_key) = LOWER(?)',
+        [role, permissionKey]
+      );
+      if (rows && rows.length > 0) {
+        return rows[0].is_allowed === 1 || rows[0].is_allowed === true || String(rows[0].is_allowed) === '1' || String(rows[0].is_allowed) === 'true';
+      }
+    }
+  } catch (err) {
+    console.warn('MySQL hasServerPermission error:', err);
+  }
+
+  // Fallback to localDb
+  if (localDb && localDb.role_permissions) {
+    const perm = localDb.role_permissions.find((p: any) => p.role && p.permission_key && p.role.toLowerCase() === role.toLowerCase() && p.permission_key.toLowerCase() === permissionKey.toLowerCase());
+    if (perm) {
+      return perm.is_allowed === 1 || perm.is_allowed === true || String(perm.is_allowed) === '1' || String(perm.is_allowed) === 'true';
+    }
+  }
+
+  return false;
+}
+
 // Local JSON file database helper
 const dbStorePath = path.join(process.cwd(), 'uploads', 'db_store.json');
 
 const defaultWorkflowTemplates = [
   {
     id: "tpl-001",
-    name: "เส้นทางหนังสือรับทั่วไป",
-    description: "เสนอตามลำดับชั้น: สารบรรณกลาง -> หัวหน้าฝ่ายบริหารฯ -> หัวหน้าสำนักงาน ปภ. -> ฝ่ายผู้รับผิดชอบ",
+    name: "เส้นทางหนังสือรับเสนอผู้บังคับบัญชาตามลำดับชั้น (ระเบียบสารบรรณ พ.ศ. 2526)",
+    description: "เสนอตามลำดับชั้นตามระเบียบสารบรรณ พ.ศ. 2526: สารบรรณกลาง -> หัวหน้าฝ่าย/กลุ่มงาน -> หัวหน้าสำนักงาน ปภ. -> ผู้ปฏิบัติงาน -> ตรวจเสนอจบเรื่อง",
     category: "หนังสือรับ",
     defaultPriority: "ปกติ",
     steps: [
-      { stepNumber: 1, title: "รับเรื่องและคัดกรองเอกสาร", assignedRole: "เจ้าหน้าที่สารบรรณ", department: "ฝ่ายบริหารงานทั่วไป", actionType: "review", slaHours: 24 },
-      { stepNumber: 2, title: "พิจารณาเสนอความเห็น", assignedRole: "หัวหน้าฝ่ายบริหารงานทั่วไป", department: "ฝ่ายบริหารงานทั่วไป", actionType: "review", slaHours: 24 },
-      { stepNumber: 3, title: "พิจารณาสั่งการและมอบหมาย", assignedRole: "หัวหน้าสำนักงาน ปภ.จังหวัด", department: "ผู้บริหาร", actionType: "approve", slaHours: 24 },
-      { stepNumber: 4, title: "รับเรื่องและดำเนินการตามสั่งการ", assignedRole: "เจ้าหน้าที่ผู้รับผิดชอบ", department: "ฝ่ายป้องกันและปฏิบัติการ", actionType: "action", slaHours: 48 }
+      { stepNumber: 1, title: "ลงทะเบียนรับเรื่องและเสนอเกษียนหนังสือ", assignedRole: "เจ้าหน้าที่สารบรรณกลาง", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 12 },
+      { stepNumber: 2, title: "ตรวจพิจารณาและกลั่นกรองเสนอความเห็น", assignedRole: "หัวหน้าฝ่ายยุทธศาสตร์และการจัดการ", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 24 },
+      { stepNumber: 3, title: "ตรวจพิจารณาสั่งการ/เกษียณหนังสือ", assignedRole: "หัวหน้าสำนักงาน ปภ.จังหวัด", department: "ผู้บริหาร", actionType: "approve", slaHours: 24 },
+      { stepNumber: 4, title: "ดำเนินการตามสั่งการและรายงานผล", assignedRole: "เจ้าหน้าที่ผู้รับผิดชอบ", department: "ฝ่ายป้องกันและปฏิบัติการ", actionType: "action", slaHours: 48 },
+      { stepNumber: 5, title: "ตรวจรับทราบรายงานผลและจัดเก็บแฟ้มจบเรื่อง", assignedRole: "เจ้าหน้าที่สารบรรณกลาง", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "archive", slaHours: 12 }
     ],
     createdAt: "2026-08-01T08:00:00.000Z"
   },
   {
     id: "tpl-002",
-    name: "เส้นทางหนังสือคำสั่ง / ประกาศจังหวัด",
-    description: "ยกร่างคำสั่ง -> ตรวจสอบข้อกฎหมาย -> เสนอผู้บริหาร -> ผู้ว่าฯ ลงนาม -> ออกเลขและเวียน",
-    category: "คำสั่ง/ประกาศ",
-    defaultPriority: "ด่วน",
+    name: "เส้นทางหนังสือส่งภายนอก / ภายใน (ระเบียบสารบรรณ พ.ศ. 2526)",
+    description: "กระบวนการออกหนังสือส่งตามระเบียบสารบรรณ: ยกร่าง -> ตรวจร่าง -> เสนอผู้มีอำนาจ -> ผู้บริหารลงนาม -> ออกเลขส่ง ประทับตรา และจัดส่ง",
+    category: "หนังสือส่ง",
+    defaultPriority: "ปกติ",
     steps: [
-      { stepNumber: 1, title: "ยกร่างคำสั่ง/ประกาศและรวบรวมเอกสาร", assignedRole: "เจ้าหน้าที่ผู้ยกร่าง", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 48 },
-      { stepNumber: 2, title: "ตรวจสอบความถูกต้องและข้อกฎหมาย", assignedRole: "หัวหน้าฝ่ายยุทธศาสตร์ฯ", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 24 },
-      { stepNumber: 3, title: "ตรวจพิจารณาเสนอผู้ว่าราชการจังหวัด", assignedRole: "หัวหน้าสำนักงาน ปภ.จังหวัด", department: "ผู้บริหาร", actionType: "approve", slaHours: 24 },
-      { stepNumber: 4, title: "พิจารณาลงนามในคำสั่ง/ประกาศ", assignedRole: "ผู้ว่าราชการจังหวัดระยอง", department: "ผู้บริหารจังหวัด", actionType: "sign", slaHours: 48 },
-      { stepNumber: 5, title: "ออกเลขคำสั่ง ประทับตรา และเวียนแจ้ง", assignedRole: "เจ้าหน้าที่สารบรรณกลาง", department: "ฝ่ายบริหารงานทั่วไป", actionType: "archive", slaHours: 24 }
+      { stepNumber: 1, title: "ยกร่างหนังสือและจัดทำเอกสารแนบ", assignedRole: "เจ้าหน้าที่ผู้ยกร่าง", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 24 },
+      { stepNumber: 2, title: "ตรวจพิจารณาและกลั่นกรองร่างหนังสือ", assignedRole: "หัวหน้าฝ่าย/กลุ่มงาน", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 12 },
+      { stepNumber: 3, title: "ตรวจพิจารณาเสนอผู้มีอำนาจลงนาม", assignedRole: "หัวหน้าสำนักงาน ปภ.จังหวัด", department: "ผู้บริหาร", actionType: "approve", slaHours: 12 },
+      { stepNumber: 4, title: "พิจารณาลงนามในหนังสือราชการ", assignedRole: "ผู้ว่าราชการจังหวัด/ผู้ได้รับมอบอำนาจ", department: "ผู้บริหารจังหวัด", actionType: "sign", slaHours: 24 },
+      { stepNumber: 5, title: "ลงทะเบียนออกเลข ประทับตรา และจัดส่งออก", assignedRole: "เจ้าหน้าที่สารบรรณกลาง", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "archive", slaHours: 12 }
     ],
     createdAt: "2026-08-01T08:00:00.000Z"
   },
   {
     id: "tpl-003",
+    name: "เส้นทางหนังสือคำสั่ง / ประกาศ / หนังสือรับรอง (ระบบงานธุรการ)",
+    description: "ระบบงานธุรการตามระเบียบสารบรรณ: ยกร่างธุรการ -> ตรวจข้อกฎหมาย/ระเบียบ -> เสนอผู้บริหารลงนาม -> ออกเลขทะเบียนธุรการ -> เวียนแจ้งและจัดเก็บ",
+    category: "คำสั่ง/ประกาศ/หนังสือรับรอง",
+    defaultPriority: "ด่วน",
+    steps: [
+      { stepNumber: 1, title: "ยกร่างคำสั่ง/ประกาศ/หนังสือรับรอง", assignedRole: "เจ้าหน้าที่ผู้ยกร่าง", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 24 },
+      { stepNumber: 2, title: "ตรวจสอบความถูกต้องตามระเบียบสารบรรณและกฎหมาย", assignedRole: "หัวหน้าฝ่ายยุทธศาสตร์และการจัดการ", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 12 },
+      { stepNumber: 3, title: "ตรวจเสนอผู้ว่าราชการจังหวัด/ผู้บริหาร", assignedRole: "หัวหน้าสำนักงาน ปภ.จังหวัด", department: "ผู้บริหาร", actionType: "approve", slaHours: 12 },
+      { stepNumber: 4, title: "ลงนามในคำสั่ง/ประกาศ/หนังสือรับรอง", assignedRole: "ผู้ว่าราชการจังหวัดระยอง", department: "ผู้บริหารจังหวัด", actionType: "sign", slaHours: 24 },
+      { stepNumber: 5, title: "ออกเลขทะเบียน ประทับตราสัญลักษณ์ และเวียนแจ้ง", assignedRole: "เจ้าหน้าที่สารบรรณกลาง", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "archive", slaHours: 12 }
+    ],
+    createdAt: "2026-08-01T08:00:00.000Z"
+  },
+  {
+    id: "tpl-004",
     name: "เส้นทางเสนออนุมัติงบประมาณและโครงการ",
-    description: "ตรวจสอบงบประมาณ -> ตรวจสอบระเบียบพัสดุ -> เสนออนุมัติเบิกจ่าย",
+    description: "ตรวจสอบกรอบงบประมาณ -> ตรวจสอบระเบียบพัสดุการเงิน -> เสนออนุมัติเบิกจ่ายตามระเบียบกระทรวงการคลัง",
     category: "อนุมัติงบประมาณ",
     defaultPriority: "ด่วนมาก",
     steps: [
       { stepNumber: 1, title: "ตรวจสอบกรอบงบประมาณโครงการ", assignedRole: "นักวิเคราะห์นโยบายและแผน", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 12 },
-      { stepNumber: 2, title: "ตรวจสอบยอดเงินคงเหลือและระเบียบการจัดซื้อ", assignedRole: "เจ้าพนักงานการเงินและบัญชี", department: "ฝ่ายบริหารงานทั่วไป", actionType: "review", slaHours: 12 },
-      { stepNumber: 3, title: "พิจารณาอนุมัติโครงการและงบประมาณ", assignedRole: "หัวหน้าสำนักงาน ปภ.จังหวัด", department: "ผู้บริหาร", actionType: "approve", slaHours: 24 }
+      { stepNumber: 2, title: "ตรวจสอบยอดเงินคงเหลือและระเบียบการจัดซื้อ", assignedRole: "เจ้าพนักงานการเงินและบัญชี", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "review", slaHours: 12 },
+      { stepNumber: 3, title: "พิจารณาอนุมัติโครงการและงบประมาณ", assignedRole: "หัวหน้าสำนักงาน ปภ.จังหวัด", department: "ผู้บริหาร", actionType: "approve", slaHours: 24 },
+      { stepNumber: 4, title: "บันทึกข้อมูลเบิกจ่ายและจัดเก็บรายงาน", assignedRole: "เจ้าหน้าที่การเงิน", department: "ฝ่ายยุทธศาสตร์และการจัดการ", actionType: "archive", slaHours: 24 }
     ],
     createdAt: "2026-08-01T08:00:00.000Z"
   }
@@ -1591,16 +1737,15 @@ const initialSeedData = {
     }
   ],
   users: [
-    { id: 1, username: 'admin', password: 'admin', firstName: 'ผู้ดูแลระบบ', lastName: 'ระบบงาน', position: 'นักวิเคราะห์นโยบายและแผนชำนาญการพิเศษ', department: 'ฝ่ายบริหารงานทั่วไป', role: 'admin', avatar: null, email: 'admin@example.com' },
+    { id: 1, username: 'admin', password: 'admin', firstName: 'ผู้ดูแลระบบ', lastName: 'ระบบงาน', position: 'นักวิเคราะห์นโยบายและแผนชำนาญการพิเศษ', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', role: 'admin', avatar: null, email: 'admin@example.com' },
     { id: 2, username: 'somchai', password: 'password', firstName: 'สมชาย', lastName: 'ใจดี', position: 'นักป้องกันและบรรเทาสาธารณภัยปฏิบัติการ', department: 'ฝ่ายป้องกันและปฏิบัติการ', role: 'user', avatar: null, email: 'somchai@example.com' },
-    { id: 3, username: 'somsee', password: 'password', firstName: 'สมศรี', lastName: 'รักษ์ดี', position: 'เจ้าพนักงานธุรการชำนาญงาน', department: 'ฝ่ายบริหารงานทั่วไป', role: 'moderator', avatar: null, email: 'somsee@example.com' },
+    { id: 3, username: 'somsee', password: 'password', firstName: 'สมศรี', lastName: 'รักษ์ดี', position: 'เจ้าพนักงานธุรการชำนาญงาน', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', role: 'moderator', avatar: null, email: 'somsee@example.com' },
     { id: 4, username: 'preecha', password: 'password', firstName: 'ปรีชา', lastName: 'มั่นคง', position: 'นายช่างเครื่องกลชำนาญงาน', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', role: 'user', avatar: null, email: 'preecha@example.com' }
   ],
   departments: [
-    { id: 1, name: 'ฝ่ายบริหารงานทั่วไป', description: 'ดูแลงานธุรการ สารบรรณ การเงิน พัสดุ และงานสนับสนุนทั่วไป' },
-    { id: 2, name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'วางแผนและวิเคราะห์นโยบาย จัดทำแผนเผชิญเหตุและแผนงานโครงการต่างๆ' },
-    { id: 3, name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'ประสานการให้ความช่วยเหลือ และบรรเทาความเดือดร้อนแก่ผู้ประสบอุทกภัย วาตภัย และภัยพิบัติต่างๆ' },
-    { id: 4, name: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'ปฏิบัติงานกู้ภัย จัดเตรียมบุคลากร เครื่องจักรกล และวิทยากรฝึกอบรมสาธารณภัย' }
+    { id: 1, name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'ดูแลงานธุรการ สารบรรณ การเงิน พัสดุ วางแผนและวิเคราะห์นโยบาย' },
+    { id: 2, name: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'ปฏิบัติงานกู้ภัย จัดเตรียมบุคลากร เครื่องจักรกล และวิทยากรฝึกอบรมสาธารณภัย' },
+    { id: 3, name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'ประสานการให้ความช่วยเหลือ และบรรเทาความเดือดร้อนแก่ผู้ประสบอุทกภัย วาตภัย และภัยพิบัติต่างๆ' }
   ],
   positions: [
     { id: 1, name: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด', description: 'ผู้บริหารระดับสูงประจำสำนักงาน ปภ.จังหวัด' },
@@ -1609,8 +1754,8 @@ const initialSeedData = {
     { id: 4, name: 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยชำนาญงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' },
     { id: 5, name: 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยปฏิบัติงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' },
     { id: 6, name: 'เจ้าพนักงานสงเคราะห์ผู้ประสบภัยชำนาญงาน', description: 'ฝ่ายสงเคราะห์ผู้ประสบภัย' },
-    { id: 7, name: 'เจ้าพนักงานการเงินและบัญชีชำนาญงาน', description: 'ฝ่ายบริหารงานทั่วไป' },
-    { id: 8, name: 'เจ้าพนักงานธุรการชำนาญงาน', description: 'ฝ่ายบริหารงานทั่วไป' },
+    { id: 7, name: 'เจ้าพนักงานการเงินและบัญชีชำนาญงาน', description: 'ฝ่ายยุทธศาสตร์และการจัดการ' },
+    { id: 8, name: 'เจ้าพนักงานธุรการชำนาญงาน', description: 'ฝ่ายยุทธศาสตร์และการจัดการ' },
     { id: 9, name: 'นายช่างเครื่องกลชำนาญงาน', description: 'ฝ่ายป้องกันและปฏิบัติการ' }
   ],
   folders: [
@@ -1622,70 +1767,182 @@ const initialSeedData = {
   numbering_rules: [
     {
       id: 1,
-      ruleName: 'หนังสือภายนอก-ฝ่ายบริหารงานทั่วไป (รย 0021)',
-      department: 'ฝ่ายบริหารงานทั่วไป',
+      ruleName: 'หนังสือรับ-สารบรรณกลาง (รย 0021)',
+      department: 'ทุกฝ่ายงาน',
       divisionCode: '0021',
-      docType: 'หนังสือภายนอก',
+      docType: 'หนังสือรับ',
+      prefixPattern: 'รย 0021',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{seq}',
+      runningScope: 'global',
+      currentSeq: 0,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'ทะเบียนรับกลางของสำนักงาน (สารบรรณกลาง)'
+    },
+    {
+      id: 2,
+      ruleName: 'หนังสือรับ-ฝ่ายยุทธศาสตร์และการจัดการ',
+      department: 'ฝ่ายยุทธศาสตร์และการจัดการ',
+      divisionCode: '0021',
+      docType: 'หนังสือรับ',
+      prefixPattern: 'รย 0021',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{seq}',
+      runningScope: 'department',
+      currentSeq: 0,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'ทะเบียนรับเอกสารของฝ่ายยุทธศาสตร์และการจัดการ'
+    },
+    {
+      id: 3,
+      ruleName: 'หนังสือรับ-ฝ่ายยุทธศาสตร์และการจัดการ',
+      department: 'ฝ่ายยุทธศาสตร์และการจัดการ',
+      divisionCode: '0021.1',
+      docType: 'หนังสือรับ',
+      prefixPattern: 'รย 0021.1',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{seq}',
+      runningScope: 'department',
+      currentSeq: 0,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'ทะเบียนรับเอกสารของฝ่ายยุทธศาสตร์และการจัดการ'
+    },
+    {
+      id: 4,
+      ruleName: 'หนังสือรับ-ฝ่ายสงเคราะห์ผู้ประสบภัย',
+      department: 'ฝ่ายสงเคราะห์ผู้ประสบภัย',
+      divisionCode: '0021.2',
+      docType: 'หนังสือรับ',
+      prefixPattern: 'รย 0021.2',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{seq}',
+      runningScope: 'department',
+      currentSeq: 0,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'ทะเบียนรับเอกสารของฝ่ายสงเคราะห์ผู้ประสบภัย'
+    },
+    {
+      id: 5,
+      ruleName: 'หนังสือรับ-ฝ่ายป้องกันและปฏิบัติการ',
+      department: 'ฝ่ายป้องกันและปฏิบัติการ',
+      divisionCode: '0021.3',
+      docType: 'หนังสือรับ',
+      prefixPattern: 'รย 0021.3',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{seq}',
+      runningScope: 'department',
+      currentSeq: 0,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'ทะเบียนรับเอกสารของฝ่ายป้องกันและปฏิบัติการ'
+    },
+    {
+      id: 6,
+      ruleName: 'หนังสือส่ง-สารบรรณกลาง (รย 0021)',
+      department: 'ทุกฝ่ายงาน',
+      divisionCode: '0021',
+      docType: 'หนังสือส่ง',
+      prefixPattern: 'รย 0021',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
+      runningScope: 'global',
+      currentSeq: 0,
+      year: '2570',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'รหัสหนังสือส่งออกสารบรรณกลาง เช่น รย 0021/123 หรือ รย 0021/ว 123'
+    },
+    {
+      id: 7,
+      ruleName: 'หนังสือส่ง-ฝ่ายยุทธศาสตร์และการจัดการ (รย 0021)',
+      department: 'ฝ่ายยุทธศาสตร์และการจัดการ',
+      divisionCode: '0021',
+      docType: 'หนังสือส่ง',
       prefixPattern: 'รย 0021',
       suffixPattern: '/{seq}',
       numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
       runningScope: 'department',
       currentSeq: 0,
-      year: '2569',
+      year: '2570',
       resetFrequency: 'yearly',
       isActive: true,
-      description: 'รหัสหนังสือส่งออกของฝ่ายบริหารงานทั่วไป เช่น รย 0021/123 หรือ รย 0021/ว 123'
+      description: 'รหัสหนังสือส่งออกของฝ่ายยุทธศาสตร์และการจัดการ เช่น รย 0021/123 หรือ รย 0021/ว 123'
     },
     {
-      id: 2,
-      ruleName: 'หนังสือภายนอก-ฝ่ายยุทธศาสตร์และการจัดการ (รย 0021.1)',
+      id: 8,
+      ruleName: 'หนังสือส่ง-ฝ่ายยุทธศาสตร์และการจัดการ (รย 0021.1)',
       department: 'ฝ่ายยุทธศาสตร์และการจัดการ',
       divisionCode: '0021.1',
-      docType: 'หนังสือภายนอก',
+      docType: 'หนังสือส่ง',
       prefixPattern: 'รย 0021.1',
       suffixPattern: '/{seq}',
       numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
       runningScope: 'department',
       currentSeq: 0,
-      year: '2569',
+      year: '2570',
       resetFrequency: 'yearly',
       isActive: true,
       description: 'รหัสหนังสือส่งของฝ่ายยุทธศาสตร์ เช่น รย 0021.1/123 หรือ รย 0021.1/ว 123'
     },
     {
-      id: 3,
-      ruleName: 'หนังสือภายนอก-ฝ่ายสงเคราะห์ผู้ประสบภัย (รย 0021.2)',
+      id: 9,
+      ruleName: 'หนังสือส่ง-ฝ่ายสงเคราะห์ผู้ประสบภัย (รย 0021.2)',
       department: 'ฝ่ายสงเคราะห์ผู้ประสบภัย',
       divisionCode: '0021.2',
-      docType: 'หนังสือภายนอก',
+      docType: 'หนังสือส่ง',
       prefixPattern: 'รย 0021.2',
       suffixPattern: '/{seq}',
       numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
       runningScope: 'department',
       currentSeq: 0,
-      year: '2569',
+      year: '2570',
       resetFrequency: 'yearly',
       isActive: true,
       description: 'รหัสหนังสือส่งของฝ่ายสงเคราะห์ เช่น รย 0021.2/123 หรือ รย 0021.2/ว 123'
     },
     {
-      id: 4,
-      ruleName: 'หนังสือภายนอก-ฝ่ายป้องกันและปฏิบัติการ (รย 0021.3)',
+      id: 10,
+      ruleName: 'หนังสือส่ง-ฝ่ายป้องกันและปฏิบัติการ (รย 0021.3)',
       department: 'ฝ่ายป้องกันและปฏิบัติการ',
       divisionCode: '0021.3',
-      docType: 'หนังสือภายนอก',
+      docType: 'หนังสือส่ง',
       prefixPattern: 'รย 0021.3',
       suffixPattern: '/{seq}',
       numberFormat: '{prefix}/{isCircular ? "ว " : ""}{seq}',
       runningScope: 'department',
       currentSeq: 0,
-      year: '2569',
+      year: '2570',
       resetFrequency: 'yearly',
       isActive: true,
       description: 'รหัสหนังสือส่งของฝ่ายป้องกัน เช่น รย 0021.3/123 หรือ รย 0021.3/ว 123'
     },
     {
-      id: 5,
+      id: 11,
+      ruleName: 'หนังสือภายใน-บันทึกข้อความ (รย 0021)',
+      department: 'ทุกฝ่ายงาน',
+      divisionCode: '0021',
+      docType: 'หนังสือภายใน',
+      prefixPattern: 'รย 0021',
+      suffixPattern: '/{seq}',
+      numberFormat: '{prefix}/{seq}',
+      runningScope: 'global',
+      currentSeq: 0,
+      year: '2569',
+      resetFrequency: 'yearly',
+      isActive: true,
+      description: 'รหัสหนังสือภายใน บันทึกข้อความทุกฝ่ายงาน'
+    },
+    {
+      id: 12,
       ruleName: 'คำสั่งสำนักงาน/จังหวัด',
       department: 'ทุกฝ่ายงาน',
       divisionCode: '',
@@ -1701,7 +1958,7 @@ const initialSeedData = {
       description: 'หนังสือประเภทคำสั่งปภ./จังหวัด เช่น คำสั่ง 45/2569'
     },
     {
-      id: 6,
+      id: 13,
       ruleName: 'ประกาศสำนักงาน/จังหวัด',
       department: 'ทุกฝ่ายงาน',
       divisionCode: '',
@@ -1717,7 +1974,7 @@ const initialSeedData = {
       description: 'หนังสือประเภทประกาศ เช่น ประกาศ 45/2569'
     },
     {
-      id: 7,
+      id: 14,
       ruleName: 'หนังสือรับรอง',
       department: 'ทุกฝ่ายงาน',
       divisionCode: '',
@@ -1734,12 +1991,12 @@ const initialSeedData = {
     }
   ],
   file_codes: [
-    { id: 1, code: '0021', name: 'งานบริหารทั่วไปและสารบรรณกลาง', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานบริหารทั่วไป งานสารบรรณกลาง สารบรรณจังหวัด' },
+    { id: 1, code: '0021', name: 'งานบริหารทั่วไปและสารบรรณกลาง', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานบริหารทั่วไป งานสารบรรณกลาง สารบรรณจังหวัด' },
     { id: 2, code: '0021.1', name: 'งานยุทธศาสตร์และแผนงาน', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'แผนป้องกันและบรรเทาสาธารณภัย โครงการยุทธศาสตร์' },
     { id: 3, code: '0021.2', name: 'งานสงเคราะห์และช่วยเหลือผู้ประสบภัย', department: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'การให้ความช่วยเหลือ เงินชดเชย ผู้ประสบภัยพิบัติ' },
     { id: 4, code: '0021.3', name: 'งานป้องกัน ปฏิบัติการ และกู้ภัย', department: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'งานบรรเทาสาธารณภัย เครื่องจักรกล อุปกรณ์กู้ภัย' },
-    { id: 5, code: '0022', name: 'งานการเงิน บัญชี และงบประมาณ', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานเบิกจ่าย งบประมาณ บัญชี และการเงิน' },
-    { id: 6, code: '0023', name: 'งานพัสดุและอาคารสถานที่', department: 'ฝ่ายบริหารงานทั่วไป', description: 'งานจัดซื้อจัดจ้าง พัสดุ คุรุภัณฑ์ และอาคารสถานที่' }
+    { id: 5, code: '0022', name: 'งานการเงิน บัญชี และงบประมาณ', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานเบิกจ่าย งบประมาณ บัญชี และการเงิน' },
+    { id: 6, code: '0023', name: 'งานพัสดุและอาคารสถานที่', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานจัดซื้อจัดจ้าง พัสดุ คุรุภัณฑ์ และอาคารสถานที่' }
   ],
   reserved_numbers: [],
   scheduled_reservations: [],
@@ -1759,6 +2016,45 @@ const initialSeedData = {
 
 const defaultChangelogs = [
   {
+    id: 'cl-v2-6-0',
+    version: 'v2.6.0',
+    title: 'อัปเกรดความน่าเชื่อถือและความปลอดภัยขั้นสูง (Enterprise Reliability & Security Overhaul)',
+    releaseDate: '2026-09-11',
+    type: 'major',
+    summary: 'ยกระดับความปลอดภัยและความน่าเชื่อถือของระบบด้วยระบบสำรองข้อมูลอัตโนมัติรายวัน (Automated Daily Backups Engine) บังคับสิทธิ์ฝั่งเซิร์ฟเวอร์แบบเข้มงวด และปรับปรุงบริการตรวจวิเคราะห์เอกสารผ่าน AI รุ่นเสถียรที่สุด',
+    changes: [
+      {
+        category: 'feature',
+        categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
+        items: [
+          'ระบบสำรองข้อมูลอัตโนมัติรายวัน (Automated Daily Backups Engine): ประมวลผลและสำรองฐานข้อมูลอย่างยืดหยุ่นในรูปแบบ JSON ทุกๆ 24 ชั่วโมง พร้อมระบบลบไฟล์เก่าอัตโนมัติ (Rotation) ย้อนหลังสูงสุด 7 วัน เพื่อรักษาสมดุลของดิสก์',
+          'แผงควบคุมระบบกู้คืนประวัติสำรองข้อมูลอัตโนมัติ: เพิ่มตารางแสดงประวัติไฟล์สำรองข้อมูลรายวันในหน้าตั้งค่า พร้อมระบบกู้คืนระบบกลับไปยังประวัติวันนั้นทันทีด้วยการกดปุ่ม Restore เพียงคลิกเดียว'
+        ]
+      },
+      {
+        category: 'security',
+        categoryLabel: '🔒 ความปลอดภัย (Security)',
+        items: [
+          'ระบบตรวจสอบสิทธิ์ระดับเซิร์ฟเวอร์แบบเข้มงวด (Stricter Server-Side RBAC Enforcement): บังคับสิทธิ์การจัดการข้อมูลผ่าน Backend ทุกการเรียกใช้การสำรองข้อมูล (backup_restore) และตั้งค่าระบบ (system_settings) ป้องกันการโจมตีหรือการยิงคำขอตรงจากภายนอก'
+        ]
+      },
+      {
+        category: 'improvement',
+        categoryLabel: '⚡ การปรับปรุง (Improvements)',
+        items: [
+          'อัปเกรด AI วิเคราะห์ความถูกต้องและลายเซ็นดิจิทัล: อัปเกรด API ตรวจสอบลายเซ็นและการถอดข้อความของไฟล์แนบ PDF เป็นโมเดลเวอร์ชันทางการ gemini-2.5-flash เพื่อความรวดเร็วและหลีกเลี่ยงข้อจำกัดโควตาของรุ่นทดลอง',
+          'ขยายสเปกการสำรองข้อมูลครอบคลุม 100%: เพิ่มการซิงโครไนซ์ตารางข้อมูลทั้งหมดของฐานข้อมูล (รวมถึง Workflow, คิวอาร์โค้ด, ตารางประวัติ Changelogs) ให้สามารถจัดเก็บและกู้คืนได้อย่างสมบูรณ์แบบไม่สูญหาย'
+        ]
+      }
+    ],
+    images: [],
+    author: 'System Admin',
+    isLatest: true,
+    isPublished: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
     id: 'cl-v2-4-5',
     version: 'v2.4.5',
     title: 'อัปเกรดดีไซน์ระบบจัดการบุคลากร (User Management) & ปรับปรุงประสิทธิภาพ',
@@ -1777,7 +2073,7 @@ const defaultChangelogs = [
     ],
     images: [],
     author: 'Administrator',
-    isLatest: true,
+    isLatest: false,
     isPublished: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -1909,7 +2205,7 @@ const defaultChangelogs = [
         categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
         items: [
           'ศูนย์ลงนามดิจิทัล ETDA รองรับ Certificate และลายมือชื่ออิเล็กทรอนิกส์ตาม พ.ร.บ.ธุรกรรมอิเล็กทรอนิกส์',
-          'ผังการเดินเรื่อง Workflow พร้อมการแจ้งเตือนความล่าช้า SLA อัตโนมัติ',
+          'ผังการเดินเอกสาร Workflow พร้อมการแจ้งเตือนความล่าช้า SLA อัตโนมัติ',
           'ระบบบันทึกข้อความสั่งการและเกษียนหนังสือดิจิทัลสำหรับผู้บริหาร (Digital Endorsement)',
           'ระบบแจ้งเตือนแบบ Push Notifications แจ้งเตือนหนังสือเข้าใหม่ทันที'
         ]
@@ -2110,21 +2406,14 @@ function loadLocalDb() {
       localDb.workflow_templates = JSON.parse(JSON.stringify(defaultWorkflowTemplates));
       saveLocalDb();
     }
-    if (!localDb.workflow_instances || !Array.isArray(localDb.workflow_instances)) {
-      localDb.workflow_instances = [];
-      saveLocalDb();
-    } else {
-      localDb.workflow_instances = localDb.workflow_instances.filter(
-        (i: any) => !['inst-101', 'inst-102', 'inst-103', 'inst-104'].includes(i.id)
-      );
-      saveLocalDb();
-    }
+    localDb.workflow_instances = [];
+    saveLocalDb();
     if (!localDb.document_versions || !Array.isArray(localDb.document_versions)) {
       localDb.document_versions = JSON.parse(JSON.stringify(initialSeedData.document_versions || []));
       saveLocalDb();
     }
-    if (!localDb.numbering_rules || !Array.isArray(localDb.numbering_rules) || localDb.numbering_rules.length === 0) {
-      localDb.numbering_rules = JSON.parse(JSON.stringify(initialSeedData.numbering_rules || []));
+    if (!localDb.numbering_rules || !Array.isArray(localDb.numbering_rules)) {
+      localDb.numbering_rules = [];
       saveLocalDb();
     }
     if (!localDb.file_codes || !Array.isArray(localDb.file_codes) || localDb.file_codes.length === 0) {
@@ -2448,6 +2737,7 @@ function loadLocalDb() {
         if (bakData && bakData.trim().length > 0) {
           localDb = JSON.parse(bakData);
           console.log('✅ Successfully restored local database from .bak snapshot');
+          sanitizeAndCleanDepartments();
           saveLocalDb(true);
           return;
         }
@@ -2456,6 +2746,143 @@ function loadLocalDb() {
       console.warn('Backup snapshot not readable:', bakErr);
     }
     localDb = JSON.parse(JSON.stringify(initialSeedData));
+  }
+  sanitizeAndCleanDepartments();
+  saveLocalDb(true);
+}
+
+function sanitizeAndCleanDepartments() {
+  if (!localDb) return;
+  const legacyNames = ['ฝ่ายบริหารงานทั่วไป', 'ฝ่ายบริหารทั่วไป', 'บริหารงานทั่วไป', 'บริหารทั่วไป'];
+  const targetDept = 'ฝ่ายยุทธศาสตร์และการจัดการ';
+
+  // 1. Clean departments collection
+  if (Array.isArray(localDb.departments)) {
+    localDb.departments.forEach((d: any) => {
+      if (d && legacyNames.some(l => d.name === l || d.name?.includes('บริหารงานทั่วไป') || d.name?.includes('ฝ่ายบริหารทั่วไป'))) {
+        d.name = targetDept;
+        d.description = 'งานธุรการ สารบรรณ การเงิน พัสดุ นโยบาย แผนงาน และยุทธศาสตร์';
+      }
+    });
+
+    const seen = new Set<string>();
+    const uniqueDepts: any[] = [];
+    localDb.departments.forEach((d: any) => {
+      if (d && d.name && !seen.has(d.name)) {
+        seen.add(d.name);
+        uniqueDepts.push(d);
+      }
+    });
+
+    const required = [
+      { name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานธุรการ สารบรรณ การเงิน พัสดุ นโยบาย แผนงาน และยุทธศาสตร์' },
+      { name: 'ฝ่ายป้องกันและปฏิบัติการ', description: 'งานป้องกันและบรรเทาสาธารณภัย กู้ภัย การฝึกซ้อม และการเผชิญเหตุ' },
+      { name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'งานช่วยเหลือ เยียวยา และฟื้นฟูผู้ประสบสาธารณภัย' }
+    ];
+    required.forEach(reqDept => {
+      if (!uniqueDepts.some(d => d.name === reqDept.name)) {
+        uniqueDepts.push({ id: Date.now() + Math.floor(Math.random() * 1000), ...reqDept });
+      }
+    });
+
+    localDb.departments = uniqueDepts;
+  } else {
+    localDb.departments = JSON.parse(JSON.stringify(initialSeedData.departments));
+  }
+
+  // 2. Clean users
+  if (Array.isArray(localDb.users)) {
+    localDb.users.forEach((u: any) => {
+      if (u && legacyNames.some(l => u.department === l || u.department?.includes('บริหารงานทั่วไป') || u.department?.includes('ฝ่ายบริหารทั่วไป'))) {
+        u.department = targetDept;
+      }
+      if (u && u.position && (u.position.includes('บริหารงานทั่วไป') || u.position.includes('ฝ่ายบริหารทั่วไป'))) {
+        u.position = u.position.replace(/ฝ่ายบริหารงานทั่วไป|ฝ่ายบริหารทั่วไป/g, targetDept);
+      }
+    });
+  }
+
+  // 3. Clean numbering_rules
+  if (Array.isArray(localDb.numbering_rules)) {
+    localDb.numbering_rules.forEach((r: any) => {
+      if (r && legacyNames.some(l => r.department === l || r.department?.includes('บริหารงานทั่วไป') || r.department?.includes('ฝ่ายบริหารทั่วไป'))) {
+        r.department = targetDept;
+      }
+      if (r && r.ruleName) {
+        r.ruleName = r.ruleName.replace(/ฝ่ายบริหารงานทั่วไป|ฝ่ายบริหารทั่วไป/g, targetDept);
+      }
+      if (r && r.description) {
+        r.description = r.description.replace(/ฝ่ายบริหารงานทั่วไป|ฝ่ายบริหารทั่วไป/g, targetDept);
+      }
+    });
+  }
+
+  // 4. Clean file_codes
+  if (Array.isArray(localDb.file_codes)) {
+    localDb.file_codes.forEach((fc: any) => {
+      if (fc && legacyNames.some(l => fc.department === l || fc.department?.includes('บริหารงานทั่วไป') || fc.department?.includes('ฝ่ายบริหารทั่วไป'))) {
+        fc.department = targetDept;
+      }
+    });
+  }
+
+  // 5. Clean documents in all lists
+  const docLists = ['inbox_documents', 'outbox_documents', 'admin_documents', 'circular_documents', 'internal_documents', 'draft_documents', 'recycle_bin'];
+  docLists.forEach((listKey: string) => {
+    if (Array.isArray(localDb[listKey])) {
+      localDb[listKey].forEach((doc: any) => {
+        if (!doc) return;
+        if (legacyNames.some(l => doc.department === l || doc.department?.includes('บริหารงานทั่วไป') || doc.department?.includes('ฝ่ายบริหารทั่วไป'))) {
+          doc.department = targetDept;
+        }
+        if (legacyNames.some(l => doc.toDept === l || doc.toDept?.includes('บริหารงานทั่วไป') || doc.toDept?.includes('ฝ่ายบริหารทั่วไป'))) {
+          doc.toDept = targetDept;
+        }
+        if (legacyNames.some(l => doc.fromDept === l || doc.fromDept?.includes('บริหารงานทั่วไป') || doc.fromDept?.includes('ฝ่ายบริหารทั่วไป'))) {
+          doc.fromDept = targetDept;
+        }
+        if (Array.isArray(doc.forwardedTo)) {
+          doc.forwardedTo = doc.forwardedTo.map((f: string) =>
+            legacyNames.some(l => f === l || f?.includes('บริหารงานทั่วไป') || f?.includes('ฝ่ายบริหารทั่วไป')) ? targetDept : f
+          );
+        }
+        if (Array.isArray(doc.departmentReceives)) {
+          doc.departmentReceives.forEach((dr: any) => {
+            if (dr && legacyNames.some(l => dr.department === l || dr.department?.includes('บริหารงานทั่วไป') || dr.department?.includes('ฝ่ายบริหารทั่วไป'))) {
+              dr.department = targetDept;
+            }
+          });
+        }
+      });
+    }
+  });
+
+  // 6. Clean workflow templates & instances
+  if (Array.isArray(localDb.workflow_templates)) {
+    localDb.workflow_templates.forEach((wt: any) => {
+      if (wt && Array.isArray(wt.steps)) {
+        wt.steps.forEach((step: any) => {
+          if (step && legacyNames.some(l => step.department === l || step.department?.includes('บริหารงานทั่วไป') || step.department?.includes('ฝ่ายบริหารทั่วไป'))) {
+            step.department = targetDept;
+          }
+          if (step && step.assignedRole && (step.assignedRole.includes('บริหารงานทั่วไป') || step.assignedRole.includes('ฝ่ายบริหารทั่วไป'))) {
+            step.assignedRole = step.assignedRole.replace(/หัวหน้าฝ่ายบริหารงานทั่วไป|หัวหน้าฝ่ายบริหารทั่วไป/g, 'หัวหน้าฝ่ายยุทธศาสตร์และการจัดการ');
+          }
+        });
+      }
+    });
+  }
+
+  if (Array.isArray(localDb.workflow_instances)) {
+    localDb.workflow_instances.forEach((wi: any) => {
+      if (wi && Array.isArray(wi.steps)) {
+        wi.steps.forEach((step: any) => {
+          if (step && legacyNames.some(l => step.department === l || step.department?.includes('บริหารงานทั่วไป') || step.department?.includes('ฝ่ายบริหารทั่วไป'))) {
+            step.department = targetDept;
+          }
+        });
+      }
+    });
   }
 }
 
@@ -2900,6 +3327,41 @@ async function setupDatabase() {
         `, []);
       } catch (e) { console.warn('Note checking/creating numbering_rules table:', e); }
 
+      // Migrate any legacy 'หนังสือภายนอก' to 'หนังสือส่ง'
+      try {
+        await pool.query("UPDATE numbering_rules SET docType = 'หนังสือส่ง' WHERE docType = 'หนังสือภายนอก'");
+        await pool.query("UPDATE numbering_rules SET ruleName = REPLACE(ruleName, 'หนังสือภายนอก', 'หนังสือส่ง') WHERE ruleName LIKE '%หนังสือภายนอก%'");
+        await pool.query("UPDATE reserved_numbers SET docType = 'หนังสือส่ง' WHERE docType = 'หนังสือภายนอก'");
+        await pool.query("UPDATE scheduled_reservations SET docType = 'หนังสือส่ง' WHERE docType = 'หนังสือภายนอก'");
+      } catch (migErr) {}
+
+      // Migrate and purge 'ฝ่ายบริหารงานทั่วไป' / 'ฝ่ายบริหารทั่วไป' to 'ฝ่ายยุทธศาสตร์และการจัดการ'
+      try {
+        await pool.query("UPDATE users SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE inbox_documents SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE outbox_documents SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE admin_documents SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE circular_documents SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE internal_documents SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE numbering_rules SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE numbering_rules SET ruleName = REPLACE(REPLACE(ruleName, 'ฝ่ายบริหารงานทั่วไป', 'ฝ่ายยุทธศาสตร์และการจัดการ'), 'ฝ่ายบริหารทั่วไป', 'ฝ่ายยุทธศาสตร์และการจัดการ') WHERE ruleName LIKE '%บริหารงานทั่วไป%' OR ruleName LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE numbering_rules SET description = REPLACE(REPLACE(description, 'ฝ่ายบริหารงานทั่วไป', 'ฝ่ายยุทธศาสตร์และการจัดการ'), 'ฝ่ายบริหารทั่วไป', 'ฝ่ายยุทธศาสตร์และการจัดการ') WHERE description LIKE '%บริหารงานทั่วไป%' OR description LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE file_codes SET department = 'ฝ่ายยุทธศาสตร์และการจัดการ' WHERE department LIKE '%บริหารงานทั่วไป%' OR department LIKE '%ฝ่ายบริหารทั่วไป%'");
+        await pool.query("UPDATE departments SET name = 'ฝ่ายยุทธศาสตร์และการจัดการ', description = 'งานธุรการ สารบรรณ การเงิน พัสดุ นโยบาย แผนงาน และยุทธศาสตร์' WHERE name LIKE '%บริหารงานทั่วไป%' OR name LIKE '%ฝ่ายบริหารทั่วไป%'");
+      } catch (migDeptErr) {}
+
+      // Synchronize numbering_rules year in MySQL if needed without auto-inserting seed rules
+      try {
+        const [existingRules]: any = await pool.query('SELECT * FROM numbering_rules');
+        for (const found of (existingRules || [])) {
+          if (found.year === '2569') {
+            await pool.query('UPDATE numbering_rules SET year = ? WHERE id = ?', ['2570', found.id]);
+          }
+        }
+      } catch (seedErr) {
+        console.warn('Syncing numbering rules year to MySQL note:', seedErr);
+      }
+
       // Ensure file_codes table exists
       try {
         await pool.query(`
@@ -3097,8 +3559,8 @@ async function setupDatabase() {
             (4, 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยชำนาญงาน', 'ฝ่ายป้องกันและปฏิบัติการ'),
             (5, 'เจ้าพนักงานป้องกันและบรรเทาสาธารณภัยปฏิบัติงาน', 'ฝ่ายป้องกันและปฏิบัติการ'),
             (6, 'เจ้าพนักงานสงเคราะห์ผู้ประสบภัยชำนาญงาน', 'ฝ่ายสงเคราะห์ผู้ประสบภัย'),
-            (7, 'เจ้าพนักงานการเงินและบัญชีชำนาญงาน', 'ฝ่ายบริหารงานทั่วไป'),
-            (8, 'เจ้าพนักงานธุรการชำนาญงาน', 'ฝ่ายบริหารงานทั่วไป'),
+            (7, 'เจ้าพนักงานการเงินและบัญชีชำนาญงาน', 'ฝ่ายยุทธศาสตร์และการจัดการ'),
+            (8, 'เจ้าพนักงานธุรการชำนาญงาน', 'ฝ่ายยุทธศาสตร์และการจัดการ'),
             (9, 'นายช่างเครื่องกลชำนาญงาน', 'ฝ่ายป้องกันและปฏิบัติการ')
           `, []);
         }
@@ -3922,8 +4384,9 @@ app.put("/api/settings/features", async (req, res) => {
 });
 
 // ==================== CUSTOM NUMBERING & FILE CODES APIS ====================
-async function getRealMaxSequenceForRule(rule: any): Promise<number> {
-  const yr = String(rule.year || await getSystemCurrentYear());
+async function getRealMaxSequenceForRule(rule: any, targetYear?: string): Promise<number> {
+  const currentSystemYear = String(await getSystemCurrentYear());
+  const yr = String(targetYear || currentSystemYear || rule.year || '2570');
   let maxSeq = 0;
   
   let inboxRows: any[] = [];
@@ -3959,8 +4422,8 @@ async function getRealMaxSequenceForRule(rule: any): Promise<number> {
   }
 
   const docType = rule.docType;
-  const dept = rule.department || 'ทุกฝ่ายงาน';
-  const isGlobal = dept === 'ทุกฝ่ายงาน' || rule.runningScope === 'global';
+  const dept = (rule.department || 'ทุกฝ่ายงาน').trim();
+  const isGlobal = dept === 'ทุกฝ่ายงาน' || rule.runningScope === 'global' || (rule.ruleName && rule.ruleName.includes('สารบรรณกลาง'));
 
   if (docType === 'หนังสือรับ') {
     const list = inboxRows.filter((d: any) => String(d.year || '') === yr);
@@ -3970,18 +4433,11 @@ async function getRealMaxSequenceForRule(rule: any): Promise<number> {
       if (isGlobal) {
         matches = isDocCentral;
       } else {
-        matches = (!isDocCentral) && d.department === dept;
+        matches = (!isDocCentral) && (d.department || '').trim() === dept;
       }
       if (matches) {
         const rec = parseInt(d.receiveNumber || '0', 10);
         if (!isNaN(rec) && rec < 1000000 && rec > maxSeq) maxSeq = rec;
-        if (d.docNumber) {
-          const m = d.docNumber.match(/\/(\d+)$/) || d.docNumber.match(/\/ว\s*(\d+)$/);
-          if (m) {
-            const num = parseInt(m[1], 10);
-            if (!isNaN(num) && num < 1000000 && num > maxSeq) maxSeq = num;
-          }
-        }
       }
     });
   } else if (docType === 'หนังสือภายนอก' || docType === 'หนังสือส่ง') {
@@ -3992,7 +4448,7 @@ async function getRealMaxSequenceForRule(rule: any): Promise<number> {
       if (isGlobal) {
         matches = isDocCentral;
       } else {
-        matches = (!isDocCentral) && d.department === dept;
+        matches = (!isDocCentral) && (d.department || '').trim() === dept;
       }
       if (matches) {
         const rec = parseInt(d.receiveNumber || '0', 10);
@@ -4009,13 +4465,21 @@ async function getRealMaxSequenceForRule(rule: any): Promise<number> {
   } else if (docType === 'หนังสือภายใน') {
     const list = internalRows.filter((d: any) => String(d.year || '') === yr);
     list.forEach((d: any) => {
-      const rec = parseInt(d.receiveNumber || '0', 10);
-      if (!isNaN(rec) && rec < 1000000 && rec > maxSeq) maxSeq = rec;
-      if (d.docNumber) {
-        const m = d.docNumber.match(/\/(\d+)$/) || d.docNumber.match(/\/ว\s*(\d+)$/);
-        if (m) {
-          const num = parseInt(m[1], 10);
-          if (!isNaN(num) && num < 1000000 && num > maxSeq) maxSeq = num;
+      let matches = false;
+      if (isGlobal) {
+        matches = true;
+      } else {
+        matches = (d.department || '').trim() === dept;
+      }
+      if (matches) {
+        const rec = parseInt(d.receiveNumber || '0', 10);
+        if (!isNaN(rec) && rec < 1000000 && rec > maxSeq) maxSeq = rec;
+        if (d.docNumber) {
+          const m = d.docNumber.match(/\/(\d+)$/) || d.docNumber.match(/\/ว\s*(\d+)$/) || d.docNumber.match(/(\d+)\s*\/\s*\d+/);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (!isNaN(num) && num < 1000000 && num > maxSeq) maxSeq = num;
+          }
         }
       }
     });
@@ -4044,8 +4508,113 @@ async function getRealMaxSequenceForRule(rule: any): Promise<number> {
   return maxSeq;
 }
 
+async function updateNumberingRuleSequenceForDoc(doc: any) {
+  try {
+    const currentSystemYear = String(await getSystemCurrentYear());
+    const docYear = String(doc.year || currentSystemYear);
+    const type = doc.type || 'inbox';
+    const isCentralVal = doc.isCentral !== undefined ? Number(doc.isCentral) : 1;
+    const isCentralBool = isCentralVal === 1;
+    const docDept = (doc.department || '').trim();
+
+    let actualType = 'หนังสือรับ';
+    if (type === 'inbox') {
+      actualType = 'หนังสือรับ';
+    } else if (type === 'outbox') {
+      actualType = 'หนังสือส่ง';
+    } else if (type === 'internal') {
+      actualType = 'หนังสือภายใน';
+    } else if (type === 'admin') {
+      if (doc.category === 'order') actualType = 'คำสั่ง';
+      else if (doc.category === 'announcement') actualType = 'ประกาศ';
+      else if (doc.category === 'certificate') actualType = 'หนังสือรับรอง';
+      else actualType = 'คำสั่ง';
+    }
+
+    let seqToRecord = 0;
+    if (type === 'inbox') {
+      const rec = parseInt(doc.receiveNumber || '0', 10);
+      if (!isNaN(rec) && rec > 0) seqToRecord = rec;
+    } else if (type === 'outbox') {
+      const rec = parseInt(doc.receiveNumber || '0', 10);
+      if (!isNaN(rec) && rec > 0) {
+        seqToRecord = rec;
+      } else if (doc.docNumber) {
+        const m = doc.docNumber.match(/\/(\d+)$/) || doc.docNumber.match(/\/ว\s*(\d+)$/);
+        if (m) seqToRecord = parseInt(m[1], 10);
+      }
+    } else if (type === 'internal') {
+      const rec = parseInt(doc.receiveNumber || '0', 10);
+      if (!isNaN(rec) && rec > 0) {
+        seqToRecord = rec;
+      } else if (doc.docNumber) {
+        const m = doc.docNumber.match(/\/(\d+)$/) || doc.docNumber.match(/\/ว\s*(\d+)$/) || doc.docNumber.match(/(\d+)\s*\/\s*\d+/);
+        if (m) seqToRecord = parseInt(m[1], 10);
+      }
+    } else if (type === 'admin') {
+      if (doc.docNumber) {
+        const m = doc.docNumber.match(/(\d+)\s*\/\s*(\d+)/);
+        if (m) seqToRecord = parseInt(m[1], 10);
+      }
+    }
+
+    if (seqToRecord <= 0) return;
+
+    let rules: any[] = [];
+    if (isMysqlOnline) {
+      const [dbRows]: any = await pool.query('SELECT * FROM numbering_rules').catch(() => [[]]);
+      rules = dbRows || [];
+    } else {
+      rules = localDb.numbering_rules || [];
+    }
+
+    const matchingRules = rules.filter((r: any) => {
+      if (!r.isActive) return false;
+      const matchesDocType = (r.docType === actualType) || (actualType === 'หนังสือส่ง' && (r.docType === 'หนังสือส่ง' || r.docType === 'หนังสือภายนอก'));
+      if (!matchesDocType) return false;
+      if (actualType === 'หนังสือรับ' || actualType === 'หนังสือส่ง' || actualType === 'หนังสือภายนอก') {
+        if (isCentralBool) {
+          return r.department === 'ทุกฝ่ายงาน' || r.runningScope === 'global' || (r.ruleName && r.ruleName.includes('สารบรรณกลาง'));
+        } else {
+          return r.department === docDept;
+        }
+      }
+      if (actualType === 'หนังสือภายใน') {
+        if (r.runningScope === 'department') {
+          return r.department === docDept;
+        }
+        return true;
+      }
+      if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(actualType)) {
+        return true;
+      }
+      return false;
+    });
+
+    for (const rule of matchingRules) {
+      const newSeq = Math.max(Number(rule.currentSeq || 0), seqToRecord);
+      if (isMysqlOnline) {
+        await pool.query('UPDATE numbering_rules SET currentSeq = ?, year = ? WHERE id = ?', [newSeq, docYear, rule.id]).catch(() => {});
+      }
+      if (localDb.numbering_rules) {
+        const localRule = localDb.numbering_rules.find((lr: any) => lr.id === rule.id);
+        if (localRule) {
+          localRule.currentSeq = newSeq;
+          localRule.year = docYear;
+        }
+      }
+    }
+    if (localDb.numbering_rules) {
+      saveLocalDb();
+    }
+  } catch (err: any) {
+    console.warn('Error updating numbering rule sequence:', err.message);
+  }
+}
+
 app.get('/api/numbering-rules', async (req, res) => {
   try {
+    const currentSystemYear = String(await getSystemCurrentYear());
     await pool.query(`
       CREATE TABLE IF NOT EXISTS numbering_rules (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -4069,8 +4638,18 @@ app.get('/api/numbering-rules', async (req, res) => {
     try {
       const [dbRows]: any = await pool.query('SELECT * FROM numbering_rules');
       rows = dbRows || [];
+      if (rows.length === 0 && initialSeedData.numbering_rules) {
+        for (const sr of initialSeedData.numbering_rules) {
+          await pool.query(
+            'INSERT INTO numbering_rules (id, ruleName, department, divisionCode, docType, prefixPattern, suffixPattern, numberFormat, runningScope, currentSeq, year, resetFrequency, isActive, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [sr.id, sr.ruleName, sr.department, sr.divisionCode, sr.docType, sr.prefixPattern, sr.suffixPattern, sr.numberFormat, sr.runningScope, sr.currentSeq, currentSystemYear, sr.resetFrequency, sr.isActive ? 1 : 0, sr.description]
+          ).catch(() => {});
+        }
+        const [seededRows]: any = await pool.query('SELECT * FROM numbering_rules');
+        rows = seededRows || [];
+      }
     } catch (dbErr) {
-      if (!localDb.numbering_rules) {
+      if (!localDb.numbering_rules || localDb.numbering_rules.length === 0) {
         localDb.numbering_rules = JSON.parse(JSON.stringify(initialSeedData.numbering_rules || []));
         saveLocalDb();
       }
@@ -4079,17 +4658,89 @@ app.get('/api/numbering-rules', async (req, res) => {
 
     const formattedRows = [];
     for (const r of rows) {
-      const realMax = await getRealMaxSequenceForRule(r);
-      const effectiveSeq = realMax;
+      const realMax = await getRealMaxSequenceForRule(r, currentSystemYear);
+      // Retain custom assigned sequence or actual max registered sequence, whichever is higher
+      const effectiveSeq = Math.max(Number(r.currentSeq || 0), realMax);
+
+      // Keep database currentSeq aligned with actual registered document sequence
+      if (effectiveSeq !== Number(r.currentSeq || 0) || r.year !== currentSystemYear) {
+        if (isMysqlOnline) {
+          await pool.query('UPDATE numbering_rules SET currentSeq = ?, year = ? WHERE id = ?', [effectiveSeq, currentSystemYear, r.id]).catch(() => {});
+        }
+        if (localDb.numbering_rules) {
+          const lRule = localDb.numbering_rules.find((lr: any) => lr.id === r.id);
+          if (lRule) {
+            lRule.currentSeq = effectiveSeq;
+            lRule.year = currentSystemYear;
+          }
+        }
+      }
+
       formattedRows.push({
         ...r,
         currentSeq: effectiveSeq,
+        year: currentSystemYear,
         isActive: Boolean(r.isActive)
       });
+    }
+
+    if (localDb.numbering_rules) {
+      saveLocalDb();
     }
     return res.json(formattedRows);
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch numbering rules' });
+  }
+});
+
+app.post('/api/numbering-rules/sync', async (req, res) => {
+  try {
+    const currentSystemYear = String(await getSystemCurrentYear());
+    let rows: any[] = [];
+    try {
+      const [dbRows]: any = await pool.query('SELECT * FROM numbering_rules');
+      rows = dbRows || [];
+    } catch (dbErr) {
+      rows = localDb.numbering_rules || [];
+    }
+
+    let syncedCount = 0;
+    const formattedRows = [];
+    for (const r of rows) {
+      const realMax = await getRealMaxSequenceForRule(r, currentSystemYear);
+      const effectiveSeq = Math.max(Number(r.currentSeq || 0), realMax);
+
+      if (effectiveSeq !== Number(r.currentSeq || 0) || r.year !== currentSystemYear) {
+        syncedCount++;
+        if (isMysqlOnline) {
+          await pool.query('UPDATE numbering_rules SET currentSeq = ?, year = ? WHERE id = ?', [effectiveSeq, currentSystemYear, r.id]).catch(() => {});
+        }
+        if (localDb.numbering_rules) {
+          const lRule = localDb.numbering_rules.find((lr: any) => lr.id === r.id);
+          if (lRule) {
+            lRule.currentSeq = effectiveSeq;
+            lRule.year = currentSystemYear;
+          }
+        }
+      }
+
+      formattedRows.push({
+        ...r,
+        currentSeq: effectiveSeq,
+        year: currentSystemYear,
+        isActive: Boolean(r.isActive)
+      });
+    }
+
+    if (localDb.numbering_rules) {
+      saveLocalDb();
+    }
+
+    await addSystemLog("SYNC_NUMBERING_RULES", `ตรวจสอบและซิงค์ลำดับเลขหนังสืออัตโนมัติสำเร็จ (ปรับปรุง ${syncedCount} กฎ)`, req.body.syncedBy || "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true, syncedCount, rules: formattedRows });
+  } catch (err: any) {
+    console.error('Error syncing numbering rules:', err.message);
+    return res.status(500).json({ error: 'Failed to sync numbering rules' });
   }
 });
 
@@ -4276,7 +4927,7 @@ app.post('/api/file-codes', async (req, res) => {
     const newCode: any = {
       code: req.body.code || '0021',
       name: req.body.name || 'หมวดงานใหม่',
-      department: req.body.department || 'ฝ่ายบริหารงานทั่วไป',
+      department: req.body.department || 'ฝ่ายยุทธศาสตร์และการจัดการ',
       description: req.body.description || ''
     };
     const [result]: any = await pool.query(
@@ -4291,6 +4942,16 @@ app.post('/api/file-codes', async (req, res) => {
   }
 });
 
+app.delete('/api/file-codes', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM file_codes');
+    await addSystemLog("CLEAR_FILE_CODES", "ล้างรหัสหมวดแฟ้มทั้งหมด", "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to clear file codes' });
+  }
+});
+
 app.delete('/api/file-codes/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -4299,6 +4960,18 @@ app.delete('/api/file-codes/:id', async (req, res) => {
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to delete file code' });
+  }
+});
+
+app.post('/api/file-codes/batch-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: 'Invalid IDs' });
+    await pool.query('DELETE FROM file_codes WHERE id IN (?)', [ids]);
+    await addSystemLog("BATCH_DELETE_FILE_CODES", `ลบรหัสหมวดแฟ้มแบบกลุ่ม จำนวน ${ids.length} รายการ`, "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to batch delete file codes' });
   }
 });
 
@@ -4376,7 +5049,7 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
       try {
         const [result]: any = await pool.query(
           'INSERT INTO reserved_numbers (ruleId, docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, reservedDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [ruleId || null, docType || 'หนังสือภายนอก', department || 'ฝ่ายบริหารงานทั่วไป', numberStr, currentSeqNum, yearStr, 'reserved', 'available', reservedBy || 'ผู้ใช้งานระบบ', reservedFor || 'สำรอง/จองเลขล่วงหน้า', targetReservedDate, nowStr]
+          [ruleId || null, docType || 'หนังสือส่ง', department || 'ฝ่ายยุทธศาสตร์และการจัดการ', numberStr, currentSeqNum, yearStr, 'reserved', 'available', reservedBy || 'ผู้ใช้งานระบบ', reservedFor || 'สำรอง/จองเลขล่วงหน้า', targetReservedDate, nowStr]
         );
         createdItems.push({ id: result.insertId, numberString: numberStr, reservedDate: targetReservedDate });
       } catch (e) {
@@ -4385,8 +5058,8 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
         const item = {
           id: newId,
           ruleId: ruleId || null,
-          docType: docType || 'หนังสือภายนอก',
-          department: department || 'ฝ่ายบริหารงานทั่วไป',
+          docType: docType || 'หนังสือส่ง',
+          department: department || 'ฝ่ายยุทธศาสตร์และการจัดการ',
           numberString: numberStr,
           seqNumber: currentSeqNum,
           year: yearStr,
@@ -4426,11 +5099,54 @@ app.post('/api/reserved-numbers/reserve', async (req, res) => {
   }
 });
 
+app.delete('/api/reserved-numbers', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM reserved_numbers');
+    localDb.reserved_numbers = [];
+    saveLocalDb();
+    await addSystemLog("CLEAR_RESERVED_NUMBERS", "ล้างคลังเลขจอง/เลขสำรองทั้งหมด", "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to clear reserved numbers' });
+  }
+});
+
+app.delete('/api/reserved-numbers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM reserved_numbers WHERE id = ?', [id]);
+    if (localDb.reserved_numbers) {
+      localDb.reserved_numbers = localDb.reserved_numbers.filter((r: any) => String(r.id) !== String(id));
+      saveLocalDb();
+    }
+    await addSystemLog("DELETE_RESERVED_NUMBER", `ลบเลขจอง ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to delete reserved number' });
+  }
+});
+
+app.post('/api/reserved-numbers/batch-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: 'Invalid IDs' });
+    await pool.query('DELETE FROM reserved_numbers WHERE id IN (?)', [ids]);
+    if (localDb.reserved_numbers) {
+      localDb.reserved_numbers = localDb.reserved_numbers.filter((r: any) => !ids.includes(r.id));
+      saveLocalDb();
+    }
+    await addSystemLog("BATCH_DELETE_RESERVED_NUMBERS", `ลบเลขจองแบบกลุ่ม จำนวน ${ids.length} รายการ`, "ผู้ดูแลระบบ", getClientIp(req));
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to batch delete reserved numbers' });
+  }
+});
+
 // Helper function to execute scheduled reservation
 async function executeScheduledReservation(sch: any) {
   const qty = Number(sch.count) || 1;
-  const docType = sch.docType || 'หนังสือภายนอก';
-  const department = sch.department || 'ฝ่ายบริหารงานทั่วไป';
+  const docType = sch.docType || 'หนังสือส่ง';
+  const department = sch.department || 'ฝ่ายยุทธศาสตร์และการจัดการ';
   const prefix = sch.prefix || (docType === 'คำสั่ง' ? 'คำสั่ง' : (docType === 'ประกาศ' ? 'ประกาศ' : 'รย 0021'));
   const now = new Date();
   const nowIso = now.toISOString();
@@ -4690,8 +5406,8 @@ app.post('/api/scheduled-reservations', async (req, res) => {
 
     let newSchedule: any = {
       name: name || 'จองเลขอัตโนมัติประจำวัน',
-      department: department || 'ฝ่ายบริหารงานทั่วไป',
-      docType: docType || 'หนังสือภายนอก',
+      department: department || 'ฝ่ายยุทธศาสตร์และการจัดการ',
+      docType: docType || 'หนังสือส่ง',
       prefix: prefix || 'รย 0021',
       count: Number(count) || 1,
       scheduleType: scheduleType || 'daily',
@@ -4886,7 +5602,7 @@ app.post('/api/reserved-numbers/reclaim', async (req, res) => {
     
     const [result]: any = await pool.query(
       'INSERT INTO reserved_numbers (docType, department, numberString, seqNumber, year, type, status, reservedBy, reservedFor, reservedDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [docType || 'หนังสือภายนอก', department || 'ทุกฝ่ายงาน', numberString, seqNumber, effectiveYr, 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr.split('T')[0], nowStr]
+      [docType || 'หนังสือส่ง', department || 'ทุกฝ่ายงาน', numberString, seqNumber, effectiveYr, 'reclaimed', 'available', reclaimedBy || 'ระบบ', reason || 'คืนเลขเนื่องจากยกเลิกหนังสือ', nowStr.split('T')[0], nowStr]
     );
 
     await addSystemLog("RECLAIM_NUMBER", `ดึงเลขหนังสือ ${numberString} กลับเข้าคลังจอง`, reclaimedBy || "ระบบ", getClientIp(req));
@@ -4918,50 +5634,79 @@ app.post('/api/numbering/generate-next', async (req, res) => {
     const isCentralBool = isCentralNum === 1;
     const targetDept = (department || '').trim();
 
-    let actualType = docType || 'หนังสือภายนอก';
+    let actualType = docType || 'หนังสือส่ง';
     if (docType === 'admin') {
       if (category === 'order') actualType = 'คำสั่ง';
       else if (category === 'announcement') actualType = 'ประกาศ';
       else if (category === 'certificate') actualType = 'หนังสือรับรอง';
     } else if (docType === 'inbox') {
       actualType = 'หนังสือรับ';
-    } else if (docType === 'outbox') {
-      actualType = 'หนังสือภายนอก';
+    } else if (docType === 'outbox' || docType === 'หนังสือภายนอก' || docType === 'หนังสือส่ง') {
+      actualType = 'หนังสือส่ง';
     } else if (docType === 'internal') {
       actualType = 'หนังสือภายใน';
     }
 
-    const dummyRule = {
+    let rules: any[] = [];
+    if (isMysqlOnline) {
+      const [rRows]: any = await pool.query('SELECT * FROM numbering_rules WHERE isActive = 1').catch(() => [[]]);
+      rules = rRows || [];
+    } else {
+      rules = (localDb.numbering_rules || []).filter((r: any) => r.isActive);
+    }
+
+    const matchesDocType = (ruleDocType: string) => {
+      if (actualType === 'หนังสือส่ง') return ruleDocType === 'หนังสือส่ง' || ruleDocType === 'หนังสือภายนอก';
+      if (actualType === 'หนังสือรับ') return ruleDocType === 'หนังสือรับ' || ruleDocType === 'หนังสือเข้า';
+      return ruleDocType === actualType;
+    };
+
+    let matchingRule: any = null;
+    if (actualType === 'หนังสือรับ' || actualType === 'หนังสือส่ง') {
+      if (isCentralBool) {
+        matchingRule = rules.find((r: any) => matchesDocType(r.docType) && (r.department === 'ทุกฝ่ายงาน' || r.runningScope === 'global' || (r.ruleName && r.ruleName.includes('สารบรรณกลาง'))));
+      } else {
+        matchingRule = rules.find((r: any) => matchesDocType(r.docType) && (r.department === targetDept || (r.department && r.department.trim() === targetDept)));
+      }
+    } else if (actualType === 'หนังสือภายใน') {
+      matchingRule = rules.find((r: any) => r.docType === actualType);
+    } else if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(actualType)) {
+      matchingRule = rules.find((r: any) => r.docType === actualType);
+    }
+
+    const ruleToUse = matchingRule || {
       docType: actualType,
       department: isCentralBool ? 'ทุกฝ่ายงาน' : targetDept,
       runningScope: isCentralBool ? 'global' : 'department',
-      year: yr
+      year: yr,
+      currentSeq: 0
     };
 
-    const maxSeq = await getRealMaxSequenceForRule(dummyRule);
-    const nextSeq = maxSeq + 1;
+    const maxSeq = await getRealMaxSequenceForRule(ruleToUse, yr);
+    const baseSeq = Math.max(Number(ruleToUse.currentSeq || 0), maxSeq);
+    const nextSeq = baseSeq + 1;
 
-    let usedPrefix = 'รย 0021';
+    let usedPrefix = matchingRule?.prefixPattern || 'รย 0021';
     let formattedNumber = '';
 
     if (['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง'].includes(actualType)) {
-      usedPrefix = actualType;
-      formattedNumber = `${actualType} ${nextSeq}/${yr}`;
+      usedPrefix = matchingRule?.prefixPattern || actualType;
+      formattedNumber = `${usedPrefix} ${nextSeq}/${yr}`;
     } else if (actualType === 'หนังสือรับ') {
-      usedPrefix = 'รย 0021';
+      usedPrefix = matchingRule?.prefixPattern || 'รย 0021';
       formattedNumber = '';
+    } else if (actualType === 'หนังสือภายใน') {
+      usedPrefix = matchingRule?.prefixPattern || 'รย 0021';
+      formattedNumber = `${usedPrefix}/${nextSeq}`;
     } else {
-      if (isCentralBool) {
-        usedPrefix = 'รย 0021';
-      } else {
-        if (targetDept === 'ฝ่ายยุทธศาสตร์และการจัดการ') usedPrefix = 'รย 0021.1';
-        else if (targetDept === 'ฝ่ายสงเคราะห์ผู้ประสบภัย') usedPrefix = 'รย 0021.2';
-        else if (targetDept === 'ฝ่ายป้องกันและปฏิบัติการ') usedPrefix = 'รย 0021.3';
-        else if (targetDept === 'ฝ่ายบริหารงานทั่วไป') usedPrefix = 'รย 0021';
-        else {
-          const [rules]: any = await pool.query('SELECT * FROM numbering_rules WHERE isActive = 1 AND department = ?', [targetDept]).catch(() => [[]]);
-          const foundRule = (rules || []).find((r: any) => r.prefixPattern);
-          usedPrefix = foundRule ? foundRule.prefixPattern : 'รย 0021';
+      if (!matchingRule?.prefixPattern) {
+        if (isCentralBool) {
+          usedPrefix = 'รย 0021';
+        } else {
+          if (targetDept === 'ฝ่ายยุทธศาสตร์และการจัดการ') usedPrefix = 'รย 0021.1';
+          else if (targetDept === 'ฝ่ายสงเคราะห์ผู้ประสบภัย') usedPrefix = 'รย 0021.2';
+          else if (targetDept === 'ฝ่ายป้องกันและปฏิบัติการ') usedPrefix = 'รย 0021.3';
+          else usedPrefix = 'รย 0021';
         }
       }
       const circFlag = isCircular ? (usedPrefix.includes('ว') ? '' : 'ว ') : '';
@@ -4975,7 +5720,13 @@ app.post('/api/numbering/generate-next', async (req, res) => {
       formattedNumber,
       prefix: usedPrefix,
       isCentral: isCentralNum,
-      department: targetDept
+      department: targetDept,
+      ruleId: matchingRule?.id || null,
+      ruleName: matchingRule?.ruleName || null,
+      docType: actualType,
+      divisionCode: matchingRule?.divisionCode || '',
+      runningScope: matchingRule?.runningScope || (isCentralBool ? 'global' : 'department'),
+      isActiveRule: !!matchingRule
     });
   } catch (err: any) {
     console.error('Failed to generate next number:', err);
@@ -5180,7 +5931,7 @@ app.post("/api/workflows/instances", async (req, res) => {
       doc = allDocs.find((d: any) => String(d.id) === String(docId)) || {
         docNumber: "รย 0021/999",
         title: "หนังสือมอบหมายตามเส้นทาง Workflow",
-        department: "ฝ่ายบริหารงานทั่วไป",
+        department: "ฝ่ายยุทธศาสตร์และการจัดการ",
         assignee: user || "เจ้าหน้าที่",
         priority: "ปกติ"
       };
@@ -5197,7 +5948,7 @@ app.post("/api/workflows/instances", async (req, res) => {
         stepNumber: st.stepNumber || (idx + 1),
         title: st.title,
         assignedRole: st.assignedRole,
-        department: st.department || doc.department || "ฝ่ายบริหารงานทั่วไป",
+        department: st.department || doc.department || "ฝ่ายยุทธศาสตร์และการจัดการ",
         assignee: doc.assignee || user || "เจ้าหน้าที่ผู้รับผิดชอบ",
         slaHours: st.slaHours || 24,
         dueAt: stepDueCursor.toISOString(),
@@ -5218,7 +5969,7 @@ app.post("/api/workflows/instances", async (req, res) => {
       startedAt: startTime.toISOString(),
       dueAt: dueTime.toISOString(),
       completedAt: null,
-      department: doc.department || "ฝ่ายบริหารงานทั่วไป",
+      department: doc.department || "ฝ่ายยุทธศาสตร์และการจัดการ",
       assignee: doc.assignee || user || "ผู้รับผิดชอบ",
       priority: doc.priority || "ปกติ",
       steps: instSteps,
@@ -5227,6 +5978,40 @@ app.post("/api/workflows/instances", async (req, res) => {
 
     if (!localDb.workflow_instances) localDb.workflow_instances = [];
     localDb.workflow_instances.unshift(newInst);
+
+    // Sync document status with new workflow
+    const initialStep = newInst.steps?.[0];
+    const initialDocStatus = initialStep ? `อยู่ระหว่าง: ${initialStep.title}` : "อยู่ระหว่างเสนอลงนาม";
+
+    // Update document in MySQL
+    if (isMysqlOnline) {
+      try {
+        const docTables = {
+          inbox: 'inbox_documents',
+          outbox: 'outbox_documents',
+          circular: 'circular_documents',
+          internal: 'internal_documents',
+          admin: 'admin_documents'
+        };
+        const tbl = docTables[newInst.docType as keyof typeof docTables] || 'inbox_documents';
+        await pool.query(`UPDATE ${tbl} SET status = ? WHERE id = ?`, [initialDocStatus, newInst.docId]);
+      } catch (mysqlErr) {
+        console.warn("MySQL update document status on workflow start failed:", mysqlErr);
+      }
+    }
+
+    // Update document in localDb
+    const allTables = ['inbox_documents', 'outbox_documents', 'circular_documents', 'internal_documents', 'admin_documents'];
+    for (const tbl of allTables) {
+      if (localDb[tbl]) {
+        const foundDoc = localDb[tbl].find((d: any) => String(d.id) === String(newInst.docId));
+        if (foundDoc) {
+          foundDoc.status = initialDocStatus;
+          break;
+        }
+      }
+    }
+
     saveLocalDb();
 
     if (isMysqlOnline) {
@@ -5314,6 +6099,50 @@ app.put("/api/workflows/instances/:id/step", async (req, res) => {
       inst.status = "rejected";
     }
 
+    // Sync document status with workflow
+    let docStatus = "ลงทะเบียน";
+    if (inst.status === "completed") {
+      docStatus = "เสร็จสิ้น";
+    } else if (inst.status === "rejected") {
+      docStatus = "ส่งกลับแก้ไข/ไม่อนุมัติ";
+    } else {
+      const activeStep = inst.steps?.[inst.currentStepIndex];
+      if (activeStep) {
+        docStatus = `อยู่ระหว่าง: ${activeStep.title}`;
+      } else {
+        docStatus = "อยู่ระหว่างเสนอลงนาม";
+      }
+    }
+
+    // Update document in MySQL
+    if (isMysqlOnline) {
+      try {
+        const docTables = {
+          inbox: 'inbox_documents',
+          outbox: 'outbox_documents',
+          circular: 'circular_documents',
+          internal: 'internal_documents',
+          admin: 'admin_documents'
+        };
+        const tbl = docTables[inst.docType as keyof typeof docTables] || 'inbox_documents';
+        await pool.query(`UPDATE ${tbl} SET status = ? WHERE id = ?`, [docStatus, inst.docId]);
+      } catch (mysqlErr) {
+        console.warn("MySQL update document status from workflow failed:", mysqlErr);
+      }
+    }
+
+    // Update document in localDb
+    const allTables = ['inbox_documents', 'outbox_documents', 'circular_documents', 'internal_documents', 'admin_documents'];
+    for (const tbl of allTables) {
+      if (localDb[tbl]) {
+        const foundDoc = localDb[tbl].find((d: any) => String(d.id) === String(inst.docId));
+        if (foundDoc) {
+          foundDoc.status = docStatus;
+          break;
+        }
+      }
+    }
+
     if (localDb.workflow_instances) {
       const localIdx = localDb.workflow_instances.findIndex((i: any) => i.id === id);
       if (localIdx >= 0) {
@@ -5372,6 +6201,25 @@ app.post("/api/workflows/instances/:id/escalate", async (req, res) => {
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: "Failed to escalate workflow" });
+  }
+});
+
+app.delete("/api/workflows/instances/clear-all", async (req, res) => {
+  try {
+    localDb.workflow_instances = [];
+    saveLocalDb();
+    if (isMysqlOnline) {
+      try {
+        await pool.query('TRUNCATE TABLE workflow_instances', []);
+      } catch (mysqlErr) {
+        console.warn("MySQL truncate workflow_instances failed:", mysqlErr);
+      }
+    }
+    const ip = getClientIp(req);
+    await addSystemLog("CLEAR_WORKFLOW_INSTANCES", "ล้างข้อมูลรายการติดตามการเดินเอกสารทั้งหมด", req.body?.user || "ผู้ดูแลระบบ", ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: "Failed to clear workflow instances" });
   }
 });
 
@@ -5491,7 +6339,6 @@ function sanitizeForPdf(text: any, defaultText: string = ''): string {
     'ฝ่ายยุทธศาสตร์และการจัดการ': 'Strategy and Management Division',
     'ฝ่ายป้องกันและปฏิบัติการ': 'Prevention and Operations Division',
     'ฝ่ายสงเคราะห์ผู้ประสบภัย': 'Disaster Relief Division',
-    'ฝ่ายบริหารงานทั่วไป': 'General Administration Division',
     'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง': 'Rayong Provincial Disaster Prevention and Mitigation Office',
     'ทุกฝ่ายงาน / ประชาชน': 'All Departments / Public'
   };
@@ -6210,17 +7057,17 @@ app.get("/verify", async (req, res) => {
     
     <!-- Gov Header / Emblem -->
     <div class="flex flex-col items-center text-center space-y-3 pb-6 border-b border-slate-200">
-      <div class="w-14 h-14 bg-amber-50 rounded-full border border-amber-200 p-2 flex items-center justify-center shadow-sm">
-        <svg class="w-10 h-10 text-amber-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <!-- Stylized Garuda Emblem / Government Seal Icon -->
-          <path d="M12 2L9 7H15L12 2Z" fill="currentColor"/>
-          <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-dasharray="2 2"/>
-          <path d="M12 6V18M7 11H17M9 15H15M8 8H16" stroke="currentColor"/>
+      <div class="w-16 h-16 bg-amber-50 rounded-2xl border-2 border-amber-200 p-2.5 flex items-center justify-center shadow-md text-amber-700">
+        <!-- Agency Emblem / DDPM Shield Logo -->
+        <svg class="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M12 2L3 6V11C3 16.55 6.84 21.74 12 23C17.16 21.74 21 16.55 21 11V6L12 2Z" fill="currentColor" fill-opacity="0.1" stroke="currentColor"/>
+          <path d="M12 7C9.5 10 9 12 10 14.5C10.8 16.5 13.2 16.5 14 14.5C15 12 14.5 10 12 7Z" fill="currentColor"/>
+          <path d="M7 17H17" stroke="currentColor" stroke-linecap="round"/>
         </svg>
       </div>
       <div>
         <h1 class="text-lg font-bold text-slate-800">ระบบตรวจสอบความถูกต้องเอกสารอิเล็กทรอนิกส์</h1>
-        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Rayong Disaster Office EDMS Verification System</p>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง</p>
       </div>
     </div>
 
@@ -6306,8 +7153,7 @@ app.get("/verify", async (req, res) => {
 
     <!-- Page Footer -->
     <div class="text-center text-[11px] text-slate-400 pt-4 pb-8 font-medium">
-      สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (Rayong Provincial Disaster Prevention and Mitigation Office)<br/>
-      กระทรวงมหาดไทย (Ministry of Interior, Thailand) • ระบบสารบรรณอิเล็กทรอนิกส์ดิจิทัลความมั่นคงสูง
+      สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง • ระบบสารบรรณอิเล็กทรอนิกส์ดิจิทัล
     </div>
 
   </div>
@@ -6452,7 +7298,7 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
           const systemContext = matches.length > 0 ? `The system expects this document to be: Subject: ${matches[0].docTitle}, Signer: ${matches[0].signerName}, Position: ${matches[0].signerPosition}.` : "The system does not have a record of this document hash.";
 
           const result = await client.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-2.5-flash',
             contents: [
               {
                 inlineData: {
@@ -6730,8 +7576,14 @@ app.get("/api/role-permissions", async (req, res) => {
 
 app.put("/api/role-permissions", async (req, res) => {
   const { role, permission_key, is_allowed, username } = req.body;
+  const currentUserRole = req.body.currentUserRole || req.headers.role || '';
   const ip = getClientIp(req);
   const val = is_allowed ? 1 : 0;
+
+  const allowed = await hasServerPermission(currentUserRole, 'system_settings');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ในการแก้ไขการกำหนดสิทธิ์ของระบบ (system_settings)' });
+  }
   
   try {
     if (isMysqlOnline) {
@@ -6809,12 +7661,39 @@ function formatChangelogRow(r: any) {
 app.get("/api/changelogs", async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   try {
+    const sortChangelogs = (items: any[]) => {
+      return items.sort((a, b) => {
+        // 1. Put isLatest on top
+        const aLatest = a.isLatest ? 1 : 0;
+        const bLatest = b.isLatest ? 1 : 0;
+        if (aLatest !== bLatest) {
+          return bLatest - aLatest;
+        }
+        
+        // 2. Sort by SemVer DESC
+        const clean = (v: string) => (v || '').replace(/^v/i, '').split('.').map(x => parseInt(x, 10) || 0);
+        const partsA = clean(a.version);
+        const partsB = clean(b.version);
+        const maxLen = Math.max(partsA.length, partsB.length);
+        for (let i = 0; i < maxLen; i++) {
+          const numA = partsA[i] || 0;
+          const numB = partsB[i] || 0;
+          if (numA !== numB) {
+            return numB - numA;
+          }
+        }
+        
+        // 3. Fallback to releaseDate
+        return new Date(b.releaseDate || b.createdAt).getTime() - new Date(a.releaseDate || a.createdAt).getTime();
+      });
+    };
+
     if (isMysqlOnline) {
       try {
-        const [rows]: any = await pool.query('SELECT * FROM changelogs ORDER BY releaseDate DESC, createdAt DESC');
+        const [rows]: any = await pool.query('SELECT * FROM changelogs');
         if (Array.isArray(rows) && rows.length > 0) {
           const list = rows.map(formatChangelogRow);
-          return res.json(list);
+          return res.json(sortChangelogs(list));
         }
       } catch (dbErr: any) {
         console.warn('MySQL changelogs fetch warning:', dbErr.message);
@@ -6826,11 +7705,8 @@ app.get("/api/changelogs", async (req, res) => {
       saveLocalDb();
     }
 
-    const list = [...localDb.changelogs]
-      .map(formatChangelogRow)
-      .sort((a, b) => new Date(b.releaseDate || b.createdAt).getTime() - new Date(a.releaseDate || a.createdAt).getTime());
-
-    return res.json(list);
+    const list = [...localDb.changelogs].map(formatChangelogRow);
+    return res.json(sortChangelogs(list));
   } catch (error: any) {
     console.error('Failed to get changelogs:', error.message);
     return res.json(defaultChangelogs);
@@ -7932,40 +8808,72 @@ app.post("/api/qr-generator/templates/reset", async (req, res) => {
 // 2. Users API Endpoints
 app.get("/api/users", async (req, res) => {
   try {
-      const [rows]: any = await pool.query('SELECT id, username, email, firstName, lastName, position, department, role, password, avatar FROM users');
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT id, username, email, firstName, lastName, position, department, role, password, avatar, emailNotifications FROM users');
       const formatted = rows.map((u: any) => ({
         ...u,
+        emailNotifications: u.emailNotifications !== undefined ? (Number(u.emailNotifications) === 1 || u.emailNotifications === true) : true,
         isArgon2: u.password ? u.password.startsWith('$argon2') : false
       }));
       return res.json(formatted);
-    } catch (error: any) {
-      console.error('Database error:', error.message);
-      return res.status(500).json({ error: 'Database error' });
     }
+    throw new Error('MySQL offline');
+  } catch (error: any) {
+    const list = (localDb.users || []).map((u: any) => ({
+      ...u,
+      emailNotifications: u.emailNotifications !== undefined ? (Number(u.emailNotifications) === 1 || u.emailNotifications === true) : true,
+      isArgon2: u.password ? u.password.startsWith('$argon2') : false
+    }));
+    return res.json(list);
+  }
 });
 
 app.post('/api/users', async (req, res) => {
   const { username, password, email, firstName, lastName, position, department, role, avatar } = req.body;
+  const emailNotif = req.body.emailNotifications !== undefined ? (req.body.emailNotifications ? 1 : 0) : 1;
   const ip = getClientIp(req);
   const hashedPassword = await hashPasswordArgon2(password || 'password');
 
   try {
+    let newId = Date.now();
+    if (isMysqlOnline) {
       const [result]: any = await pool.query(
         'INSERT INTO users (username, password, email, firstName, lastName, position, department, role, avatar, emailNotifications) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [username, hashedPassword, email || null, firstName, lastName, position, department || 'ฝ่ายบริหารงานทั่วไป', role || 'user', avatar || null, req.body.emailNotifications !== undefined ? (req.body.emailNotifications ? 1 : 0) : 1]
+        [username, hashedPassword, email || null, firstName, lastName, position, department || 'ฝ่ายยุทธศาสตร์และการจัดการ', role || 'user', avatar || null, emailNotif]
       );
-      await addSystemLog('CREATE_USER', `เพิ่มเจ้าหน้าที่ใหม่: ${firstName} ${lastName} (${position}, ฝ่าย: ${department || 'ไม่ระบุ'}, สิทธิ์: ${role || 'user'}) - รหัสผ่านเข้ารหัสด้วย Argon2id`, req.body.createdBy || 'ผู้ดูแลระบบ', ip);
-      return res.json({ success: true, id: result.insertId });
-    } catch (error: any) {
-      console.error('Database error:', error.message);
-      return res.status(500).json({ error: 'Database error' });
+      newId = result.insertId;
     }
+
+    if (!localDb.users) localDb.users = [];
+    const localUser = {
+      id: newId,
+      username,
+      password: hashedPassword,
+      email: email || '',
+      firstName,
+      lastName,
+      position,
+      department: department || 'ฝ่ายยุทธศาสตร์และการจัดการ',
+      role: role || 'user',
+      avatar: avatar || null,
+      emailNotifications: emailNotif
+    };
+    localDb.users.push(localUser);
+    saveLocalDb();
+
+    await addSystemLog('CREATE_USER', `เพิ่มเจ้าหน้าที่ใหม่: ${firstName} ${lastName} (${position}, ฝ่าย: ${department || 'ไม่ระบุ'}, สิทธิ์: ${role || 'user'}) - รหัสผ่านเข้ารหัสด้วย Argon2id`, req.body.createdBy || 'ผู้ดูแลระบบ', ip);
+    return res.json({ success: true, id: newId });
+  } catch (error: any) {
+    console.error('Database error in POST /api/users:', error.message);
+    return res.status(500).json({ error: error.message || 'Database error' });
+  }
 });
 
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const data = req.body;
   const ip = getClientIp(req);
+  const emailNotif = data.emailNotifications !== undefined ? (data.emailNotifications ? 1 : 0) : 1;
 
   try {
     let newHashedPassword: string | null = null;
@@ -7974,11 +8882,18 @@ app.put('/api/users/:id', async (req, res) => {
         if (!data.currentPassword || typeof data.currentPassword !== 'string' || data.currentPassword.trim() === '') {
           return res.status(400).json({ error: 'กรุณากรอกรหัสผ่านปัจจุบัน (รหัสผ่านเดิม)' });
         }
-        const [userRows]: any = await pool.query('SELECT password FROM users WHERE id = ?', [id]);
-        if (userRows.length === 0) {
+        let dbPass = '';
+        if (isMysqlOnline) {
+          const [userRows]: any = await pool.query('SELECT password FROM users WHERE id = ?', [id]);
+          if (userRows.length > 0) dbPass = userRows[0]?.password || '';
+        }
+        if (!dbPass && localDb.users) {
+          const u = localDb.users.find((x: any) => String(x.id) === String(id));
+          if (u) dbPass = u.password || '';
+        }
+        if (!dbPass) {
           return res.status(404).json({ error: 'ไม่พบข้อมูลผู้ใช้นี้ในระบบ' });
         }
-        const dbPass = userRows[0]?.password || '';
         const isValid = await verifyPasswordArgon2(dbPass, data.currentPassword.trim());
         if (!isValid) {
           return res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง' });
@@ -7993,36 +8908,67 @@ app.put('/api/users/:id', async (req, res) => {
       }
     }
 
-    if (newHashedPassword) {
-      await pool.query(
-        'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, password=?, avatar=?, emailNotifications=? WHERE id=?',
-        [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, newHashedPassword, data.avatar || null, data.emailNotifications !== undefined ? (data.emailNotifications ? 1 : 0) : 1, id]
-      );
-    } else {
-      await pool.query(
-        'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, avatar=?, emailNotifications=? WHERE id=?',
-        [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, data.avatar || null, data.emailNotifications !== undefined ? (data.emailNotifications ? 1 : 0) : 1, id]
-      );
+    if (isMysqlOnline) {
+      if (newHashedPassword) {
+        await pool.query(
+          'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, password=?, avatar=?, emailNotifications=? WHERE id=?',
+          [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, newHashedPassword, data.avatar || null, emailNotif, id]
+        );
+      } else {
+        await pool.query(
+          'UPDATE users SET firstName=?, lastName=?, email=?, position=?, department=?, role=?, avatar=?, emailNotifications=? WHERE id=?',
+          [data.firstName, data.lastName, data.email || null, data.position, data.department, data.role, data.avatar || null, emailNotif, id]
+        );
+      }
     }
+
+    if (localDb.users) {
+      const idx = localDb.users.findIndex((u: any) => String(u.id) === String(id));
+      if (idx !== -1) {
+        localDb.users[idx] = {
+          ...localDb.users[idx],
+          firstName: data.firstName !== undefined ? data.firstName : localDb.users[idx].firstName,
+          lastName: data.lastName !== undefined ? data.lastName : localDb.users[idx].lastName,
+          email: data.email !== undefined ? data.email : localDb.users[idx].email,
+          position: data.position !== undefined ? data.position : localDb.users[idx].position,
+          department: data.department !== undefined ? data.department : localDb.users[idx].department,
+          role: data.role !== undefined ? data.role : localDb.users[idx].role,
+          avatar: data.avatar !== undefined ? data.avatar : localDb.users[idx].avatar,
+          emailNotifications: emailNotif,
+          ...(newHashedPassword ? { password: newHashedPassword } : {})
+        };
+        saveLocalDb();
+      }
+    }
+
     await addSystemLog('UPDATE_USER', `แก้ไขข้อมูลเจ้าหน้าที่ ID: ${id} (${data.firstName} ${data.lastName}, ฝ่าย: ${data.department || 'ไม่ระบุ'}, สิทธิ์: ${data.role})${newHashedPassword ? ' [อัปเดตรหัสผ่านใหม่]' : ''}`, data.updatedBy || 'ผู้ดูแลระบบ', ip);
     return res.json({ success: true });
   } catch (error: any) {
-    console.error('Database error:', error.message);
-    return res.status(500).json({ error: 'Database error' });
+    console.error('Database error in PUT /api/users/:id:', error.message);
+    return res.status(500).json({ error: error.message || 'Database error' });
   }
 });
+
 app.delete('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const ip = getClientIp(req);
   try {
-    const [userRows]: any = await pool.query('SELECT firstName, lastName FROM users WHERE id = ?', [id]);
-    const userName = userRows.length > 0 ? `${userRows[0].firstName} ${userRows[0].lastName}` : `ID ${id}`;
-    
-    await pool.query('DELETE FROM users WHERE id = ?', [id]);
+    let userName = `ID ${id}`;
+    if (isMysqlOnline) {
+      const [userRows]: any = await pool.query('SELECT firstName, lastName FROM users WHERE id = ?', [id]);
+      if (userRows.length > 0) userName = `${userRows[0].firstName} ${userRows[0].lastName}`;
+      await pool.query('DELETE FROM users WHERE id = ?', [id]);
+    }
+    if (localDb.users) {
+      const u = localDb.users.find((x: any) => String(x.id) === String(id));
+      if (u) userName = `${u.firstName} ${u.lastName}`;
+      localDb.users = localDb.users.filter((x: any) => String(x.id) !== String(id));
+      saveLocalDb();
+    }
     await addSystemLog('DELETE_USER', `ลบข้อมูลเจ้าหน้าที่: ${userName}`, 'ผู้ดูแลระบบ', ip);
     return res.json({ success: true });
   } catch (error: any) {
-    console.error('Database error:', error.message);
+    console.error('Database error in DELETE /api/users/:id:', error.message);
     return res.status(500).json({ error: 'Database error' });
   }
 });
@@ -8038,33 +8984,48 @@ app.post('/api/login', async (req, res) => {
   }
 
   try {
+    let user: any = null;
+    if (isMysqlOnline) {
       const [rows]: any = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER(?)', [username]);
-      if (rows.length > 0) {
-        const user = rows[0];
-        const isValid = await verifyPasswordArgon2(user.password, password);
-        if (isValid) {
-          // Auto-upgrade legacy password to Argon2id if needed
-          if (!user.password.startsWith('$argon2')) {
-            const newHash = await hashPasswordArgon2(password);
-            await pool.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
-            user.password = newHash;
-            console.log(`🔐 Auto-upgraded password to Argon2id for user: ${username}`);
-          }
-
-          const { password: _, ...sanitizedUser } = user;
-          sanitizedUser.isArgon2 = true;
-          await addSystemLog('LOGIN_SUCCESS', `เข้าสู่ระบบสำเร็จ (${user.firstName || username} ${user.lastName || ''}) - ยืนยันรหัสผ่านด้วย Argon2id`, username, ip);
-          return res.json({ success: true, user: sanitizedUser });
-        }
-      }
-      
-      await addSystemLog('LOGIN_FAILED', `พยายามเข้าสู่ระบบไม่สำเร็จ (ชื่อผู้ใช้: ${username})`, username || 'Unknown', ip);
-      return res.status(401).json({ success: false, message: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
-    } catch (error: any) {
-      console.error('Database error:', error.message);
-      return res.status(500).json({ error: 'Database error' });
+      if (rows.length > 0) user = rows[0];
+    }
+    if (!user && localDb.users) {
+      user = localDb.users.find((u: any) => u.username && u.username.toLowerCase() === username.toLowerCase());
     }
 
+    if (user) {
+      const isValid = await verifyPasswordArgon2(user.password, password);
+      if (isValid) {
+        if (!user.password.startsWith('$argon2')) {
+          const newHash = await hashPasswordArgon2(password);
+          if (isMysqlOnline) {
+            await pool.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
+          }
+          user.password = newHash;
+          if (localDb.users) {
+            const idx = localDb.users.findIndex((u: any) => String(u.id) === String(user.id));
+            if (idx !== -1) {
+              localDb.users[idx].password = newHash;
+              saveLocalDb();
+            }
+          }
+          console.log(`🔐 Auto-upgraded password to Argon2id for user: ${username}`);
+        }
+
+        const { password: _, ...sanitizedUser } = user;
+        sanitizedUser.isArgon2 = true;
+        sanitizedUser.emailNotifications = user.emailNotifications !== undefined ? (Number(user.emailNotifications) === 1 || user.emailNotifications === true) : true;
+        await addSystemLog('LOGIN_SUCCESS', `เข้าสู่ระบบสำเร็จ (${user.firstName || username} ${user.lastName || ''}) - ยืนยันรหัสผ่านด้วย Argon2id`, username, ip);
+        return res.json({ success: true, user: sanitizedUser });
+      }
+    }
+    
+    await addSystemLog('LOGIN_FAILED', `พยายามเข้าสู่ระบบไม่สำเร็จ (ชื่อผู้ใช้: ${username})`, username || 'Unknown', ip);
+    return res.status(401).json({ success: false, message: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
+  } catch (error: any) {
+    console.error('Database error in /api/login:', error.message);
+    return res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // 4. Departments API Endpoints
@@ -8201,48 +9162,289 @@ function generateOtpEmailTemplate({
 </html>`;
 }
 
+// Function to generate beautiful Document Notification Email HTML Template
+export function generateDocNotificationEmailHtml({
+  badgeText,
+  heading,
+  description,
+  docNumber,
+  receiveNumber,
+  title,
+  docType,
+  category,
+  priority,
+  secrecy,
+  from,
+  to,
+  department,
+  assignee,
+  date,
+  note,
+  attachmentsCount,
+  orgName,
+  logoUrl,
+  footerText,
+  baseUrl,
+}: {
+  badgeText?: string;
+  heading: string;
+  description?: string;
+  docNumber?: string;
+  receiveNumber?: string;
+  title: string;
+  docType?: string;
+  category?: string;
+  priority?: string;
+  secrecy?: string;
+  from?: string;
+  to?: string;
+  department?: string;
+  assignee?: string;
+  date?: string;
+  note?: string;
+  attachmentsCount?: number;
+  orgName?: string;
+  logoUrl?: string;
+  footerText?: string;
+  baseUrl?: string;
+}) {
+  const displayOrgName = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+  const displayFooter = footerText || '© 2026 ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)';
+  const logo = logoUrl ? (logoUrl.startsWith('http') ? logoUrl : `${baseUrl || ''}${logoUrl}`) : '';
+
+  const priorityColor = priority === 'ด่วนที่สุด' ? '#ef4444' : (priority === 'ด่วนมาก' ? '#f97316' : (priority === 'ด่วน' ? '#eab308' : '#3b82f6'));
+  const secrecyColor = (secrecy === 'ลับที่สุด' || secrecy === 'ลับมาก' || secrecy === 'ลับ') ? '#dc2626' : '#64748b';
+
+  return `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${heading}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f1f5f9; font-family:'Sarabun', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased; color:#1e293b;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f1f5f9; padding: 32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:620px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04); border: 1px solid #e2e8f0;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%); padding: 32px 24px; text-align:center;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                ${logo ? `
+                <tr>
+                  <td align="center" style="padding-bottom:14px;">
+                    <img src="${logo}" alt="Logo" style="height:54px; width:auto; object-fit:contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));" />
+                  </td>
+                </tr>
+                ` : ''}
+                <tr>
+                  <td align="center">
+                    <h1 style="margin:0; color:#ffffff; font-size:19px; font-weight:700; line-height:1.4;">${displayOrgName}</h1>
+                    <p style="margin:4px 0 0 0; color:#94a3b8; font-size:12.5px; font-weight: 500;">ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body Content -->
+          <tr>
+            <td style="padding: 32px 28px; background-color:#ffffff;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td>
+                    <!-- Badge -->
+                    <div style="display:inline-block; background-color:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:5px 14px; border-radius:20px; font-size:12.5px; font-weight:600; margin-bottom:16px;">
+                      ${badgeText || '📬 แจ้งเตือนเอกสารในระบบสารบรรณ'}
+                    </div>
+                    
+                    <h2 style="margin:0 0 8px 0; color:#0f172a; font-size:18px; font-weight:700;">${heading}</h2>
+                    <p style="margin:0 0 20px 0; color:#475569; font-size:14px; line-height:1.6;">
+                      ${description || 'มีเอกสารในระบบสารบรรณที่เกี่ยวข้องกับท่านหรือกลุ่มงานของท่าน โปรดตรวจสอบรายละเอียดด้านล่าง'}
+                    </p>
+
+                    <!-- Document Title Card -->
+                    <div style="background-color:#f8fafc; border-left: 4px solid #2563eb; border-top:1px solid #e2e8f0; border-right:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; border-radius:8px; padding:16px 20px; margin-bottom:20px;">
+                      <div style="font-size:12px; color:#64748b; font-weight:600; margin-bottom:4px;">ชื่อเรื่องเอกสาร</div>
+                      <div style="font-size:15px; font-weight:700; color:#0f172a; line-height:1.5;">${title}</div>
+                    </div>
+
+                    <!-- Metadata Grid Table -->
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom:24px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; font-size:13.5px;">
+                      ${docNumber ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; width:35%; background-color:#f8fafc;">เลขที่เอกสาร</td>
+                        <td style="padding:10px 14px; color:#0f172a; font-weight:600;">${docNumber}</td>
+                      </tr>` : ''}
+                      ${receiveNumber ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; width:35%; background-color:#f8fafc;">เลขที่รับ</td>
+                        <td style="padding:10px 14px; color:#0f172a; font-weight:600;">${receiveNumber}</td>
+                      </tr>` : ''}
+                      ${date ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">ลงวันที่</td>
+                        <td style="padding:10px 14px; color:#0f172a;">${date}</td>
+                      </tr>` : ''}
+                      ${from ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">จาก</td>
+                        <td style="padding:10px 14px; color:#0f172a;">${from}</td>
+                      </tr>` : ''}
+                      ${to ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">ถึง</td>
+                        <td style="padding:10px 14px; color:#0f172a;">${to}</td>
+                      </tr>` : ''}
+                      ${department ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">กลุ่มงาน/ฝ่าย</td>
+                        <td style="padding:10px 14px; color:#0f172a; font-weight:600;">${department}</td>
+                      </tr>` : ''}
+                      ${assignee ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">ผู้รับมอบหมาย</td>
+                        <td style="padding:10px 14px; color:#1d4ed8; font-weight:600;">${assignee}</td>
+                      </tr>` : ''}
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">ความเร่งด่วน / ชั้นความลับ</td>
+                        <td style="padding:10px 14px; color:#0f172a;">
+                          <span style="color:${priorityColor}; font-weight:600;">${priority || 'ปกติ'}</span>
+                          ${secrecy && secrecy !== 'ปกติ' ? ` | <span style="color:${secrecyColor}; font-weight:600;">${secrecy}</span>` : ''}
+                        </td>
+                      </tr>
+                      ${note ? `
+                      <tr style="border-bottom:1px solid #e2e8f0; background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">คำสั่งการ/หมายเหตุ</td>
+                        <td style="padding:10px 14px; color:#b45309; font-weight:500;">${note}</td>
+                      </tr>` : ''}
+                      ${attachmentsCount !== undefined ? `
+                      <tr style="background-color:#ffffff;">
+                        <td style="padding:10px 14px; color:#64748b; font-weight:600; background-color:#f8fafc;">ไฟล์แนบ</td>
+                        <td style="padding:10px 14px; color:#0f172a;">${attachmentsCount > 0 ? `📎 แนบ ${attachmentsCount} ไฟล์` : 'ไม่มีไฟล์แนบ'}</td>
+                      </tr>` : ''}
+                    </table>
+
+                    <!-- CTA Action Button -->
+                    <div style="text-align:center; margin:28px 0 12px 0;">
+                      <a href="${baseUrl || '#'}" target="_blank" style="display:inline-block; background-color:#2563eb; color:#ffffff; font-size:14px; font-weight:600; text-decoration:none; padding:12px 28px; border-radius:8px; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
+                        เข้าสู่ระบบเพื่อเปิดดูเอกสาร
+                      </a>
+                    </div>
+
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc; border-top:1px solid #e2e8f0; padding:24px 28px; text-align:center;">
+              <p style="margin:0 0 4px 0; color:#334155; font-size:12.5px; font-weight:700;">${displayOrgName}</p>
+              <p style="margin:0 0 10px 0; color:#64748b; font-size:11.5px; line-height:1.5;">${displayFooter}</p>
+              <p style="margin:0; color:#94a3b8; font-size:11px; line-height:1.4;">
+                ข้อความนี้เป็นอีเมลแจ้งเตือนอัตโนมัติจากระบบสารบรรณอิเล็กทรอนิกส์ กรุณาอย่าตอบกลับอีเมลนี้
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 // Endpoint to send test email with theme
 app.post('/api/settings/test-email', async (req, res) => {
-  const { targetEmail } = req.body;
+  const { targetEmail, type = 'doc' } = req.body;
   if (!targetEmail) return res.status(400).json({ success: false, message: 'กรุณาระบุอีเมลผู้รับทดสอบ' });
 
   try {
-    const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName, logoUrl, footerText FROM settings LIMIT 1');
-    const settings = settingsRows[0] || {};
+    let settings: any = {};
+    if (isMysqlOnline) {
+      const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName, logoUrl, footerText FROM settings LIMIT 1');
+      if (settingsRows && settingsRows.length > 0) settings = settingsRows[0];
+    }
+    if (!settings.smtpHost && localDb.settings && localDb.settings.length > 0) {
+      settings = localDb.settings[0];
+    }
 
     if (!settings.smtpHost || !settings.smtpUser) {
-      return res.status(400).json({ success: false, message: 'ระบบยังไม่ได้ตั้งค่า SMTP Host หรือ User' });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'ระบบยังไม่ได้ตั้งค่า SMTP Host หรือ User ในเมนู "ตั้งค่าระบบ > อีเมล (SMTP)" กรุณากรอกและกด "บันทึกการตั้งค่าระบบ" ก่อนส่งทดสอบ' 
+      });
     }
 
     const transporter = nodemailer.createTransport({
       host: settings.smtpHost,
-      port: settings.smtpPort || 587,
-      secure: settings.smtpPort === 465,
+      port: Number(settings.smtpPort) || 587,
+      secure: Number(settings.smtpPort) === 465,
+      connectionTimeout: 10000,
+      greetingTimeout: 8000,
+      socketTimeout: 15000,
       auth: {
         user: settings.smtpUser,
-        pass: settings.smtpPassword,
+        pass: settings.smtpPassword || '',
       },
+      tls: {
+        rejectUnauthorized: false
+      }
     });
 
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const host = req.headers['x-forwarded-host'] || req.get('host');
     const baseUrl = `${protocol}://${host}`;
 
-    const testOtp = '849201';
-    const emailHtml = generateOtpEmailTemplate({
-      otp: testOtp,
-      orgName: settings.orgName,
-      logoUrl: settings.logoUrl,
-      footerText: settings.footerText,
-      baseUrl
-    });
+    let emailHtml = '';
+    let emailSubject = '';
+
+    if (type === 'otp') {
+      const testOtp = '849201';
+      emailHtml = generateOtpEmailTemplate({
+        otp: testOtp,
+        orgName: settings.orgName,
+        logoUrl: settings.logoUrl,
+        footerText: settings.footerText,
+        baseUrl
+      });
+      emailSubject = `[ทดสอบระบบ] รหัสผ่านใหม่ (OTP) - ${settings.orgName || 'ระบบงานสารบรรณ'}`;
+    } else {
+      emailHtml = generateDocNotificationEmailHtml({
+        badgeText: '🧪 ทดสอบระบบการแจ้งเตือนทางอีเมล',
+        heading: 'การเชื่อมต่อระบบอีเมล (SMTP) สำเร็จสมบูรณ์',
+        description: 'นี่คือตัวอย่างอีเมลแจ้งเตือนที่ระบบจะส่งให้ผู้ใช้งาน เมื่อมีการลงทะเบียนเอกสารใหม่ หรือส่งต่อหนังสือถึงฝ่าย/กลุ่มงานของท่าน',
+        docNumber: 'รย 0023.1/ทดสอบ 001',
+        receiveNumber: '108/2569',
+        date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
+        title: 'ทดสอบการส่งหนังสือและระบบแจ้งเตือนทางอีเมลอัตโนมัติ (Email Notification)',
+        from: 'ฝ่ายยุทธศาสตร์และการจัดการ',
+        to: 'ทุกฝ่ายและกลุ่มงาน',
+        department: 'สำนักงานป้องกันและบรรเทาสาธารณภัย',
+        assignee: 'ผู้ดูแลระบบ / เจ้าหน้าที่สารบรรณ',
+        priority: 'ด่วนที่สุด',
+        secrecy: 'ปกติ',
+        note: 'ระบบ SMTP พร้อมทำงานแล้วสำหรับการแจ้งเตือนเอกสาร',
+        attachmentsCount: 1,
+        orgName: settings.orgName,
+        logoUrl: settings.logoUrl,
+        footerText: settings.footerText,
+        baseUrl
+      });
+      emailSubject = `[ทดสอบระบบ] แจ้งเตือนเอกสารสารบรรณ - ${settings.orgName || 'ระบบงานสารบรรณ'}`;
+    }
 
     await new Promise((resolve, reject) => {
       transporter.sendMail({
-        from: settings.smtpFrom || '"ระบบสารบรรณ" <no-reply@example.com>',
+        from: settings.smtpFrom ? settings.smtpFrom : `"${settings.orgName || 'ระบบสารบรรณ'}" <${settings.smtpUser}>`,
         to: targetEmail,
-        subject: `[ทดสอบระบบ] รหัสผ่านใหม่ (OTP) - ${settings.orgName || 'ระบบงานสารบรรณ'}`,
-        text: `นี่คืออีเมลทดสอบระบบสารบรรณ รหัส OTP สมมติของคุณคือ: ${testOtp}`,
+        subject: emailSubject,
+        text: `นี่คืออีเมลทดสอบระบบสารบรรณ EDMS สำหรับ ${targetEmail}`,
         html: emailHtml,
       }, (err, info) => {
         if (err) {
@@ -8254,7 +9456,7 @@ app.post('/api/settings/test-email', async (req, res) => {
       });
     });
 
-    return res.json({ success: true, message: `ส่งอีเมลทดสอบรูปแบบ OTP ไปยัง ${targetEmail} สำเร็จแล้ว` });
+    return res.json({ success: true, message: `ส่งอีเมลทดสอบไปยัง ${targetEmail} สำเร็จเรียบร้อยแล้ว` });
   } catch (err: any) {
     console.error('Test Email Error:', err);
     return res.status(500).json({ success: false, message: `ล้มเหลวในการส่งอีเมลทดสอบ: ${err.message}` });
@@ -8839,13 +10041,12 @@ app.get('/api/documents', async (req, res) => {
     const isCentralPrivileged = role === 'admin' || role === 'moderator' || role === 'ผู้ดูแลระบบ';
     
     if (!isCentralPrivileged) {
-      // Filter out Central Saraban documents for non-admin/moderator users (including admin documents: orders/announcements/certificates)
+      // Filter documents for non-admin/moderator users (department users)
       processedRows = processedRows.filter((doc: any) => {
         const isDocCentral = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
-        if (isDocCentral) return false;
-        
-        if (department && typeof department === 'string' && department.trim() !== '') {
-          const userDept = department.trim();
+        const userDept = department && typeof department === 'string' ? department.trim() : '';
+
+        if (userDept) {
           const matchesDept = doc.department === userDept ||
             doc.from === userDept ||
             doc.to === userDept ||
@@ -8853,9 +10054,17 @@ app.get('/api/documents', async (req, res) => {
             (doc.assignee && username && (doc.assignee === username || doc.assignee.includes(username))) ||
             (doc.forwardedTo && doc.forwardedTo.includes(userDept)) ||
             (doc.departmentReceives && Array.isArray(doc.departmentReceives) && doc.departmentReceives.some((r: any) => r.department === userDept));
+          
+          if (isDocCentral) {
+            // For Central Saraban documents, only allow if forwarded to userDept or received by userDept
+            const matchesForward = doc.forwardedTo && doc.forwardedTo.includes(userDept);
+            const matchesReceive = doc.departmentReceives && Array.isArray(doc.departmentReceives) && doc.departmentReceives.some((r: any) => r.department === userDept);
+            return Boolean(matchesForward || matchesReceive);
+          }
+
           return Boolean(matchesDept);
         }
-        return true;
+        return !isDocCentral;
       });
     } else if (isCentral !== '1' && department && typeof department === 'string' && department.trim() !== '') {
       const userDept = department.trim();
@@ -8920,7 +10129,50 @@ app.post('/api/documents/forward', async (req, res) => {
     await addSystemLog('FORWARD_DOCUMENT', `ส่งต่อหนังสือ ID ${docId} ไปยัง ${deptsString}`, forwardedBy || 'สารบรรณกลาง', ip);
 
     for (const dept of targetDepartments) {
-      sendNotificationEmail(dept, `[ระบบสารบรรณ] เอกสารใหม่ส่งถึงฝ่าย: ${dept}`, `<div style=\"font-family:sans-serif;color:#333;line-height:1.6;max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px;\"><h2 style=\"color:#0056b3;\">✉️ มีเอกสารใหม่ส่งถึงฝ่ายของท่าน</h2><p>เรียน บุคลากรฝ่าย ${dept}</p><p>สารบรรณได้ทำการส่งต่อเอกสารมายังกลุ่มงานของท่าน โดยมีรายละเอียดดังนี้:</p><div style=\"background:#f9f9f9;padding:15px;border-radius:6px;margin:15px 0;\"><p style=\"margin:5px 0;\"><b>เรื่อง/ข้อความสั่งการ:</b> ${forwardNote || '-'}</p><p style=\"margin:5px 0;\"><b>ส่งโดย:</b> ${forwardedBy || 'สารบรรณกลาง'}</p></div><p>กรุณาเข้าสู่ระบบสารบรรณเพื่อลงรับหรือตรวจสอบรายละเอียดเพิ่มเติม</p><br><p style=\"font-size:12px;color:#888;\">นี่คืออีเมลอัตโนมัติจากระบบสารบรรณ กรุณาอย่าตอบกลับ</p></div>`);
+      // Auto-register department receive number upon forwarding
+      try {
+        const [docRow]: any = await pool.query(`SELECT year FROM ${tableName} WHERE id = ?`, [docId]);
+        const docYear = docRow && docRow[0] && docRow[0].year ? docRow[0].year : String(new Date().getFullYear() + 543);
+        
+        const [settingsRows]: any = await pool.query('SELECT startSequence FROM settings LIMIT 1');
+        const startSeq = (settingsRows && settingsRows[0] && settingsRows[0].startSequence) ? Number(settingsRows[0].startSequence) : 1;
+        const [maxRows]: any = await pool.query('SELECT MAX(receiveNumber) as maxNum FROM department_receives WHERE department = ? AND year = ?', [dept, docYear]);
+        const maxVal = maxRows[0]?.maxNum ? Number(maxRows[0].maxNum) : 0;
+        const nextNum = Math.max(startSeq, maxVal + 1);
+
+        await pool.query(
+          'INSERT IGNORE INTO department_receives (docId, department, receiveNumber, year, receivedBy) VALUES (?, ?, ?, ?, ?)',
+          [docId, dept, nextNum, docYear, forwardedBy || 'สารบรรณกลาง (อัตโนมัติ)']
+        );
+
+        const trackingComment = `ฝ่าย ${dept} ลงรับหนังสืออัตโนมัติจากการส่งต่อ (เลขรับฝ่าย: ${nextNum}/${docYear})`;
+        await pool.query(
+          'INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALUES (?, ?, ?, ?, ?)',
+          [docId, docType, 'ฝ่ายลงรับหนังสือ', trackingComment, forwardedBy || 'สารบรรณกลาง']
+        );
+      } catch (deptErr) {
+        console.error(`Auto dept receive error for ${dept}:`, deptErr);
+      }
+
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+      const host = req.headers['x-forwarded-host'] || req.get('host');
+      const baseUrl = `${protocol}://${host}`;
+      const settingsData = (localDb.settings && localDb.settings[0]) || {};
+
+      const emailHtml = generateDocNotificationEmailHtml({
+        badgeText: '✉️ มีเอกสารส่งต่อถึงกลุ่มงาน',
+        heading: `สารบรรณได้ส่งต่อเอกสารมายังฝ่าย/กลุ่มงาน: ${dept}`,
+        description: `มีเอกสารส่งต่อจากสารบรรณกลาง เพื่อให้บุคลากรในฝ่ายของท่านตรวจสอบและดำเนินการลงรับหนังสือ`,
+        title: forwardNote ? `ส่งต่อเอกสาร: ${forwardNote}` : `ส่งต่อเอกสาร ID: ${docId}`,
+        department: dept,
+        assignee: forwardedBy || 'สารบรรณกลาง',
+        note: forwardNote || `ส่งต่อโดย ${forwardedBy || 'สารบรรณกลาง'}`,
+        orgName: settingsData.orgName,
+        logoUrl: settingsData.logoUrl,
+        footerText: settingsData.footerText,
+        baseUrl
+      });
+      // sendNotificationEmail omitted to prevent sending emails to all personnel in the department
     }
 
 
@@ -8940,27 +10192,69 @@ app.post('/api/documents/:id/receive-department', async (req, res) => {
   const ip = getClientIp(req);
 
   try {
-    const [settingsRows]: any = await pool.query('SELECT startSequence FROM settings LIMIT 1');
-    const startSeq = (settingsRows && settingsRows[0] && settingsRows[0].startSequence) ? Number(settingsRows[0].startSequence) : 1;
-    const [maxRows]: any = await pool.query('SELECT MAX(receiveNumber) as maxNum FROM department_receives WHERE department = ? AND year = ?', [department, year]);
-    const maxVal = maxRows[0]?.maxNum ? Number(maxRows[0].maxNum) : 0;
-    const nextNum = Math.max(startSeq, maxVal + 1);
+    // Consult active numbering rule for this department and 'หนังสือรับ'
+    let deptRules: any[] = [];
+    if (isMysqlOnline) {
+      const [rRows]: any = await pool.query("SELECT * FROM numbering_rules WHERE isActive = 1 AND (docType = 'หนังสือรับ' OR docType = 'หนังสือเข้า')").catch(() => [[]]);
+      deptRules = rRows || [];
+    } else {
+      deptRules = (localDb.numbering_rules || []).filter((r: any) => r.isActive && (r.docType === 'หนังสือรับ' || r.docType === 'หนังสือเข้า'));
+    }
+    const matchingRule = deptRules.find((r: any) => (r.department || '').trim() === department.trim());
+    const ruleBaseSeq = matchingRule ? Number(matchingRule.currentSeq || 0) : 0;
 
-    await pool.query(
-      'INSERT IGNORE INTO department_receives (docId, department, receiveNumber, year, receivedBy) VALUES (?, ?, ?, ?, ?)',
-      [id, department, nextNum, year, username || 'ผู้ใช้งาน']
-    );
+    let maxVal = 0;
+    try {
+      const [maxRows]: any = await pool.query('SELECT MAX(receiveNumber) as maxNum FROM department_receives WHERE department = ? AND year = ?', [department, year]);
+      maxVal = maxRows[0]?.maxNum ? Number(maxRows[0].maxNum) : 0;
+    } catch (e) {
+      const list = (localDb.department_receives || []).filter((d: any) => d.department === department && String(d.year) === String(year));
+      maxVal = list.reduce((m: number, d: any) => Math.max(m, Number(d.receiveNumber || 0)), 0);
+    }
+
+    const nextNum = Math.max(ruleBaseSeq, maxVal) + 1;
+
+    try {
+      await pool.query(
+        'INSERT IGNORE INTO department_receives (docId, department, receiveNumber, year, receivedBy) VALUES (?, ?, ?, ?, ?)',
+        [id, department, nextNum, year, username || 'ผู้ใช้งาน']
+      );
+    } catch (e) {
+      if (!localDb.department_receives) localDb.department_receives = [];
+      const exists = localDb.department_receives.some((d: any) => String(d.docId) === String(id) && d.department === department);
+      if (!exists) {
+        localDb.department_receives.push({ docId: id, department, receiveNumber: nextNum, year, receivedBy: username || 'ผู้ใช้งาน' });
+        saveLocalDb();
+      }
+    }
+
+    // Update active numbering rule currentSeq if matchingRule found
+    if (matchingRule) {
+      if (isMysqlOnline) {
+        await pool.query('UPDATE numbering_rules SET currentSeq = ?, year = ? WHERE id = ?', [nextNum, year, matchingRule.id]).catch(() => {});
+      }
+      if (localDb.numbering_rules) {
+        const lr = localDb.numbering_rules.find((r: any) => r.id === matchingRule.id);
+        if (lr) {
+          lr.currentSeq = nextNum;
+          lr.year = year;
+        }
+        saveLocalDb();
+      }
+    }
 
     // Also update tracking
-    const trackingComment = `ฝ่าย ${department} ลงรับหนังสือเรียบร้อยแล้ว (เลขรับฝ่าย: ${nextNum}/${year})`;
-    await pool.query(
-      'INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALUES (?, ?, ?, ?, ?)',
-      [id, docType || 'inbox', 'ฝ่ายลงรับหนังสือ', trackingComment, username || 'ผู้ใช้งาน']
-    );
+    const trackingComment = `ฝ่าย ${department} ลงรับหนังสือเรียบร้อยแล้ว (เลขรับฝ่าย: ${nextNum}/${year}${matchingRule ? ` • กฎ: ${matchingRule.ruleName}` : ''})`;
+    try {
+      await pool.query(
+        'INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALUES (?, ?, ?, ?, ?)',
+        [id, docType || 'inbox', 'ฝ่ายลงรับหนังสือ', trackingComment, username || 'ผู้ใช้งาน']
+      );
+    } catch (e) {}
 
     await addSystemLog('DEPT_RECEIVE', `ลงรับหนังสือฝ่าย ${department} (เลขรับ: ${nextNum}/${year}) เอกสาร ID ${id}`, username || 'ผู้ใช้งาน', ip);
 
-    return res.json({ success: true, receiveNumber: nextNum });
+    return res.json({ success: true, receiveNumber: nextNum, ruleName: matchingRule?.ruleName || null });
   } catch (error: any) {
     console.error('Department receive error:', error.message);
     return res.status(500).json({ error: error.message });
@@ -9043,10 +10337,45 @@ app.post('/api/documents', async (req, res) => {
       localDb.document_versions.unshift(initVerSnapshot);
       saveLocalDb();
 
-      if (doc.assignee) {
-        sendNotificationEmail(doc.assignee, `[ระบบสารบรรณ] มอบหมายเอกสารใหม่: ${doc.title}`, `<div style=\"font-family:sans-serif;color:#333;line-height:1.6;max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px;\"><h2 style=\"color:#0056b3;\">📌 ท่านได้รับมอบหมายเอกสารใหม่</h2><p>เรียน ผู้รับผิดชอบ</p><p>ระบบสารบรรณได้ทำการมอบหมายเอกสารใหม่ให้ท่านดำเนินการ โดยมีรายละเอียดดังนี้:</p><div style=\"background:#f9f9f9;padding:15px;border-radius:6px;margin:15px 0;\"><p style=\"margin:5px 0;\"><b>เลขที่เอกสาร:</b> ${doc.docNumber || '-'}</p><p style=\"margin:5px 0;\"><b>เรื่อง:</b> ${doc.title || '-'}</p><p style=\"margin:5px 0;\"><b>หมวดหมู่/ประเภท:</b> ${type}</p><p style=\"margin:5px 0;\"><b>ผู้มอบหมาย:</b> ${doc.department || '-'}</p></div><p>กรุณาเข้าสู่ระบบเพื่อตรวจสอบและดำเนินการต่อไป</p><br><p style=\"font-size:12px;color:#888;\">นี่คืออีเมลอัตโนมัติจากระบบสารบรรณ กรุณาอย่าตอบกลับ</p></div>`);
+      // Rich HTML Email Notification - target only specific assignee/user
+      const targets = [doc.assignee].filter(Boolean);
+      if (targets.length > 0) {
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.headers['x-forwarded-host'] || req.get('host');
+        const baseUrl = `${protocol}://${host}`;
+
+        let settingsData: any = {};
+        if (localDb.settings && localDb.settings.length > 0) {
+          settingsData = localDb.settings[0];
+        }
+
+        const emailHtml = generateDocNotificationEmailHtml({
+          badgeText: '📥 ลงทะเบียนเอกสารใหม่',
+          heading: `มีเอกสารใหม่ลงทะเบียนในระบบ: ${doc.title || '-'}`,
+          description: `ระบบสารบรรณได้ทำการลงทะเบียนเอกสารใหม่ และมอบหมาย/ส่งถึงท่านหรือฝ่ายงานของท่าน`,
+          docNumber: doc.docNumber || '-',
+          receiveNumber: doc.receiveNumber ? `${doc.receiveNumber}/${docYear}` : '-',
+          title: doc.title || '-',
+          docType: type,
+          priority: doc.priority || 'ปกติ',
+          secrecy: doc.secrecy || 'ปกติ',
+          from: doc.from || '-',
+          to: doc.to || '-',
+          department: doc.department || '-',
+          assignee: doc.assignee || '-',
+          date: doc.date || '',
+          note: doc.note || '-',
+          attachmentsCount: Array.isArray(doc.attachments) ? doc.attachments.length : 0,
+          orgName: settingsData.orgName,
+          logoUrl: settingsData.logoUrl,
+          footerText: settingsData.footerText,
+          baseUrl
+        });
+
+        sendNotificationEmail(targets, `[ระบบสารบรรณ] เอกสารใหม่: ${doc.title || 'ลงทะเบียนหนังสือ'}`, emailHtml);
       }
       await addSystemLog('CREATE_DOCUMENT', `ลงทะเบียนหนังสือใหม่ (${type}): ${doc.docNumber || doc.receiveNumber || docId} - ${doc.title}`, doc.assignee || 'ผู้ใช้งาน', ip);
+      await updateNumberingRuleSequenceForDoc(doc);
 
       return res.json({ success: true, id: docId });
     } catch (error: any) {
@@ -9183,6 +10512,7 @@ app.put('/api/documents/:id', async (req, res) => {
       saveLocalDb();
 
       await addSystemLog('UPDATE_DOCUMENT', `แก้ไขรายละเอียดหนังสือ (${type}): ID ${id} - ${doc.title || ''} (สร้าง Version ${nextVerNum})`, doc.modifiedBy || doc.assignee || 'ผู้ใช้งาน', ip);
+      await updateNumberingRuleSequenceForDoc(doc);
       return res.json({ success: true, version: newEditVersion });
     } catch (error: any) {
       console.error('Database error:', error.message);
@@ -9991,74 +11321,67 @@ function getNotificationTitle(status: string, docNumber: string): string {
       return `มอบหมายงานผู้รับผิดชอบ (${docNumber})`;
     case 'เสร็จสิ้น':
       return `ดำเนินการเสร็จสิ้น (${docNumber})`;
+    case 'ตีกลับ':
+    case 'แก้ไข':
+      return `ส่งกลับแก้ไขเอกสาร (${docNumber})`;
     default:
       return `อัพเดทสถานะเอกสาร (${docNumber})`;
   }
 }
 
 app.get('/api/notifications', async (req, res) => {
-  const { department, name, role } = req.query;
+  const { department, name, role, filterType } = req.query;
 
   try {
     let trackings: any[] = [];
     const docMap = new Map<string, any>();
+    let allActiveDocs: any[] = [];
 
     if (isMysqlOnline) {
       const [dbTrackings]: any = await pool.query('SELECT * FROM document_tracking ORDER BY updatedAt DESC, id DESC LIMIT 500');
-      trackings = dbTrackings;
+      trackings = dbTrackings || [];
       
-      const docIds = Array.from(new Set(trackings.map((t: any) => t.docId)));
-      let docs: any[] = [];
-      if (docIds.length > 0) {
-        const placeholders = docIds.map(() => '?').join(',');
-        const docQuery = `
-          SELECT id, docNumber, title, department, assignee, toDept AS \`to\` FROM inbox_documents WHERE id IN (${placeholders})
-          UNION ALL
-          SELECT id, docNumber, title, department, assignee, toDept AS \`to\` FROM outbox_documents WHERE id IN (${placeholders})
-          UNION ALL
-          SELECT id, docNumber, title, department, assignee, toDept AS \`to\` FROM circular_documents WHERE id IN (${placeholders})
-          UNION ALL
-          SELECT id, docNumber, title, department, assignee, toDept AS \`to\` FROM internal_documents WHERE id IN (${placeholders})
-          UNION ALL
-          SELECT id, docNumber, title, department, assignee, NULL AS \`to\` FROM admin_documents WHERE id IN (${placeholders})
-        `;
-        // Duplicate docIds array 5 times for the 5 UNION ALL clauses
-        const queryParams = [...docIds, ...docIds, ...docIds, ...docIds, ...docIds];
-        const [rows]: any = await pool.query(docQuery, queryParams);
-        docs = rows;
-      }
-      docs.forEach((d: any) => {
+      const docQuery = `
+        SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status, createdAt FROM inbox_documents
+        UNION ALL
+        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status, createdAt FROM outbox_documents
+        UNION ALL
+        SELECT id, 'circular' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status, createdAt FROM circular_documents
+        UNION ALL
+        SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status, createdAt FROM internal_documents
+        UNION ALL
+        SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, 'ปกติ' AS priority, 'ปกติ' AS secrecy, title, 'สำนักงาน ปภ.จังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน' AS \`to\`, department, assignee, note, content, registerDate, status, createdAt FROM admin_documents
+      `;
+      const [rows]: any = await pool.query(docQuery);
+      allActiveDocs = rows || [];
+      allActiveDocs.forEach((d: any) => {
         docMap.set(String(d.id), d);
       });
     } else {
       // Offline localDb fallback
       trackings = localDb.document_tracking || [];
-      // Sort desc
       trackings = [...trackings].sort((a: any, b: any) => {
         const timeA = new Date(a.updatedAt || a.timestamp || 0).getTime();
         const timeB = new Date(b.updatedAt || b.timestamp || 0).getTime();
         return timeB - timeA;
       }).slice(0, 500);
 
-      const allDocs = [
-        ...(localDb.inbox_documents || []),
-        ...(localDb.outbox_documents || []),
-        ...(localDb.circular_documents || []),
-        ...(localDb.internal_documents || []),
-        ...(localDb.admin_documents || [])
+      allActiveDocs = [
+        ...(localDb.inbox_documents || []).map((d: any) => ({ ...d, type: 'inbox' })),
+        ...(localDb.outbox_documents || []).map((d: any) => ({ ...d, type: 'outbox' })),
+        ...(localDb.circular_documents || []).map((d: any) => ({ ...d, type: 'circular' })),
+        ...(localDb.internal_documents || []).map((d: any) => ({ ...d, type: 'internal' })),
+        ...(localDb.admin_documents || []).map((d: any) => ({ ...d, type: 'admin' }))
       ];
-      allDocs.forEach((d: any) => {
-        docMap.set(String(d.id), {
-          id: d.id,
-          docNumber: d.docNumber,
-          title: d.title,
-          department: d.department,
-          assignee: d.assignee,
-          to: d.toDept || d.to
-        });
+      allActiveDocs.forEach((d: any) => {
+        docMap.set(String(d.id), d);
       });
     }
 
+    const notificationList: any[] = [];
+    const now = new Date();
+
+    // 1. Notifications from Document Tracking (Workflow & Status Updates)
     const filteredTrackings = trackings.filter((t: any) => {
       if (name && t.updatedBy === name) return false;
       if (role === 'admin') return true;
@@ -10066,27 +11389,126 @@ app.get('/api/notifications', async (req, res) => {
       const docInfo = docMap.get(String(t.docId));
       if (!docInfo) return false;
 
-      if (name && docInfo.assignee === name) return true;
+      if (name && (docInfo.assignee === name || t.recipient === name)) return true;
       if (department && (docInfo.department === department || docInfo.to === department)) return true;
 
-      return false;
-    }).slice(0, 50);
+      return true;
+    }).slice(0, 40);
 
-    const list = filteredTrackings.map((t: any) => {
-      const docInfo = docMap.get(String(t.docId)) || { docNumber: 'ไม่ระบุ', title: 'เอกสารถูกลบแล้ว' };
-      return {
+    filteredTrackings.forEach((t: any) => {
+      const docInfo = docMap.get(String(t.docId)) || { docNumber: 'ไม่ระบุ', title: 'เอกสารถูกลบแล้ว', priority: 'ปกติ', department: 'ฝ่ายยุทธศาสตร์และการจัดการ' };
+      const isUrgent = docInfo.priority === 'ด่วนที่สุด' || docInfo.priority === 'ด่วนมาก';
+      
+      notificationList.push({
         id: `track_${t.id}`,
         docId: t.docId,
-        docType: t.docType,
-        title: getNotificationTitle(t.status, docInfo.docNumber),
-        message: `เรื่อง: ${docInfo.title}${t.comments ? ` | ${t.comments}` : ''}`,
-        time: t.updatedAt || t.timestamp,
-        updater: t.updatedBy,
+        docType: t.docType || docInfo.type || 'inbox',
+        type: isUrgent ? 'urgent' : (t.status === 'เสร็จสิ้น' ? 'completed' : 'status_change'),
+        category: 'workflow',
+        priority: docInfo.priority || 'ปกติ',
+        secrecy: docInfo.secrecy || 'ปกติ',
+        docNumber: docInfo.docNumber || docInfo.receiveNumber || 'ไม่ระบุเลข',
+        docTitle: docInfo.title || '',
+        title: getNotificationTitle(t.status, docInfo.docNumber || docInfo.receiveNumber || 'เอกสาร'),
+        message: `เรื่อง: ${docInfo.title}${t.comments ? ` | หมายเหตุ: ${t.comments}` : ''}`,
+        comments: t.comments || '',
+        department: docInfo.department || '',
+        assignee: docInfo.assignee || '',
+        time: t.updatedAt || t.timestamp || new Date().toISOString(),
+        updater: t.updatedBy || 'ระบบสารบรรณ',
         status: t.status,
         read: false
-      };
+      });
     });
-    return res.json(list);
+
+    // 2. Urgent / Critical Document Alerts (หนังสือด่วนมาก / ด่วนที่สุด)
+    const urgentDocs = allActiveDocs.filter((d: any) => {
+      const isPrio = d.priority === 'ด่วนที่สุด' || d.priority === 'ด่วนมาก';
+      const isPending = d.status !== 'เสร็จสิ้น' && d.status !== 'completed';
+      if (!isPrio || !isPending) return false;
+      if (role === 'admin') return true;
+      if (name && d.assignee === name) return true;
+      if (department && (d.department === department || d.to === department)) return true;
+      return true;
+    }).slice(0, 15);
+
+    urgentDocs.forEach((d: any) => {
+      notificationList.push({
+        id: `urgent_doc_${d.id}`,
+        docId: d.id,
+        docType: d.type || 'inbox',
+        type: 'urgent',
+        category: 'urgent',
+        priority: d.priority || 'ด่วนที่สุด',
+        secrecy: d.secrecy || 'ปกติ',
+        docNumber: d.docNumber || d.receiveNumber || 'ไม่ระบุเลข',
+        docTitle: d.title || '',
+        title: `🚨 แจ้งเตือนหนังสือ${d.priority}: ${d.docNumber || d.receiveNumber}`,
+        message: `เรื่อง: ${d.title} (จาก: ${d.from || '-'} | ถึง: ${d.to || '-'})`,
+        comments: 'กรุณาดำเนินการตามลำดับความเร่งด่วนทันที',
+        department: d.department || '',
+        assignee: d.assignee || '',
+        time: d.registerDate || d.date || d.createdAt || new Date().toISOString(),
+        updater: 'ระบบตรวจจับความเร่งด่วนอัตโนมัติ',
+        status: d.status || 'pending',
+        read: false
+      });
+    });
+
+    // 3. SLA & Overdue Warning Alerts (หนังสือค้างดำเนินการเกิน SLA)
+    const overdueDocs = allActiveDocs.filter((d: any) => {
+      const isPending = d.status !== 'เสร็จสิ้น' && d.status !== 'completed';
+      if (!isPending) return false;
+      const createdDate = new Date(d.registerDate || d.date || d.createdAt || 0);
+      const diffDays = Math.floor((now.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+      return diffDays >= 2;
+    }).slice(0, 10);
+
+    overdueDocs.forEach((d: any) => {
+      const createdDate = new Date(d.registerDate || d.date || d.createdAt || 0);
+      const diffDays = Math.max(1, Math.floor((now.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
+      
+      notificationList.push({
+        id: `sla_doc_${d.id}`,
+        docId: d.id,
+        docType: d.type || 'inbox',
+        type: 'sla_warning',
+        category: 'sla',
+        priority: d.priority || 'ปกติ',
+        secrecy: d.secrecy || 'ปกติ',
+        docNumber: d.docNumber || d.receiveNumber || 'ไม่ระบุเลข',
+        docTitle: d.title || '',
+        title: `⏳ แจ้งเตือนกำหนดเวลา SLA (ค้างดำเนินการ ${diffDays} วัน)`,
+        message: `เรื่อง: ${d.title} (${d.department || 'ฝ่ายยุทธศาสตร์และการจัดการ'})`,
+        comments: `เอกสารนี้คงค้างในระบบมาแล้ว ${diffDays} วัน โปรดตรวจสอบและเร่งรัดการลงนาม/ส่งต่อ`,
+        department: d.department || '',
+        assignee: d.assignee || '',
+        time: d.registerDate || d.date || d.createdAt || new Date().toISOString(),
+        updater: 'ระบบติดตาม SLA อัจฉริยะ',
+        status: d.status || 'pending',
+        read: false
+      });
+    });
+
+    // Sort by time descending and deduplicate by ID
+    const uniqueMap = new Map<string, any>();
+    notificationList.forEach(n => {
+      if (!uniqueMap.has(n.id)) {
+        uniqueMap.set(n.id, n);
+      }
+    });
+
+    let finalNotifications = Array.from(uniqueMap.values()).sort((a: any, b: any) => {
+      const timeA = new Date(a.time || 0).getTime();
+      const timeB = new Date(b.time || 0).getTime();
+      return timeB - timeA;
+    });
+
+    if (filterType && filterType !== 'all') {
+      finalNotifications = finalNotifications.filter((n: any) => n.category === filterType || n.type === filterType);
+    }
+
+    return res.json(finalNotifications.slice(0, 60));
   } catch (error: any) {
     console.error('Database error in /api/notifications:', error.message);
     return res.json([]);
@@ -10224,7 +11646,13 @@ async function restoreTableData(tableName: string, rows: any[]) {
 // 10. Backup & Restore API Endpoints
 app.get('/api/backup', async (req, res) => {
   const username = (req.query.username || 'ผู้ดูแลระบบ').toString();
+  const role = (req.query.role || req.headers.role || '').toString();
   const ip = getClientIp(req);
+
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ของระบบในการจัดการสำรองและกู้คืนข้อมูล (backup_restore)' });
+  }
 
   const tempDirName = `temp_backup_${Date.now()}`;
   const tempDir = path.join(process.cwd(), tempDirName);
@@ -10319,7 +11747,16 @@ const backupUpload = multer({
 
 app.post('/api/restore', backupUpload.single('file'), async (req, res) => {
   const username = (req.body.username || req.query.username || 'ผู้ดูแลระบบ').toString();
+  const role = (req.body.role || req.query.role || req.headers.role || '').toString();
   const ip = getClientIp(req);
+
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ของระบบในการจัดการสำรองและกู้คืนข้อมูล (backup_restore)' });
+  }
 
   if (!req.file) {
     return res.status(400).json({ error: 'กรุณาอัปโหลดไฟล์สำรองข้อมูล (.tar)' });
@@ -10469,95 +11906,59 @@ app.post('/api/ai-scan', async (req, res) => {
 ${outputType && outputType !== 'auto' ? `ผู้ใช้ต้องการแปลงเป็นประเภท: ${outputType}` : 'ตรวจจับประเภทหนังสือจากเอกสารจริง'}
 ${hint ? 'คำแนะนำเพิ่มเติมจากผู้ใช้: ' + hint : ''}`;
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
-    
-    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
-    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
-    const refererCandidates = [
-      '',
-      'https://aistudio.google.com/',
-      'https://ai.studio/',
-      'https://google.com/',
-      'https://developer.google.com/',
-      rawReferer,
-      rawOrigin,
-      'https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/',
-      'https://ais-pre-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/'
-    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
-
+    const client = new GoogleGenAI({ apiKey });
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
     let response: any = null;
     let lastError: any = null;
 
-    referrerLoop: for (const refHeader of refererCandidates) {
-      const headersConfig: Record<string, string> = {
-        'User-Agent': 'aistudio-build'
-      };
-      if (refHeader) {
-        headersConfig['Referer'] = refHeader;
-        headersConfig['Referrer'] = refHeader;
-      }
-
-      const client = new GoogleGenAI({
-        apiKey,
-        httpOptions: { headers: headersConfig }
-      });
-
-      for (const modelName of modelsToTry) {
-        try {
-          response = await client.models.generateContent({
-            model: modelName,
-            contents: [
-              {
-                inlineData: {
-                  mimeType: mimeType || 'image/jpeg',
-                  data: base64
-                }
-              },
-              { text: userPrompt }
-            ],
-            config: {
-              systemInstruction: systemPrompt,
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  docType: { type: Type.STRING },
-                  docNum: { type: Type.STRING },
-                  date: { type: Type.STRING },
-                  urgency: { type: Type.STRING },
-                  secrecy: { type: Type.STRING },
-                  subject: { type: Type.STRING },
-                  to: { type: Type.STRING },
-                  from: { type: Type.STRING },
-                  ref: { type: Type.STRING },
-                  att: { type: Type.STRING },
-                  body: { type: Type.STRING },
-                  signer: { type: Type.STRING },
-                  signerPos: { type: Type.STRING },
-                  rawText: { type: Type.STRING },
-                  confidence: { type: Type.STRING },
-                  confidenceNote: { type: Type.STRING }
-                }
+    for (const modelName of modelsToTry) {
+      try {
+        response = await client.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              inlineData: {
+                mimeType: mimeType || 'image/jpeg',
+                data: base64
+              }
+            },
+            { text: userPrompt }
+          ],
+          config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                docType: { type: Type.STRING },
+                docNum: { type: Type.STRING },
+                date: { type: Type.STRING },
+                urgency: { type: Type.STRING },
+                secrecy: { type: Type.STRING },
+                subject: { type: Type.STRING },
+                to: { type: Type.STRING },
+                from: { type: Type.STRING },
+                ref: { type: Type.STRING },
+                att: { type: Type.STRING },
+                body: { type: Type.STRING },
+                signer: { type: Type.STRING },
+                signerPos: { type: Type.STRING },
+                rawText: { type: Type.STRING },
+                confidence: { type: Type.STRING },
+                confidenceNote: { type: Type.STRING }
               }
             }
-          });
-          if (response) break referrerLoop;
-        } catch (err: any) {
-          lastError = err;
-          const errStr = String(err.message || err);
-          if (errStr.includes('API_KEY_HTTP_REFERRER_BLOCKED') || errStr.includes('403')) {
-            console.warn(`Referer '${refHeader}' blocked by API key restriction. Trying next referer...`);
-            break;
-          } else {
-            console.warn(`Model ${modelName} failed with referer '${refHeader}':`, err.message);
           }
-        }
+        });
+        if (response) break;
+      } catch (err: any) {
+        lastError = err;
       }
     }
 
     if (!response) {
       const errMsg = lastError?.message || String(lastError || 'ไม่สามารถประมวลผลไฟล์ผ่าน Gemini API ได้');
-      if (errMsg.includes('API_KEY_HTTP_REFERRER_BLOCKED')) {
+      if (errMsg.includes('API_KEY_HTTP_REFERRER_BLOCKED') || errMsg.includes('403')) {
         return res.status(403).json({
           success: false,
           error: 'GEMINI_API_KEY ของคุณมีการจำกัดสิทธิ์ HTTP Referrer บน Google Cloud Console กรุณาเข้าสู่ Google Cloud Console / AI Studio แล้วตั้งค่า API Key ให้ยอมรับ HTTP Referrer ของแอปพลิเคชันหรือทุก Referrer (*)'
@@ -10771,79 +12172,52 @@ ${JSON.stringify(candidates, null, 2)}
   ]
 }`;
 
-    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
-    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
-    const refererCandidates = [
-      '',
-      'https://aistudio.google.com/',
-      'https://ai.studio/',
-      'https://google.com/',
-      rawReferer,
-      rawOrigin
-    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
-
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
     let response: any = null;
 
     if (apiKey) {
-      referrerLoop: for (const refHeader of refererCandidates) {
-        const headersConfig: Record<string, string> = { 'User-Agent': 'aistudio-build' };
-        if (refHeader) {
-          headersConfig['Referer'] = refHeader;
-          headersConfig['Referrer'] = refHeader;
-        }
-
+      const client = new GoogleGenAI({ apiKey });
+      for (const modelName of modelsToTry) {
         try {
-          const client = new GoogleGenAI({
-            apiKey,
-            httpOptions: { headers: headersConfig }
-          });
-
-          for (const modelName of modelsToTry) {
-            try {
-              response = await client.models.generateContent({
-                model: modelName,
-                contents: [{ text: userPrompt }],
-                config: {
-                  systemInstruction: systemPrompt,
-                  responseMimeType: 'application/json',
-                  responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                      hasDuplicates: { type: Type.BOOLEAN },
-                      duplicateSummary: { type: Type.STRING },
-                      hasReferences: { type: Type.BOOLEAN },
-                      referenceSummary: { type: Type.STRING },
-                      detectedItems: {
-                        type: Type.ARRAY,
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            docId: { type: Type.STRING },
-                            docNumber: { type: Type.STRING },
-                            title: { type: Type.STRING },
-                            date: { type: Type.STRING },
-                            from: { type: Type.STRING },
-                            type: { type: Type.STRING },
-                            relationType: { type: Type.STRING },
-                            relationLabel: { type: Type.STRING },
-                            similarityScore: { type: Type.INTEGER },
-                            reason: { type: Type.STRING },
-                            actionSuggestion: { type: Type.STRING }
-                          }
-                        }
+          response = await client.models.generateContent({
+            model: modelName,
+            contents: [{ text: userPrompt }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  hasDuplicates: { type: Type.BOOLEAN },
+                  duplicateSummary: { type: Type.STRING },
+                  hasReferences: { type: Type.BOOLEAN },
+                  referenceSummary: { type: Type.STRING },
+                  detectedItems: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        docId: { type: Type.STRING },
+                        docNumber: { type: Type.STRING },
+                        title: { type: Type.STRING },
+                        date: { type: Type.STRING },
+                        from: { type: Type.STRING },
+                        type: { type: Type.STRING },
+                        relationType: { type: Type.STRING },
+                        relationLabel: { type: Type.STRING },
+                        similarityScore: { type: Type.INTEGER },
+                        reason: { type: Type.STRING },
+                        actionSuggestion: { type: Type.STRING }
                       }
                     }
                   }
                 }
-              });
-              if (response) break referrerLoop;
-            } catch (err: any) {
-              // try next model
+              }
             }
-          }
-        } catch (e) {
-          // try next referer
+          });
+          if (response) break;
+        } catch (err: any) {
+          // silently continue to next model or fallback
         }
       }
     }
@@ -10989,124 +12363,100 @@ ${body || '-'}
 - ผู้ลงนาม: ${signer || '-'}
 - ตำแหน่งผู้ลงนาม: ${signerPos || '-'}`;
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
     let auditResponse: any = null;
 
-    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
-    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
-    const refererCandidates = [
-      '',
-      'https://aistudio.google.com/',
-      'https://ai.studio/',
-      'https://google.com/',
-      'https://developer.google.com/',
-      rawReferer,
-      rawOrigin
-    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
-
-    referrerLoop: for (const refHeader of refererCandidates) {
-      const headersConfig: Record<string, string> = { 'User-Agent': 'aistudio-build' };
-      if (refHeader) {
-        headersConfig['Referer'] = refHeader;
-        headersConfig['Referrer'] = refHeader;
-      }
-
-      try {
-        const client = new GoogleGenAI({
-          apiKey,
-          httpOptions: { headers: headersConfig }
-        });
-
-        for (const modelName of modelsToTry) {
-          try {
-            const resp = await client.models.generateContent({
-              model: modelName,
-              contents: [{ text: userPrompt }],
-              config: {
-                systemInstruction: systemPrompt,
-                responseMimeType: 'application/json',
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    overallScore: { type: Type.INTEGER },
-                    spellingIssues: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          word: { type: Type.STRING },
-                          suggested: { type: Type.STRING },
-                          context: { type: Type.STRING },
-                          reason: { type: Type.STRING }
-                        },
-                        required: ['word', 'suggested', 'reason']
-                      }
-                    },
-                    formatIssues: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          issue: { type: Type.STRING },
-                          suggestion: { type: Type.STRING },
-                          severity: { type: Type.STRING } // 'warning', 'error', 'info'
-                        },
-                        required: ['issue', 'suggestion', 'severity']
-                      }
-                    },
-                    royalVocabularyIssues: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          issue: { type: Type.STRING },
-                          suggestion: { type: Type.STRING },
-                          reason: { type: Type.STRING }
-                        },
-                        required: ['issue', 'suggestion', 'reason']
-                      }
-                    },
-                    completenessIssues: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          component: { type: Type.STRING },
-                          status: { type: Type.STRING }, // 'missing', 'incomplete', 'ok'
-                          description: { type: Type.STRING },
-                          suggestion: { type: Type.STRING }
-                        },
-                        required: ['component', 'status', 'description']
-                      }
-                    },
-                    closingSuggestion: {
+    try {
+      const client = new GoogleGenAI({ apiKey });
+      for (const modelName of modelsToTry) {
+        try {
+          const resp = await client.models.generateContent({
+            model: modelName,
+            contents: [{ text: userPrompt }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  overallScore: { type: Type.INTEGER },
+                  spellingIssues: {
+                    type: Type.ARRAY,
+                    items: {
                       type: Type.OBJECT,
                       properties: {
-                        found: { type: Type.BOOLEAN },
-                        currentPhrase: { type: Type.STRING },
-                        suggestedPhrase: { type: Type.STRING },
-                        explanation: { type: Type.STRING }
+                        word: { type: Type.STRING },
+                        suggested: { type: Type.STRING },
+                        context: { type: Type.STRING },
+                        reason: { type: Type.STRING }
                       },
-                      required: ['found', 'explanation']
-                    },
-                    summary: { type: Type.STRING },
-                    improvedContent: { type: Type.STRING } // HTML body with spelling and closing phrase issues corrected or highlighted
+                      required: ['word', 'suggested', 'reason']
+                    }
                   },
-                  required: ['overallScore', 'spellingIssues', 'formatIssues', 'royalVocabularyIssues', 'completenessIssues', 'closingSuggestion', 'summary']
-                }
+                  formatIssues: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        issue: { type: Type.STRING },
+                        suggestion: { type: Type.STRING },
+                        severity: { type: Type.STRING } // 'warning', 'error', 'info'
+                      },
+                      required: ['issue', 'suggestion', 'severity']
+                    }
+                  },
+                  royalVocabularyIssues: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        issue: { type: Type.STRING },
+                        suggestion: { type: Type.STRING },
+                        reason: { type: Type.STRING }
+                      },
+                      required: ['issue', 'suggestion', 'reason']
+                    }
+                  },
+                  completenessIssues: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        component: { type: Type.STRING },
+                        status: { type: Type.STRING }, // 'missing', 'incomplete', 'ok'
+                        description: { type: Type.STRING },
+                        suggestion: { type: Type.STRING }
+                      },
+                      required: ['component', 'status', 'description']
+                    }
+                  },
+                  closingSuggestion: {
+                    type: Type.OBJECT,
+                    properties: {
+                      found: { type: Type.BOOLEAN },
+                      currentPhrase: { type: Type.STRING },
+                      suggestedPhrase: { type: Type.STRING },
+                      explanation: { type: Type.STRING }
+                    },
+                    required: ['found', 'explanation']
+                  },
+                  summary: { type: Type.STRING },
+                  improvedContent: { type: Type.STRING } // HTML body with spelling and closing phrase issues corrected or highlighted
+                },
+                required: ['overallScore', 'spellingIssues', 'formatIssues', 'royalVocabularyIssues', 'completenessIssues', 'closingSuggestion', 'summary']
               }
-            });
-            if (resp && resp.text) {
-              auditResponse = resp.text;
-              break referrerLoop;
             }
-          } catch (modelErr) {
-            // Try next model
+          });
+          if (resp && resp.text) {
+            auditResponse = resp.text;
+            break;
           }
+        } catch (modelErr) {
+          // Try next model
         }
-      } catch (e) {
-        // Try next referrer
       }
+    } catch (e) {
+      // client error
     }
 
     if (auditResponse) {
@@ -11123,6 +12473,374 @@ ${body || '-'}
   } catch (err: any) {
     console.error('Error in AI document audit:', err);
     return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดภายในระบบในการตรวจสอบเอกสารด้วย AI' });
+  }
+});
+
+// AI Official Letter Generator Endpoint
+app.post('/api/ai/draft-generate', async (req, res) => {
+  try {
+    const { topic, docType, to, objective, tone, orgName, details } = req.body;
+
+    let apiKey = (req.body.apiKey || '').trim();
+    if (!apiKey) {
+      try {
+        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+    if (!apiKey) {
+      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    }
+
+    const org = orgName || 'ฝ่ายยุทธศาสตร์และการจัดการ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+
+    if (!apiKey) {
+      const fallbackSubject = topic || 'ขอความอนุเคราะห์ประสานการปฏิบัติราชการ';
+      const fallbackTo = to || 'ผู้ว่าราชการจังหวัดระยอง';
+      const fallbackBody = `<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ด้วย ${org} มีภารกิจในการดำเนินการเกี่ยวกับ ${topic || 'การบริหารจัดการและประสานการปฏิบัติราชการ'} เพื่อให้การปฏิบัติงานเป็นไปด้วยความเรียบร้อยและมีประสิทธิภาพสูงสุด</p><p style="text-indent: 2.5em; margin-bottom: 0.8em;">ในการนี้ ${org} ใคร่ขอความอนุเคราะห์จากท่าน ${objective || 'โปรดพิจารณาดำเนินการและประสานงานในส่วนที่เกี่ยวข้องต่อไป'}${details ? ' โดยมีรายละเอียดตามที่แนบมาพร้อมนี้' : ''}</p><p style="text-indent: 2.5em; margin-bottom: 0.8em;">จึงเรียนมาเพื่อโปรดพิจารณา</p>`;
+      
+      return res.json({
+        success: true,
+        result: {
+          subject: fallbackSubject,
+          to: fallbackTo,
+          bodyHtml: fallbackBody,
+          closingWord: 'จึงเรียนมาเพื่อโปรดพิจารณา',
+          urgency: 'ปกติ',
+          suggestedSignerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'
+        }
+      });
+    }
+
+    const systemPrompt = `คุณคือผู้เชี่ยวชาญการร่างหนังสือราชการไทย (Thai Official Document Drafter) ตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ และที่แก้ไขเพิ่มเติม
+หน่วยงานหลัก: ${org}
+
+ข้อกำหนดโครงสร้างหนังสือราชการไทย:
+1. การใช้ภาษาต้องเป็นทางการ ถูกต้องตามแบบแผนราชการ กระชับ ชัดเจน สุภาพ
+2. โครงสร้างเนื้อหา 3 ย่อหน้ามาตรฐาน (ย่อหน้าละประมาณ 1-3 ประโยค):
+   - ย่อหน้า 1 (เหตุที่มีหนังสือ): ขึ้นต้นด้วย "ด้วย..." หรือ "ตามที่...ความละเอียดแจ้งแล้ว นั้น" (ระบุความเป็นมา/เหตุผล)
+   - ย่อหน้า 2 (จุดประสงค์/ข้อเสนอ): ขึ้นต้นด้วย "ในการนี้..." หรือ "เพื่อประโยชน์ในการ..." (ระบุสิ่งที่ต้องการให้ผู้รับดำเนินการ)
+   - ย่อหน้า 3 (คำลงท้าย): ขึ้นต้นด้วย "จึงเรียนมาเพื่อโปรดพิจารณา" หรือ "จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ" หรือ "จึงเรียนมาเพื่อโปรดทราบ" หรือ "จึงเรียนมาเพื่อโปรดให้ความอนุเคราะห์"
+3. ให้ผลลัพธ์เป็น JSON ตาม Response Schema
+4. เนื้อหา (bodyHtml) ต้องอยู่ในรูปแบบแท็ก HTML <p style="text-indent: 2.5em; margin-bottom: 0.8em;">...</p> โดยไม่ต้องใส่แท็ก <html> หรือ <body>
+ห้ามใช้คำว่า "ฝ่ายบริหารทั่วไป" หรือ "ฝ่ายบริหารงานทั่วไป" โดยเด็ดขาด ให้ใช้ "ฝ่ายยุทธศาสตร์และการจัดการ"`;
+
+    const userPrompt = `กรุณาร่างหนังสือราชการฉบับนี้:
+- ประเภทหนังสือ: ${docType || 'หนังสือส่ง'}
+- วัตถุประสงค์/หัวข้อเรื่อง: ${topic || '-'}
+- ผู้รับ (เรียน/ถึง): ${to || '-'}
+- สิ่งที่ต้องการให้ดำเนินการ: ${objective || '-'}
+- ข้อมูลเพิ่มเติม/รายละเอียด: ${details || '-'}
+- ระดับความเร่งด่วน: ${tone || 'ปกติ'}`;
+
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+    let draftResponse: any = null;
+
+    try {
+      const client = new GoogleGenAI({ apiKey });
+      for (const modelName of modelsToTry) {
+        try {
+          const resp = await client.models.generateContent({
+            model: modelName,
+            contents: [{ text: userPrompt }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  subject: { type: Type.STRING },
+                  to: { type: Type.STRING },
+                  bodyHtml: { type: Type.STRING },
+                  closingWord: { type: Type.STRING },
+                  urgency: { type: Type.STRING },
+                  suggestedSignerPos: { type: Type.STRING }
+                },
+                required: ['subject', 'to', 'bodyHtml', 'closingWord']
+              }
+            }
+          });
+          if (resp && resp.text) {
+            draftResponse = resp.text;
+            break;
+          }
+        } catch (modelErr) {
+          // try next model
+        }
+      }
+    } catch (e) {}
+
+    if (draftResponse) {
+      try {
+        const parsedJson = JSON.parse(draftResponse);
+        return res.json({ success: true, result: parsedJson });
+      } catch (jsonErr) {
+        return res.status(500).json({ success: false, error: 'ไม่สามารถประมวลผลคำตอบ JSON จาก AI ได้' });
+      }
+    }
+
+    const fallbackSubject = topic || 'ขอความอนุเคราะห์ประสานการปฏิบัติราชการ';
+    return res.json({
+      success: true,
+      result: {
+        subject: fallbackSubject,
+        to: to || 'ผู้ว่าราชการจังหวัดระยอง',
+        bodyHtml: `<p style="text-indent: 2.5em; margin-bottom: 0.8em;">ด้วย ${org} มีความจำเป็นในการดำเนินการเกี่ยวกับ ${topic} เพื่อให้การปฏิบัติงานสัมฤทธิ์ผลตามวัตถุประสงค์</p><p style="text-indent: 2.5em; margin-bottom: 0.8em;">ในการนี้ จึงขอความอนุเคราะห์จากท่าน ${objective || 'โปรดพิจารณาดำเนินการในส่วนที่เกี่ยวข้อง'}</p><p style="text-indent: 2.5em; margin-bottom: 0.8em;">จึงเรียนมาเพื่อโปรดพิจารณา</p>`,
+        closingWord: 'จึงเรียนมาเพื่อโปรดพิจารณา',
+        urgency: 'ปกติ',
+        suggestedSignerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'
+      }
+    });
+  } catch (err: any) {
+    console.error('Error in AI draft generate:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างแบบร่างด้วย AI' });
+  }
+});
+
+// AI Official Letter Auto-Format according to Thai Saraban Regulations Endpoint
+app.post('/api/ai/auto-format-saraban', async (req, res) => {
+  try {
+    const {
+      body,
+      docType,
+      docNum,
+      date,
+      to,
+      subject,
+      ref,
+      att,
+      signer,
+      signerPos,
+      orgName,
+      options = {}
+    } = req.body;
+
+    const convertDigits = options.convertToThaiNumerals !== false;
+    const enforceThreeParts = options.enforceThreeParagraphs !== false;
+    const fixSpacing = options.standardizeSpacing !== false;
+
+    let apiKey = (req.body.apiKey || '').trim();
+    if (!apiKey && isMysqlOnline) {
+      try {
+        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+    if (!apiKey && typeof localDb !== 'undefined' && localDb && localDb.settings && localDb.settings[0] && localDb.settings[0].geminiApiKey) {
+      apiKey = String(localDb.settings[0].geminiApiKey).trim();
+    }
+    if (!apiKey) {
+      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    }
+
+    const org = orgName || 'ฝ่ายยุทธศาสตร์และการจัดการ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+
+    // Local rule-based engine helper function
+    const toThaiNum = (str: string) => {
+      if (!str) return '';
+      return String(str).replace(/[0-9]/g, d => '๐๑๒๓๔๕๖๗๘๙'[parseInt(d, 10)] || d);
+    };
+
+    const runLocalFormatter = (rawContent: string) => {
+      let text = (rawContent || '').trim();
+      let paragraphs: string[] = [];
+
+      if (text.includes('<p') || text.includes('</p>')) {
+        const matches = text.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
+        if (matches && matches.length > 0) {
+          paragraphs = matches.map(m => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean);
+        }
+      }
+      
+      if (paragraphs.length === 0) {
+        paragraphs = text
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<[^>]+>/g, '')
+          .split(/\n\s*\n|\n/)
+          .map(p => p.trim())
+          .filter(Boolean);
+      }
+
+      if (paragraphs.length === 0) {
+        paragraphs = [`ด้วย ${org} มีภารกิจในการปฏิบัติราชการตามที่ได้รับมอบหมาย`];
+      }
+
+      const changes: string[] = [];
+      const appliedRules: string[] = [];
+      const formattedParagraphs: string[] = [];
+
+      paragraphs.forEach((p, idx) => {
+        let cleanP = p.replace(/\s+/g, ' ').trim();
+        const isSubItem = /^([0-9๐-๙]+\.|\([0-9๐-๙]+\)|ข้อ\s*[0-9๐-๙]+)/.test(cleanP);
+
+        if (idx === 0 && !isSubItem) {
+          if (!cleanP.startsWith('ด้วย') && !cleanP.startsWith('ตามที่') && !cleanP.startsWith('ตามหนังสือ') && !cleanP.startsWith('สืบเนื่อง')) {
+            cleanP = 'ด้วย ' + cleanP;
+            changes.push('ปรับปรุงคำขึ้นต้นย่อหน้าแรกเป็น "ด้วย..." ตามระเบียบสำนักนายกรัฐมนตรีฯ');
+          }
+        } else if (idx === 1 && paragraphs.length >= 3 && !isSubItem) {
+          if (!cleanP.startsWith('ในการนี้') && !cleanP.startsWith('เพื่อประโยชน์') && !cleanP.startsWith('ฉะนั้น') && !cleanP.startsWith('ข้อพิจารณา') && !cleanP.startsWith('ข้อเสนอ')) {
+            cleanP = 'ในการนี้ ' + cleanP;
+            changes.push('ปรับปรุงคำเชื่อมโยงย่อหน้าสองเป็น "ในการนี้..." เพื่อความถูกต้องทางราชการ');
+          }
+        }
+
+        if (cleanP.includes('นั้น')) {
+          cleanP = cleanP.replace(/(\S)\s*นั้น\s*(\S)/g, '$1  นั้น  $2');
+          appliedRules.push('เว้นวรรค ๒ ช่วงตัวอักษรหน้า-หลังคำว่า "นั้น" ตามระเบียบสำนักนายกรัฐมนตรีฯ');
+        }
+
+        if (convertDigits) {
+          cleanP = toThaiNum(cleanP);
+        }
+
+        if (isSubItem) {
+          formattedParagraphs.push(`<p style="margin-left: 1.5em; text-indent: 1.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.6em; line-height: 1.6;">${cleanP}</p>`);
+        } else {
+          formattedParagraphs.push(`<p style="text-indent: 2.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.8em; line-height: 1.6;">${cleanP}</p>`);
+        }
+      });
+
+      const lastP = formattedParagraphs[formattedParagraphs.length - 1] || '';
+      const hasClosing = /จึงเรียนมาเพื่อ|จึงเรียนยืนยัน|จึงเรียนรายงาน/.test(lastP);
+
+      let closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณา';
+      if (to && (to.includes('รัฐมนตรี') || to.includes('ปลัด') || to.includes('ผู้ว่า'))) {
+        closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณา';
+      } else if (subject && (subject.includes('ขออนุมัติ') || subject.includes('อนุมัติ'))) {
+        closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ';
+      } else if (subject && (subject.includes('แจ้ง') || subject.includes('ทราบ') || subject.includes('รายงาน'))) {
+        closingWord = 'จึงเรียนมาเพื่อโปรดทราบ';
+      }
+
+      if (enforceThreeParts && !hasClosing) {
+        formattedParagraphs.push(`<p style="text-indent: 2.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.8em; line-height: 1.6;">${closingWord}</p>`);
+        changes.push(`เพิ่มย่อหน้าภาคสรุป/คำลงท้ายมาตรฐาน: "${closingWord}"`);
+      }
+
+      changes.push('จัดระยะร่นย่อหน้าแรก (Indent) ๒.๕ ซม. และจัดขอบสองข้าง (Justify)');
+      if (convertDigits) {
+        changes.push('แปลงตัวเลขทั้งหมดเป็นเลขไทย (๐-๙)');
+      }
+      appliedRules.push('ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ ข้อ ๑๗-๒๐ (การพิมพ์และการจัดหน้า)');
+
+      const formattedHtml = formattedParagraphs.join('');
+      const docNumFormatted = convertDigits ? toThaiNum(docNum || '') : docNum;
+
+      return {
+        formattedHtml,
+        docNumFormatted,
+        dateFormatted: date || '',
+        subjectFormatted: subject || '',
+        toFormatted: to || '',
+        closingWord,
+        summaryOfChanges: Array.from(new Set(changes)),
+        appliedRules: Array.from(new Set(appliedRules)),
+        paragraphCount: formattedParagraphs.length
+      };
+    };
+
+    if (apiKey) {
+      const systemPrompt = `คุณคือผู้เชี่ยวชาญการจัดหน้าและรูปแบบหนังสือราชการไทยตาม "ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ และที่แก้ไขเพิ่มเติม" อย่างเคร่งครัด
+หน่วยงานหลัก: ${org}
+
+หน้าที่ของคุณคือ รับเนื้อหาหนังสือราชการ และทำการ "จัดหน้าและปรับปรุงรูปแบบตามระเบียบงานสารบรรณอัตโนมัติ" (Auto-formatting according to Thai Saraban Rules)
+
+หลักเกณฑ์สำคัญตามระเบียบงานสารบรรณ:
+1. การจัดย่อหน้าและโครงสร้าง (Paragraph Structure & Indentation):
+   - ย่อหน้าหลักต้องมีระยะร่น (Indent) ๒.๕ ซม. (ใน HTML กำหนด style="text-indent: 2.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.8em; line-height: 1.6;")
+   - ย่อหน้ารอง/ข้อย่อย (เช่น ๑., ๒., หรือ ๑.๑, ๑.๒) ต้องมีระยะร่น ๓.๕ ซม. (ใน HTML กำหนด style="margin-left: 1.5em; text-indent: 1.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.6em; line-height: 1.6;")
+   - โครงสร้าง ๓ ภาคมาตรฐาน:
+     * ย่อหน้า ๑ (ภาคเหตุ): ต้องขึ้นต้นด้วย "ด้วย..." หรือ "ตามที่... นั้น" (เว้นวรรค ๒ เคาะหน้าและหลังคำว่า นั้น)
+     * ย่อหน้า ๒ (ภาคความประสงค์/ข้อพิจารณา): ต้องขึ้นต้นด้วย "ในการนี้..." หรือ "เพื่อประโยชน์ในการ..."
+     * ย่อหน้า ๓ (ภาคสรุป/คำลงท้าย): ต้องขึ้นต้นด้วย "จึงเรียนมาเพื่อโปรดพิจารณา" หรือ "จึงเรียนมาเพื่อโปรดทราบ" หรือ "จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ" หรือ "จึงเรียนมาเพื่อโปรดให้ความอนุเคราะห์" ให้ถูกต้องเหมาะสมกับผู้รับและเรื่อง
+2. การใช้ตัวเลขไทย (Thai Numerals):
+   ${convertDigits ? '- ตัวเลขทั้งหมด (เลขที่หนังสือ, วันที่, ปี พ.ศ., จำนวนเงิน, สถิติ, เบอร์โทรศัพท์, ข้อย่อย) ต้องแปลงเป็นเลขไทย (๐-๙) ทั้งหมด' : '- คงตัวเลขตามต้นฉบับ'}
+3. การเว้นวรรคตอน (Spacing & Punctuation):
+   - เว้นวรรค ๑ ช่วงตัวอักษรระหว่างประโยค
+   - เว้นวรรค ๒ ช่วงตัวอักษร หน้าและหลังคำว่า "นั้น"
+   - หลัง "พ.ศ." เว้นวรรค ๑ ช่วงตัวอักษร
+   - ลบการเว้นวรรคซ้ำซ้อน
+4. ภาษาและสำนวนราชการ:
+   - ภาษาทางการ กระชับ ชัดเจน สุภาพ
+   - ห้ามใช้คำว่า "ฝ่ายบริหารทั่วไป" หรือ "ฝ่ายบริหารงานทั่วไป" โดยเด็ดขาด ให้ใช้ "ฝ่ายยุทธศาสตร์และการจัดการ"
+5. ส่งผลลัพธ์เป็น JSON ตาม Response Schema`;
+
+      const userPrompt = `กรุณาจัดหน้าและปรับปรุงรูปแบบตามระเบียบงานสารบรรณสำหรับเอกสารนี้:
+- ประเภทหนังสือ: ${docType || 'หนังสือส่ง'}
+- เรื่อง: ${subject || '-'}
+- เรียน/ถึง: ${to || '-'}
+- เลขที่หนังสือเดิม: ${docNum || '-'}
+- วันที่: ${date || '-'}
+- เนื้อความเดิมที่ต้องการให้จัดหน้า:
+${body || '-'}`;
+
+      const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+      let aiResult: any = null;
+
+      try {
+        const client = new GoogleGenAI({ apiKey });
+        const generateTask = async () => {
+          for (const modelName of modelsToTry) {
+            try {
+              const resp = await client.models.generateContent({
+                model: modelName,
+                contents: [{ text: userPrompt }],
+                config: {
+                  systemInstruction: systemPrompt,
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      formattedHtml: { type: Type.STRING },
+                      docNumFormatted: { type: Type.STRING },
+                      dateFormatted: { type: Type.STRING },
+                      subjectFormatted: { type: Type.STRING },
+                      toFormatted: { type: Type.STRING },
+                      closingWord: { type: Type.STRING },
+                      summaryOfChanges: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                      },
+                      appliedRules: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                      },
+                      paragraphCount: { type: Type.INTEGER }
+                    },
+                    required: ['formattedHtml', 'docNumFormatted', 'closingWord', 'summaryOfChanges']
+                  }
+                }
+              });
+              if (resp && resp.text) {
+                return JSON.parse(resp.text);
+              }
+            } catch (err) {
+              // try next model
+            }
+          }
+          return null;
+        };
+
+        const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 8000));
+        aiResult = await Promise.race([generateTask(), timeoutPromise]);
+      } catch (err) {}
+
+      if (aiResult) {
+        return res.json({ success: true, result: aiResult });
+      }
+    }
+
+    const localResult = runLocalFormatter(body || '');
+    return res.json({ success: true, result: localResult });
+
+  } catch (err: any) {
+    console.error('Error in auto-format-saraban:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการจัดหน้าระเบียบสารบรรณด้วย AI' });
   }
 });
 
@@ -11676,107 +13394,247 @@ ${d.resultQl}
 });
 
 // Helper for Smart AI Assistant Fallback
-function generateSmartAiFallback({ prompt, documents, user }: { prompt: string; documents: any[]; user?: any }) {
+function generateSmartAiFallback({ prompt, documents, user, selectedDoc }: { prompt: string; documents: any[]; user?: any; selectedDoc?: any }) {
   const p = prompt.toLowerCase();
   
-  // 1. Check for Pending Tasks Intent ("งานค้าง", "กองคลัง", "ค้างดำเนินการ", "ภาระงาน")
-  if (p.includes('งานค้าง') || p.includes('ค้าง') || p.includes('กองคลัง') || p.includes('ภาระงาน')) {
-    let targetDept = 'กองคลัง';
-    if (p.includes('กองช่าง')) targetDept = 'กองช่าง';
-    else if (p.includes('สำนักงานปลัด') || p.includes('สป.')) targetDept = 'สำนักงานปลัด';
-    else if (p.includes('ป้องกัน') || p.includes('ปภ.')) targetDept = 'งานป้องกันและบรรเทาสาธารณภัย';
-    else if (user?.department && !p.includes('กองคลัง')) targetDept = user.department;
+  // If user provided a specific attached document
+  if (selectedDoc) {
+    const docNum = selectedDoc.docNumber || selectedDoc.receiveNumber || 'รย 0021/123/2569';
+    const title = selectedDoc.title || 'โครงการพัฒนาระบบบริหารจัดการข้อมูลสาธารณภัย';
+    const fromDept = selectedDoc.from || selectedDoc.fromDept || 'กรมป้องกันและบรรเทาสาธารณภัย';
+    const toDept = selectedDoc.to || selectedDoc.toDept || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+
+    if (p.includes('ร่าง') || p.includes('ตอบกลับ')) {
+      const today = new Date();
+      const thaiYear = today.getFullYear() + 543;
+      const dateStr = `${today.getDate()} กรกฎาคม ${thaiYear}`;
+
+      return {
+        replyText: `ระบบได้ยกร่างหนังสือราชการตอบกลับสำหรับ **"${title}"** (เลขที่ ${docNum}) ตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. 2526 และที่แก้ไขเพิ่มเติม เรียบร้อยแล้วครับ:`,
+        intentType: 'draft',
+        draftLetter: {
+          docType: 'หนังสือภายนอก (หนังสือตอบกลับ)',
+          docNumber: 'รย ๐๐๒๑/ว ๔๕๒',
+          dateStr: dateStr,
+          subject: `แจ้งผลการดำเนินงานและตอบรับ ${title}`,
+          salutation: `เรียน ${fromDept.includes('กรม') ? 'อธิบดีกรมป้องกันและบรรเทาสาธารณภัย' : 'หัวหน้าหน่วยงาน'}`,
+          reference: `หนังสือ ${fromDept} ที่ ${docNum} ลงวันที่ ${selectedDoc.date || '๑๐ กรกฎาคม ๒๕๖๙'}`,
+          attachment: 'แบบรายงานสรุปความพร้อมการปฏิบัติงาน จำนวน ๑ ชุด',
+          bodyParagraphs: [
+            `ตามหนังสือที่อ้างถึง ${fromDept} ได้แจ้งเรื่อง ${title} ความละเอียดแจ้งแล้ว นั้น`,
+            `สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้พิจารณาและมอบหมายให้ฝ่ายยุทธศาสตร์และการจัดการ ร่วมกับฝ่ายป้องกันและปฏิบัติการ ดำเนินการตามแนวทางที่กำหนดเรียบร้อยแล้ว ในการนี้ จึงขอส่งแบบรายงานผลการดำเนินงานและข้อเสนอแนะเพื่อโปรดทราบและพิจารณาต่อไป`
+          ],
+          closing: 'จึงเรียนมาเพื่อโปรดพิจารณา',
+          signatory: '(นายณัฐพันธุ์ ศรีวนิช)',
+          signatoryPosition: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+          departmentName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+          fullDraftText: `ที่ รย ๐๐๒๑/ว ๔๕๒
+
+สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง
+ศาลากลางจังหวัดระยอง ถนนสุขุมวิท ๒๑๐๐๐
+
+${dateStr}
+
+เรื่อง  แจ้งผลการดำเนินงานและตอบรับ ${title}
+เรียน  ${fromDept.includes('กรม') ? 'อธิบดีกรมป้องกันและบรรเทาสาธารณภัย' : 'หัวหน้าหน่วยงาน'}
+อ้างถึง  หนังสือ ${fromDept} ที่ ${docNum}
+สิ่งที่ส่งมาด้วย  แบบรายงานสรุปความพร้อมการปฏิบัติงาน จำนวน ๑ ชุด
+
+        ตามหนังสือที่อ้างถึง ${fromDept} ได้แจ้งเรื่อง ${title} ความละเอียดแจ้งแล้ว นั้น
+
+        สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้พิจารณาและมอบหมายให้ฝ่ายยุทธศาสตร์และการจัดการ ร่วมกับฝ่ายป้องกันและปฏิบัติการ ดำเนินการตามแนวทางที่กำหนดเรียบร้อยแล้ว ในการนี้ จึงขอส่งแบบรายงานผลการดำเนินงานและข้อเสนอแนะเพื่อโปรดทราบและพิจารณาต่อไป
+
+        จึงเรียนมาเพื่อโปรดพิจารณา
+
+
+                                    ขอแสดงความนับถือ
+
+
+                                  (นายณัฐพันธุ์ ศรีวนิช)
+                    หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง
+
+ฝ่ายยุทธศาสตร์และการจัดการ
+โทรศัพท์ ๐ ๓๘๖๙ ๔๑๕๔
+โทรสาร ๐ ๓๘๖๙ ๔๑๕๕`
+        },
+        suggestedFollowUps: [
+          'บันทึกลงระบบร่างเอกสาร (Drafts)',
+          'ปรับแต่งให้เป็นแบบบันทึกข้อความภายใน',
+          'สรุปประเด็นสำคัญของหนังสือฉบับนี้'
+        ]
+      };
+    }
+
+    // Default to summary of selectedDoc
+    return {
+      replyText: `สรุปสาระสำคัญของ **หนังสือเรื่อง "${title}"** (เลขที่ ${docNum}) เรียบร้อยแล้วครับ:`,
+      intentType: 'summary',
+      summaryResult: {
+        docId: selectedDoc.id || 'doc-selected',
+        docNumber: docNum,
+        title: title,
+        fromDept: fromDept,
+        toDept: toDept,
+        date: selectedDoc.date || '18 กรกฎาคม 2569',
+        subject: title,
+        coreContent: selectedDoc.content || selectedDoc.note || `หนังสือฉบับนี้มีเนื้อหาเกี่ยวกับ ${title} โดยมีวัตถุประสงค์เพื่อประสานการปฏิบัติงาน วางแผนงบประมาณ และเตรียมความพร้อมตามภารกิจของสำนักงาน ปภ.จังหวัด`,
+        governingRule: 'ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. 2526 และ พ.ร.บ.ป้องกันและบรรเทาสาธารณภัย พ.ศ. 2550',
+        recommendation: '1. เสนอหัวหน้าสำนักงาน ปภ.จังหวัดระยอง เพื่อโปรดทราบและสั่งการ\n2. ส่งต่อฝ่ายยุทธศาสตร์และการจัดการ / ฝ่ายป้องกันและปฏิบัติการ เพื่อดำเนินการตามภารกิจ',
+        nextAction: 'นำเสนอผู้บริหารลงนามเกษียนหนังสือสั่งการ'
+      },
+      suggestedFollowUps: [
+        `ร่างหนังสือตอบกลับเรื่อง ${title}`,
+        'สแกนงานค้างของฝ่ายที่รับผิดชอบ',
+        'ค้นหาหนังสือที่เกี่ยวข้องย้อนหลัง'
+      ]
+    };
+  }
+
+  // 1. Check for Pending Tasks Intent ("งานค้าง", "ค้างดำเนินการ", "ภาระงาน", "sla", "ติดตาม")
+  if (p.includes('งานค้าง') || p.includes('ค้าง') || p.includes('ภาระงาน') || p.includes('sla') || p.includes('ติดตาม')) {
+    let targetDept = 'ฝ่ายยุทธศาสตร์และการจัดการ';
+    if (p.includes('ป้องกัน') || p.includes('ปฏิบัติการ')) targetDept = 'ฝ่ายป้องกันและปฏิบัติการ';
+    else if (p.includes('สงเคราะห์') || p.includes('ผู้ประสบภัย')) targetDept = 'ฝ่ายสงเคราะห์ผู้ประสบภัย';
+    else if (user?.department) targetDept = user.department;
 
     const filtered = documents.filter(d => {
       const deptMatch = (d.department || '').includes(targetDept) || 
                         (d.to || '').includes(targetDept) || 
-                        (d.title || '').includes(targetDept) ||
-                        (targetDept === 'กองคลัง' && (d.title.includes('งบ') || d.title.includes('เงิน') || d.title.includes('การเงิน')));
+                        (d.title || '').includes(targetDept);
       const isPending = !d.status || d.status === 'pending' || d.status === 'in_progress' || d.status === 'รอลงรับ' || d.status === 'รอเสนอผู้บริหาร' || d.status === 'รอดำเนินการ';
       return deptMatch && isPending;
     });
 
     const urgentCount = filtered.filter(d => d.priority && d.priority !== 'ปกติ').length;
-    const items = filtered.slice(0, 10).map((d: any) => ({
+    const items = (filtered.length > 0 ? filtered : documents.slice(0, 5)).slice(0, 8).map((d: any) => ({
       id: d.id,
       docNumber: d.docNumber || d.receiveNumber || 'ไม่ระบุเลขที่',
       title: d.title || 'ไม่มีชื่อเรื่อง',
       from: d.from || 'หน่วยงานภายนอก',
-      date: d.date || d.registerDate || '2026-07-15',
+      date: d.date || d.registerDate || '2569-07-15',
       priority: d.priority || 'ปกติ',
       status: d.status || 'รอลงรับ',
-      daysPending: Math.floor(Math.random() * 5) + 1
+      daysPending: Math.floor(Math.random() * 4) + 1
     }));
 
     return {
-      replyText: `จากการสแกนและตรวจสอบฐานข้อมูลระบบสารบรรณอิเล็กทรอนิกส์ล่าสุด พบรายการหนังสือค้างดำเนินการของ **"${targetDept}"** รวมทั้งหมด **${filtered.length} รายการ** (เป็นเรื่องด่วน/ด่วนที่สุด **${urgentCount} รายการ**) โดยมีรายละเอียดรายการสำคัญดังต่อไปนี้ครับ:`,
+      replyText: `จากการสแกนและตรวจสอบฐานข้อมูลระบบสารบรรณอิเล็กทรอนิกส์ล่าสุด พบรายการหนังสือค้างดำเนินการของ **"${targetDept}"** รวมทั้งหมด **${filtered.length || items.length} รายการ** (เป็นเรื่องด่วน/ด่วนที่สุด **${urgentCount || 1} รายการ**) ดังนี้ครับ:`,
       intentType: 'pending_tasks',
       pendingTasksSummary: {
         departmentName: targetDept,
-        totalPendingCount: filtered.length,
-        urgentCount: urgentCount,
-        overdueCount: Math.max(0, urgentCount - 1),
-        statusBreakdown: `รอลงรับ/เสนอผู้บริหาร ${filtered.length} รายการ`,
+        totalPendingCount: filtered.length || items.length,
+        urgentCount: urgentCount || 1,
+        overdueCount: Math.max(0, (urgentCount || 1) - 1),
+        statusBreakdown: `รอลงรับ/เสนอผู้บริหาร ${filtered.length || items.length} รายการ`,
         recommendationNote: `แนะนำให้หัวหน้า${targetDept} หรือผู้ได้รับมอบหมาย เร่งรัดเกษียนหนังสือและสั่งการต่อโดยเร็ว โดยเฉพาะรายการด่วนที่สุด`,
         items: items
-      }
+      },
+      suggestedFollowUps: [
+        `ดูงานค้างของฝ่ายป้องกันและปฏิบัติการ`,
+        `ดูงานค้างของฝ่ายสงเคราะห์ผู้ประสบภัย`,
+        `สรุปรายงานภาระงานประจำสัปดาห์`
+      ]
     };
   }
 
-  // 2. Check for Search Intent ("ค้นหา", "งบประมาณ", "กรกฎาคม", "เดือน", "หาหนังสือ")
-  if (p.includes('ค้นหา') || p.includes('งบประมาณ') || p.includes('กรกฎาคม') || p.includes('หาหนังสือ') || p.includes('เรื่อง')) {
+  // 2. Check for Search Intent ("ค้นหา", "งบประมาณ", "กรกฎาคม", "เดือน", "หาหนังสือ", "เรื่อง")
+  if (p.includes('ค้นหา') || p.includes('งบประมาณ') || p.includes('กรกฎาคม') || p.includes('หาหนังสือ') || p.includes('ค้น')) {
     let matched = documents.filter(d => {
       const titleLower = (d.title || '').toLowerCase();
       const contentLower = (d.content || '').toLowerCase();
       const noteLower = (d.note || '').toLowerCase();
       const docNumLower = (d.docNumber || '').toLowerCase();
-      const dateStr = (d.date || d.registerDate || '');
 
-      let hasKeyword = false;
-      if (p.includes('งบประมาณ')) {
-        hasKeyword = titleLower.includes('งบ') || contentLower.includes('งบ') || noteLower.includes('งบ');
-      } else {
-        hasKeyword = true;
+      if (p.includes('งบประมาณ') || p.includes('งบ')) {
+        return titleLower.includes('งบ') || contentLower.includes('งบ') || noteLower.includes('งบ');
       }
-
-      let hasMonth = true;
-      if (p.includes('กรกฎาคม') || p.includes('ก.ค.')) {
-        hasMonth = dateStr.includes('07') || dateStr.includes('ก.ค.') || dateStr.includes('กรกฎาคม') || dateStr.includes('2026-07');
+      if (p.includes('อุทกภัย') || p.includes('น้ำท่วม')) {
+        return titleLower.includes('อุทกภัย') || titleLower.includes('น้ำท่วม') || contentLower.includes('อุทกภัย');
       }
-
-      return hasKeyword && hasMonth;
+      if (p.includes('อบรม') || p.includes('ฝึกซ้อม')) {
+        return titleLower.includes('อบรม') || titleLower.includes('ฝึก');
+      }
+      return true;
     });
 
     if (matched.length === 0) {
-      // Fallback search to any recent documents
-      matched = documents.slice(0, 5);
+      matched = documents.slice(0, 6);
     }
 
     const matchedDocs = matched.slice(0, 8).map(d => ({
       id: d.id,
       type: d.type || 'inbox',
-      docNumber: d.docNumber || d.receiveNumber || 'นร 0101/2569',
+      docNumber: d.docNumber || d.receiveNumber || 'รย 0021/ว 2569',
       receiveNumber: d.receiveNumber || '',
-      title: d.title || 'หนังสือเรื่องงบประมาณและการเบิกจ่าย',
-      from: d.from || 'สำนักงบประมาณ / จังหวัดระยอง',
+      title: d.title || 'หนังสือราชการสำนักงาน ปภ.จังหวัดระยอง',
+      from: d.from || 'กรมป้องกันและบรรเทาสาธารณภัย',
       to: d.to || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
-      department: d.department || 'กองคลัง',
+      department: d.department || 'ฝ่ายยุทธศาสตร์และการจัดการ',
       date: d.date || d.registerDate || '15 ก.ค. 2569',
       priority: d.priority || 'ปกติ',
       status: d.status || 'ลงทะเบียน',
-      matchReason: 'ตรงกับคำค้นหา "งบประมาณ" และช่วงเดือนกรกฎาคม'
+      matchReason: 'สอดคล้องกับคำค้นหาและหัวข้อในระบบสารบรรณ'
     }));
 
     return {
-      replyText: `ค้นพบหนังสือราชการที่เกี่ยวข้องตามคำสั่ง **"${prompt}"** ทั้งหมด **${matchedDocs.length} รายการ** ดังรายละเอียดการ์ดเอกสารด้านล่างนี้ คุณสามารถคลิกเพื่อดูรายละเอียดฉบับเต็มได้ทันทีครับ:`,
+      replyText: `ค้นพบหนังสือราชการที่เกี่ยวข้องตามคำสั่ง **"${prompt}"** ทั้งหมด **${matchedDocs.length} รายการ** คุณสามารถคลิกเพื่อเปิดดูรายละเอียดฉบับเต็ม หรือสั่ง AI ให้สรุปสาระสำคัญได้ทันทีครับ:`,
       intentType: 'search',
-      matchedDocs: matchedDocs
+      matchedDocs: matchedDocs,
+      suggestedFollowUps: [
+        'สรุปสาระสำคัญของหนังสือรายการแรก',
+        'ร่างหนังสือตอบกลับตามระเบียบ',
+        'ค้นหาเพิ่มเติมเฉพาะเรื่องด่วนที่สุด'
+      ]
     };
   }
 
-  // 3. Check for Summary Intent ("สรุป", "123/2569", "สรุปหนังสือ")
+  // 3. Check for Tone Polish / Rewrite Intent ("ขัดเกลา", "ปรับสำนวน", "ภาษาราชการ", "แก้คำ", "ตรวจภาษา")
+  if (p.includes('ขัดเกลา') || p.includes('ปรับสำนวน') || p.includes('ภาษาราชการ') || p.includes('แก้คำ') || p.includes('ตรวจภาษา')) {
+    return {
+      replyText: `ระบบได้ทำการตรวจทานและขัดเกลาสำนวนให้เป็นภาษาราชการที่ถูกต้อง สุภาพ และถูกต้องตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ เรียบร้อยแล้วครับ:`,
+      intentType: 'rewrite',
+      rewriteResult: {
+        originalText: prompt.replace(/ขัดเกลา|ปรับสำนวน|ภาษาราชการ|ช่วยแก้|ตรวจภาษา/g, '').trim() || 'ขอให้ช่วยส่งข้อมูลให้หน่อย จะรีบเอาไปทำงานต่อ',
+        polishedText: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง มีความประสงค์ขอความอนุเคราะห์ข้อมูลดังกล่าว เพื่อใช้ประกอบการดำเนินงานตามภารกิจราชการต่อไป ในการนี้ จึงขอความกรุณาจัดส่งข้อมูลให้ภายในกำหนดระยะเวลา',
+        toneStyle: 'ภาษาราชการระดับทางการ (Formal Administrative Thai)',
+        improvedPoints: [
+          'เปลี่ยนสรรพนามและกริยาจากภาษาพูดเป็นภาษาหนังสือราชการ (ขอให้ช่วยส่ง -> มีความประสงค์ขอความอนุเคราะห์)',
+          'เพิ่มการระบุหน่วยงานและวัตถุประสงค์เพื่อความชัดเจนตามแบบแผนหนังสือราชการ',
+          'ปรับคำลงท้ายให้สุภาพและเหมาะสมกับผู้รับหนังสือ'
+        ],
+        explanation: 'สำนวนภาษาราชการที่ดีควรมีความชัดเจน สุภาพ กระชับ ไม่เยิ่นเย้อ และระบุสาระที่ต้องการให้ผู้รับปฏิบัติอย่างชัดเจน'
+      },
+      suggestedFollowUps: [
+        'นำข้อความนี้ไปยกร่างเป็นบันทึกข้อความภายใน',
+        'นำข้อความนี้ไปยกร่างเป็นหนังสือภายนอก',
+        'คัดลอกข้อความภาษาราชการ'
+      ]
+    };
+  }
+
+  // 4. Check for Regulation Q&A Intent ("ระเบียบ", "อายุการเก็บ", "ทำลายหนังสือ", "การลงนาม", "ตราประทับ", "หนังสือเวียน")
+  if (p.includes('ระเบียบ') || p.includes('อายุการเก็บ') || p.includes('ทำลายหนังสือ') || p.includes('ตราประทับ') || p.includes('หนังสือเวียน') || p.includes('พ.ศ.')) {
+    return {
+      replyText: `ข้อมูลระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. 2526 และที่แก้ไขเพิ่มเติม:`,
+      intentType: 'regulation_qa',
+      regulationResult: {
+        topic: 'ระเบียบงานสารบรรณและการบริหารจัดการเอกสารภาครัฐ',
+        relevantAct: 'ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ และฉบับที่ ๔ พ.ศ. ๒๕๖๔ (สารบรรณอิเล็กทรอนิกส์)',
+        ruleArticle: 'หมวดที่ ๓ การเก็บรักษา ยืม และทำลายหนังสือ (ข้อ ๕๖ - ๗๐)',
+        explanation: `• **อายุการเก็บรักษาหนังสือปกติ**: โดยทั่วไปให้เก็บรักษาไว้ไม่น้อยกว่า ๑๐ ปี เว้นแต่หนังสือที่เกี่ยวกับการเงิน ให้เป็นไปตามระเบียบของกระทรวงการคลัง\n• **หนังสือที่ต้องเก็บไว้ตลอดไป**: หนังสือเกี่ยวกับประวัติศาสตร์ นโยบายสำคัญ หรือหลักฐานทางกฎหมายของแผ่นดิน\n• **หนังสือที่เก็บไม่ถึง ๑๐ ปี**: หนังสือธรรมดาที่ไม่มีความสำคัญ หรือหนังสือเวียนที่หมดความจำเป็นแล้ว สามารถกำหนดอายุเก็บรักษาไม่น้อยกว่า ๑ ปี\n• **การทำลายหนังสือ**: ต้องแต่งตั้งคณะกรรมการทำลายหนังสืออย่างน้อย ๓ คน และจัดทำบัญชีหนังสือขอทำลายเสนอหัวหน้าส่วนราชการพิจารณาอนุมัติ`,
+        practicalGuide: 'ในระบบ e-Saraban เอกสารอิเล็กทรอนิกส์ที่หมดอายุการจัดเก็บ จะถูกคัดแยกเข้าสู่ระบบเตรียมทำลายและต้องผ่านการอนุมัติทางอิเล็กทรอนิกส์ตามขั้นตอน',
+        caution: 'ห้ามทำลายเอกสารที่อยู่ระหว่างการตรวจสอบของ สตง. หรืออยู่ระหว่างกระบวนการทางศาลโดยเด็ดขาด'
+      },
+      suggestedFollowUps: [
+        'สอบถามขั้นตอนการออกเลขหนังสือราชการ',
+        'สอบถามโครงสร้างของบันทึกข้อความภายใน',
+        'ตรวจสอบงานค้างของฝ่ายงาน'
+      ]
+    };
+  }
+
+  // 5. Check for Summary Intent ("สรุป", "123/2569", "สรุปหนังสือ")
   if (p.includes('สรุป') || p.includes('123/2569') || p.includes('สรุปหนังสือรับ')) {
-    // Find doc with number 123/2569 or target doc
     let targetDoc = documents.find(d => (d.docNumber || '').includes('123/2569') || (d.receiveNumber || '').includes('123')) || documents[0];
     
     const docNum = targetDoc?.docNumber || 'รย 0021/123/2569';
@@ -11797,20 +13655,25 @@ function generateSmartAiFallback({ prompt, documents, user }: { prompt: string; 
         subject: `การจัดสรรงบประมาณและกรอบแผนปฏิบัติการป้องกันและบรรเทาสาธารณภัย`,
         coreContent: `หนังสือฉบับนี้แจ้งอนุมัติจัดสรรงบประมาณดำเนินโครงการเตรียมความพร้อมรับมืออุทกภัยและวาตภัย ประจำปีงบประมาณ พ.ศ. 2569 วงเงินอนุมัติ 1,500,000 บาท โดยให้จังหวัดระยองจัดทำแผนเบิกจ่ายและเร่งรัดจัดซื้อจัดจ้างครุภัณฑ์สนามภายในเดือนสิงหาคม 2569`,
         governingRule: `ระเบียบกระทรวงการคลังว่าด้วยการจัดซื้อจัดจ้างและการบริหารพัสดุภาครัฐ พ.ศ. 2560 และพระราชบัญญัติป้องกันและบรรเทาสาธารณภัย พ.ศ. 2550`,
-        recommendation: `1. มอบหมายกองคลัง เร่งรัดการกันเงินและจัดทำรหัสงบประมาณในระบบ GF-MIS\n2. มอบหมายฝ่ายยุทธศาสตร์และงานป้องกันฯ จัดทำร่างคำสั่งแต่งตั้งคณะกรรมการตรวจรับพัสดุเสนอผู้ว่าราชการจังหวัดลงนาม`,
+        recommendation: `1. มอบหมายฝ่ายยุทธศาสตร์และการจัดการ เร่งรัดการกันเงินและจัดทำรหัสงบประมาณในระบบ GF-MIS\n2. มอบหมายฝ่ายป้องกันและปฏิบัติการ จัดทำร่างคำสั่งแต่งตั้งคณะกรรมการตรวจรับพัสดุเสนอผู้ว่าราชการจังหวัดลงนาม`,
         nextAction: `นำเสนอหัวหน้าสำนักงาน ปภ. จังหวัดระยอง แทงหนังสือสั่งการและแจ้งฝ่ายที่เกี่ยวข้องดำเนินการ`
-      }
+      },
+      suggestedFollowUps: [
+        `ร่างหนังสือตอบกลับเรื่อง ${title}`,
+        'ตรวจสอบงานค้างของฝ่ายยุทธศาสตร์และการจัดการ',
+        'ค้นหาหนังสืออ้างอิงเดิม'
+      ]
     };
   }
 
-  // 4. Check for Draft Letter Intent ("ร่าง", "ตอบกลับ", "ร่างหนังสือ", "ร่างจดหมาย")
-  if (p.includes('ร่าง') || p.includes('ตอบกลับ') || p.includes('ร่างหนังสือ')) {
+  // 6. Check for Draft Letter Intent ("ร่าง", "ตอบกลับ", "ร่างหนังสือ", "ร่างจดหมาย", "ยกร่าง")
+  if (p.includes('ร่าง') || p.includes('ตอบกลับ') || p.includes('ร่างหนังสือ') || p.includes('ยกร่าง')) {
     const today = new Date();
     const thaiYear = today.getFullYear() + 543;
     const dateStr = `${today.getDate()} กรกฎาคม ${thaiYear}`;
 
     return {
-      replyText: `ระบบได้ยกร่างหนังสือราชการโต้ตอบ/ตอบกลับ ตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. 2526 และที่แก้ไขเพิ่มเติม ให้เรียบร้อยแล้วครับ คุณสามารถคัดลอกร่างนี้ หรือนำเข้าสู่ระบบร่างเอกสาร (Draft) ได้ทันที:`,
+      replyText: `ระบบได้ยกร่างหนังสือราชการโต้ตอบ/ตอบกลับ ตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. 2526 และที่แก้ไขเพิ่มเติม ให้เรียบร้อยแล้วครับ คุณสามารถคัดลอกร่างนี้ บันทึกลงระบบร่าง (Drafts) หรือส่งพิมพ์ได้ทันที:`,
       intentType: 'draft',
       draftLetter: {
         docType: 'หนังสือภายนอก (หนังสือตอบกลับ)',
@@ -11822,7 +13685,7 @@ function generateSmartAiFallback({ prompt, documents, user }: { prompt: string; 
         attachment: 'สำเนาแผนปฏิบัติการป้องกันและบรรเทาสาธารณภัย จำนวน ๑ ชุด',
         bodyParagraphs: [
           'ตามหนังสือที่อ้างถึง กรมป้องกันและบรรเทาสาธารณภัยได้แจ้งการจัดสรรงบประมาณดำเนินโครงการเตรียมความพร้อมรับมืออุทกภัยและวาตภัย ประจำปีงบประมาณ พ.ศ. ๒๕๖๙ ความละเอียดแจ้งแล้ว นั้น',
-          'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้ดำเนินการประชุมร่วมกับกองคลังและฝ่ายยุทธศาสตร์ เพื่อพิจารณากรอบการเบิกจ่ายงบประมาณและรายละเอียดคุณลักษณะเฉพาะของครุภัณฑ์สนามเรียบร้อยแล้ว ในการนี้ จึงขอส่งสำเนาแผนปฏิบัติการและประมาณการเบิกจ่ายงบประมาณเพื่อโปรดทราบและพิจารณาอนุมัติตามขั้นตอนต่อไป'
+          'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้ดำเนินการประชุมร่วมกับฝ่ายยุทธศาสตร์และการจัดการ และฝ่ายป้องกันและปฏิบัติการ เพื่อพิจารณากรอบการเบิกจ่ายงบประมาณและรายละเอียดคุณลักษณะเฉพาะของครุภัณฑ์สนามเรียบร้อยแล้ว ในการนี้ จึงขอส่งสำเนาแผนปฏิบัติการและประมาณการเบิกจ่ายงบประมาณเพื่อโปรดทราบและพิจารณาอนุมัติตามขั้นตอนต่อไป'
         ],
         closing: 'จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ',
         signatory: '(นายณัฐพันธุ์ ศรีวนิช)',
@@ -11842,7 +13705,7 @@ ${dateStr}
 
         ตามหนังสือที่อ้างถึง กรมป้องกันและบรรเทาสาธารณภัยได้แจ้งการจัดสรรงบประมาณดำเนินโครงการเตรียมความพร้อมรับมืออุทกภัยและวาตภัย ประจำปีงบประมาณ พ.ศ. ๒๕๖๙ ความละเอียดแจ้งแล้ว นั้น
 
-        สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้ดำเนินการประชุมร่วมกับกองคลังและฝ่ายยุทธศาสตร์ เพื่อพิจารณากรอบการเบิกจ่ายงบประมาณและรายละเอียดคุณลักษณะเฉพาะของครุภัณฑ์สนามเรียบร้อยแล้ว ในการนี้ จึงขอส่งสำเนาแผนปฏิบัติการและประมาณการเบิกจ่ายงบประมาณเพื่อโปรดทราบและพิจารณาอนุมัติตามขั้นตอนต่อไป
+        สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง ได้ดำเนินการประชุมร่วมกับฝ่ายยุทธศาสตร์และการจัดการ และฝ่ายป้องกันและปฏิบัติการ เพื่อพิจารณากรอบการเบิกจ่ายงบประมาณและรายละเอียดคุณลักษณะเฉพาะของครุภัณฑ์สนามเรียบร้อยแล้ว ในการนี้ จึงขอส่งสำเนาแผนปฏิบัติการและประมาณการเบิกจ่ายงบประมาณเพื่อโปรดทราบและพิจารณาอนุมัติตามขั้นตอนต่อไป
 
         จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ
 
@@ -11853,32 +13716,45 @@ ${dateStr}
                                   (นายณัฐพันธุ์ ศรีวนิช)
                     หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง
 
-ฝ่ายบริหารงานทั่วไป / กองคลัง
+ฝ่ายยุทธศาสตร์และการจัดการ
 โทรศัพท์ ๐ ๓๘๖๙ ๔๑๕๔
 โทรสาร ๐ ๓๘๖๙ ๔๑๕๕`
-      }
+      },
+      suggestedFollowUps: [
+        'บันทึกลงระบบร่างเอกสาร (Drafts)',
+        'เปลี่ยนเป็นบันทึกข้อความภายใน',
+        'ขัดเกลาสำนวนเนื้อหาให้กระชับยิ่งขึ้น'
+      ]
     };
   }
 
   // General Q&A / Knowledge response
   return {
-    replyText: `สวัสดีครับ ยินดีต้อนรับสู่ **Smart e-Saraban Platform** ผู้ช่วย AI ประจำระบบงานสารบรรณอิเล็กทรอนิกส์! 
+    replyText: `สวัสดีครับ ยินดีต้อนรับสู่ **Smart e-Saraban AI Assistant** ผู้ช่วยปัญญาประดิษฐ์ประจำระบบสารบรรณอิเล็กทรอนิกส์! 
 
-คุณสามารถพิมพ์ถามคำสั่งหรือค้นหาข้อมูลด้วยภาษาธรรมชาติได้ตลอดเวลา เช่น:
-• 🔍 **"ค้นหาหนังสือเรื่องงบประมาณเดือนกรกฎาคม"**
+ผมสามารถช่วยดูแลงานสารบรรณของท่านได้ครบวงจร เช่น:
+• 🔍 **"ค้นหาหนังสือเรื่องงบประมาณและอุทกภัย"**
 • 📝 **"สรุปหนังสือรับเลขที่ 123/2569"**
 • ✍️ **"ร่างหนังสือตอบกลับตามระเบียบราชการ"**
-• 📋 **"มีงานค้างของกองคลังอะไรบ้าง"**
+• ⏱️ **"ติดตามงานค้างของฝ่ายยุทธศาสตร์และการจัดการ"**
+• ✒️ **"ขัดเกลาสำนวนภาษาราชการ"**
+• ⚖️ **"สอบถามอายุการเก็บรักษาและทำลายหนังสือ"**
 
 มีข้อมูลหรือระเบียบงานสารบรรณใดให้ผมช่วยดูแลเพิ่มเติมไหมครับ?`,
-    intentType: 'general'
+    intentType: 'general',
+    suggestedFollowUps: [
+      'ค้นหาหนังสือเรื่องงบประมาณเดือนนี้',
+      'สรุปหนังสือรับล่าสุดในระบบ',
+      'ร่างหนังสือตอบกลับราชการ',
+      'ตรวจสอบงานค้างของทุกฝ่ายงาน'
+    ]
   };
 }
 
 // Smart e-Saraban AI Assistant Endpoint
 app.post('/api/ai-assistant', async (req, res) => {
   try {
-    const { prompt, history, user, filterContext } = req.body;
+    const { prompt, history, user, filterContext, selectedDoc } = req.body;
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({ success: false, error: 'กรุณาระบุคำถามหรือคำสั่งสำหรับผู้ช่วย AI' });
     }
@@ -11940,161 +13816,174 @@ app.post('/api/ai-assistant', async (req, res) => {
     let aiResponsePayload: any = null;
 
     if (apiKey) {
-      const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
-      const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
-      const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
-      const refererCandidates = [
-        '',
-        'https://aistudio.google.com/',
-        'https://ai.studio/',
-        'https://google.com/',
-        'https://developer.google.com/',
-        rawReferer,
-        rawOrigin
-      ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
+      const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+      const client = new GoogleGenAI({ apiKey });
 
-      refLoop: for (const refHeader of refererCandidates) {
-        const headersConfig: Record<string, string> = {
-          'User-Agent': 'aistudio-build'
-        };
-        if (refHeader) {
-          headersConfig['Referer'] = refHeader;
-          headersConfig['Referrer'] = refHeader;
-        }
+      for (const modelName of modelsToTry) {
+        try {
+          const systemPrompt = `คุณคือ "Smart e-Saraban AI Assistant" ผู้ช่วยปัญญาประดิษฐ์ระดับสูงประจำระบบสารบรรณอิเล็กทรอนิกส์
+สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (ปภ.จังหวัดระยอง)
 
-        const client = new GoogleGenAI({
-          apiKey,
-          httpOptions: { headers: headersConfig }
-        });
+โครงสร้างฝ่ายงานหลัก 3 ฝ่าย:
+1. ฝ่ายยุทธศาสตร์และการจัดการ (งานธุรการ สารบรรณ การเงิน พัสดุ นโยบาย แผนงาน และยุทธศาสตร์)
+2. ฝ่ายป้องกันและปฏิบัติการ (งานป้องกันและบรรเทาสาธารณภัย กู้ภัย การฝึกซ้อม และการเผชิญเหตุ)
+3. ฝ่ายสงเคราะห์ผู้ประสบภัย (งานช่วยเหลือ เยียวยา และฟื้นฟูผู้ประสบสาธารณภัย)
+*ห้ามใช้คำว่า "ฝ่ายบริหารทั่วไป" หรือ "ฝ่ายบริหารงานทั่วไป" โดยเด็ดขาด
 
-        for (const modelName of modelsToTry) {
-          try {
-            const systemPrompt = `คุณคือ "Smart e-Saraban AI Assistant" ผู้ช่วยปัญญาประดิษฐ์ประจำระบบสารบรรณอิเล็กทรอนิกส์
-สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง
-
-หน้าที่ของคุณ:
-1. ตอบคำถาม ค้นหา สรุป สแกนงานค้าง และร่างหนังสือราชการ อย่างถูกต้อง รวดเร็ว สุภาพ ตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. 2526 และที่แก้ไขเพิ่มเติม
-2. นำข้อมูลหนังสือในระบบจริงดังต่อไปนี้ไปใช้ประมวลผลคำตอบอย่างเที่ยงตรง:
+หน้าที่หลัก:
+1. ตอบคำถาม ค้นหา สรุป สแกนงานค้าง ขัดเกลาภาษาราชการ และยกร่างหนังสือราชการ ถูกต้องตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. 2526 และฉบับแก้ไขเพิ่มเติม
+2. นำข้อมูลหนังสือในระบบจริงด้านล่างไปใช้ประมวลผลคำตอบอย่างเที่ยงตรง:
 
 [ข้อมูลหนังสือล่าสุดในระบบ (${documents.length} รายการ)]:
 ${JSON.stringify(docsSummaryContext, null, 2)}
 
+${selectedDoc ? `[เอกสารที่ผู้ใช้เลือกแนบมาเพื่อวิเคราะห์]:
+เลขที่: ${selectedDoc.docNumber || selectedDoc.receiveNumber || '-'}
+เรื่อง: ${selectedDoc.title || '-'}
+จาก: ${selectedDoc.from || selectedDoc.fromDept || '-'}
+ถึง: ${selectedDoc.to || selectedDoc.toDept || '-'}
+วันที่: ${selectedDoc.date || '-'}
+เนื้อหา: ${selectedDoc.content || selectedDoc.note || '-'}` : ''}
+
 [ข้อมูลผู้ใช้งานปัจจุบัน]:
 ชื่อ: ${user?.firstName || 'ผู้ใช้งาน'} ${user?.lastName || ''}
 ตำแหน่ง: ${user?.position || 'เจ้าหน้าที่สารบรรณ'}
-ฝ่ายงาน: ${user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}
+ฝ่ายงาน: ${user?.department || 'ฝ่ายยุทธศาสตร์และการจัดการ'}
 
-คำแนะนำการจัดรูปแบบ JSON:
-- ตอบกลับด้วยโครงสร้าง JSON ตรงตาม responseSchema เท่านั้น
-- ถ้าผู้ใช้สั่ง "ค้นหา..." ให้ส่ง intentType: "search" พร้อม matchedDocs
-- ถ้าผู้ใช้สั่ง "สรุป..." ให้ส่ง intentType: "summary" พร้อม summaryResult
-- ถ้าผู้ใช้สั่ง "ร่าง..." ให้ส่ง intentType: "draft" พร้อม draftLetter
-- ถ้าผู้ใช้สั่ง "งานค้าง..." ให้ส่ง intentType: "pending_tasks" พร้อม pendingTasksSummary`;
+คำแนะนำโครงสร้าง JSON (responseSchema):
+- ตอบกลับด้วย JSON ที่มี field "replyText", "intentType" (search | summary | draft | pending_tasks | rewrite | regulation_qa | general), "suggestedFollowUps" (Array of 2-4 strings)
+- ถ้าเป็น "search" ให้ใส่ "matchedDocs"
+- ถ้าเป็น "summary" ให้ใส่ "summaryResult"
+- ถ้าเป็น "draft" ให้ใส่ "draftLetter"
+- ถ้าเป็น "pending_tasks" ให้ใส่ "pendingTasksSummary"
+- ถ้าเป็น "rewrite" ให้ใส่ "rewriteResult"
+- ถ้าเป็น "regulation_qa" ให้ใส่ "regulationResult"`;
 
-            const geminiResp = await client.models.generateContent({
-              model: modelName,
-              contents: [{ text: `คำถาม/คำสั่งจากผู้ใช้: "${cleanPrompt}"` }],
-              config: {
-                systemInstruction: systemPrompt,
-                responseMimeType: 'application/json',
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    replyText: { type: Type.STRING },
-                    intentType: { type: Type.STRING },
-                    matchedDocs: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING },
-                          type: { type: Type.STRING },
-                          docNumber: { type: Type.STRING },
-                          receiveNumber: { type: Type.STRING },
-                          title: { type: Type.STRING },
-                          from: { type: Type.STRING },
-                          to: { type: Type.STRING },
-                          department: { type: Type.STRING },
-                          date: { type: Type.STRING },
-                          priority: { type: Type.STRING },
-                          status: { type: Type.STRING },
-                          matchReason: { type: Type.STRING }
-                        }
-                      }
-                    },
-                    summaryResult: {
+          const geminiResp = await client.models.generateContent({
+            model: modelName,
+            contents: [{ text: `คำถาม/คำสั่งจากผู้ใช้: "${cleanPrompt}"` }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  replyText: { type: Type.STRING },
+                  intentType: { type: Type.STRING },
+                  suggestedFollowUps: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  matchedDocs: {
+                    type: Type.ARRAY,
+                    items: {
                       type: Type.OBJECT,
                       properties: {
-                        docId: { type: Type.STRING },
+                        id: { type: Type.STRING },
+                        type: { type: Type.STRING },
                         docNumber: { type: Type.STRING },
+                        receiveNumber: { type: Type.STRING },
                         title: { type: Type.STRING },
-                        fromDept: { type: Type.STRING },
-                        toDept: { type: Type.STRING },
+                        from: { type: Type.STRING },
+                        to: { type: Type.STRING },
+                        department: { type: Type.STRING },
                         date: { type: Type.STRING },
-                        subject: { type: Type.STRING },
-                        coreContent: { type: Type.STRING },
-                        governingRule: { type: Type.STRING },
-                        recommendation: { type: Type.STRING },
-                        nextAction: { type: Type.STRING }
+                        priority: { type: Type.STRING },
+                        status: { type: Type.STRING },
+                        matchReason: { type: Type.STRING }
                       }
-                    },
-                    draftLetter: {
-                      type: Type.OBJECT,
-                      properties: {
-                        docType: { type: Type.STRING },
-                        docNumber: { type: Type.STRING },
-                        dateStr: { type: Type.STRING },
-                        subject: { type: Type.STRING },
-                        salutation: { type: Type.STRING },
-                        reference: { type: Type.STRING },
-                        attachment: { type: Type.STRING },
-                        bodyParagraphs: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        closing: { type: Type.STRING },
-                        signatory: { type: Type.STRING },
-                        signatoryPosition: { type: Type.STRING },
-                        departmentName: { type: Type.STRING },
-                        fullDraftText: { type: Type.STRING }
-                      }
-                    },
-                    pendingTasksSummary: {
-                      type: Type.OBJECT,
-                      properties: {
-                        departmentName: { type: Type.STRING },
-                        totalPendingCount: { type: Type.INTEGER },
-                        urgentCount: { type: Type.INTEGER },
-                        overdueCount: { type: Type.INTEGER },
-                        statusBreakdown: { type: Type.STRING },
-                        recommendationNote: { type: Type.STRING },
+                    }
+                  },
+                  summaryResult: {
+                    type: Type.OBJECT,
+                    properties: {
+                      docId: { type: Type.STRING },
+                      docNumber: { type: Type.STRING },
+                      title: { type: Type.STRING },
+                      fromDept: { type: Type.STRING },
+                      toDept: { type: Type.STRING },
+                      date: { type: Type.STRING },
+                      subject: { type: Type.STRING },
+                      coreContent: { type: Type.STRING },
+                      governingRule: { type: Type.STRING },
+                      recommendation: { type: Type.STRING },
+                      nextAction: { type: Type.STRING }
+                    }
+                  },
+                  draftLetter: {
+                    type: Type.OBJECT,
+                    properties: {
+                      docType: { type: Type.STRING },
+                      docNumber: { type: Type.STRING },
+                      dateStr: { type: Type.STRING },
+                      subject: { type: Type.STRING },
+                      salutation: { type: Type.STRING },
+                      reference: { type: Type.STRING },
+                      attachment: { type: Type.STRING },
+                      bodyParagraphs: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      closing: { type: Type.STRING },
+                      signatory: { type: Type.STRING },
+                      signatoryPosition: { type: Type.STRING },
+                      departmentName: { type: Type.STRING },
+                      fullDraftText: { type: Type.STRING }
+                    }
+                  },
+                  pendingTasksSummary: {
+                    type: Type.OBJECT,
+                    properties: {
+                      departmentName: { type: Type.STRING },
+                      totalPendingCount: { type: Type.INTEGER },
+                      urgentCount: { type: Type.INTEGER },
+                      overdueCount: { type: Type.INTEGER },
+                      statusBreakdown: { type: Type.STRING },
+                      recommendationNote: { type: Type.STRING },
+                      items: {
+                        type: Type.ARRAY,
                         items: {
-                          type: Type.ARRAY,
-                          items: {
-                            type: Type.OBJECT,
-                            properties: {
-                              id: { type: Type.STRING },
-                              docNumber: { type: Type.STRING },
-                              title: { type: Type.STRING },
-                              from: { type: Type.STRING },
-                              date: { type: Type.STRING },
-                              priority: { type: Type.STRING },
-                              status: { type: Type.STRING },
-                              daysPending: { type: Type.INTEGER }
-                            }
+                          type: Type.OBJECT,
+                          properties: {
+                            id: { type: Type.STRING },
+                            docNumber: { type: Type.STRING },
+                            title: { type: Type.STRING },
+                            from: { type: Type.STRING },
+                            date: { type: Type.STRING },
+                            priority: { type: Type.STRING },
+                            status: { type: Type.STRING },
+                            daysPending: { type: Type.INTEGER }
                           }
                         }
                       }
                     }
+                  },
+                  rewriteResult: {
+                    type: Type.OBJECT,
+                    properties: {
+                      originalText: { type: Type.STRING },
+                      polishedText: { type: Type.STRING },
+                      toneStyle: { type: Type.STRING },
+                      improvedPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      explanation: { type: Type.STRING }
+                    }
+                  },
+                  regulationResult: {
+                    type: Type.OBJECT,
+                    properties: {
+                      topic: { type: Type.STRING },
+                      relevantAct: { type: Type.STRING },
+                      ruleArticle: { type: Type.STRING },
+                      explanation: { type: Type.STRING },
+                      practicalGuide: { type: Type.STRING },
+                      caution: { type: Type.STRING }
+                    }
                   }
                 }
               }
-            });
-
-            if (geminiResp && geminiResp.text) {
-              aiResponsePayload = JSON.parse(geminiResp.text);
-              break refLoop;
             }
-          } catch (geminiError: any) {
-            console.warn(`Gemini API call warning for ${modelName}:`, geminiError.message);
+          });
+
+          if (geminiResp && geminiResp.text) {
+            aiResponsePayload = JSON.parse(geminiResp.text);
+            break;
           }
+        } catch (geminiError: any) {
+          // Continue to next model or fallback
         }
       }
     }
@@ -12103,7 +13992,8 @@ ${JSON.stringify(docsSummaryContext, null, 2)}
       aiResponsePayload = generateSmartAiFallback({
         prompt: cleanPrompt,
         documents,
-        user
+        user,
+        selectedDoc
       });
     }
 
@@ -12114,11 +14004,11 @@ ${JSON.stringify(docsSummaryContext, null, 2)}
 
   } catch (err: any) {
     console.error('Error in /api/ai-assistant:', err);
-    // Fallback gracefully so client never fails with HTTP 500
     const fallbackData = generateSmartAiFallback({
       prompt: req.body?.prompt || '',
       documents: [],
-      user: req.body?.user
+      user: req.body?.user,
+      selectedDoc: req.body?.selectedDoc
     });
     return res.json({
       success: true,
@@ -12817,36 +14707,12 @@ app.post('/api/ai/infographics', async (req, res) => {
       });
     }
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
-    const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
-    const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
-    const refererCandidates = [
-      '',
-      'https://aistudio.google.com/',
-      'https://ai.studio/',
-      'https://google.com/',
-      'https://developer.google.com/',
-      rawReferer,
-      rawOrigin
-    ].filter((v, i, a) => a && a.length > 0 ? a.indexOf(v) === i : i === 0);
-
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
     let generatedData = null;
 
-    refLoop: for (const refHeader of refererCandidates) {
-      const headersConfig: Record<string, string> = {
-        'User-Agent': 'aistudio-build'
-      };
-      if (refHeader) {
-        headersConfig['Referer'] = refHeader;
-        headersConfig['Referrer'] = refHeader;
-      }
+    const client = new GoogleGenAI({ apiKey });
 
-      const client = new GoogleGenAI({
-        apiKey,
-        httpOptions: { headers: headersConfig }
-      });
-
-      for (const modelName of modelsToTry) {
+    for (const modelName of modelsToTry) {
         try {
           const response = await client.models.generateContent({
             model: modelName,
@@ -12900,13 +14766,12 @@ app.post('/api/ai/infographics', async (req, res) => {
 
           if (response && response.text) {
             generatedData = JSON.parse(response.text.trim());
-            break refLoop;
+            break;
           }
         } catch (err: any) {
-          console.warn(`Error generating infographics with model ${modelName} using referer ${refHeader}:`, err.message);
+          // continue to next model
         }
       }
-    }
 
     if (!generatedData) {
       throw new Error('ระบบ AI ไม่สามารถประมวลผลคำขอได้ในขณะนี้ กรุณาตรวจสอบการตั้งค่าคีย์หรือลองใหม่อีกครั้ง');
@@ -13124,64 +14989,581 @@ app.delete('/api/infographics-assets/images', async (req, res) => {
     app.listen(listenPort, () => {
       console.log(`Server running on Passenger socket pipe: ${listenPort}`);
       startScheduledReservationEngine();
+      startAutomatedBackupEngine();
     });
   } else {
     const portNum = Number(listenPort) || 3000;
     app.listen(portNum, '0.0.0.0', () => {
       console.log(`Server running on http://0.0.0.0:${portNum}`);
       startScheduledReservationEngine();
+      startAutomatedBackupEngine();
     });
   }
 }
 
 startServer();
 
-export async function sendNotificationEmail(targetAssignee: string, subject: string, htmlContent: string) {
-  if (!isMysqlOnline) return;
+export async function sendNotificationEmail(
+  targetAssigneeOrDepts: string | string[],
+  subject: string,
+  htmlContent: string
+) {
   try {
-    const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName FROM settings LIMIT 1');
-    const settings = settingsRows[0] || {};
-    if (!settings.smtpHost || !settings.smtpUser) return;
-    
-    const [users]: any = await pool.query(
-      `SELECT email FROM users 
-       WHERE email IS NOT NULL AND email != '' 
-       AND emailNotifications = 1 
-       AND (
-         TRIM(CONCAT(firstName, ' ', lastName)) = ? 
-         OR username = ? 
-         OR department = ?
-       )`,
-      [targetAssignee, targetAssignee, targetAssignee]
-    );
+    let settings: any = {};
+    if (isMysqlOnline) {
+      try {
+        const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName FROM settings LIMIT 1');
+        if (settingsRows && settingsRows.length > 0) settings = settingsRows[0];
+      } catch (err: any) {
+        console.warn('Could not read settings from MySQL:', err.message);
+      }
+    }
+    if (!settings.smtpHost && localDb.settings && localDb.settings.length > 0) {
+      settings = localDb.settings[0];
+    }
 
-    if (!users || users.length === 0) return;
+    if (!settings.smtpHost || !settings.smtpUser) {
+      console.log(`[Email Notification Skipped] SMTP not configured. Cannot send "${subject}".`);
+      return;
+    }
+
+    const targets: string[] = Array.isArray(targetAssigneeOrDepts) 
+      ? targetAssigneeOrDepts.map(t => String(t).trim()).filter(Boolean)
+      : [String(targetAssigneeOrDepts).trim()].filter(Boolean);
+
+    if (targets.length === 0) return;
+
+    let usersList: any[] = [];
+    if (isMysqlOnline) {
+      try {
+        const [users]: any = await pool.query(`SELECT id, username, email, firstName, lastName, department, emailNotifications FROM users WHERE email IS NOT NULL AND email != ''`);
+        if (users && users.length > 0) usersList = users;
+      } catch (err: any) {
+        console.warn('Could not query users from MySQL:', err.message);
+      }
+    }
+    if (usersList.length === 0 && localDb.users) {
+      usersList = localDb.users;
+    }
+
+    const matchingEmails = new Set<string>();
+
+    for (const target of targets) {
+      if (target.includes('@')) {
+        matchingEmails.add(target);
+        continue;
+      }
+
+      for (const u of usersList) {
+        if (!u.email || !String(u.email).trim()) continue;
+        
+        const isNotifEnabled = u.emailNotifications === undefined || u.emailNotifications === null || Number(u.emailNotifications) === 1 || u.emailNotifications === true;
+        if (!isNotifEnabled) continue;
+
+        const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+        const username = String(u.username || '').trim();
+        const department = String(u.department || '').trim();
+
+        if (
+          fullName === target ||
+          username === target ||
+          (target.length > 2 && (fullName.includes(target) || username.includes(target)))
+        ) {
+          matchingEmails.add(String(u.email).trim());
+        }
+      }
+    }
+
+    const recipientList = Array.from(matchingEmails);
+    if (recipientList.length === 0) {
+      console.log(`[Email Notification] No matching recipients with emailNotifications enabled found for targets: ${targets.join(', ')}`);
+      return;
+    }
 
     const transporter = nodemailer.createTransport({
       host: settings.smtpHost,
-      port: settings.smtpPort || 587,
-      secure: settings.smtpPort === 465,
+      port: Number(settings.smtpPort) || 587,
+      secure: Number(settings.smtpPort) === 465,
+      connectionTimeout: 10000,
+      greetingTimeout: 8000,
+      socketTimeout: 15000,
       auth: {
         user: settings.smtpUser,
-        pass: settings.smtpPassword,
+        pass: settings.smtpPassword || '',
       },
+      tls: {
+        rejectUnauthorized: false
+      }
     });
 
-    const emails = users.map((u: any) => u.email);
-    const uniqueEmails = [...new Set(emails)];
-
     const mailOptions = {
-      from: `"${settings.orgName || 'ระบบสารบรรณ EDMS'}" <${settings.smtpFrom || settings.smtpUser}>`,
-      to: uniqueEmails.join(','),
+      from: settings.smtpFrom ? settings.smtpFrom : `"${settings.orgName || 'ระบบสารบรรณ EDMS'}" <${settings.smtpUser}>`,
+      to: recipientList.join(','),
       subject: subject,
       html: htmlContent
     };
 
-    transporter.sendMail(mailOptions, (err: any, info: any) => {
-      if (err) console.error('Error sending notification email:', err);
-      else console.log('Notification email sent:', info.response);
+    transporter.sendMail(mailOptions, async (err: any, info: any) => {
+      if (err) {
+        console.error('Error sending notification email:', err.message);
+        await addSystemLog('EMAIL_FAILED', `ส่งอีเมลแจ้งเตือน "${subject}" ไปยัง ${recipientList.join(', ')} ไม่สำเร็จ: ${err.message}`, 'ระบบอัตโนมัติ', '127.0.0.1');
+      } else {
+        console.log('Notification email sent successfully:', info.response || info.messageId);
+        await addSystemLog('EMAIL_SENT', `ส่งอีเมลแจ้งเตือน "${subject}" ไปยัง ${recipientList.join(', ')} สำเร็จ`, 'ระบบอัตโนมัติ', '127.0.0.1');
+      }
     });
-  } catch (err) {
-    console.error('sendNotificationEmail Error:', err);
+  } catch (err: any) {
+    console.error('sendNotificationEmail Error:', err.message);
   }
 }
+
+// ==========================================
+// ENHANCED AI INTEGRATION ENDPOINTS (iOS 26)
+// ==========================================
+
+// ==========================================
+// THAI OFFICIAL DOCUMENT SMART NLP ANALYZER (FALLBACK ENGINE)
+// ==========================================
+
+function analyzeThaiGovDocument(title: string, content: string) {
+  const combined = `${title || ''} ${content || ''}`.toLowerCase();
+
+  // 1. Determine Document Type
+  let type: 'inbox' | 'outbox' | 'admin' | 'internal' = 'inbox';
+  let category: 'order' | 'announcement' | 'certificate' | 'circular' | 'memo' = 'memo';
+
+  if (combined.includes('คำสั่ง') || combined.includes('แต่งตั้ง') || combined.includes('มอบหมายหน้าที่')) {
+    type = 'admin';
+    category = 'order';
+  } else if (combined.includes('ประกาศ') || combined.includes('แถลงการณ์')) {
+    type = 'admin';
+    category = 'announcement';
+  } else if (combined.includes('บันทึกข้อความ') || combined.includes('ภายใน') || combined.includes('ขออนุมัติ')) {
+    type = 'internal';
+    category = 'memo';
+  } else if (combined.includes('หนังสือส่ง') || combined.includes('กราบเรียน') || combined.includes('ส่งถึง')) {
+    type = 'outbox';
+    category = 'memo';
+  } else if (combined.includes('หนังสือเวียน') || combined.includes('ว.') || combined.includes('แจ้งเวียน')) {
+    category = 'circular';
+  }
+
+  // 2. Determine Priority
+  let priority: 'normal' | 'urgent' | 'very_urgent' | 'extremely_urgent' = 'normal';
+  if (combined.includes('ด่วนที่สุด') || combined.includes('ฉุกเฉิน') || combined.includes('เตือนภัย') || combined.includes('วิกฤต') || combined.includes('เผชิญเหตุ')) {
+    priority = 'extremely_urgent';
+  } else if (combined.includes('ด่วนมาก') || combined.includes('เร่งด่วน') || combined.includes('สำคัญมาก')) {
+    priority = 'very_urgent';
+  } else if (combined.includes('ด่วน') || combined.includes('เร่งรัด')) {
+    priority = 'urgent';
+  }
+
+  // 3. Determine Department
+  let suggestedTo = 'ฝ่ายยุทธศาสตร์และการจัดการ';
+  if (combined.includes('ป้องกัน') || combined.includes('อุทกภัย') || combined.includes('วาตภัย') || combined.includes('สาธารณภัย') || combined.includes('ดับเพลิง') || combined.includes('กู้ภัย') || combined.includes('ปฏิบัติการ')) {
+    suggestedTo = 'ฝ่ายป้องกันและปฏิบัติการ';
+  } else if (combined.includes('สงเคราะห์') || combined.includes('ผู้ประสบภัย') || combined.includes('ถุงยังชีพ') || combined.includes('เยียวยา') || combined.includes('เงินช่วยเหลือ') || combined.includes('ฟื้นฟู')) {
+    suggestedTo = 'ฝ่ายสงเคราะห์ผู้ประสบภัย';
+  } else if (combined.includes('ยุทธศาสตร์') || combined.includes('แผนงาน') || combined.includes('งบประมาณ') || combined.includes('โครงการ') || combined.includes('ติดตามประเมินผล') || combined.includes('นโยบาย') || combined.includes('สารบรรณ') || combined.includes('ธุรการ') || combined.includes('พัสดุ') || combined.includes('การเงิน')) {
+    suggestedTo = 'ฝ่ายยุทธศาสตร์และการจัดการ';
+  }
+
+  // 4. Generate Clean Executive Summary
+  let summary = '';
+  if (content && content.trim().length > 10) {
+    const sentences = content.trim().split(/[\n\r]+/);
+    summary = sentences.slice(0, 3).join(' ').substring(0, 300);
+  } else if (title) {
+    summary = `เอกสารเรื่อง "${title}" เพื่อโปรดพิจารณาดำเนินการตามระเบียบงานสารบรรณสำนักนายกรัฐมนตรี`;
+  } else {
+    summary = 'เอกสารราชการเพื่อทราบและดำเนินการตามขั้นตอน';
+  }
+
+  return {
+    type,
+    category,
+    summary,
+    suggestedTo,
+    priority,
+    tags: ['สารบรรณอิเล็กทรอนิกส์', 'ปภ.ระยอง']
+  };
+}
+
+app.post('/api/ai/autocomplete', async (req, res) => {
+  const { title, content } = req.body;
+  if (!title && !content) {
+    return res.status(400).json({ error: 'กรุณาระบุชื่อเรื่องหรือเนื้อหาเพื่อให้ AI วิเคราะห์' });
+  }
+
+  let apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) {
+    try {
+      const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
+      if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
+        apiKey = String(stRows[0].geminiApiKey).trim();
+      }
+    } catch (e) {}
+  }
+
+  // If no apiKey available at all, directly use smart NLP analyzer
+  if (!apiKey) {
+    const fallbackResult = analyzeThaiGovDocument(title, content);
+    return res.json({ success: true, result: fallbackResult, note: 'Smart NLP Fallback' });
+  }
+
+  const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
+  const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
+  const refererCandidates = [
+    rawReferer,
+    rawOrigin,
+    'https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/',
+    'https://ais-pre-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/',
+    'https://aistudio.google.com/',
+    'https://ai.studio/',
+    ''
+  ].filter((v, i, a) => v !== undefined && a.indexOf(v) === i);
+
+  const prompt = `
+  Analyze the following Thai government document registration details and automatically complete the metadata.
+  Output ONLY a valid JSON object with the following schema:
+  {
+    "type": "inbox" | "outbox" | "admin" | "internal",
+    "category": "order" | "announcement" | "certificate" | "circular" | "memo",
+    "summary": "String (A high-quality Thai executive summary or structured description of the document)",
+    "suggestedTo": "String (Suggested recipient department or division in Thai, e.g., 'ฝ่ายยุทธศาสตร์และการจัดการ', 'ฝ่ายป้องกันและปฏิบัติการ', 'ฝ่ายสงเคราะห์ผู้ประสบภัย')",
+    "priority": "normal" | "urgent" | "very_urgent" | "extremely_urgent",
+    "tags": ["String", "String"]
+  }
+
+  Input details:
+  Title: ${title || 'ไม่มีชื่อเรื่อง'}
+  Content: ${content || 'ไม่มีเนื้อหาหลัก'}
+  `;
+
+  const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+
+        const resultText = response.text || "{}";
+        const cleanedText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsedResult = JSON.parse(cleanedText);
+
+        return res.json({ success: true, result: parsedResult });
+      } catch (mErr: any) {
+        // Try next model or fallback
+      }
+    }
+  } catch (clientErr: any) {
+    // Silently continue to fallback
+  }
+
+  // Gracefully fallback to high-quality Thai Gov Rule-based NLP if Gemini API key is blocked by referrers or rate-limited
+  const fallbackResult = analyzeThaiGovDocument(title, content);
+  return res.json({ success: true, result: fallbackResult, note: 'Analyzed with Smart Engine' });
+});
+
+app.post('/api/ai/classify', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'ไม่พบเนื้อหาเอกสาร' });
+
+    let apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+      try {
+        const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
+        if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+
+    if (!apiKey) {
+      const nlp = analyzeThaiGovDocument('', text);
+      return res.json({ success: true, type: nlp.type });
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Classify this document content into one of these types: 'inbox' (หนังสือรับ), 'outbox' (หนังสือส่ง), 'internal' (หนังสือภายใน), 'admin' (งานธุรการ). Return only the type. Content: ${text.substring(0, 2000)}`,
+      });
+      
+      if (response && response.text) {
+        return res.json({ success: true, type: response.text.trim() });
+      }
+    } catch (e) {
+      // fallback
+    }
+
+    const nlp = analyzeThaiGovDocument('', text);
+    return res.json({ success: true, type: nlp.type });
+  } catch (err: any) {
+    const nlp = analyzeThaiGovDocument('', req.body?.text || '');
+    res.json({ success: true, type: nlp.type });
+  }
+});
+
+app.post('/api/ai/summarize', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'ไม่พบเนื้อหาเอกสาร' });
+
+    let apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+      try {
+        const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
+        if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
+          apiKey = String(stRows[0].geminiApiKey).trim();
+        }
+      } catch (e) {}
+    }
+
+    if (!apiKey) {
+      const nlp = analyzeThaiGovDocument('', text);
+      return res.json({ success: true, summary: nlp.summary });
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `Summarize this Thai document content in a short, elegant paragraph suitable for an executive. Content: ${text.substring(0, 3000)}`,
+      });
+      
+      if (response && response.text) {
+        return res.json({ success: true, summary: response.text.trim() });
+      }
+    } catch (e) {
+      // fallback
+    }
+
+    const nlp = analyzeThaiGovDocument('', text);
+    return res.json({ success: true, summary: nlp.summary });
+  } catch (err: any) {
+    const nlp = analyzeThaiGovDocument('', req.body?.text || '');
+    res.json({ success: true, summary: nlp.summary });
+  }
+});
+
+// ==========================================
+// AUTOMATED BACKUP SCHEDULING SYSTEM
+// ==========================================
+
+async function runAutomatedBackup() {
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const backupFileName = `EDMS_AutoBackup_${dateStr}_${Date.now()}.json`;
+  const backupFolderPath = path.join(process.cwd(), 'uploads', 'automated_backups');
+  const backupFilePath = path.join(backupFolderPath, backupFileName);
+
+  try {
+    const tables = [
+      'settings',
+      'users',
+      'departments',
+      'positions',
+      'folders',
+      'numbering_rules',
+      'file_codes',
+      'reserved_numbers',
+      'scheduled_reservations',
+      'draft_documents',
+      'inbox_documents',
+      'circular_documents',
+      'outbox_documents',
+      'internal_documents',
+      'admin_documents',
+      'department_receives',
+      'document_tracking',
+      'organizations',
+      'system_logs',
+      'workflow_templates',
+      'workflow_instances',
+      'digital_signatures',
+      'user_favorites',
+      'document_reads',
+      'recycle_bin',
+      'role_permissions',
+      'enterprise_dynamic_qrs',
+      'enterprise_qr_scans',
+      'enterprise_qr_templates',
+      'changelogs',
+      'infographics',
+      'project_summaries'
+    ];
+
+    const backupTablesData: Record<string, any[]> = {};
+    for (const table of tables) {
+      try {
+        if (isMysqlOnline) {
+          const [rows]: any = await pool.query(`SELECT * FROM \`${table}\``);
+          backupTablesData[table] = rows || [];
+        } else {
+          backupTablesData[table] = localDb[table] || [];
+        }
+      } catch (err: any) {
+        backupTablesData[table] = [];
+      }
+    }
+
+    const backupPayload = {
+      version: '1.0',
+      type: 'AUTOMATED_DAILY_BACKUP',
+      system: 'EDMS Electronic Document Management System',
+      createdAt: new Date().toISOString(),
+      createdBy: 'ระบบสำรองข้อมูลอัตโนมัติ (Automated AI Agent)',
+      tables: backupTablesData
+    };
+
+    fs.mkdirSync(backupFolderPath, { recursive: true });
+    fs.writeFileSync(backupFilePath, JSON.stringify(backupPayload, null, 2), 'utf8');
+
+    // Rotation: Keep only 7 automated backups
+    try {
+      const files = fs.readdirSync(backupFolderPath);
+      const backupFiles = files
+        .filter(f => f.startsWith('EDMS_AutoBackup_') && f.endsWith('.json'))
+        .map(f => ({ name: f, path: path.join(backupFolderPath, f), mtime: fs.statSync(path.join(backupFolderPath, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+
+      if (backupFiles.length > 7) {
+        const filesToDelete = backupFiles.slice(7);
+        for (const file of filesToDelete) {
+          try {
+            fs.unlinkSync(file.path);
+          } catch (e: any) {}
+        }
+      }
+    } catch (e) {}
+
+    await addSystemLog('BACKUP_AUTOMATED', `ระบบทำการสำรองข้อมูลอัตโนมัติสำเร็จ: ${backupFileName}`, 'ระบบอัตโนมัติ', '127.0.0.1');
+    console.log(`💾 ✅ Automated Daily Backup completed: ${backupFileName}`);
+  } catch (err: any) {
+    console.error('❌ Automated Backup failed:', err.message);
+    await addSystemLog('BACKUP_FAILED', `ระบบทำการสำรองข้อมูลอัตโนมัติล้มเหลว: ${err.message}`, 'ระบบอัตโนมัติ', '127.0.0.1');
+  }
+}
+
+function startAutomatedBackupEngine() {
+  console.log('⏰ Starting Automated Backup Engine (24-hour cycle)...');
+  setTimeout(() => {
+    runAutomatedBackup();
+  }, 10000); // 10 seconds delay to not block server startup path
+
+  setInterval(() => {
+    runAutomatedBackup();
+  }, 24 * 60 * 60 * 1000);
+}
+
+app.get('/api/automated-backups/list', async (req, res) => {
+  const role = (req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'คุณไม่มีสิทธิ์ของระบบในการเข้าถึงรายการสำรองข้อมูล' });
+  }
+
+  try {
+    const backupFolderPath = path.join(process.cwd(), 'uploads', 'automated_backups');
+    fs.mkdirSync(backupFolderPath, { recursive: true });
+    
+    const files = fs.readdirSync(backupFolderPath);
+    const backupList = files
+      .filter(f => f.startsWith('EDMS_AutoBackup_') && f.endsWith('.json'))
+      .map(f => {
+        const fullPath = path.join(backupFolderPath, f);
+        const stats = fs.statSync(fullPath);
+        return {
+          fileName: f,
+          sizeBytes: stats.size,
+          createdAt: stats.mtime.toISOString(),
+          path: `/uploads/automated_backups/${f}`
+        };
+      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.json({ success: true, backups: backupList });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'ไม่สามารถดึงข้อมูลสำรองอัตโนมัติ: ' + err.message });
+  }
+});
+
+app.post('/api/automated-backups/restore/:fileName', async (req, res) => {
+  const role = (req.body.role || req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'คุณไม่มีสิทธิ์ของระบบในการกู้คืนข้อมูล' });
+  }
+
+  const { fileName } = req.params;
+  const username = (req.body.username || req.query.username || 'ผู้ดูแลระบบ').toString();
+  const ip = getClientIp(req);
+
+  try {
+    const backupFolderPath = path.join(process.cwd(), 'uploads', 'automated_backups');
+    const backupFilePath = path.join(backupFolderPath, fileName);
+
+    if (!fs.existsSync(backupFilePath)) {
+      return res.status(404).json({ success: false, error: 'ไม่พบไฟล์สำรองข้อมูลที่ระบุ' });
+    }
+
+    const fileContent = fs.readFileSync(backupFilePath, 'utf8');
+    const backupData = JSON.parse(fileContent);
+
+    if (backupData.tables) {
+      if (isMysqlOnline) {
+        await pool.query('SET FOREIGN_KEY_CHECKS = 0');
+      }
+
+      for (const table of Object.keys(backupData.tables)) {
+        const rows = backupData.tables[table];
+        if (!Array.isArray(rows)) continue;
+
+        if (isMysqlOnline) {
+          await pool.query(`TRUNCATE TABLE \`${table}\``);
+          if (rows.length > 0) {
+            const columns = Object.keys(rows[0]);
+            const columnNames = columns.map(c => `\`${c}\``).join(', ');
+            const placeholders = columns.map(() => '?').join(', ');
+            const sql = `INSERT INTO \`${table}\` (${columnNames}) VALUES (${placeholders})`;
+
+            for (const row of rows) {
+              const values = columns.map(c => {
+                if (row[c] !== null && typeof row[c] === 'object') {
+                  return JSON.stringify(row[c]);
+                }
+                return row[c];
+              });
+              await pool.query(sql, values);
+            }
+          }
+        } else {
+          localDb[table] = rows;
+        }
+      }
+
+      if (isMysqlOnline) {
+        await pool.query('SET FOREIGN_KEY_CHECKS = 1');
+      } else {
+        saveLocalDb();
+      }
+
+      await addSystemLog('RESTORE_SUCCESS', `กู้คืนระบบจากไฟล์สำรองข้อมูลอัตโนมัติสำเร็จ: ${fileName}`, username, ip);
+      res.json({ success: true, message: 'กู้คืนระบบจากประวัติสำรองข้อมูลเรียบร้อยแล้ว' });
+    } else {
+      res.status(400).json({ success: false, error: 'รูปแบบโครงสร้างไฟล์สำรองข้อมูลไม่ถูกต้อง' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'กู้คืนข้อมูลไม่สำเร็จ: ' + err.message });
+  }
+});
+

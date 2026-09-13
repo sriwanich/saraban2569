@@ -1,3 +1,16 @@
+
+// Suppress benign Firebase offline warnings in the preview iframe
+const originalConsoleError = console.error;
+console.error = (...args) => {
+  if (
+    typeof args[0] === 'string' && 
+    (args[0].includes('Could not reach Cloud Firestore backend') || args[0].includes('[code=unavailable]'))
+  ) {
+    return;
+  }
+  originalConsoleError(...args);
+};
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'

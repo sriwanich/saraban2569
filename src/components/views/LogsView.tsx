@@ -304,39 +304,39 @@ export default function LogsView({ user }: { user?: any }) {
   return (
     <div className="space-y-4 sm:space-y-6 max-w-full overflow-hidden">
       {/* Header Banner */}
-      <div className="p-5 sm:p-6 bg-gradient-to-r from-[var(--bg-surface)] via-[var(--bg-surface)] to-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl sm:rounded-2xl shadow-xs relative overflow-hidden">
-        <div className="absolute right-0 top-0 bottom-0 opacity-5 dark:opacity-10 pointer-events-none flex items-center pr-6 sm:pr-10">
-          <ShieldCheck className="w-36 h-36 sm:w-48 sm:h-48 text-[var(--primary-color)]" />
-        </div>
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] text-xs font-semibold border border-[var(--primary-color)]/20">
+      <div className="p-6 sm:p-8 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+        <div className="absolute right-0 top-0 w-64 h-64 bg-gradient-to-bl from-blue-500/10 to-transparent rounded-full blur-[80px] pointer-events-none -mr-10 -mt-10 transition-all duration-700 group-hover:from-blue-500/20" />
+        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-bold border border-blue-500/20 shadow-sm shadow-blue-500/5">
               <Database className="w-3.5 h-3.5" /> Audit Logs
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text-primary)] flex items-center gap-2.5 font-sans">
-              <ShieldCheck className="w-6 h-6 sm:w-7 sm:h-7 text-[var(--primary-color)] shrink-0" />
-              บันทึกประวัติการใช้งานระบบ
+            <h1 className="text-2xl lg:text-3xl font-bold font-sans text-[var(--text-primary)] flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/20">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <span className="tracking-tight">บันทึกประวัติการใช้งาน <span className="text-blue-500 font-normal">System Logs</span></span>
             </h1>
-            <p className="text-xs sm:text-sm text-[var(--text-secondary)] max-w-2xl leading-relaxed">
+            <p className="text-sm text-[var(--text-secondary)] font-medium max-w-2xl leading-relaxed">
               ติดตามตรวจสอบประวัติการเข้าใช้งานและกิจกรรมในระบบสารบรรณอย่างละเอียดและปลอดภัย
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 self-end sm:self-center shrink-0">
+          <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
             <button
               onClick={fetchLogs}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] text-xs sm:text-sm font-medium rounded-xl border border-[var(--border-medium)] transition shadow-xs disabled:opacity-50 active:scale-95 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md hover:border-slate-300 dark:hover:border-slate-700 text-[var(--text-primary)] text-xs sm:text-sm font-bold rounded-xl border border-[var(--border-light)] transition-all shadow-sm hover:shadow-md disabled:opacity-50"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[var(--primary-color)]' : ''}`} />
-              <span>รีเฟรช</span>
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
+              <span>รีเฟรชข้อมูล</span>
             </button>
             {(!user || user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ') && (
               <button
                 onClick={() => setShowClearConfirmModal(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-medium rounded-xl transition shadow-xs active:scale-95 cursor-pointer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-sm shadow-rose-500/20 hover:shadow-md hover:shadow-rose-500/30"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Trash2 className="w-4 h-4" />
                 <span>ล้างประวัติ</span>
               </button>
             )}
@@ -369,84 +369,85 @@ export default function LogsView({ user }: { user?: any }) {
       )}
 
       {/* Quick Stats Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-        <div className="p-4 bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-light)] shadow-xs hover:border-[var(--primary-color)]/30 transition-colors flex items-center justify-between">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="p-5 bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:border-slate-300 dark:hover:border-slate-700 transition-all flex items-center justify-between group">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-[var(--text-secondary)] truncate">บันทึกทั้งหมด</p>
-            <p className="text-2xl font-bold text-[var(--text-primary)] mt-1 font-mono tracking-tight">{logs.length}</p>
+            <p className="text-xs font-bold text-[var(--text-secondary)] truncate uppercase tracking-wider">บันทึกทั้งหมด</p>
+            <p className="text-3xl font-extrabold text-[var(--text-primary)] mt-1.5 font-mono tracking-tight group-hover:scale-105 origin-left transition-transform">{logs.length}</p>
           </div>
-          <div className="p-3 bg-[var(--primary-color)]/10 rounded-xl text-[var(--primary-color)] shrink-0">
-            <Database className="w-5 h-5 sm:w-6 sm:h-6" />
+          <div className="p-3.5 bg-slate-100 dark:bg-slate-800 rounded-2xl text-slate-500 dark:text-slate-400 shrink-0 group-hover:bg-slate-200 dark:group-hover:bg-slate-700 transition-colors">
+            <Database className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="p-4 bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-light)] shadow-xs hover:border-emerald-500/30 transition-colors flex items-center justify-between">
+        <div className="p-5 bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:border-emerald-500/30 transition-all flex items-center justify-between group">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-[var(--text-secondary)] truncate">เข้าสู่ระบบ</p>
-            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 font-mono tracking-tight">
+            <p className="text-xs font-bold text-[var(--text-secondary)] truncate uppercase tracking-wider">เข้าสู่ระบบ</p>
+            <p className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5 font-mono tracking-tight group-hover:scale-105 origin-left transition-transform">
               {logs.filter(l => l.action.startsWith('LOGIN')).length}
             </p>
           </div>
-          <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400 shrink-0">
-            <Key className="w-5 h-5 sm:w-6 sm:h-6" />
+          <div className="p-3.5 bg-emerald-500/10 rounded-2xl text-emerald-600 dark:text-emerald-400 shrink-0 group-hover:bg-emerald-500/20 transition-colors">
+            <Key className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="p-4 bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-light)] shadow-xs hover:border-blue-500/30 transition-colors flex items-center justify-between">
+        <div className="p-5 bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:border-blue-500/30 transition-all flex items-center justify-between group">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-[var(--text-secondary)] truncate">งานเอกสาร</p>
-            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1 font-mono tracking-tight">
+            <p className="text-xs font-bold text-[var(--text-secondary)] truncate uppercase tracking-wider">งานเอกสาร</p>
+            <p className="text-3xl font-extrabold text-blue-600 dark:text-blue-400 mt-1.5 font-mono tracking-tight group-hover:scale-105 origin-left transition-transform">
               {logs.filter(l => l.action.includes('DOCUMENT') || l.action.includes('TRACKING')).length}
             </p>
           </div>
-          <div className="p-3 bg-blue-500/10 rounded-xl text-blue-600 dark:text-blue-400 shrink-0">
-            <FileText className="w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
-        </div>
-        <div className="p-4 bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-light)] shadow-xs hover:border-amber-500/30 transition-colors flex items-center justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-[var(--text-secondary)] truncate">ร่างเอกสาร</p>
-            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1 font-mono tracking-tight">
-              {logs.filter(l => l.action.includes('DRAFT')).length}
-            </p>
-          </div>
-          <div className="p-3 bg-amber-500/10 rounded-xl text-amber-600 dark:text-amber-400 shrink-0">
-            <FileEdit className="w-5 h-5 sm:w-6 sm:h-6" />
+          <div className="p-3.5 bg-blue-500/10 rounded-2xl text-blue-600 dark:text-blue-400 shrink-0 group-hover:bg-blue-500/20 transition-colors">
+            <FileText className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="p-4 bg-[var(--bg-surface)] rounded-2xl border border-[var(--border-light)] shadow-xs hover:border-purple-500/30 transition-colors flex items-center justify-between">
+        <div className="p-5 bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:border-amber-500/30 transition-all flex items-center justify-between group">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-[var(--text-secondary)] truncate">ตั้งค่า/ผู้ใช้/ระบบ</p>
-            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1 font-mono tracking-tight">
+            <p className="text-xs font-bold text-[var(--text-secondary)] truncate uppercase tracking-wider">ร่างเอกสาร</p>
+            <p className="text-3xl font-extrabold text-amber-600 dark:text-amber-400 mt-1.5 font-mono tracking-tight group-hover:scale-105 origin-left transition-transform">
+              {logs.filter(l => l.action.includes('DRAFT')).length}
+            </p>
+          </div>
+          <div className="p-3.5 bg-amber-500/10 rounded-2xl text-amber-600 dark:text-amber-400 shrink-0 group-hover:bg-amber-500/20 transition-colors">
+            <FileEdit className="w-6 h-6" />
+          </div>
+        </div>
+
+        <div className="p-5 bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:border-purple-500/30 transition-all flex items-center justify-between group">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-[var(--text-secondary)] truncate uppercase tracking-wider">ตั้งค่าระบบ</p>
+            <p className="text-3xl font-extrabold text-purple-600 dark:text-purple-400 mt-1.5 font-mono tracking-tight group-hover:scale-105 origin-left transition-transform">
               {logs.filter(l => l.action.includes('SETTINGS') || l.action.includes('USER') || l.action.includes('DATABASE')).length}
             </p>
           </div>
-          <div className="p-3 bg-purple-500/10 rounded-xl text-purple-600 dark:text-purple-400 shrink-0">
-            <Settings className="w-5 h-5 sm:w-6 sm:h-6" />
+          <div className="p-3.5 bg-purple-500/10 rounded-2xl text-purple-600 dark:text-purple-400 shrink-0 group-hover:bg-purple-500/20 transition-colors">
+            <Settings className="w-6 h-6" />
           </div>
         </div>
       </div>
 
       {/* Controls Bar: Search & Filter Tabs */}
-      <div className="p-3.5 sm:p-4 bg-[var(--bg-surface)] rounded-xl sm:rounded-2xl border border-[var(--border-light)] shadow-xs space-y-3">
-        <div className="flex flex-col md:flex-row gap-3 md:items-center justify-between">
+      <div className="p-4 sm:p-5 bg-[var(--bg-overlay)] backdrop-blur-xl rounded-3xl border border-[var(--border-light)] shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-4">
+        <div className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
           {/* Search Bar */}
-          <div className="relative w-full md:w-80 lg:w-96">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+          <div className="relative w-full md:w-96 group">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-blue-500 transition-colors" />
             <input
               type="text"
               placeholder="ค้นหาข้อความ, ผู้ใช้, กิจกรรม หรือ IP..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-xl text-xs sm:text-sm focus:outline-none focus:border-[var(--primary-color)] text-[var(--text-primary)] transition-colors placeholder:text-[var(--text-muted)]"
+              className="w-full pl-10 pr-8 py-2.5 bg-white dark:bg-slate-900/50 border border-[var(--border-light)] rounded-xl text-sm font-medium focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 text-[var(--text-primary)] transition-all placeholder:text-[var(--text-muted)] shadow-sm"
             />
             {searchTerm && (
               <button 
                 onClick={() => setSearchTerm('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] p-0.5 rounded-full"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-rose-500 transition-colors"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>

@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DocumentItem, DocType, DocPriority, DocCategory, Folder as FolderType, User, formatThaiDate, formatThaiDateString } from '../types';
+import { DocumentItem, DocType, DocPriority, DocCategory, Folder as FolderType, User, formatThaiDate, formatThaiDateString, WorkflowTemplate, WorkflowInstance } from '../types';
 import { 
   X, Save, Paperclip, Upload, Trash2, FileText, Loader2, Folder, CheckCircle2, 
   Calendar, Lock, Sparkles, Bookmark, Search, Filter, Check, Hash, Building2, 
-  UserCheck, Tag, AlignLeft, Info, Layers, Inbox, Send, ShieldAlert, AlertCircle, FileCode
+  UserCheck, Tag, AlignLeft, Info, Layers, Inbox, Send, ShieldAlert, AlertCircle, FileCode,
+  Workflow, Clock, Play, ArrowRight
 } from 'lucide-react';
 import AiCrossReferencePanel, { DetectionResult, CrossReferenceItem } from './ai-cross-reference-panel';
+import ReservedNumberPicker from './ReservedNumberPicker';
 import { DEFAULT_FILE_CODES, parseFileCodeFromDoc, parseDocNumberStructure, FileCodeItem } from '../lib/fileCodeUtils';
 import { useConfirm } from '../context/ConfirmContext';
 
@@ -24,8 +26,27 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const [numberingRules, setNumberingRules] = useState<any[]>([]);
   const [reservedNumbers, setReservedNumbers] = useState<any[]>([]);
   const [fileCodes, setFileCodes] = useState<FileCodeItem[]>(DEFAULT_FILE_CODES);
+  const [matchedRuleInfo, setMatchedRuleInfo] = useState<{
+    ruleName?: string;
+    prefix?: string;
+    nextSeq?: string;
+    isActiveRule?: boolean;
+  } | null>(null);
   const [showReservedModal, setShowReservedModal] = useState<boolean>(false);
   const [selectedReservedId, setSelectedReservedId] = useState<number | null>(null);
+
+  const [isAiAutocompleting, setIsAiAutocompleting] = useState<boolean>(false);
+  const [aiAutocompError, setAiAutocompError] = useState<string | null>(null);
+  const [aiAutocompSuccess, setAiAutocompSuccess] = useState<{
+    summary?: string;
+    priority?: string;
+    typeName?: string;
+    dept?: string;
+    to?: string;
+    categoryName?: string;
+  } | null>(null);
+  const [highlightTitleField, setHighlightTitleField] = useState<boolean>(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const [reservedFilterType, setReservedFilterType] = useState<string>('ALL');
   const [reservedFilterDate, setReservedFilterDate] = useState<string>('');
@@ -33,7 +54,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const [reservedSearchTerm, setReservedSearchTerm] = useState<string>('');
 
   // Helper to determine exact docType for filtering reserved numbers
-  const getCurrentSpecificDocType = (docType?: DocType, category?: string) => {
+  const getCurrentSpecificDocType = (docType?: DocType, category?: string): string => {
     const t = docType || formData.type;
     const cat = category || formData.category;
     if (t === 'admin') {
@@ -42,10 +63,10 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       if (cat === 'certificate' || cat === 'cert') return 'หนังสือรับรอง';
       return 'คำสั่ง';
     }
-    if (t === 'outbox') return 'หนังสือภายนอก';
+    if (t === 'outbox') return 'หนังสือส่ง';
     if (t === 'internal') return 'หนังสือภายใน';
     if (t === 'inbox') return 'หนังสือรับ';
-    return 'หนังสือภายนอก';
+    return 'หนังสือส่ง';
   };
 
   const getCurrentDocTypeDisplayLabel = (docType?: DocType, category?: string) => {
@@ -57,10 +78,10 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       if (cat === 'certificate' || cat === 'cert') return 'หนังสือรับรอง';
       return 'งานธุรการ (คำสั่ง)';
     }
-    if (t === 'outbox') return 'หนังสือส่ง (หนังสือภายนอก)';
+    if (t === 'outbox') return 'หนังสือส่ง';
     if (t === 'internal') return 'หนังสือภายใน';
     if (t === 'inbox') return 'หนังสือรับ';
-    return 'หนังสือภายนอก';
+    return 'หนังสือส่ง';
   };
 
   const handleOpenReservedModal = () => {
@@ -133,7 +154,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     const activeType = defaultType || 'inbox';
     const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
     const initIsCentral = isCentralPrivileged ? 1 : 0;
-    const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป');
+    const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายยุทธศาสตร์และการจัดการ');
     return {
       receiveNumber: '',
       year: effectiveYear,
@@ -172,9 +193,81 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Workflow & SLA State
+  const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplate[]>([]);
+  const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState<string>('');
+  const [activeWorkflowInstance, setActiveWorkflowInstance] = useState<WorkflowInstance | null>(null);
+
+  const getWorkflowDerivedStatus = (inst: WorkflowInstance | null): string => {
+    if (!inst) return formData.status || 'ลงทะเบียน';
+    if (inst.status === 'completed') {
+      return 'เสร็จสิ้น';
+    }
+    if (inst.status === 'rejected') {
+      return 'ส่งกลับแก้ไข/ไม่อนุมัติ';
+    }
+    const currentStep = inst.steps?.[inst.currentStepIndex];
+    if (currentStep) {
+      return `อยู่ระหว่าง: ${currentStep.title}`;
+    }
+    return 'อยู่ระหว่างเสนอลงนาม';
+  };
+
+  useEffect(() => {
+    if (activeWorkflowInstance) {
+      const derived = getWorkflowDerivedStatus(activeWorkflowInstance);
+      setFormData(prev => {
+        if (prev.status !== derived) {
+          return { ...prev, status: derived };
+        }
+        return prev;
+      });
+    }
+  }, [activeWorkflowInstance]);
+
   // AI Cross-Reference Detector State
   const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(null);
   const [isDetecting, setIsDetecting] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fetchWorkflowData = async () => {
+      try {
+        const resTpl = await fetch('/api/workflows/templates');
+        if (resTpl.ok) {
+          const tpls: WorkflowTemplate[] = await resTpl.json();
+          if (Array.isArray(tpls)) {
+            setWorkflowTemplates(tpls);
+            if (!initialData) {
+              const categoryMatch = (formData.type === 'inbox' ? 'หนังสือรับ' : (formData.type === 'outbox' ? 'หนังสือส่ง' : 'ทั่วไป'));
+              const defaultTpl = tpls.find(t => t.category === categoryMatch) || tpls[0];
+              if (defaultTpl) {
+                setSelectedWorkflowTemplateId(defaultTpl.id);
+              }
+            }
+          }
+        }
+
+        if (initialData?.id) {
+          const resInst = await fetch('/api/workflows/instances');
+          if (resInst.ok) {
+            const insts: WorkflowInstance[] = await resInst.json();
+            if (Array.isArray(insts)) {
+              const found = insts.find(i => String(i.docId) === String(initialData.id) || (initialData.docNumber && i.docNumber === initialData.docNumber));
+              if (found) {
+                setActiveWorkflowInstance(found);
+                if (found.templateId) {
+                  setSelectedWorkflowTemplateId(found.templateId);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load workflow data in modal:', err);
+      }
+    };
+    fetchWorkflowData();
+  }, [initialData?.id]);
 
   const handleRunAiCrossRef = async () => {
     setIsDetecting(true);
@@ -212,6 +305,117 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       });
     } finally {
       setIsDetecting(false);
+    }
+  };
+
+  const handleAiAutocomplete = async () => {
+    if (!formData.title?.trim() && !formData.content?.trim()) {
+      setAiAutocompError('⚠️ กรุณาระบุชื่อเรื่องหนังสือในช่องด้านล่างก่อน เพื่อให้ AI วิเคราะห์และเติมข้อมูล');
+      setHighlightTitleField(true);
+      if (titleInputRef.current) {
+        titleInputRef.current.focus();
+      }
+      setTimeout(() => {
+        setHighlightTitleField(false);
+      }, 3500);
+      return;
+    }
+
+    setIsAiAutocompleting(true);
+    setAiAutocompError(null);
+    setAiAutocompSuccess(null);
+
+    try {
+      const res = await fetch('/api/ai/autocomplete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: formData.title || '',
+          content: formData.content || ''
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.result) {
+        const result = data.result;
+        
+        let mappedPriority: any = 'ปกติ';
+        if (result.priority === 'urgent' || result.priority === 'ด่วน') mappedPriority = 'ด่วน';
+        else if (result.priority === 'very_urgent' || result.priority === 'ด่วนมาก') mappedPriority = 'ด่วนมาก';
+        else if (result.priority === 'extremely_urgent' || result.priority === 'ด่วนที่สุด') mappedPriority = 'ด่วนที่สุด';
+        else mappedPriority = 'ปกติ';
+
+        let targetDocType: DocType = 'inbox';
+        if (result.type === 'outbox') targetDocType = 'outbox';
+        else if (result.type === 'admin') targetDocType = 'admin';
+        else targetDocType = 'inbox';
+
+        // Auto-match department from system departments list
+        let matchedDept = formData.department;
+        const suggestion = (result.suggestedTo || '').toLowerCase();
+        if (departments.length > 0 && suggestion) {
+          const directMatch = departments.find(d => 
+            d.name.toLowerCase().includes(suggestion) || suggestion.includes(d.name.toLowerCase())
+          );
+          if (directMatch) {
+            matchedDept = directMatch.name;
+          } else {
+            // Keyword matching
+            if (suggestion.includes('ป้องกัน') || suggestion.includes('ปฏิบัติการ') || suggestion.includes('ดับเพลิง') || suggestion.includes('กู้ภัย')) {
+              const d = departments.find(dep => dep.name.includes('ป้องกัน'));
+              if (d) matchedDept = d.name;
+            } else if (suggestion.includes('สงเคราะห์') || suggestion.includes('ผู้ประสบภัย')) {
+              const d = departments.find(dep => dep.name.includes('สงเคราะห์'));
+              if (d) matchedDept = d.name;
+            } else if (suggestion.includes('ยุทธศาสตร์') || suggestion.includes('แผนงาน') || suggestion.includes('จัดการ') || suggestion.includes('ธุรการ') || suggestion.includes('สารบรรณ') || suggestion.includes('การเงิน') || suggestion.includes('พัสดุ')) {
+              const d = departments.find(dep => dep.name.includes('ยุทธศาสตร์'));
+              if (d) matchedDept = d.name;
+            }
+          }
+        }
+
+        const newContent = result.summary || formData.content || '';
+        const newTo = result.suggestedTo || formData.to || '';
+        const newCategory = result.category || formData.category || 'order';
+
+        setFormData(prev => ({
+          ...prev,
+          type: targetDocType,
+          category: newCategory,
+          content: newContent,
+          to: newTo,
+          priority: mappedPriority,
+          department: (user?.role === 'user' && user?.department) ? prev.department : (matchedDept || prev.department)
+        }));
+
+        if (targetDocType !== formData.type) {
+          handleTypeChange(targetDocType);
+        }
+
+        const categoryLabels: Record<string, string> = {
+          order: 'คำสั่ง',
+          announcement: 'ประกาศ',
+          certificate: 'หนังสือรับรอง',
+          circular: 'หนังสือเวียน',
+          memo: 'บันทึกข้อความ'
+        };
+
+        setAiAutocompSuccess({
+          summary: newContent,
+          priority: mappedPriority,
+          typeName: targetDocType === 'inbox' ? 'หนังสือรับ' : (targetDocType === 'outbox' ? 'หนังสือส่ง' : 'งานธุรการ (คำสั่ง/ประกาศ)'),
+          dept: matchedDept || result.suggestedTo,
+          to: newTo,
+          categoryName: categoryLabels[newCategory] || newCategory
+        });
+      } else {
+        let errMessage = data.error || 'เกิดข้อผิดพลาดในการเชื่อมต่อ AI';
+        if (typeof errMessage === 'object') errMessage = JSON.stringify(errMessage);
+        setAiAutocompError(errMessage);
+      }
+    } catch (err: any) {
+      setAiAutocompError('เกิดข้อผิดพลาดขณะส่งคำขอ: ' + err.message);
+    } finally {
+      setIsAiAutocompleting(false);
     }
   };
 
@@ -261,7 +465,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     const trimmed = (deptName || '').trim();
     const rule = numberingRules.find((r: any) => 
       r.isActive && 
-      r.docType === 'หนังสือภายนอก' && 
+      (r.docType === 'หนังสือส่ง' || r.docType === 'หนังสือภายนอก') && 
       r.department === trimmed &&
       r.prefixPattern
     );
@@ -270,7 +474,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     if (trimmed === 'ฝ่ายยุทธศาสตร์และการจัดการ') return 'รย 0021.1';
     if (trimmed === 'ฝ่ายสงเคราะห์ผู้ประสบภัย') return 'รย 0021.2';
     if (trimmed === 'ฝ่ายป้องกันและปฏิบัติการ') return 'รย 0021.3';
-    if (trimmed === 'ฝ่ายบริหารงานทั่วไป') return 'รย 0021';
+    if (trimmed === 'ฝ่ายยุทธศาสตร์และการจัดการ') return 'รย 0021';
 
     return 'รย 0021';
   };
@@ -294,9 +498,9 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
 
     const activeDept = (targetDeptName !== undefined
       ? targetDeptName
-      : (formData?.department || user?.department || (activeIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป'))).trim();
+      : (formData?.department || user?.department || (activeIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายยุทธศาสตร์และการจัดการ'))).trim();
 
-    let actualType = 'หนังสือภายนอก';
+    let actualType = 'หนังสือส่ง';
     if (targetType === 'admin') {
       actualType = targetCategory === 'order' ? 'คำสั่ง' : (targetCategory === 'announcement' ? 'ประกาศ' : 'หนังสือรับรอง');
     } else if (targetType === 'inbox') {
@@ -341,6 +545,35 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       }, 0);
     }
 
+    // Also consult numberingRules if available
+    if (numberingRules && numberingRules.length > 0) {
+      let matchedRule: any = null;
+      if (targetType === 'inbox') {
+        if (activeIsCentral === 1) {
+          matchedRule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือรับ' && (r.department === 'ทุกฝ่ายงาน' || r.runningScope === 'global' || (r.ruleName && r.ruleName.includes('สารบรรณกลาง'))));
+        } else {
+          matchedRule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือรับ' && (r.department === activeDept || (r.department && r.department.trim() === activeDept)));
+        }
+      } else if (targetType === 'outbox') {
+        if (activeIsCentral === 1) {
+          matchedRule = numberingRules.find((r: any) => r.isActive && (r.docType === 'หนังสือส่ง' || r.docType === 'หนังสือภายนอก') && (r.department === 'ทุกฝ่ายงาน' || r.runningScope === 'global' || (r.ruleName && r.ruleName.includes('สารบรรณกลาง'))));
+        } else {
+          matchedRule = numberingRules.find((r: any) => r.isActive && (r.docType === 'หนังสือส่ง' || r.docType === 'หนังสือภายนอก') && (r.department === activeDept || (r.department && r.department.trim() === activeDept)));
+        }
+      } else if (targetType === 'admin') {
+        matchedRule = numberingRules.find((r: any) => r.isActive && r.docType === actualType);
+      } else if (targetType === 'internal') {
+        matchedRule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายใน');
+      }
+
+      if (matchedRule && matchedRule.currentSeq) {
+        const ruleSeq = Number(matchedRule.currentSeq);
+        if (!isNaN(ruleSeq) && ruleSeq > existingMax) {
+          existingMax = ruleSeq;
+        }
+      }
+    }
+
     const finalSeq = existingMax + 1;
 
     let formattedNumber = '';
@@ -351,7 +584,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     } else if (targetType === 'outbox') {
       let prefix = 'รย 0021';
       if (activeIsCentral === 1) {
-        let rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && (r.department === 'ทุกฝ่ายงาน' || r.department === 'สารบรรณกลาง'));
+        let rule = numberingRules.find((r: any) => r.isActive && (r.docType === 'หนังสือส่ง' || r.docType === 'หนังสือภายนอก') && (r.department === 'ทุกฝ่ายงาน' || r.department === 'สารบรรณกลาง'));
         prefix = rule?.prefixPattern || 'รย 0021';
       } else {
         prefix = getDepartmentPrefix(activeDept);
@@ -393,14 +626,25 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         if (data && data.success) {
           return {
             seq: String(data.nextSeq),
-            docNumber: data.formattedNumber || ''
+            docNumber: data.formattedNumber || '',
+            ruleName: data.ruleName,
+            prefix: data.prefix,
+            ruleId: data.ruleId,
+            isActiveRule: data.isActiveRule
           };
         }
       }
     } catch (err) {
       console.warn('generate-next server endpoint fallback:', err);
     }
-    return generateNumberInfo(targetType, targetIsCirc, targetCategory, targetYr, targetIsCentral, targetDept);
+    const localFallback = generateNumberInfo(targetType, targetIsCirc, targetCategory, targetYr, targetIsCentral, targetDept);
+    return {
+      ...localFallback,
+      ruleName: undefined,
+      prefix: undefined,
+      ruleId: undefined,
+      isActiveRule: false
+    };
   };
 
   const applyNewNumbering = async (
@@ -411,7 +655,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     targetIsCentral: number,
     targetDept: string
   ) => {
-    const { seq, docNumber: newDocNum } = await fetchNextNumberFromServer(
+    const result = await fetchNextNumberFromServer(
       targetType,
       targetIsCirc,
       targetCategory,
@@ -420,10 +664,19 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       targetDept
     );
 
+    if (result.ruleName || result.prefix) {
+      setMatchedRuleInfo({
+        ruleName: result.ruleName,
+        prefix: result.prefix,
+        nextSeq: result.seq,
+        isActiveRule: result.isActiveRule
+      });
+    }
+
     setFormData(prev => ({
       ...prev,
-      receiveNumber: seq,
-      docNumber: newDocNum
+      receiveNumber: result.seq,
+      docNumber: targetType === 'inbox' ? (prev.docNumber || '') : (result.docNumber || prev.docNumber)
     }));
   };
 
@@ -470,14 +723,15 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const activeIsCentral = formData.isCentral !== undefined 
         ? Number(formData.isCentral) 
         : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
-      const targetDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+      const targetDept = (formData.department || user?.department || 'ฝ่ายยุทธศาสตร์และการจัดการ').trim();
 
       let prefix = 'รย 0021';
       if (activeIsCentral === 1) {
-        let rule = numberingRules.find((r: any) => r.isActive && r.docType === 'หนังสือภายนอก' && (r.department === 'ทุกฝ่ายงาน' || r.department === 'สารบรรณกลาง'));
+        let rule = numberingRules.find((r: any) => r.isActive && (r.docType === 'หนังสือส่ง' || r.docType === 'หนังสือภายนอก') && (r.department === 'ทุกฝ่ายงาน' || r.department === 'สารบรรณกลาง' || r.runningScope === 'global'));
         prefix = rule?.prefixPattern || 'รย 0021';
       } else {
-        prefix = getDepartmentPrefix(targetDept);
+        let rule = numberingRules.find((r: any) => r.isActive && (r.docType === 'หนังสือส่ง' || r.docType === 'หนังสือภายนอก') && (r.department === targetDept || (r.department && r.department.trim() === targetDept)));
+        prefix = rule?.prefixPattern || getDepartmentPrefix(targetDept);
       }
       const circStr = formData.isCircular ? (prefix.includes('ว') ? '' : 'ว ') : '';
       const expectedDocNumber = `${prefix}/${circStr}${formData.receiveNumber || ''}`;
@@ -495,7 +749,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     const currentIsCentral = formData.isCentral !== undefined 
       ? Number(formData.isCentral) 
       : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
-    const currentDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+    const currentDept = (formData.department || user?.department || 'ฝ่ายยุทธศาสตร์และการจัดการ').trim();
     const currentYear = formData.year || effectiveYear;
 
     setFormData(prev => ({ ...prev, isCircular: checked }));
@@ -521,7 +775,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const initYear = effectiveYear;
       const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
       const initIsCentral = isCentralPrivileged ? 1 : 0;
-      const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายบริหารงานทั่วไป');
+      const initDept = user?.department || (initIsCentral === 0 ? 'ฝ่ายยุทธศาสตร์และการจัดการ' : 'ฝ่ายยุทธศาสตร์และการจัดการ');
 
       setFormData(prev => ({
         ...prev,
@@ -550,17 +804,16 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const currentIsCentral = formData.isCentral !== undefined 
         ? Number(formData.isCentral) 
         : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
-      const currentDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+      const currentDept = (formData.department || user?.department || 'ฝ่ายยุทธศาสตร์และการจัดการ').trim();
 
       const { seq, docNumber: initDocNum } = generateNumberInfo(activeType, isCirc, initCat, initYear, currentIsCentral, currentDept);
-      if (initDocNum) {
-        setFormData(prev => ({
-          ...prev,
-          receiveNumber: prev.receiveNumber || seq,
-          docNumber: activeType === 'inbox' ? (prev.docNumber || '') : (prev.docNumber || initDocNum)
-        }));
-        hasAppliedRulesRef.current = true;
-      }
+      setFormData(prev => ({
+        ...prev,
+        receiveNumber: seq || prev.receiveNumber,
+        docNumber: activeType === 'inbox' ? (prev.docNumber || '') : (initDocNum || prev.docNumber)
+      }));
+      hasAppliedRulesRef.current = true;
+      applyNewNumbering(activeType, isCirc, initCat, initYear, currentIsCentral, currentDept);
     }
   }, [numberingRules]);
 
@@ -576,7 +829,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       const currentIsCentral = formData.isCentral !== undefined 
         ? Number(formData.isCentral) 
         : ((user?.role === 'admin' || user?.role === 'moderator') ? 1 : 0);
-      const currentDept = (formData.department || user?.department || 'ฝ่ายบริหารงานทั่วไป').trim();
+      const currentDept = (formData.department || user?.department || 'ฝ่ายยุทธศาสตร์และการจัดการ').trim();
 
       setFormData(prev => ({
         ...prev,
@@ -600,8 +853,8 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     setSelectedReservedId(null);
 
     const targetDept = newIsCentral === 1 
-      ? (formData.department || 'ฝ่ายบริหารงานทั่วไป')
-      : (user?.department || (formData.department && formData.department !== 'ฝ่ายบริหารงานทั่วไป' ? formData.department : 'ฝ่ายยุทธศาสตร์และการจัดการ'));
+      ? (formData.department || 'ฝ่ายยุทธศาสตร์และการจัดการ')
+      : (user?.department || (formData.department && formData.department !== 'ฝ่ายยุทธศาสตร์และการจัดการ' ? formData.department : 'ฝ่ายยุทธศาสตร์และการจัดการ'));
 
     setFormData(prev => ({
       ...prev,
@@ -659,14 +912,19 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     if (field === 'docNumber' || field === 'receiveNumber') {
       isManualDocNumberRef.current = true;
     }
-    if (!initialData && formData.type === 'admin' && (field === 'category' || field === 'year')) {
-      const cat = field === 'category' ? value : (formData.category || 'order');
-      const yr = field === 'year' ? value : (formData.year || effectiveYear);
-      const { docNumber: nextDocNum } = generateNumberInfo('admin', false, cat, yr);
-      setFormData(prev => ({ ...prev, [field]: value, docNumber: nextDocNum }));
-      return;
-    }
-    setFormData(prev => ({ ...prev, [field]: value }));
+    
+    setFormData(prev => {
+      const newFormData = { ...prev, [field]: value };
+      
+      // If category or year changed for admin documents, re-generate numbering from server
+      if (!initialData && prev.type === 'admin' && (field === 'category' || field === 'year')) {
+        const cat = field === 'category' ? value : (prev.category || 'order');
+        const yr = field === 'year' ? value : (prev.year || effectiveYear);
+        applyNewNumbering('admin', false, cat, String(yr), prev.isCentral ?? 1, prev.department || 'ฝ่ายยุทธศาสตร์และการจัดการ');
+      }
+      
+      return newFormData;
+    });
   };
 
   const getTargetFolderLabel = () => {
@@ -800,6 +1058,32 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
     }));
   };
 
+  const handleSelectReservedNumber = (item: any) => {
+    const specificType = getCurrentSpecificDocType();
+    
+    // Strict type check to prevent cross-type selection even if UI filter was bypassed
+    if (item.docType && item.docType !== specificType) {
+      const isOutboxMatch = (item.docType === 'หนังสือภายนอก' || item.docType === 'หนังสือส่ง') && (specificType === 'หนังสือภายนอก' || specificType === 'หนังสือส่ง');
+      const isInboxMatch = (item.docType === 'หนังสือรับ' || item.docType === 'หนังสือเข้า') && (specificType === 'หนังสือรับ' || specificType === 'หนังสือเข้า');
+      
+      if (!isOutboxMatch && !isInboxMatch) {
+        alert(`ไม่อนุญาตให้ใช้เลขจองข้ามประเภทเอกสาร\nเลขจองนี้เป็นประเภท: ${item.docType}\nประเภทเอกสารปัจจุบัน: ${specificType}`);
+        return;
+      }
+    }
+
+    isManualDocNumberRef.current = true;
+    setSelectedReservedId(item.id);
+    setFormData(prev => ({
+      ...prev,
+      docNumber: item.numberString,
+      receiveNumber: item.seqNumber ? String(item.seqNumber) : prev.receiveNumber,
+      department: (item.department && item.department !== 'ทุกฝ่ายงาน') ? item.department : prev.department,
+      date: item.reservedDate ? item.reservedDate : prev.date,
+      year: item.year || prev.year || effectiveYear
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -846,7 +1130,19 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       ? (formData.isCentral !== undefined ? Number(formData.isCentral) : 1)
       : 0;
 
-    const resolvedDept = (formData.department || (resolvedIsCentral === 0 ? user?.department : 'ฝ่ายบริหารงานทั่วไป') || '').trim();
+    const resolvedDept = (formData.department || (resolvedIsCentral === 0 ? user?.department : 'ฝ่ายยุทธศาสตร์และการจัดการ') || '').trim();
+
+    let finalStatus = formData.status || 'ลงทะเบียน';
+    if (selectedWorkflowTemplateId && (!activeWorkflowInstance || activeWorkflowInstance.templateId !== selectedWorkflowTemplateId)) {
+      const template = workflowTemplates.find(t => t.id === selectedWorkflowTemplateId);
+      if (template && template.steps?.[0]) {
+        finalStatus = `อยู่ระหว่าง: ${template.steps[0].title}`;
+      } else {
+        finalStatus = 'อยู่ระหว่างเสนอลงนาม';
+      }
+    } else if (activeWorkflowInstance) {
+      finalStatus = getWorkflowDerivedStatus(activeWorkflowInstance);
+    }
 
     const newDoc: DocumentItem = {
       ...formData as DocumentItem,
@@ -854,6 +1150,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       registerDate: initialData?.registerDate || new Date().toISOString(),
       isCentral: resolvedIsCentral,
       department: resolvedDept,
+      status: finalStatus,
     };
 
     if (selectedReservedId) {
@@ -865,6 +1162,32 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         });
       } catch (err) {
         console.error('Failed to mark reserved number as used:', err);
+      }
+    }
+
+    // Assign / Trigger Workflow Instance if a template was selected
+    if (selectedWorkflowTemplateId && (!activeWorkflowInstance || activeWorkflowInstance.templateId !== selectedWorkflowTemplateId)) {
+      try {
+        const userFullName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : 'ผู้เสนอเรื่อง';
+        await fetch('/api/workflows/instances', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            docId: newDoc.id,
+            templateId: selectedWorkflowTemplateId,
+            user: userFullName,
+            docTitle: newDoc.title,
+            docNumber: newDoc.docNumber,
+            department: newDoc.department,
+            assignee: newDoc.assignee,
+            priority: newDoc.priority
+          })
+        });
+
+        // Trigger realtime sync event
+        window.dispatchEvent(new CustomEvent('REALTIME_EVENT', { detail: { type: 'WORKFLOW_UPDATED' } }));
+      } catch (wfErr) {
+        console.error('Failed to initiate workflow on doc submit:', wfErr);
       }
     }
 
@@ -1004,9 +1327,33 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
 
             {/* Section 1: ข้อมูลระบบและหมวดหมู่ */}
             <div className="bg-[var(--bg-canvas)]/40 border border-[var(--border-light)] rounded-2xl p-4 sm:p-5 space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-[var(--border-light)] text-xs font-bold text-[var(--text-primary)]">
-                <Hash className="w-4 h-4 text-[var(--primary-color)]" />
-                <span>1. ประเภทระบบงานและเลขทะเบียนอัตโนมัติ</span>
+              <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)] text-xs font-bold text-[var(--text-primary)]">
+                <div className="flex items-center gap-2">
+                  <Hash className="w-4 h-4 text-[var(--primary-color)]" />
+                  <span>1. ประเภทระบบงานและเลขทะเบียนอัตโนมัติ</span>
+                </div>
+              </div>
+
+              {/* Active Rule Reference Indicator */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-emerald-500/10 border border-blue-500/20 text-xs shadow-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold shrink-0">
+                    ⚡
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-[var(--text-primary)] flex items-center gap-1.5 flex-wrap truncate">
+                      <span>อ้างอิงกฎออกเลขที่เปิดใช้งาน:</span>
+                      <span className="text-blue-600 dark:text-blue-400 font-mono font-bold">
+                        {matchedRuleInfo?.ruleName || (
+                          numberingRules.find(r => r.isActive && r.docType === (formData.type === 'admin' ? (formData.category === 'order' ? 'คำสั่ง' : formData.category === 'announcement' ? 'ประกาศ' : 'หนังสือรับรอง') : formData.type === 'inbox' ? 'หนังสือรับ' : formData.type === 'outbox' ? 'หนังสือส่ง' : 'หนังสือภายใน'))?.ruleName || 'กฎมาตรฐานของระบบ'
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <span className="hidden sm:inline-flex text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full items-center gap-1 shrink-0">
+                  <CheckCircle2 className="w-3 h-3" /> เปิดใช้งาน
+                </span>
               </div>
 
               <div className={`grid grid-cols-1 sm:grid-cols-2 ${formData.type === 'outbox' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4`}>
@@ -1240,16 +1587,122 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 <span>3. เรื่อง และหน่วยงานเกี่ยวข้อง</span>
               </div>
 
+              {/* AI Auto-Complete / Assist Panel */}
+              <div className="bg-gradient-to-r from-indigo-500/10 via-purple-500/5 to-pink-500/10 border border-indigo-500/25 rounded-2xl p-4 flex flex-col gap-3 shadow-sm backdrop-blur-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/10">
+                      <Sparkles className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                        ระบบช่วยเติมข้อมูลและสรุปเอกสารอัจฉริยะ (AI Smart Assist)
+                        <span className="text-[9px] font-semibold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 px-2 py-0.5 rounded-full animate-pulse">
+                          Gemini Core
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5 leading-relaxed">
+                        เพียงพิมพ์ชื่อเรื่องหรือรายละเอียดสั้นๆ แล้วคลิกปุ่ม AI จะช่วยวิเคราะห์ สรุปสาระสำคัญ เลือกประเภทหนังสือ แนะนำฝ่ายปลายทาง และตั้งความด่วนให้อัตโนมัติ!
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex flex-col items-stretch sm:items-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleAiAutocomplete}
+                      disabled={isAiAutocompleting}
+                      className={`flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-[0.98] cursor-pointer shadow-md ${
+                        isAiAutocompleting
+                          ? 'bg-indigo-400 text-white cursor-wait opacity-80'
+                          : 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-indigo-500/20 hover:shadow-indigo-500/30'
+                      }`}
+                    >
+                      {isAiAutocompleting ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>กำลังวิเคราะห์เอกสาร...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>วิเคราะห์ & เติมข้อมูลอัตโนมัติ</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Error Banner */}
+                {aiAutocompError && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold animate-shake">
+                    <Info className="w-4 h-4 shrink-0" />
+                    <span className="flex-1">{aiAutocompError}</span>
+                  </div>
+                )}
+
+                {/* Success Card Feedback */}
+                {aiAutocompSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-xl p-3 text-xs space-y-2 animate-fadeIn">
+                    <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-300 font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        AI วิเคราะห์และเติมข้อมูลลงในแบบฟอร์มเรียบร้อยแล้ว!
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setAiAutocompSuccess(null)}
+                        className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                      >
+                        ปิดการแจ้งเตือน
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                      <div className="bg-[var(--bg-surface)]/80 rounded-lg p-2 border border-emerald-500/20">
+                        <span className="text-[var(--text-muted)] block text-[10px]">ประเภทเอกสาร:</span>
+                        <span className="font-bold text-[var(--text-primary)]">{aiAutocompSuccess.typeName}</span>
+                      </div>
+                      <div className="bg-[var(--bg-surface)]/80 rounded-lg p-2 border border-emerald-500/20">
+                        <span className="text-[var(--text-muted)] block text-[10px]">ความเร่งด่วน:</span>
+                        <span className="font-bold text-amber-600 dark:text-amber-400">{aiAutocompSuccess.priority}</span>
+                      </div>
+                      <div className="bg-[var(--bg-surface)]/80 rounded-lg p-2 border border-emerald-500/20">
+                        <span className="text-[var(--text-muted)] block text-[10px]">ฝ่าย/กลุ่มงาน:</span>
+                        <span className="font-bold text-[var(--text-primary)] truncate block">{aiAutocompSuccess.dept || '-'}</span>
+                      </div>
+                      <div className="bg-[var(--bg-surface)]/80 rounded-lg p-2 border border-emerald-500/20">
+                        <span className="text-[var(--text-muted)] block text-[10px]">ปลายทาง (ถึง):</span>
+                        <span className="font-bold text-[var(--text-primary)] truncate block">{aiAutocompSuccess.to || '-'}</span>
+                      </div>
+                    </div>
+                    {aiAutocompSuccess.summary && (
+                      <div className="text-[11px] text-[var(--text-secondary)] bg-[var(--bg-surface)]/60 rounded-lg p-2 border border-emerald-500/15 line-clamp-2">
+                        <span className="font-semibold text-[var(--text-primary)]">สรุปสาระสำคัญ: </span>
+                        {aiAutocompSuccess.summary}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-[var(--text-secondary)]">เรื่อง / ชื่อเอกสาร <span className="text-rose-500">*</span></label>
                   <input 
+                    ref={titleInputRef}
                     required
                     type="text" 
                     value={formData.title || ''}
-                    onChange={(e) => handleChange('title', e.target.value)}
-                    placeholder="ระบุชื่อเรื่องหนังสือให้ถูกต้อง ชัดเจน"
-                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-4 py-2.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors placeholder-[var(--text-muted)] font-medium"
+                    onChange={(e) => {
+                      handleChange('title', e.target.value);
+                      if (aiAutocompError) setAiAutocompError(null);
+                    }}
+                    placeholder="ระบุชื่อเรื่องหนังสือให้ถูกต้อง ชัดเจน (เช่น ขออนุมัติจัดซื้ออุปกรณ์กู้ภัย, แจ้งเตือนสถานการณ์น้ำท่วม)"
+                    className={`w-full bg-[var(--bg-overlay)] border rounded-xl px-4 py-2.5 text-xs text-[var(--text-primary)] outline-none transition-all placeholder-[var(--text-muted)] font-medium ${
+                      highlightTitleField 
+                        ? 'border-rose-500 ring-2 ring-rose-500/30 bg-rose-500/5' 
+                        : 'border-[var(--border-light)] focus:border-[var(--primary-color)]'
+                    }`}
                   />
                 </div>
 
@@ -1305,7 +1758,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                     onChange={(e) => handleChange('folderId', e.target.value ? Number(e.target.value) : null)}
                     className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors"
                   >
-                    <option value="">-- ไม่จัดเก็บเข้าแฟ้มพิเศษ (เก็บเข้าสารบรรณทั่วไป) --</option>
+                    <option value="">-- เก็บเข้าสารบรรณทั่วไป --</option>
                     {folders.map(folder => (
                       <option key={folder.id} value={folder.id}>{folder.name}</option>
                     ))}
@@ -1313,15 +1766,57 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[var(--text-secondary)]">สถานะเอกสารปัจจุบัน</label>
-                  <select 
-                    value={formData.status || 'ลงทะเบียน'}
-                    onChange={(e) => handleChange('status', e.target.value)}
-                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors font-semibold text-blue-600 dark:text-blue-400"
-                  >
-                    <option value="ลงทะเบียน">ลงทะเบียน</option>
-                    <option value="ส่งต่อกลุ่มงาน">ส่งต่อผู้รับผิดชอบหลัก</option>
-                  </select>
+                  {activeWorkflowInstance ? (
+                    <>
+                      <label className="text-xs font-semibold text-[var(--text-secondary)] flex items-center justify-between">
+                        <span>สถานะเอกสารปัจจุบัน</span>
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
+                          <span className="flex h-1.5 w-1.5 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                          </span>
+                          เชื่อมโยง Workflow
+                        </span>
+                      </label>
+                      <div className="relative">
+                        <input 
+                          readOnly
+                          type="text"
+                          value={getWorkflowDerivedStatus(activeWorkflowInstance)}
+                          className="w-full bg-[var(--bg-canvas)] border border-blue-500/30 text-blue-600 dark:text-blue-400 font-bold rounded-xl px-3.5 py-2 text-xs outline-none shadow-sm cursor-not-allowed"
+                        />
+                      </div>
+                    </>
+                  ) : selectedWorkflowTemplateId ? (
+                    <>
+                      <label className="text-xs font-semibold text-[var(--text-secondary)] flex items-center justify-between">
+                        <span>สถานะเอกสารปัจจุบัน</span>
+                        <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                          จะเริ่มส่งตาม Workflow
+                        </span>
+                      </label>
+                      <div className="relative">
+                        <input 
+                          readOnly
+                          type="text"
+                          value={`อยู่ระหว่าง: ${workflowTemplates.find(t => t.id === selectedWorkflowTemplateId)?.steps?.[0]?.title || 'เสนอพิจารณา'}`}
+                          className="w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] font-medium rounded-xl px-3.5 py-2 text-xs outline-none cursor-not-allowed"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <label className="text-xs font-semibold text-[var(--text-secondary)]">สถานะเอกสารปัจจุบัน</label>
+                      <select 
+                        value={formData.status || 'ลงทะเบียน'}
+                        onChange={(e) => handleChange('status', e.target.value)}
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors font-semibold text-blue-600 dark:text-blue-400"
+                      >
+                        <option value="ลงทะเบียน">ลงทะเบียน</option>
+                        <option value="ส่งต่อกลุ่มงาน">ส่งต่อผู้รับผิดชอบหลัก</option>
+                      </select>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1442,12 +1937,144 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
               onAttachRef={handleAttachRef}
             />
 
+            {/* Section 6: มอบหมายผังการเดินเอกสารและติดตาม SLA */}
+            <div className="bg-[var(--bg-canvas)]/40 border border-[var(--border-light)] rounded-2xl p-4 sm:p-5 space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)]">
+                <div className="flex items-center gap-2 text-xs font-bold text-[var(--text-primary)]">
+                  <Workflow className="w-4 h-4 text-[var(--primary-color)]" />
+                  <span>6. มอบหมายผังการเดินเอกสารเสนออนุมัติ และติดตาม SLA (Workflow & SLA Alignment)</span>
+                </div>
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold border border-blue-500/20">
+                  ระเบียบสารบรรณ พ.ศ. 2526
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-[var(--text-secondary)] flex items-center justify-between">
+                    <span>เลือกแม่แบบผังการเดินเอกสารเสนออนุมัติ</span>
+                    {activeWorkflowInstance && (
+                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        มีผังการเดินเอกสารที่กำลังดำเนินการอยู่แล้ว
+                      </span>
+                    )}
+                  </label>
+                  <select
+                    value={selectedWorkflowTemplateId}
+                    onChange={(e) => setSelectedWorkflowTemplateId(e.target.value)}
+                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] transition-colors font-medium"
+                  >
+                    <option value="">-- ไม่กำหนดผังการเดินเอกสาร (กำหนดหรือเสนอเรื่องภายหลัง) --</option>
+                    {workflowTemplates.map((tpl) => {
+                      const totalHours = (tpl.steps || []).reduce((acc, st) => acc + (st.slaHours || 24), 0);
+                      return (
+                        <option key={tpl.id} value={tpl.id}>
+                          {tpl.name} [{tpl.category}] - ({tpl.steps?.length || 0} ขั้นตอน / SLA รวม {totalHours} ช.ม.)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* Workflow Preview Card */}
+                {selectedWorkflowTemplateId ? (() => {
+                  const currentTpl = workflowTemplates.find(t => t.id === selectedWorkflowTemplateId);
+                  if (!currentTpl) return null;
+                  const totalHours = (currentTpl.steps || []).reduce((acc, st) => acc + (st.slaHours || 24), 0);
+                  const totalDays = Math.ceil(totalHours / 24);
+
+                  return (
+                    <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-3.5 space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-2">
+                        <div>
+                          <div className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-2">
+                            <span>{currentTpl.name}</span>
+                            <span className="text-[10px] text-[var(--primary-color)] bg-[var(--primary-color)]/10 px-2 py-0.5 rounded-full font-medium">
+                              {currentTpl.category}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{currentTpl.description}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 justify-end">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>SLA รวม: {totalHours} ช.ม. ({totalDays} วัน)</span>
+                          </div>
+                          <span className="text-[10px] text-[var(--text-muted)]">กำหนดแล้วเสร็จตามระเบียบ</span>
+                        </div>
+                      </div>
+
+                      {/* Steps Timeline Preview */}
+                      <div className="space-y-2">
+                        <span className="text-[11px] font-bold text-[var(--text-secondary)] block">
+                          ลำดับขั้นตอนการเสนอหนังสือและตรวจพิจารณา ({currentTpl.steps?.length || 0} ขั้นตอน):
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {(currentTpl.steps || []).map((step, idx) => (
+                            <div 
+                              key={idx}
+                              className="bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-lg p-2.5 text-xs space-y-1 relative"
+                            >
+                              <div className="flex items-center justify-between font-bold text-[var(--text-primary)]">
+                                <span className="flex items-center gap-1.5 min-w-0">
+                                  <span className="w-4 h-4 rounded-full bg-[var(--primary-color)] text-white text-[10px] flex items-center justify-center shrink-0 font-mono">
+                                    {step.stepNumber || idx + 1}
+                                  </span>
+                                  <span className="truncate">{step.title}</span>
+                                </span>
+                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded shrink-0">
+                                  {step.slaHours}h
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-[var(--text-muted)] truncate pl-5">
+                                ผู้เสนอ/ผู้ตรวจ: {step.assignedRole} ({step.department || 'หน่วยงานหลัก'})
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Active Instance Badge if exists */}
+                      {activeWorkflowInstance && (
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2.5 flex items-center justify-between text-xs mt-2">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <div>
+                              <div className="font-bold text-emerald-700 dark:text-emerald-300">
+                                สถานะการเสนอเรื่องปัจจุบัน: ขั้นตอนที่ {activeWorkflowInstance.currentStepIndex + 1} ({activeWorkflowInstance.steps?.[activeWorkflowInstance.currentStepIndex]?.title || 'กำลังดำเนินการ'})
+                              </div>
+                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                                เริ่มเสนอเมื่อ: {formatThaiDate(activeWorkflowInstance.startedAt)} | ครบกำหนด SLA: {formatThaiDate(activeWorkflowInstance.dueAt)}
+                              </div>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full shrink-0 ${
+                            activeWorkflowInstance.slaStatus === 'OVERDUE' ? 'bg-red-500/20 text-red-600' :
+                            activeWorkflowInstance.slaStatus === 'WARNING' ? 'bg-amber-500/20 text-amber-600' :
+                            'bg-emerald-500/20 text-emerald-600'
+                          }`}>
+                            {activeWorkflowInstance.slaStatus === 'OVERDUE' ? '⚠️ เกินกำหนด SLA' :
+                             activeWorkflowInstance.slaStatus === 'WARNING' ? '⚡ ใกล้ครบกำหนด' : '🟢 ปฏิบัติตามเวลา'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })() : (
+                  <div className="p-3 text-center text-xs text-[var(--text-muted)] bg-[var(--bg-canvas)] border border-dashed border-[var(--border-lighter)] rounded-xl">
+                    เลือกแม่แบบด้านบนเพื่อดูตัวอย่างลำดับขั้นตอนการเดินเอกสารและระยะเวลา SLA
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* File Attachment Section */}
             <div className="bg-[var(--bg-canvas)]/40 border border-[var(--border-light)] rounded-2xl p-4 sm:p-5 space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-[var(--border-light)]">
                 <div className="flex items-center gap-2 text-xs font-bold text-[var(--text-primary)]">
                   <Paperclip className="w-4 h-4 text-[var(--primary-color)]" />
-                  <span>6. แนบไฟล์เอกสารดิจิทัล (Scan / Digital Attachments)</span>
+                  <span>7. แนบไฟล์เอกสารดิจิทัล (Scan / Digital Attachments)</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-[var(--primary-color)] bg-[var(--primary-color)]/10 px-2.5 py-1 rounded-lg border border-[var(--primary-color)]/20">
                   <Folder className="w-3.5 h-3.5 shrink-0" />
@@ -1576,371 +2203,15 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       </div>
       
       {/* MODAL: SELECT RESERVED / RECLAIMED NUMBER */}
-      {showReservedModal && (
-        <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 animate-fade-in">
-          <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] sm:rounded-2xl rounded-none w-full max-w-3xl h-full sm:h-auto max-h-[100dvh] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-scale-up">
-            {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-[var(--border-light)] bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-transparent flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                  <Bookmark className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-[var(--text-primary)] flex items-center gap-2">
-                    เลือกเลขหนังสือจากคลังจองล่วงหน้า
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold">
-                      {reservedNumbers.filter(r => r.status === 'available').length} เลขพร้อมใช้
-                    </span>
-                  </h3>
-                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                    เลือกเลขหนังสือที่ได้ทำการจองล่วงหน้า เพื่อนำมาใช้ออกหนังสือฉบับนี้
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowReservedModal(false)}
-                className="p-1.5 rounded-lg hover:bg-[var(--border-lighter)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Filter & Search Toolbar */}
-            <div className="p-3 sm:p-4 border-b border-[var(--border-light)] bg-[var(--bg-canvas)] space-y-3 text-xs">
-              {/* Type Filter Quick Pills */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-                <span className="text-[var(--text-muted)] font-medium shrink-0 flex items-center gap-1 mr-1">
-                  <Filter className="w-3.5 h-3.5 text-[var(--primary-color)]" /> กรองประเภท:
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => setReservedFilterType(getCurrentSpecificDocType())}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                    reservedFilterType === getCurrentSpecificDocType()
-                      ? 'bg-[var(--primary-color)] text-white shadow-sm ring-1 ring-[var(--primary-color)]'
-                      : 'bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)]'
-                  }`}
-                >
-                  <Sparkles className="w-3 h-3" />
-                  ตรงกับเอกสารนี้ ({getCurrentDocTypeDisplayLabel()})
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setReservedFilterType('ALL')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer shrink-0 ${
-                    reservedFilterType === 'ALL'
-                      ? 'bg-[var(--primary-color)] text-white shadow-sm'
-                      : 'bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] border border-[var(--border-light)]'
-                  }`}
-                >
-                  ทั้งหมด
-                </button>
-
-                {['คำสั่ง', 'ประกาศ', 'หนังสือรับรอง', 'หนังสือภายนอก', 'หนังสือภายใน', 'หนังสือรับ'].map(t => {
-                  const isSelected = reservedFilterType === t;
-                  const label = t === 'หนังสือภายนอก' ? 'หนังสือส่ง (ภายนอก)' : t;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setReservedFilterType(t)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer shrink-0 ${
-                        isSelected
-                          ? 'bg-[var(--primary-color)] text-white shadow-sm'
-                          : 'bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] border border-[var(--border-light)]'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Date Filter & Search Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
-                {/* Date Picker Filter */}
-                <div className="sm:col-span-5 flex items-center gap-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2.5 py-1.5 rounded-lg">
-                  <Calendar className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
-                  <span className="text-[var(--text-muted)] shrink-0">วันที่จอง:</span>
-                  <input
-                    type="date"
-                    value={reservedFilterDate}
-                    onChange={(e) => setReservedFilterDate(e.target.value)}
-                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none text-xs flex-1 cursor-pointer"
-                  />
-                  {reservedFilterDate ? (
-                    <button
-                      type="button"
-                      onClick={() => setReservedFilterDate('')}
-                      className="text-[10px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded font-semibold transition-colors cursor-pointer"
-                      title="ล้างตัวกรองวันที่"
-                    >
-                      ล้าง
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const today = new Date().toISOString().split('T')[0];
-                        setReservedFilterDate(today);
-                      }}
-                      className="text-[10px] text-[var(--text-muted)] hover:text-[var(--primary-color)] hover:underline shrink-0 cursor-pointer"
-                    >
-                      วันนี้
-                    </button>
-                  )}
-                </div>
-
-                {/* Status selector */}
-                <div className="sm:col-span-3 flex items-center gap-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] px-2.5 py-1.5 rounded-lg">
-                  <span className="text-[var(--text-muted)] shrink-0">สถานะ:</span>
-                  <select
-                    value={reservedFilterStatus}
-                    onChange={(e) => setReservedFilterStatus(e.target.value)}
-                    className="bg-transparent text-[var(--text-primary)] font-medium outline-none cursor-pointer w-full text-xs"
-                  >
-                    <option value="available">พร้อมใช้งาน</option>
-                    <option value="used">ใช้งานแล้ว</option>
-                    <option value="ALL">ทุกสถานะ</option>
-                  </select>
-                </div>
-
-                {/* Text Search */}
-                <div className="sm:col-span-4 relative">
-                  <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="ค้นหาเลขที่, ผู้จอง, วัตถุประสงค์..."
-                    value={reservedSearchTerm}
-                    onChange={(e) => setReservedSearchTerm(e.target.value)}
-                    className="w-full pl-8 pr-3 py-1.5 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg text-xs text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)]"
-                  />
-                  {reservedSearchTerm && (
-                    <button
-                      type="button"
-                      onClick={() => setReservedSearchTerm('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* List of Reserved / Reclaimed Numbers */}
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
-              {(() => {
-                const matchesType = (itemType: string, filterType: string) => {
-                  if (filterType === 'ALL') return true;
-                  if (filterType === 'หนังสือภายนอก') {
-                    return itemType === 'หนังสือภายนอก' || itemType === 'หนังสือส่ง';
-                  }
-                  if (filterType === 'หนังสือรับ') {
-                    return itemType === 'หนังสือรับ' || itemType === 'หนังสือเข้า';
-                  }
-                  return itemType === filterType;
-                };
-
-                const filtered = reservedNumbers.filter(item => {
-                  if (reservedFilterStatus !== 'ALL' && item.status !== reservedFilterStatus) return false;
-                  if (!matchesType(item.docType || '', reservedFilterType)) return false;
-                  
-                  if (reservedFilterDate) {
-                    const itemDate = (item.reservedDate || item.createdAt || '').split('T')[0];
-                    if (itemDate !== reservedFilterDate) return false;
-                  }
-
-                  if (reservedSearchTerm.trim()) {
-                    const term = reservedSearchTerm.toLowerCase();
-                    const numStr = (item.numberString || '').toLowerCase();
-                    const byStr = (item.reservedBy || '').toLowerCase();
-                    const forStr = (item.reservedFor || '').toLowerCase();
-                    const deptStr = (item.department || '').toLowerCase();
-                    const seqStr = String(item.seqNumber || '');
-                    return numStr.includes(term) || byStr.includes(term) || forStr.includes(term) || deptStr.includes(term) || seqStr.includes(term);
-                  }
-                  return true;
-                });
-
-                if (filtered.length === 0) {
-                  return (
-                    <div className="p-8 text-center text-[var(--text-muted)] space-y-3">
-                      <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500">
-                        <Bookmark className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm text-[var(--text-primary)]">ไม่พบรายการเลขจองตรงตามเงื่อนไข</p>
-                        <p className="text-xs text-[var(--text-muted)] mt-1">
-                          {reservedFilterType !== 'ALL' && `ประเภท: "${reservedFilterType}" `}
-                          {reservedFilterDate && `วันที่: "${formatThaiDate(reservedFilterDate)}" `}
-                          {reservedSearchTerm && `ค้นหา: "${reservedSearchTerm}"`}
-                        </p>
-                      </div>
-                      <div className="flex items-center justify-center gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setReservedFilterType('ALL');
-                            setReservedFilterDate('');
-                            setReservedSearchTerm('');
-                            setReservedFilterStatus('available');
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-[var(--bg-overlay)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-xs text-[var(--text-primary)] font-semibold transition-colors cursor-pointer"
-                        >
-                          ล้างตัวกรองทั้งหมดเพื่อดูเลขทั้งหมด
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="space-y-3">
-                    {/* Active Filter Status Indicator */}
-                    <div className="flex items-center justify-between text-xs text-[var(--text-secondary)] px-1">
-                      <span className="flex items-center gap-1.5">
-                        <span className="font-bold text-[var(--text-primary)]">{filtered.length}</span> รายการที่ตรงกับเงื่อนไข
-                        {reservedFilterType !== 'ALL' && (
-                          <span className="px-2 py-0.5 rounded-full bg-[var(--primary-color)]/10 text-[var(--primary-color)] font-semibold text-[11px]">
-                            {reservedFilterType}
-                          </span>
-                        )}
-                        {reservedFilterDate && (
-                          <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-700 dark:text-purple-300 font-semibold text-[11px]">
-                            วันที่ {formatThaiDate(reservedFilterDate)}
-                          </span>
-                        )}
-                      </span>
-                      {(reservedFilterType !== 'ALL' || reservedFilterDate || reservedSearchTerm) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setReservedFilterType('ALL');
-                            setReservedFilterDate('');
-                            setReservedSearchTerm('');
-                          }}
-                          className="text-[11px] text-[var(--primary-color)] hover:underline cursor-pointer"
-                        >
-                          แสดงทั้งหมด ({reservedNumbers.length})
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {filtered.map(item => {
-                        const isAvailable = item.status === 'available';
-                        const isReclaimed = item.type === 'reclaimed';
-                        const isSelected = selectedReservedId === item.id;
-
-                        return (
-                          <div
-                            key={item.id}
-                            className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
-                              isSelected
-                                ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/30'
-                                : isAvailable
-                                ? 'bg-[var(--bg-overlay)] border-[var(--border-light)] hover:border-amber-500/50 hover:shadow-md'
-                                : 'bg-[var(--bg-canvas)] border-[var(--border-light)] opacity-60'
-                            }`}
-                          >
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    isReclaimed ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                                  }`}>
-                                    {isReclaimed ? '♻️ เลขคืนเข้าคลัง' : '📌 เลขจองล่วงหน้า'}
-                                  </span>
-                                  <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold border border-blue-500/20">
-                                    {item.docType}
-                                  </span>
-                                </div>
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                  isAvailable ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-gray-500/15 text-gray-500'
-                                }`}>
-                                  {isAvailable ? 'พร้อมใช้งาน' : 'ถูกใช้งานแล้ว'}
-                                </span>
-                              </div>
-
-                              <div className="font-mono font-bold text-base text-[var(--text-primary)] flex items-center gap-2">
-                                <span>{item.numberString}</span>
-                                {item.year && <span className="text-xs text-[var(--text-muted)] font-normal">({item.year})</span>}
-                              </div>
-
-                              <div className="text-xs text-[var(--text-secondary)] space-y-1 bg-[var(--bg-canvas)] p-2.5 rounded-lg border border-[var(--border-light)]">
-                                <div className="flex items-center gap-1.5 text-purple-700 dark:text-purple-300 font-medium">
-                                  <Calendar className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
-                                  <span>วันที่จอง: {formatThaiDateString(item.reservedDate || item.createdAt)}</span>
-                                </div>
-                                <div><span className="text-[var(--text-muted)]">หน่วยงาน:</span> {item.department || 'ทุกฝ่ายงาน'}</div>
-                                <div><span className="text-[var(--text-muted)]">ผู้จอง/คืน:</span> {item.reservedBy || '-'}</div>
-                                {item.reservedFor && (
-                                  <div className="text-[11px] text-[var(--text-muted)] line-clamp-2">
-                                    <span className="text-[var(--text-secondary)] font-medium">วัตถุประสงค์:</span> {item.reservedFor}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-end pt-1">
-                              {isAvailable ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    isManualDocNumberRef.current = true;
-                                    setSelectedReservedId(item.id);
-                                    setFormData(prev => ({
-                                      ...prev,
-                                      docNumber: item.numberString,
-                                      receiveNumber: item.seqNumber ? String(item.seqNumber) : prev.receiveNumber,
-                                      department: (item.department && item.department !== 'ทุกฝ่ายงาน') ? item.department : prev.department,
-                                      date: item.reservedDate ? item.reservedDate : prev.date,
-                                      year: item.year || prev.year || effectiveYear
-                                    }));
-                                    setShowReservedModal(false);
-                                  }}
-                                  className={`w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer ${
-                                    isSelected
-                                      ? 'bg-amber-600 text-white'
-                                      : 'bg-amber-500/20 hover:bg-amber-500 text-amber-800 dark:text-amber-200 hover:text-white'
-                                  }`}
-                                >
-                                  <Check className="w-4 h-4" />
-                                  {isSelected ? 'เลือกเลขนี้แล้ว' : 'เลือกใช้เลขนี้'}
-                                </button>
-                              ) : (
-                                <span className="text-xs text-[var(--text-muted)] italic">
-                                  ถูกใช้งานแล้ว {item.usedAt ? `เมื่อ ${new Date(item.usedAt).toLocaleDateString('th-TH')}` : ''}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-3 sm:p-4 border-t border-[var(--border-light)] bg-[var(--bg-surface)] flex items-center justify-between text-xs text-[var(--text-muted)]">
-              <span>เคล็ดลับ: เมื่อบันทึกเอกสารแล้ว ระบบจะทำเครื่องหมายว่าเลขนี้ถูกใช้งานแล้วให้อัตโนมัติ</span>
-              <button
-                type="button"
-                onClick={() => setShowReservedModal(false)}
-                className="px-4 py-2 rounded-lg border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] cursor-pointer"
-              >
-                ปิดหน้าต่าง
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReservedNumberPicker
+        isOpen={showReservedModal}
+        onClose={() => setShowReservedModal(false)}
+        reservedNumbers={reservedNumbers}
+        currentDocTypeLabel={getCurrentDocTypeDisplayLabel()}
+        currentSpecificDocType={getCurrentSpecificDocType()}
+        selectedId={selectedReservedId}
+        onSelect={handleSelectReservedNumber}
+      />
 
       <style>{`
         @keyframes slideUp {

@@ -2,8 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { DocumentItem, User } from '../../types';
 import { 
   FileText, Eye, Inbox, Send, FileSpreadsheet, TrendingUp, AlertTriangle, 
-  ShieldAlert, BarChart3, PieChart, Layers, Filter, CheckCircle2, Clock, 
-  Building2, Lock, FileCheck, ArrowUpRight, Activity, Calendar, Zap, ChevronRight
+  ShieldAlert, BarChart3, PieChart, Filter, CheckCircle2, 
+  Building2, Lock, FileCheck, Activity, Calendar, Zap
 } from 'lucide-react';
 import EecWeatherWidget from './EecWeatherWidget';
 
@@ -18,7 +18,6 @@ interface Props {
 export default function Overview({ documents, user, onCreateDoc, onViewDoc, enabledFeatures }: Props) {
   const [selectedYear, setSelectedYear] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
-  const [activeTab, setActiveTab] = useState<'recent' | 'urgent'>('recent');
 
   const showInbox = !enabledFeatures || enabledFeatures.inbox !== false;
   const showOutbox = !enabledFeatures || enabledFeatures.outbox !== false;
@@ -102,24 +101,6 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
     };
   }, [filteredDocs, totalCount]);
 
-  // Status Workflow Pipeline
-  const statusStats = useMemo(() => {
-    const registered = filteredDocs.filter(d => !d.status || d.status === 'ลงทะเบียน').length;
-    const proposed = filteredDocs.filter(d => d.status === 'เสนอผู้บริหาร').length;
-    const forwarded = filteredDocs.filter(d => d.status === 'ส่งต่อกลุ่มงาน').length;
-    const completed = filteredDocs.filter(d => d.status === 'เสร็จสิ้น').length;
-
-    const completionRate = totalCount > 0 ? Math.round((completed / totalCount) * 100) : 0;
-
-    return {
-      registered,
-      proposed,
-      forwarded,
-      completed,
-      completionRate
-    };
-  }, [filteredDocs, totalCount]);
-
   const getPriorityBadge = (priority: string) => {
     if (priority === 'ปกติ') return null;
     let color = '';
@@ -135,40 +116,37 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
     );
   };
 
-  const urgentAlertDocs = useMemo(() => {
-    return filteredDocs.filter(d => d.priority === 'ด่วนที่สุด' || d.priority === 'ด่วนมาก').slice(0, 5);
-  }, [filteredDocs]);
-
   return (
     <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in">
       {/* 1. Quick Registration Shortcuts (Top Priority Action Bar) */}
       {(showInbox || showOutbox || showAdmin) && (
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-4 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="text-[11px] sm:text-xs uppercase font-bold tracking-wider text-[var(--primary-color)] flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20">
-                <Zap className="w-3.5 h-3.5 animate-pulse" />
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-[2rem] p-6 sm:p-8 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.08)] relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/10 rounded-full blur-[120px] pointer-events-none -mr-20 -mt-20 transition-all duration-700" />
+          <div className="flex items-center justify-between gap-3 mb-6 relative z-10">
+            <div className="text-xs sm:text-sm uppercase font-extrabold tracking-widest text-[var(--primary-color)] flex items-center gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-white flex items-center justify-center shadow-lg shadow-amber-500/20">
+                <Zap className="w-5 h-5 animate-pulse" />
               </div>
-              <span className="font-sans text-sm font-extrabold text-[var(--text-primary)]">ทางลัดการลงทะเบียนด่วน (Quick Registration Shortcuts)</span>
+              <span className="font-sans text-sm font-extrabold text-[var(--text-primary)]">ทางลัดลงทะเบียนด่วน</span>
             </div>
-            <span className="text-[11px] text-[var(--text-muted)] hidden sm:inline">
-              เลือกเพื่อเปิดแบบฟอร์มลงทะเบียนเอกสารทันที
+            <span className="text-[11px] font-bold tracking-wider text-[var(--text-muted)] hidden sm:inline px-4 py-1.5 rounded-full bg-[var(--bg-surface)] border border-[var(--border-light)]">
+              QUICK ACTIONS
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 relative z-10">
             {showInbox && (
               <button
                 type="button"
                 onClick={() => onCreateDoc('inbox')}
-                className="flex items-center gap-3.5 p-3.5 rounded-xl bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/15 hover:border-blue-500/40 transition-all text-xs font-semibold text-left group shadow-xs active:scale-[0.98] cursor-pointer"
+                className="flex items-center gap-5 p-5 rounded-3xl bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-light)] hover:border-[var(--primary-color)]/30 transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] text-xs font-semibold text-left group shadow-sm hover:shadow-lg hover:shadow-[var(--primary-color)]/10 active:scale-[0.98] cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
-                  <Inbox className="w-5 h-5" />
+                <div className="w-14 h-14 rounded-3xl bg-gradient-to-br from-blue-500 to-blue-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-all duration-300">
+                  <Inbox className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">ลงทะเบียนหนังสือรับ</div>
-                  <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">บันทึกและจำแนกเรื่องเข้าหน่วยงาน</div>
+                  <div className="font-extrabold text-sm text-[var(--text-primary)] group-hover:text-[var(--primary-color)] transition-colors">รับหนังสือใหม่</div>
+                  <div className="text-xs text-[var(--text-secondary)] font-medium mt-1 leading-tight opacity-80">บันทึกและจำแนกเรื่องเข้าหน่วยงาน</div>
                 </div>
               </button>
             )}
@@ -177,14 +155,14 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               <button
                 type="button"
                 onClick={() => onCreateDoc('outbox')}
-                className="flex items-center gap-3.5 p-3.5 rounded-xl bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/15 hover:border-emerald-500/40 transition-all text-xs font-semibold text-left group shadow-xs active:scale-[0.98] cursor-pointer"
+                className="flex items-center gap-4 p-4 rounded-2xl bg-white dark:bg-slate-800/50 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:border-emerald-500/50 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all duration-300 text-xs font-semibold text-left group shadow-sm hover:shadow-md hover:shadow-emerald-500/10 active:scale-[0.98] cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
                   <Send className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">ออกเลขหนังสือส่ง</div>
-                  <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">จัดส่งหนังสือออกภายนอก / ลงทะเบียนเวียน</div>
+                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">ส่งหนังสือออก</div>
+                  <div className="text-[11px] text-[var(--text-secondary)] font-medium mt-1 leading-tight">จัดส่งเอกสารออก / ลงทะเบียนเวียน</div>
                 </div>
               </button>
             )}
@@ -193,14 +171,14 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               <button
                 type="button"
                 onClick={() => onCreateDoc('admin')}
-                className="flex items-center gap-3.5 p-3.5 rounded-xl bg-violet-500/5 hover:bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/15 hover:border-violet-500/40 transition-all text-xs font-semibold text-left group shadow-xs active:scale-[0.98] cursor-pointer"
+                className="flex items-center gap-4 p-4 rounded-2xl bg-white dark:bg-slate-800/50 text-violet-600 dark:text-violet-400 border border-violet-500/20 hover:border-violet-500/50 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-all duration-300 text-xs font-semibold text-left group shadow-sm hover:shadow-md hover:shadow-violet-500/10 active:scale-[0.98] cursor-pointer"
               >
-                <div className="w-10 h-10 rounded-xl bg-violet-500 text-white flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-all duration-300">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/20 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
                   <FileCheck className="w-5 h-5" />
                 </div>
                 <div>
                   <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">สร้างคำสั่ง / ประกาศ</div>
-                  <div className="text-[11px] text-[var(--text-secondary)] font-normal mt-0.5">ออกเลขรับรอง จังหวัด ประกาศ และเอกสารธุรการ</div>
+                  <div className="text-[11px] text-[var(--text-secondary)] font-medium mt-1 leading-tight">ออกเลขรับรองและเอกสารธุรการ</div>
                 </div>
               </button>
             )}
@@ -212,55 +190,55 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
       <EecWeatherWidget />
 
       {/* Executive Header Banner */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-6 lg:p-8 shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-[var(--primary-color)]/5 rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20" />
-        <div className="absolute bottom-0 left-10 w-72 h-72 bg-blue-500/5 rounded-full blur-[80px] pointer-events-none" />
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-[var(--primary-color)]/10 to-transparent rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20 transition-all duration-700 group-hover:from-[var(--primary-color)]/20" />
+        <div className="absolute bottom-0 left-10 w-72 h-72 bg-gradient-to-tr from-blue-500/10 to-transparent rounded-full blur-[80px] pointer-events-none transition-all duration-700 group-hover:from-blue-500/20" />
         
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 relative z-10">
           <div>
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--primary-color)] mb-1.5">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[var(--primary-color)] mb-3 opacity-90">
               <Activity className="w-4 h-4 text-[var(--primary-color)] animate-pulse" />
-              <span className="tracking-widest">Executive Analytics Dashboard</span>
+              <span>Executive Analytics Dashboard</span>
             </div>
-            <h1 className="text-2xl lg:text-3xl font-sans font-extrabold text-[var(--text-primary)] tracking-tight leading-none">
-              ภาพรวมและสถิติงานสารบรรณ
+            <h1 className="text-3xl lg:text-4xl font-sans font-extrabold text-[var(--text-primary)] tracking-tight leading-tight mb-2">
+              ภาพรวมและสถิติสารบรรณ
             </h1>
-            <p className="text-xs sm:text-sm text-[var(--text-secondary)] mt-2 max-w-2xl leading-relaxed">
-              ศูนย์สรุปข้อมูล สถิติการรับ-ส่งเอกสาร ระดับความเร่งด่วน และสถานะการดำเนินงานของสำนักงานอย่างเป็นระบบและโปร่งใสตามมาตรฐานงานสารบรรณ
+            <p className="text-sm text-[var(--text-secondary)] max-w-2xl leading-relaxed font-medium">
+              ศูนย์ข้อมูลเชิงลึก สถิติการรับ-ส่งเอกสาร ระดับความเร่งด่วน และสถานะการดำเนินงานของสำนักงานอย่างเป็นระบบและโปร่งใส
             </p>
           </div>
 
           {/* Quick Filters & Action */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-3">
             {/* Year Selector */}
-            <div className="flex items-center gap-2 bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs transition-all hover:border-[var(--primary-color)]/30">
-              <Calendar className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-              <span className="text-[var(--text-muted)] font-medium">ปี พ.ศ.:</span>
+            <div className="flex items-center gap-2.5 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] rounded-xl px-4 py-2.5 text-sm transition-all hover:border-[var(--primary-color)]/40 hover:shadow-sm">
+              <Calendar className="w-4 h-4 text-[var(--primary-color)]" />
+              <span className="text-[var(--text-secondary)] font-medium">ปี พ.ศ.</span>
               <select 
                 value={selectedYear} 
                 onChange={(e) => setSelectedYear(e.target.value)}
-                className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer pr-1"
+                className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer pr-2 appearance-none"
               >
-                <option value="all">ทุกปี พ.ศ.</option>
+                <option value="all">ทั้งหมด</option>
                 {availableYears.map(yr => (
-                  <option key={yr} value={yr}>ปี {yr}</option>
+                  <option key={yr} value={yr}>{yr}</option>
                 ))}
               </select>
             </div>
 
             {/* Doc Type Selector */}
-            <div className="flex items-center gap-2 bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs transition-all hover:border-[var(--primary-color)]/30">
-              <Filter className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-              <span className="text-[var(--text-muted)] font-medium">ระบบงาน:</span>
+            <div className="flex items-center gap-2.5 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] rounded-xl px-4 py-2.5 text-sm transition-all hover:border-[var(--primary-color)]/40 hover:shadow-sm">
+              <Filter className="w-4 h-4 text-[var(--primary-color)]" />
+              <span className="text-[var(--text-secondary)] font-medium">ระบบงาน</span>
               <select 
                 value={selectedType} 
                 onChange={(e) => setSelectedType(e.target.value)}
-                className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer pr-1"
+                className="bg-transparent text-[var(--text-primary)] font-bold focus:outline-none cursor-pointer pr-2 appearance-none"
               >
-                <option value="all">ระบบงานทั้งหมด</option>
-                {showInbox && <option value="inbox">หนังสือรับ</option>}
-                {showOutbox && <option value="outbox">หนังสือส่ง</option>}
-                {showAdmin && <option value="admin">งานธุรการ</option>}
+                <option value="all">ทั้งหมด</option>
+                {showInbox && <option value="inbox">รับ</option>}
+                {showOutbox && <option value="outbox">ส่ง</option>}
+                {showAdmin && <option value="admin">ธุรการ</option>}
               </select>
             </div>
 
@@ -271,10 +249,10 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
                   else if (showOutbox) onCreateDoc('outbox');
                   else if (showAdmin) onCreateDoc('admin');
                 }}
-                className="flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/10 hover:shadow-lg hover:shadow-[var(--primary-color)]/20 active:scale-[0.98] border border-[var(--primary-dark)]/10 cursor-pointer"
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--primary-color)] to-[var(--primary-dark)] hover:from-[var(--primary-hover)] hover:to-[var(--primary-color)] text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/20 hover:shadow-xl hover:shadow-[var(--primary-color)]/30 hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer"
               >
                 <FileText className="w-4 h-4 shrink-0" />
-                <span>+ ลงทะเบียนหนังสือ</span>
+                <span>ลงทะเบียนเอกสาร</span>
               </button>
             )}
           </div>
@@ -292,20 +270,20 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
         return (
           <div className={`grid grid-cols-1 sm:grid-cols-2 ${gridColsClass} gap-4`}>
             {/* Metric 1: Total Docs */}
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 group">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-3xl p-6 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 transition-all duration-300 group">
+              <div className="flex items-center justify-between mb-6">
                 <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">เอกสารรวมทั้งหมด</span>
-                <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-500 group-hover:scale-105 transition-transform duration-300">
-                  <FileSpreadsheet className="w-4 h-4" />
+                <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 text-blue-600 dark:text-blue-400 group-hover:scale-110 group-hover:bg-blue-500 group-hover:text-white transition-all duration-300 shadow-sm">
+                  <FileSpreadsheet className="w-5 h-5" />
                 </div>
               </div>
               <div>
-                <div className="text-3xl lg:text-4xl font-extrabold font-mono text-[var(--text-primary)] tracking-tight flex items-baseline gap-1.5">
+                <div className="text-4xl lg:text-5xl font-extrabold font-mono text-[var(--text-primary)] tracking-tight flex items-baseline gap-2">
                   {totalCount}
-                  <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                  <span className="text-sm font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                 </div>
-                <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center gap-1 font-semibold">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                <div className="mt-4 text-xs text-[var(--text-muted)] flex items-center gap-1.5 font-medium bg-[var(--bg-elevated)] w-fit px-2.5 py-1 rounded-md">
+                  <TrendingUp className="w-4 h-4 text-emerald-500" />
                   <span>ฐานข้อมูลดิจิทัลรวมขององค์กร</span>
                 </div>
               </div>
@@ -313,19 +291,19 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
 
             {/* Metric 2: Inbox Docs */}
             {showInbox && (
-              <div className="bg-[var(--bg-surface)] border border-blue-500/15 dark:border-blue-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 group">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-blue-500/15 dark:border-blue-500/20 rounded-3xl p-6 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-[0_8px_30px_rgb(59,130,246,0.1)] hover:-translate-y-1 transition-all duration-300 group">
+                <div className="flex items-center justify-between mb-6">
                   <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">หนังสือรับ (Inbox)</span>
-                  <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform duration-300">
-                    <Inbox className="w-4 h-4" />
+                  <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 text-blue-600 dark:text-blue-400 group-hover:scale-110 group-hover:bg-blue-500 group-hover:text-white transition-all duration-300 shadow-sm">
+                    <Inbox className="w-5 h-5" />
                   </div>
                 </div>
                 <div>
-                  <div className="text-3xl lg:text-4xl font-extrabold font-mono text-blue-600 dark:text-blue-400 tracking-tight flex items-baseline gap-1.5">
+                  <div className="text-4xl lg:text-5xl font-extrabold font-mono text-blue-600 dark:text-blue-400 tracking-tight flex items-baseline gap-2">
                     {inboxDocs.length}
-                    <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                    <span className="text-sm font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                   </div>
-                  <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
+                  <div className="mt-4 text-xs text-[var(--text-muted)] flex items-center justify-between font-medium bg-blue-50/50 dark:bg-blue-500/5 px-3 py-1.5 rounded-lg border border-blue-100 dark:border-blue-500/10">
                     <span>สัดส่วน {totalCount > 0 ? Math.round((inboxDocs.length / totalCount) * 100) : 0}% ของทั้งหมด</span>
                     <span className="text-blue-600 dark:text-blue-400 font-bold">{inboxDocs.filter(d => d.status === 'เสนอผู้บริหาร').length} เสนอผู้บริหาร</span>
                   </div>
@@ -335,19 +313,19 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
 
             {/* Metric 3: Outbox Docs */}
             {showOutbox && (
-              <div className="bg-[var(--bg-surface)] border border-emerald-500/15 dark:border-emerald-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 group">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-emerald-500/15 dark:border-emerald-500/20 rounded-3xl p-6 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-[0_8px_30px_rgb(16,185,129,0.1)] hover:-translate-y-1 transition-all duration-300 group">
+                <div className="flex items-center justify-between mb-6">
                   <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">หนังสือส่ง (Outbox)</span>
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform duration-300">
-                    <Send className="w-4 h-4" />
+                  <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300 shadow-sm">
+                    <Send className="w-5 h-5" />
                   </div>
                 </div>
                 <div>
-                  <div className="text-3xl lg:text-4xl font-extrabold font-mono text-emerald-600 dark:text-emerald-400 tracking-tight flex items-baseline gap-1.5">
+                  <div className="text-4xl lg:text-5xl font-extrabold font-mono text-emerald-600 dark:text-emerald-400 tracking-tight flex items-baseline gap-2">
                     {outboxDocs.length}
-                    <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                    <span className="text-sm font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                   </div>
-                  <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
+                  <div className="mt-4 text-xs text-[var(--text-muted)] flex items-center justify-between font-medium bg-emerald-50/50 dark:bg-emerald-500/5 px-3 py-1.5 rounded-lg border border-emerald-100 dark:border-emerald-500/10">
                     <span>สัดส่วน {totalCount > 0 ? Math.round((outboxDocs.length / totalCount) * 100) : 0}% ของทั้งหมด</span>
                     <span className="text-emerald-600 dark:text-emerald-400 font-bold">{circularCount} หนังสือเวียน</span>
                   </div>
@@ -357,19 +335,19 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
 
             {/* Metric 4: Admin Docs */}
             {showAdmin && (
-              <div className="bg-[var(--bg-surface)] border border-violet-500/15 dark:border-violet-500/30 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 group">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-violet-500/15 dark:border-violet-500/20 rounded-3xl p-6 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-[0_8px_30px_rgb(139,92,246,0.1)] hover:-translate-y-1 transition-all duration-300 group">
+                <div className="flex items-center justify-between mb-6">
                   <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">งานธุรการ / คำสั่ง</span>
-                  <div className="p-2.5 rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-400 group-hover:scale-105 transition-transform duration-300">
-                    <FileCheck className="w-4 h-4" />
+                  <div className="p-3 rounded-xl bg-gradient-to-br from-violet-500/10 to-violet-500/5 text-violet-600 dark:text-violet-400 group-hover:scale-110 group-hover:bg-violet-500 group-hover:text-white transition-all duration-300 shadow-sm">
+                    <FileCheck className="w-5 h-5" />
                   </div>
                 </div>
                 <div>
-                  <div className="text-3xl lg:text-4xl font-extrabold font-mono text-violet-600 dark:text-violet-400 tracking-tight flex items-baseline gap-1.5">
+                  <div className="text-4xl lg:text-5xl font-extrabold font-mono text-violet-600 dark:text-violet-400 tracking-tight flex items-baseline gap-2">
                     {adminDocs.length}
-                    <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                    <span className="text-sm font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                   </div>
-                  <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
+                  <div className="mt-4 text-xs text-[var(--text-muted)] flex items-center justify-between font-medium bg-violet-50/50 dark:bg-violet-500/5 px-3 py-1.5 rounded-lg border border-violet-100 dark:border-violet-500/10">
                     <span>สัดส่วน {totalCount > 0 ? Math.round((adminDocs.length / totalCount) * 100) : 0}% ของทั้งหมด</span>
                     <span className="text-violet-600 dark:text-violet-400 font-bold">คำสั่ง {ordersCount} | ประกาศ {announcementsCount}</span>
                   </div>
@@ -378,22 +356,22 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
             )}
 
             {/* Metric 5: Urgent & Confidential Alert */}
-            <div className="bg-rose-50/20 dark:bg-rose-950/5 border border-rose-500/20 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 group">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-gradient-to-br from-rose-50/80 to-red-50/30 dark:from-rose-950/20 dark:to-red-900/10 border border-rose-500/20 rounded-3xl p-6 flex flex-col justify-between relative overflow-hidden shadow-sm hover:shadow-[0_8px_30px_rgb(244,63,94,0.15)] hover:-translate-y-1 transition-all duration-300 group">
+              <div className="flex items-center justify-between mb-6">
                 <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500 animate-bounce" />
+                  <AlertTriangle className="w-4 h-4 text-rose-500 animate-bounce" />
                   ด่วนมาก / ชั้นลับ
                 </span>
-                <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-500 group-hover:scale-105 transition-transform duration-300">
-                  <ShieldAlert className="w-4 h-4" />
+                <div className="p-3 rounded-xl bg-gradient-to-br from-rose-500/10 to-rose-500/5 text-rose-500 group-hover:scale-110 group-hover:bg-rose-500 group-hover:text-white transition-all duration-300 shadow-sm">
+                  <ShieldAlert className="w-5 h-5" />
                 </div>
               </div>
               <div>
-                <div className="text-3xl lg:text-4xl font-extrabold font-mono text-rose-600 dark:text-rose-400 tracking-tight flex items-baseline gap-1.5">
+                <div className="text-4xl lg:text-5xl font-extrabold font-mono text-rose-600 dark:text-rose-400 tracking-tight flex items-baseline gap-2">
                   {urgentCount}
-                  <span className="text-xs font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
+                  <span className="text-sm font-sans font-semibold text-[var(--text-muted)]">ฉบับ</span>
                 </div>
-                <div className="mt-3 text-[0.75rem] text-[var(--text-muted)] flex items-center justify-between font-semibold">
+                <div className="mt-4 text-xs text-[var(--text-muted)] flex items-center justify-between font-medium bg-white/50 dark:bg-rose-950/30 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-rose-100/50 dark:border-rose-900/30">
                   <span className="text-rose-600 dark:text-rose-400 font-bold">ด่วนพิเศษ {urgentCount} ฉบับ</span>
                   <span className="text-amber-600 dark:text-amber-400 font-bold">{confidentialCount} เอกสารลับ</span>
                 </div>
@@ -407,14 +385,16 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Visual Analytics 1: Category & Type Proportion */}
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-5 lg:p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 flex flex-col justify-between shadow-sm hover:shadow-md transition-all duration-300 group">
           <div>
-            <div className="flex items-center justify-between mb-5 pb-3 border-b border-[var(--border-lighter)]">
-              <div className="flex items-center gap-2">
-                <PieChart className="w-4 h-4 text-[var(--primary-color)]" />
-                <h3 className="text-base font-sans font-semibold text-[var(--text-primary)]">สัดส่วนประเภทหนังสือ</h3>
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-[var(--border-light)]">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-[var(--primary-color)]/10 text-[var(--primary-color)]">
+                  <PieChart className="w-5 h-5" />
+                </div>
+                <h3 className="text-lg font-sans font-bold text-[var(--text-primary)]">สัดส่วนประเภทหนังสือ</h3>
               </div>
-              <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--text-muted)]">สถิติมวลรวม</span>
+              <span className="text-[11px] uppercase font-bold tracking-widest text-[var(--text-muted)] bg-[var(--bg-elevated)] px-3 py-1 rounded-full">สถิติมวลรวม</span>
             </div>
 
             {/* Custom Segmented Progress Bar */}
@@ -500,14 +480,16 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
         </div>
 
         {/* Visual Analytics 2: Priority & Secrecy Metrics */}
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-5 lg:p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 flex flex-col justify-between shadow-sm hover:shadow-md transition-all duration-300 group">
           <div>
-            <div className="flex items-center justify-between mb-5 pb-3 border-b border-[var(--border-lighter)]">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-amber-500" />
-                <h3 className="text-base font-sans font-semibold text-[var(--text-primary)]">ระดับความเร่งด่วน</h3>
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-[var(--border-light)]">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+                <h3 className="text-lg font-sans font-bold text-[var(--text-primary)]">ระดับความเร่งด่วน</h3>
               </div>
-              <span className="text-[10px] font-bold text-red-500 bg-red-500/10 px-2.5 py-1 rounded-xl border border-red-500/10">
+              <span className="text-[11px] font-bold text-red-500 bg-red-500/10 px-3 py-1 rounded-full border border-red-500/10">
                 ด่วนรวม {priorityStats.urgent + priorityStats.veryUrgent + priorityStats.topUrgent} ฉบับ
               </span>
             </div>
@@ -573,26 +555,30 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
           </div>
 
           {/* Secrecy Footer Badge */}
-          <div className="mt-5 pt-3 border-t border-[var(--border-lighter)] flex items-center justify-between text-xs">
-            <span className="text-[var(--text-muted)] flex items-center gap-1.5 font-medium">
-              <Lock className="w-3.5 h-3.5 text-amber-500" />
+          <div className="mt-6 pt-4 border-t border-[var(--border-light)] flex items-center justify-between text-xs">
+            <span className="text-[var(--text-muted)] flex items-center gap-2 font-medium">
+              <div className="p-1.5 rounded-md bg-amber-500/10">
+                <Lock className="w-3.5 h-3.5 text-amber-500" />
+              </div>
               เอกสารชั้นลับในสารระบบ:
             </span>
-            <span className="font-mono font-bold text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20 text-[11px]">
+            <span className="font-mono font-bold text-amber-500 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20 text-[11px]">
               {confidentialCount} ฉบับ
             </span>
           </div>
         </div>
 
         {/* Visual Analytics 3: Department Workload Distribution */}
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-5 lg:p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 flex flex-col justify-between shadow-sm hover:shadow-md transition-all duration-300 group">
           <div>
-            <div className="flex items-center justify-between mb-5 pb-3 border-b border-[var(--border-lighter)]">
-              <div className="flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-emerald-500" />
-                <h3 className="text-base font-sans font-semibold text-[var(--text-primary)]">ปริมาณงานแยกตามกลุ่มงาน</h3>
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-[var(--border-light)]">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <h3 className="text-lg font-sans font-bold text-[var(--text-primary)]">ปริมาณงานแยกตามกลุ่มงาน</h3>
               </div>
-              <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/10 font-mono">
+              <span className="text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/10 font-mono">
                 {deptStats.length} กลุ่มปฏิบัติ
               </span>
             </div>
@@ -629,126 +615,27 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
 
       </div>
 
-      {/* Processing Pipeline / Workflow Pipeline Bar */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-5 lg:p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 pb-3 border-b border-[var(--border-lighter)]">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-indigo-500 animate-pulse" />
-            <h3 className="text-base font-sans font-bold text-[var(--text-primary)]">
-              สถานะวงจรการดำเนินงานสารบรรณ (Document Processing Pipeline)
+      {/* Main Table View: Recent Tab */}
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] rounded-3xl overflow-hidden flex flex-col shadow-sm mt-8 transition-all hover:shadow-md">
+        <div className="p-5 lg:p-6 border-b border-[var(--border-light)] flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-[var(--bg-elevated)] to-transparent">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[var(--primary-color)]/10 text-[var(--primary-color)]">
+              <FileText className="w-5 h-5" />
+            </div>
+            <h3 className="text-lg font-sans font-bold text-[var(--text-primary)]">
+              หนังสือราชการล่าสุด <span className="text-[var(--text-muted)] font-medium text-base ml-1">({filteredDocs.length})</span>
             </h3>
           </div>
-          <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 px-3 py-1.5 rounded-xl text-xs font-mono font-bold">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>อัตราดำเนินงานสำเร็จ: {statusStats.completionRate}%</span>
-          </div>
-        </div>
 
-        {/* Cohesive Connected Pipeline Row */}
-        <div className="flex flex-col lg:flex-row items-center gap-3 w-full">
-          {/* Step 1: Registered */}
-          <div className="w-full bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-2xl p-4 flex items-center justify-between hover:border-slate-400/40 transition-colors shadow-sm">
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-xl bg-slate-500/10 text-slate-500 flex items-center justify-center font-bold font-mono text-sm border border-slate-500/10">
-                1
-              </div>
-              <div>
-                <div className="text-[11px] text-[var(--text-muted)] font-bold uppercase tracking-wider">ลงทะเบียนแล้ว</div>
-                <div className="text-base font-bold font-mono text-[var(--text-primary)] mt-0.5">{statusStats.registered} ฉบับ</div>
-              </div>
-            </div>
-            <Clock className="w-4.5 h-4.5 text-slate-400" />
-          </div>
-
-          <ChevronRight className="hidden lg:block w-5 h-5 text-[var(--text-muted)] shrink-0 opacity-60" />
-
-          {/* Step 2: Proposed to Executives */}
-          <div className="w-full bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-2xl p-4 flex items-center justify-between hover:border-blue-400/40 transition-colors shadow-sm">
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center font-bold font-mono text-sm border border-blue-500/10">
-                2
-              </div>
-              <div>
-                <div className="text-[11px] text-[var(--text-muted)] font-bold uppercase tracking-wider">เสนอผู้บริหาร</div>
-                <div className="text-base font-bold font-mono text-blue-500 mt-0.5">{statusStats.proposed} ฉบับ</div>
-              </div>
-            </div>
-            <ArrowUpRight className="w-4.5 h-4.5 text-blue-500" />
-          </div>
-
-          <ChevronRight className="hidden lg:block w-5 h-5 text-[var(--text-muted)] shrink-0 opacity-60" />
-
-          {/* Step 3: Forwarded */}
-          <div className="w-full bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-2xl p-4 flex items-center justify-between hover:border-amber-400/40 transition-colors shadow-sm">
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center font-bold font-mono text-sm border border-amber-500/10">
-                3
-              </div>
-              <div>
-                <div className="text-[11px] text-[var(--text-muted)] font-bold uppercase tracking-wider">ส่งต่อกลุ่มงาน</div>
-                <div className="text-base font-bold font-mono text-amber-500 mt-0.5">{statusStats.forwarded} ฉบับ</div>
-              </div>
-            </div>
-            <Send className="w-4.5 h-4.5 text-amber-500" />
-          </div>
-
-          <ChevronRight className="hidden lg:block w-5 h-5 text-[var(--text-muted)] shrink-0 opacity-60" />
-
-          {/* Step 4: Completed */}
-          <div className="w-full bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-2xl p-4 flex items-center justify-between hover:border-emerald-400/40 transition-colors shadow-sm">
-            <div className="flex items-center gap-3.5">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold font-mono text-sm border border-emerald-500/10">
-                4
-              </div>
-              <div>
-                <div className="text-[11px] text-[var(--text-muted)] font-bold uppercase tracking-wider">เสร็จสิ้น/ยุติ</div>
-                <div className="text-base font-bold font-mono text-emerald-500 mt-0.5">{statusStats.completed} ฉบับ</div>
-              </div>
-            </div>
-            <CheckCircle2 className="w-4.5 h-4.5 text-emerald-500" />
-          </div>
-        </div>
-      </div>
-
-      {/* Main Table View: Recent vs Urgent Tabs */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl overflow-hidden flex flex-col shadow-sm">
-        <div className="p-4 lg:p-5 border-b border-[var(--border-lighter)] flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/[0.01]">
-          {/* Segmented Control Tabs */}
-          <div className="bg-[var(--bg-elevated)] p-1 rounded-2xl flex border border-[var(--border-light)] max-w-md w-full sm:w-auto">
-            <button 
-              onClick={() => setActiveTab('recent')}
-              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                activeTab === 'recent' 
-                  ? 'bg-[var(--primary-color)] text-white shadow-md' 
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
-              }`}
-            >
-              <FileText className="w-4 h-4 shrink-0" />
-              <span>หนังสือล่าสุด ({filteredDocs.length})</span>
-            </button>
-
-            <button 
-              onClick={() => setActiveTab('urgent')}
-              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                activeTab === 'urgent' 
-                  ? 'bg-rose-600 text-white shadow-md' 
-                  : 'text-[var(--text-secondary)] hover:text-rose-500 hover:bg-rose-500/[0.03]'
-              }`}
-            >
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>ติดตามหนังสือด่วน ({urgentAlertDocs.length})</span>
-            </button>
-          </div>
-
-          <div className="text-[11px] text-[var(--text-muted)] font-mono flex items-center gap-1.5 self-end sm:self-auto font-semibold bg-[var(--bg-elevated)] px-3 py-1.5 rounded-xl border border-[var(--border-light)]">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>อัปเดตข้อมูลแบบเรียลไทม์</span>
+          <div className="text-[11px] text-[var(--text-muted)] font-mono flex items-center gap-2 self-end sm:self-auto font-semibold bg-white/50 dark:bg-slate-900/50 px-4 py-2 rounded-xl border border-[var(--border-light)] shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+            <span>Real-time Sync</span>
           </div>
         </div>
         
         {/* Mobile View: list of items as cards */}
         <div className="block md:hidden divide-y divide-[var(--border-lighter)] max-h-[500px] overflow-y-auto custom-scrollbar">
-          {(activeTab === 'recent' ? filteredDocs.slice(0, 5) : urgentAlertDocs).map((row) => (
+          {filteredDocs.slice(0, 10).map((row) => (
             <div key={row.id} className="p-4 space-y-3 hover:bg-[var(--border-lighter)]/30 transition-colors">
               <div className="flex items-start justify-between gap-2">
                 <span className="text-[0.75rem] font-mono text-[var(--text-primary)] bg-[var(--bg-elevated)] px-2.5 py-1 rounded-lg border border-[var(--border-light)] font-bold">
@@ -794,7 +681,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               </div>
             </div>
           ))}
-          {(activeTab === 'recent' ? filteredDocs.length === 0 : urgentAlertDocs.length === 0) && (
+          {filteredDocs.length === 0 && (
             <div className="p-10 text-center text-[var(--text-muted)] text-sm font-medium">ไม่พบข้อมูลหนังสือ</div>
           )}
         </div>
@@ -808,12 +695,11 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
                 <th className="p-4 lg:p-5 font-bold min-w-[240px]">ชื่อเรื่องหนังสือ</th>
                 <th className="p-4 lg:p-5 font-bold whitespace-nowrap">ผู้ส่ง / ผู้รับ</th>
                 <th className="p-4 lg:p-5 font-bold whitespace-nowrap">กลุ่มปฏิบัติงาน</th>
-                <th className="p-4 lg:p-5 font-bold whitespace-nowrap">สถานะดำเนินงาน</th>
                 <th className="p-4 lg:p-5 font-bold whitespace-nowrap text-right">การจัดการ</th>
               </tr>
             </thead>
             <tbody className="text-[0.92rem] divide-y divide-[var(--border-lighter)]">
-              {(activeTab === 'recent' ? filteredDocs.slice(0, 8) : urgentAlertDocs).map((row) => (
+              {filteredDocs.slice(0, 10).map((row) => (
                 <tr 
                   key={row.id} 
                   className="hover:bg-[var(--primary-color)]/[0.015] dark:hover:bg-slate-800/10 transition-colors group"
@@ -851,24 +737,6 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
                       {row.department || '-'}
                     </div>
                   </td>
-                  <td className="p-4 lg:p-5 whitespace-nowrap text-xs">
-                    {(() => {
-                      const status = row.status || 'ลงทะเบียน';
-                      let statusStyle = 'bg-slate-500/10 text-slate-500 border-slate-500/20';
-                      if (status === 'เสนอผู้บริหาร') {
-                        statusStyle = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
-                      } else if (status === 'ส่งต่อกลุ่มงาน' || status === 'กำลังดำเนินการ') {
-                        statusStyle = 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
-                      } else if (status === 'เสร็จสิ้น' || status === 'ยุติ') {
-                        statusStyle = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
-                      }
-                      return (
-                        <span className={`px-2.5 py-1 rounded-xl border font-bold text-[11px] inline-block ${statusStyle}`}>
-                          {status}
-                        </span>
-                      );
-                    })()}
-                  </td>
                   <td className="p-4 lg:p-5 text-right">
                     <button 
                       onClick={() => onViewDoc(row)}
@@ -880,7 +748,7 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
                   </td>
                 </tr>
               ))}
-              {(activeTab === 'recent' ? filteredDocs.length === 0 : urgentAlertDocs.length === 0) && (
+              {filteredDocs.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-16 text-center text-[var(--text-muted)] text-sm font-semibold">
                     ไม่พบข้อมูลเอกสารในระบบงานสารบรรณ

@@ -41,6 +41,27 @@ export default function Settings(props: SettingsProps) {
   const [isExecutingDedup, setIsExecutingDedup] = useState<boolean>(false);
   const [dedupMsg, setDedupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [autoDedupOnUpload, setAutoDedupOnUpload] = useState<boolean>(true);
+  const [collapsedGroupHashes, setCollapsedGroupHashes] = useState<Record<string, boolean>>({});
+
+  const toggleGroupCollapse = (hash: string) => {
+    setCollapsedGroupHashes(prev => ({
+      ...prev,
+      [hash]: !prev[hash]
+    }));
+  };
+
+  const expandAllGroups = () => {
+    setCollapsedGroupHashes({});
+  };
+
+  const collapseAllGroups = () => {
+    if (!dedupStats?.groups) return;
+    const next: Record<string, boolean> = {};
+    dedupStats.groups.forEach((g: any) => {
+      if (g.hash) next[g.hash] = true;
+    });
+    setCollapsedGroupHashes(next);
+  };
   
   // Feature flags control
   const [localEnabledFeatures, setLocalEnabledFeatures] = useState<Record<string, boolean>>({
@@ -200,6 +221,70 @@ export default function Settings(props: SettingsProps) {
   const [restoreStatusMsg, setRestoreStatusMsg] = useState<{ type: 'success' | 'error'; text: string; details?: any } | null>(null);
   const [backupStatusMsg, setBackupStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Automated Backup History States
+  const [automatedBackups, setAutomatedBackups] = useState<any[]>([]);
+  const [isLoadingAutomatedBackups, setIsLoadingAutomatedBackups] = useState(false);
+  const [isRestoringAutomated, setIsRestoringAutomated] = useState(false);
+  const [automatedBackupMsg, setAutomatedBackupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const fetchAutomatedBackups = async () => {
+    setIsLoadingAutomatedBackups(true);
+    setAutomatedBackupMsg(null);
+    try {
+      const res = await fetch(`/api/automated-backups/list?role=${props.user?.role || 'admin'}`);
+      if (!res.ok) throw new Error('ไม่สามารถดึงข้อมูลประวัติสำรองข้อมูลได้');
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackups(data.backups || []);
+      } else {
+        throw new Error(data.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsLoadingAutomatedBackups(false);
+    }
+  };
+
+  const handleRestoreAutomatedBackup = async (fileName: string) => {
+    if (!window.confirm(`⚠️ คำเตือน: คุณต้องการคืนค่าระบบกลับไปยังช่วงเวลาของไฟล์สำรองข้อมูล "${fileName}" ใช่หรือไม่?\nข้อมูลปัจจุบันทั้งหมดในระบบจะถูกเขียนทับและสูญหายทันที!`)) {
+      return;
+    }
+    setIsRestoringAutomated(true);
+    setAutomatedBackupMsg(null);
+    try {
+      const res = await fetch(`/api/automated-backups/restore/${fileName}?role=${props.user?.role || 'admin'}&username=${encodeURIComponent(props.user?.firstName || 'ผู้ดูแลระบบ')}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          role: props.user?.role || 'admin',
+          username: props.user?.firstName || 'ผู้ดูแลระบบ'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackupMsg({
+          type: 'success',
+          text: `กู้คืนข้อมูลสำเร็จแล้ว! ระบบทำงานตามข้อมูล ณ ช่วงเวลา ${new Date(parseInt(fileName.split('_').pop()?.split('.')[0] || '0')).toLocaleString('th-TH')} เรียบร้อยแล้ว`
+        });
+        if (props.onSettingsUpdated) {
+          props.onSettingsUpdated();
+        }
+      } else {
+        throw new Error(data.error || 'การคืนค่าข้อมูลล้มเหลว');
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({
+        type: 'error',
+        text: err.message || 'เกิดข้อผิดพลาดในการกู้คืนข้อมูล'
+      });
+    } finally {
+      setIsRestoringAutomated(false);
+    }
+  };
+
   // Role & Permissions state
   const [rolePermissions, setRolePermissions] = useState<any[]>([]);
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
@@ -276,7 +361,7 @@ export default function Settings(props: SettingsProps) {
     const allKeys = [
       'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
       'admin_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
-      'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin',
+      'digital_folders', 'digital_signatures', 'recycle_bin',
       'manage_users', 'system_settings', 'backup_restore', 'audit_logs', 'manage_changelog'
     ];
 
@@ -312,7 +397,9 @@ export default function Settings(props: SettingsProps) {
     setIsBackingUp(true);
     setBackupStatusMsg(null);
     try {
-      const response = await fetch('/api/backup?username=' + encodeURIComponent('ผู้ดูแลระบบ'));
+      const usernameParam = encodeURIComponent(props.user?.firstName || 'ผู้ดูแลระบบ');
+      const roleParam = encodeURIComponent(props.user?.role || 'admin');
+      const response = await fetch(`/api/backup?username=${usernameParam}&role=${roleParam}`);
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
         throw new Error(errJson.error || 'ไม่สามารถดาวน์โหลดไฟล์สำรองข้อมูลได้');
@@ -352,7 +439,8 @@ export default function Settings(props: SettingsProps) {
     try {
       const formData = new FormData();
       formData.append('file', restoreFile);
-      formData.append('username', 'ผู้ดูแลระบบ');
+      formData.append('username', props.user?.firstName || 'ผู้ดูแลระบบ');
+      formData.append('role', props.user?.role || 'admin');
 
       const response = await fetch('/api/restore', {
         method: 'POST',
@@ -410,10 +498,10 @@ export default function Settings(props: SettingsProps) {
 
   const handleExecuteDedup = async () => {
     const confirmed = await confirm({
-      title: 'ยืนยันการรวมไฟล์ซ้ำบนระบบคลาวด์',
-      message: 'ยืนยันการรวมไฟล์ซ้ำทั้งหมดในเซิร์ฟเวอร์? ระบบจะรวมไฟล์ซ้ำ และสร้าง Pointer เชื่อมโยงไปยังไฟล์ต้นฉบับเพื่อประหยัดพื้นที่คลาวด์',
+      title: 'ยืนยันการย้ายไฟล์ซ้ำไป Pointer & ลบไฟล์ซ้ำ',
+      message: 'ยืนยันการย้ายไฟล์ซ้ำทั้งหมดไป Pointer? ระบบจะเก็บรักษาไฟล์ต้นฉบับไว้ สร้าง Pointer Link และลบไฟล์ซ้ำทางกายภาพออกจากเซิร์ฟเวอร์เพื่อประหยัดพื้นที่ดิสก์',
       type: 'warning',
-      confirmText: 'ยืนยันการรวมไฟล์',
+      confirmText: 'ยืนยันการย้ายไฟล์และลบไฟล์ซ้ำ',
       cancelText: 'ยกเลิก'
     });
     if (!confirmed) return;
@@ -431,7 +519,7 @@ export default function Settings(props: SettingsProps) {
       if (data.success) {
         setDedupMsg({
           type: 'success',
-          text: `รวมไฟล์ซ้ำเรียบร้อยแล้ว! รวมไฟล์แล้ว ${data.filesMerged} ไฟล์ ประหยัดพื้นที่ได้ ${data.bytesReclaimedFormatted}`
+          text: `ย้ายไฟล์ซ้ำไป Pointer และลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์เรียบร้อยแล้ว! จัดการแล้ว ${data.filesMerged} ไฟล์ ประหยัดพื้นที่ได้ ${data.bytesReclaimedFormatted}`
         });
         if (data.updatedStats) {
           setDedupStats(data.updatedStats);
@@ -439,10 +527,50 @@ export default function Settings(props: SettingsProps) {
           fetchDedupStats();
         }
       } else {
-        setDedupMsg({ type: 'error', text: data.error || 'การรวมไฟล์ซ้ำล้มเหลว' });
+        setDedupMsg({ type: 'error', text: data.error || 'การย้ายไฟล์ซ้ำล้มเหลว' });
       }
     } catch (err: any) {
-      setDedupMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการรวมไฟล์ซ้ำ' });
+      setDedupMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการย้ายไฟล์ซ้ำ' });
+    } finally {
+      setIsExecutingDedup(false);
+    }
+  };
+
+  const handleExecuteDedupGroup = async (hash: string) => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการย้ายกลุ่มนี้ไป Pointer',
+      message: 'ระบบจะเก็บไฟล์ต้นฉบับไว้ ย้ายสำเนาทั้งหมดในกลุ่มนี้ไป Pointer และลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์ ต้องการดำเนินการหรือไม่?',
+      type: 'warning',
+      confirmText: 'ย้ายกลุ่มนี้ไป Pointer',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    setIsExecutingDedup(true);
+    setDedupMsg(null);
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      const res = await fetch('/api/deduplication/deduplicate-group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentUser.username || 'admin', hash })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDedupMsg({
+          type: 'success',
+          text: `ย้ายกลุ่มไฟล์ซ้ำไป Pointer และลบไฟล์ซ้ำเรียบร้อยแล้ว! ประหยัดพื้นที่ได้ ${data.bytesReclaimedFormatted}`
+        });
+        if (data.updatedStats) {
+          setDedupStats(data.updatedStats);
+        } else {
+          fetchDedupStats();
+        }
+      } else {
+        setDedupMsg({ type: 'error', text: data.error || 'การย้ายกลุ่มไฟล์ซ้ำล้มเหลว' });
+      }
+    } catch (err: any) {
+      setDedupMsg({ type: 'error', text: err.message || 'เกิดข้อผิดพลาดในการย้ายกลุ่มไฟล์ซ้ำ' });
     } finally {
       setIsExecutingDedup(false);
     }
@@ -474,6 +602,9 @@ export default function Settings(props: SettingsProps) {
     }
     if (activeTab === 'permissions') {
       fetchRolePermissions();
+    }
+    if (activeTab === 'backup') {
+      fetchAutomatedBackups();
     }
   }, [activeTab]);
 
@@ -983,7 +1114,7 @@ export default function Settings(props: SettingsProps) {
 
     setIsSubmittingUser(true);
     try {
-      const defaultDept = newUser.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป');
+      const defaultDept = newUser.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายยุทธศาสตร์และการจัดการ');
       const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1200,40 +1331,40 @@ export default function Settings(props: SettingsProps) {
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Executive Header */}
-      <div className="relative overflow-hidden bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl p-5 sm:p-6 shadow-xs">
-        <div className="absolute -right-16 -top-16 w-64 h-64 bg-[var(--primary-color)]/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="relative overflow-hidden bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] group">
+        <div className="absolute right-0 top-0 w-64 h-64 bg-gradient-to-bl from-blue-500/10 to-transparent rounded-full blur-[80px] pointer-events-none -mr-10 -mt-10 transition-all duration-700 group-hover:from-blue-500/20" />
         
-        <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[var(--primary-color)] to-[var(--primary-hover)] text-white flex items-center justify-center shadow-md shrink-0">
-              <Sliders className="w-6 h-6" />
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20 shrink-0">
+              <Sliders className="w-7 h-7" />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-sans font-bold text-[var(--text-primary)] tracking-tight">
-                  ตั้งค่าระบบและผู้ดูแล
+              <div className="flex items-center gap-3 flex-wrap">
+                <h1 className="text-2xl sm:text-3xl font-sans font-bold text-[var(--text-primary)] tracking-tight">
+                  ตั้งค่าระบบ<span className="font-normal text-blue-500">และผู้ดูแล</span>
                 </h1>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                  <Shield className="w-3 h-3" />
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-sm shadow-blue-500/5">
+                  <Shield className="w-3.5 h-3.5" />
                   {props.user?.role === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : props.user?.role === 'moderator' ? 'สารบรรณฝ่าย (Moderator)' : 'ผู้ใช้งาน (User)'}
                 </span>
               </div>
-              <p className="text-xs sm:text-sm text-[var(--text-secondary)] mt-1">
+              <p className="text-sm text-[var(--text-secondary)] mt-1.5 font-medium max-w-xl">
                 ศูนย์ควบคุมการตั้งค่าระบบ สิทธิ์การเข้าถึง อัตลักษณ์องค์กร และฐานข้อมูลสารบรรณอิเล็กทรอนิกส์
               </p>
             </div>
           </div>
 
           {/* Quick status chips */}
-          <div className="flex items-center gap-2 flex-wrap pt-2 md:pt-0 border-t md:border-t-0 border-[var(--border-lighter)]">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-xs text-[var(--text-secondary)]">
-              <Calendar className="w-3.5 h-3.5 text-[var(--primary-color)]" />
-              <span className="font-medium">ปี พ.ศ. {currentYear}</span>
+          <div className="flex items-center gap-3 flex-wrap pt-4 md:pt-0 border-t md:border-t-0 border-[var(--border-lighter)]">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-sm text-[var(--text-secondary)] font-bold shadow-sm">
+              <Calendar className="w-4 h-4 text-blue-500" />
+              <span>ปี พ.ศ. {currentYear}</span>
             </div>
             {users.length > 0 && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-xs text-[var(--text-secondary)]">
-                <UserIcon className="w-3.5 h-3.5 text-[var(--primary-color)]" />
-                <span className="font-medium">{users.length} บุคลากร</span>
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-sm text-[var(--text-secondary)] font-bold shadow-sm">
+                <UserIcon className="w-4 h-4 text-emerald-500" />
+                <span>{users.length} บุคลากร</span>
               </div>
             )}
           </div>
@@ -1244,18 +1375,18 @@ export default function Settings(props: SettingsProps) {
       <div className="space-y-6">
         
         {/* Horizontal Segmented Navigation Ribbon (All Screens) */}
-        <div className="w-full overflow-x-auto scrollbar-none pb-2 -mb-2">
-          <div className="flex items-end gap-4 min-w-max px-1">
+        <div className="w-full overflow-x-auto custom-scrollbar pb-2 -mb-2">
+          <div className="flex items-end gap-6 min-w-max px-1">
             {navCategories.map((cat, catIdx) => {
               const visibleItems = cat.items.filter(i => i.visible);
               if (visibleItems.length === 0) return null;
               return (
-                <div key={catIdx} className="flex flex-col gap-2">
-                  <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider pl-2 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--border-light)]"></span>
+                <div key={catIdx} className="flex flex-col gap-3">
+                  <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-widest pl-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--border-medium)]"></span>
                     {cat.category}
                   </span>
-                  <div className="flex items-center bg-[var(--bg-surface)]/40 p-1 rounded-2xl border border-[var(--border-lighter)] shadow-[inset_0_1px_4px_rgba(0,0,0,0.02)] gap-1">
+                  <div className="flex items-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-md p-1.5 rounded-2xl border border-[var(--border-light)] shadow-sm gap-1.5">
                     {visibleItems.map(item => {
                       const ItemIcon = item.icon;
                       const isActive = activeTab === item.id;
@@ -1264,19 +1395,19 @@ export default function Settings(props: SettingsProps) {
                           key={item.id}
                           type="button"
                           onClick={() => setActiveTab(item.id)}
-                          className={`group relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 cursor-pointer outline-none select-none ${
+                          className={`group relative flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 cursor-pointer outline-none select-none ${
                             isActive
-                              ? 'bg-[var(--bg-overlay)] text-[var(--primary-color)] shadow-sm ring-1 ring-[var(--border-light)]'
-                              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-overlay)]/50'
+                              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
                           }`}
                         >
-                          <ItemIcon className={`w-4 h-4 transition-transform duration-300 ${isActive ? 'text-[var(--primary-color)] scale-110' : 'text-[var(--text-muted)] group-hover:scale-110'}`} />
+                          <ItemIcon className={`w-4 h-4 transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
                           <span className="tracking-wide">{item.label}</span>
                           
                           {/* Badge Overlay */}
                           {item.badge && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold transition-colors ${
-                              isActive ? 'bg-[var(--primary-color)]/10 text-[var(--primary-color)]' : 'bg-[var(--border-light)] text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
+                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-extrabold transition-colors ${
+                              isActive ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
                             }`}>
                               {item.badge}
                             </span>
@@ -1443,7 +1574,7 @@ export default function Settings(props: SettingsProps) {
 
               <div>
                 <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
-                  <Crown className="w-5 h-5 text-[var(--primary-color)]" /> ตราครุฑ ๓.๐ ซม. (หนังสือภายนอก/คำสั่ง/ประกาศ)
+                  <Crown className="w-5 h-5 text-[var(--primary-color)]" /> ตราครุฑ ๓.๐ ซม. (หนังสือส่ง/คำสั่ง/ประกาศ)
                 </h3>
                 <div className="space-y-4">
                   <div className="flex items-start gap-4">
@@ -1518,9 +1649,18 @@ export default function Settings(props: SettingsProps) {
                         }`}
                       >
                         {logoUrl ? (
-                          <img src={logoUrl} alt="Logo" className="max-w-full max-h-full object-contain" />
+                          <img
+                            src={logoUrl}
+                            alt="Logo"
+                            className="max-w-full max-h-full object-contain"
+                            onError={(e) => {
+                              if ((e.target as HTMLImageElement).src.indexOf('ddpm-logo.svg') === -1) {
+                                (e.target as HTMLImageElement).src = '/public/ddpm-logo.svg';
+                              }
+                            }}
+                          />
                         ) : (
-                          <Image className="w-8 h-8 text-[var(--text-muted)]" />
+                          <img src="/public/ddpm-logo.svg" alt="Default Logo" className="max-w-full max-h-full object-contain opacity-70" />
                         )}
                         <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-white">
                           <Upload className="w-5 h-5 mb-1" />
@@ -2240,13 +2380,13 @@ export default function Settings(props: SettingsProps) {
                         <td className="py-3.5 px-5 align-top">
                           <div className="flex flex-col gap-2">
                             <select 
-                              value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
+                              value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายยุทธศาสตร์และการจัดการ')}
                               disabled={!canEditThisUser}
                               onChange={(e) => updateUser(user.id, 'department', e.target.value)}
                               className={`bg-transparent hover:bg-[var(--bg-canvas)] border border-transparent hover:border-[var(--border-light)] rounded-lg px-2 py-1 outline-none text-xs font-medium text-[var(--text-primary)] focus:border-[var(--primary-color)] transition-all w-full ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                             >
                               {departments.length === 0 ? (
-                                <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
+                                <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ</option>
                               ) : (
                                 departments.map((dept: any) => (
                                   <option key={dept.id} value={dept.name}>{dept.name}</option>
@@ -2444,13 +2584,13 @@ export default function Settings(props: SettingsProps) {
                         <div>
                           <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase mb-1.5 px-1">ฝ่าย / กลุ่มงาน</label>
                           <select 
-                            value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายบริหารงานทั่วไป')}
+                            value={user.department || (departments.length > 0 ? departments[0].name : 'ฝ่ายยุทธศาสตร์และการจัดการ')}
                             disabled={!canEditThisUser}
                             onChange={(e) => updateUser(user.id, 'department', e.target.value)}
                             className={`w-full bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl px-2.5 py-2 text-xs font-medium text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-all ${!canEditThisUser ? 'cursor-not-allowed opacity-75' : ''}`}
                           >
                             {departments.length === 0 ? (
-                              <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
+                              <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ</option>
                             ) : (
                               departments.map((dept: any) => (
                                 <option key={dept.id} value={dept.name}>{dept.name}</option>
@@ -2597,9 +2737,9 @@ export default function Settings(props: SettingsProps) {
                 },
                 {
                   key: 'workflow_sla',
-                  title: 'ติดตามกระบวนการและ SLA (Workflow & SLA Tracking)',
-                  desc: 'สิทธิ์ตรวจสอบเส้นทางหนังสือ ระยะเวลาประมวลผล ความล่าช้า และกำหนดแจ้งเตือน SLA',
-                  note: 'ช่วยบริหารจัดการเวลาเสนอหนังสือ'
+                  title: 'ผังการเดินเอกสารและติดตาม SLA (Workflow & SLA Tracking)',
+                  desc: 'สิทธิ์ตรวจสอบและบริหารจัดการผังเสนอหนังสือ เสนอความเห็น เกษียณหนังสือ และควบคุมเวลา SLA ตามระเบียบสารบรรณ พ.ศ. 2526',
+                  note: 'ควบคุมเวลาประมวลผลหนังสือเสนอผู้บังคับบัญชา'
                 },
                 {
                   key: 'digital_signatures',
@@ -3355,6 +3495,106 @@ export default function Settings(props: SettingsProps) {
 
             </div>
 
+            {/* Automated Backups Section (Upgrade) */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-6 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[var(--border-light)] pb-4 gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-indigo-500/10 text-indigo-500 rounded-lg">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-sans font-semibold text-base text-[var(--text-primary)]">
+                      3. ประวัติการสำรองข้อมูลอัตโนมัติรายวัน (Automated Daily Backups Engine)
+                    </h4>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      สำรองฐานข้อมูลอัตโนมัติทุกๆ 24 ชั่วโมงเพื่อความน่าเชื่อถือและความปลอดภัยสูงสุดของระบบ (จำกัดการเก็บย้อนหลัง 7 วัน)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchAutomatedBackups}
+                  disabled={isLoadingAutomatedBackups}
+                  className="px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg text-xs font-medium hover:bg-[var(--border-lighter)] text-[var(--text-primary)] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAutomatedBackups ? 'animate-spin' : ''}`} />
+                  <span>โหลดใหม่</span>
+                </button>
+              </div>
+
+              {automatedBackupMsg && (
+                <div className={`p-4 rounded-lg text-xs flex items-center gap-2 border ${
+                  automatedBackupMsg.type === 'success' 
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                }`}>
+                  {automatedBackupMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                  <span>{automatedBackupMsg.text}</span>
+                </div>
+              )}
+
+              {isLoadingAutomatedBackups ? (
+                <div className="py-8 text-center text-xs text-[var(--text-muted)] flex flex-col items-center justify-center gap-2">
+                  <RefreshCw className="w-6 h-6 animate-spin text-[var(--primary-color)]" />
+                  <span>กำลังโหลดประวัติสำรองข้อมูลอัตโนมัติ...</span>
+                </div>
+              ) : automatedBackups.length === 0 ? (
+                <div className="py-8 text-center text-xs text-[var(--text-muted)] border border-dashed border-[var(--border-medium)] rounded-xl bg-[var(--bg-canvas)]">
+                  ไม่พบไฟล์สำรองข้อมูลอัตโนมัติในสารบรรณระบบ (จะเริ่มต้นทำงานโดยอัตโนมัติเมื่อระบบรันครบกำหนดเวลา)
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)]">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-secondary)] border-b border-[var(--border-light)]">
+                        <th className="p-3.5 font-sans">#</th>
+                        <th className="p-3.5 font-sans">ชื่อไฟล์สำรองข้อมูล (.json)</th>
+                        <th className="p-3.5 font-sans">ขนาดไฟล์</th>
+                        <th className="p-3.5 font-sans">วันที่สร้างระบบ</th>
+                        <th className="p-3.5 font-sans text-right">การจัดการ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-xs text-[var(--text-primary)] divide-y divide-[var(--border-lighter)]">
+                      {automatedBackups.map((bk, idx) => {
+                        const date = new Date(bk.createdAt);
+                        const formattedDate = date.toLocaleString('th-TH', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit'
+                        });
+                        const sizeKB = (bk.sizeBytes / 1024).toFixed(1);
+                        
+                        return (
+                          <tr key={bk.fileName} className="hover:bg-[var(--bg-surface)]/40 transition-colors">
+                            <td className="p-3.5 font-mono text-[var(--text-muted)]">{idx + 1}</td>
+                            <td className="p-3.5 font-mono text-[var(--primary-color)] font-medium max-w-[250px] truncate">
+                              {bk.fileName}
+                            </td>
+                            <td className="p-3.5 font-mono text-[var(--text-secondary)]">{sizeKB} KB</td>
+                            <td className="p-3.5 text-[var(--text-secondary)]">{formattedDate}</td>
+                            <td className="p-3.5 text-right">
+                              <button
+                                type="button"
+                                disabled={isRestoringAutomated}
+                                onClick={() => handleRestoreAutomatedBackup(bk.fileName)}
+                                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg text-xs transition-colors inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              >
+                                <RefreshCw className={`w-3 h-3 ${isRestoringAutomated ? 'animate-spin' : ''}`} />
+                                <span>กู้คืนข้อมูล (Restore)</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             {/* Confirmation Modal for Restore */}
             {showRestoreConfirmModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
@@ -3418,14 +3658,14 @@ export default function Settings(props: SettingsProps) {
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-lg sm:text-xl font-sans font-semibold text-[var(--text-primary)]">
-                        ระบบบริหารจัดการและลดความซ้ำซ้อนของไฟล์
+                        ระบบบริหารจัดการและลดความซ้ำซ้อนของไฟล์ (File Deduplication & Pointer Engine)
                       </h3>
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-500 font-sans border border-emerald-500/20 font-medium">
-                        ประหยัดพื้นที่เซิร์ฟเวอร์
+                        ย้ายไป Pointer & ลบไฟล์ซ้ำ (เก็บต้นฉบับ)
                       </span>
                     </div>
                     <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed max-w-4xl">
-                      สแกนและตรวจจับไฟล์เอกสารแนบที่มีเนื้อหาตรงกันแบบ 100% (SHA-256 Checksum) เพื่อรวมให้เหลือไฟล์ต้นฉบับจริงเพียงหนึ่งไฟล์ในระบบจัดเก็บ และสร้าง Pointer Link ชี้ลิงก์เดิมทั้งหมดไปยังไฟล์จริง ช่วยประหยัดเนื้อที่เซิร์ฟเวอร์ได้อย่างมหาศาลโดยไม่ทำให้โครงสร้างลิงก์เดิมเสียหาย
+                      สแกนและตรวจจับไฟล์เอกสารแนบที่มีเนื้อหาตรงกันแบบ 100% (SHA-256 Checksum) เมื่อพบไฟล์ซ้ำ ระบบจะเก็บไฟล์ต้นฉบับไว้ ย้ายไปยัง Pointer Hub และลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์เพื่อประหยัดพื้นที่ดิสก์อย่างมีประสิทธิภาพ โดยที่ลิงก์และการเรียกดูไฟล์ทั้งหมดยังคงใช้งานได้ตามปกติ
                     </p>
                   </div>
                 </div>
@@ -3450,12 +3690,12 @@ export default function Settings(props: SettingsProps) {
                     {isExecutingDedup ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>กำลังดำเนินการรวมไฟล์...</span>
+                        <span>กำลังย้ายไป Pointer & ลบไฟล์ซ้ำ...</span>
                       </>
                     ) : (
                       <>
                         <Layers className="w-4 h-4" />
-                        <span>เริ่มเคลียร์ไฟล์ซ้ำ (สร้าง Pointer)</span>
+                        <span>ย้ายไฟล์ซ้ำไป Pointer & ลบไฟล์ซ้ำทั้งหมด</span>
                       </>
                     )}
                   </button>
@@ -3570,9 +3810,30 @@ export default function Settings(props: SettingsProps) {
                     กลุ่มไฟล์แนบที่ตรวจพบความซ้ำซ้อน ({dedupStats?.groups?.length || 0} กลุ่ม)
                   </h4>
                   <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                    ไฟล์ซ้ำที่มี Hash ตรงกัน จะเหลือเพียงไฟล์มาสเตอร์ไฟล์เดียวบนระบบดิสก์ ส่วนไฟล์อื่นจะถูกแปลงเป็น Pointer
+                    ไฟล์ซ้ำที่มี Hash ตรงกัน จะเหลือเพียงไฟล์มาสเตอร์ไฟล์เดียวบนระบบดิสก์ ส่วนไฟล์อื่นจะถูกแปลงเป็น Pointer (คลิกเพื่อแสดง/ซ่อนรายละเอียดของแต่ละกลุ่ม)
                   </p>
                 </div>
+
+                {dedupStats?.groups && dedupStats.groups.length > 0 && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={expandAllGroups}
+                      className="px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>ขยายทั้งหมด</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={collapseAllGroups}
+                      className="px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>ย่อทั้งหมด</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {isScanningDedup ? (
@@ -3590,93 +3851,166 @@ export default function Settings(props: SettingsProps) {
                 </div>
               ) : (
                 <div className="divide-y divide-[var(--border-light)]">
-                  {dedupStats.groups.map((group: any, idx: number) => (
-                    <div key={group.hash || idx} className="p-4 sm:p-5 hover:bg-[var(--bg-canvas)]/20 transition-colors space-y-4">
-                      {/* Group Header Info */}
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[var(--bg-canvas)]/50 p-3 sm:p-4 rounded-xl border border-[var(--border-lighter)] shadow-inner">
-                        <div className="flex items-start sm:items-center gap-3">
-                          <span className="w-7 h-7 rounded-full bg-indigo-500/15 text-indigo-400 font-mono text-xs font-bold flex items-center justify-center shrink-0">
-                            #{idx + 1}
-                          </span>
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-semibold text-[var(--text-primary)]">ขนาดกลุ่ม: {group.fileSizeFormatted}</span>
-                              <span className="text-[11px] px-2 py-0.5 rounded-md bg-[var(--bg-surface)] text-[var(--text-muted)] font-mono border border-[var(--border-lighter)]">
-                                SHA-256: {group.hash.substring(0, 12)}
-                              </span>
+                  {dedupStats.groups.map((group: any, idx: number) => {
+                    const isCollapsed = Boolean(collapsedGroupHashes[group.hash]);
+                    return (
+                      <div key={group.hash || idx} className="p-4 sm:p-5 hover:bg-[var(--bg-canvas)]/20 transition-colors space-y-4">
+                        {/* Group Header Info */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[var(--bg-canvas)]/50 p-3 sm:p-4 rounded-xl border border-[var(--border-lighter)] shadow-inner">
+                          <div
+                            onClick={() => toggleGroupCollapse(group.hash)}
+                            className="flex items-start sm:items-center gap-3 cursor-pointer select-none flex-1 group/header"
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleGroupCollapse(group.hash);
+                              }}
+                              className="w-7 h-7 rounded-full bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors font-mono text-xs font-bold flex items-center justify-center shrink-0 border border-indigo-500/20"
+                              title={isCollapsed ? 'คลิกเพื่อแสดงรายละเอียด' : 'คลิกเพื่อซ่อนรายละเอียด'}
+                            >
+                              {isCollapsed ? (
+                                <ChevronRight className="w-4 h-4 text-indigo-400" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 text-indigo-400" />
+                              )}
+                            </button>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold text-[var(--text-primary)] group-hover/header:text-indigo-400 transition-colors">
+                                  กลุ่มที่ #{idx + 1}: ขนาด {group.fileSizeFormatted}
+                                </span>
+                                <span className="text-[11px] px-2 py-0.5 rounded-md bg-[var(--bg-surface)] text-[var(--text-muted)] font-mono border border-[var(--border-lighter)]">
+                                  SHA-256: {group.hash.substring(0, 12)}
+                                </span>
+                                <span className="text-[11px] px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 font-sans border border-indigo-500/20 font-medium">
+                                  {isCollapsed ? 'ซ่อนอยู่ (คลิกเปิด)' : 'กำลังแสดง'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-[var(--text-secondary)] mt-0.5">
+                                พบคู่ซ้ำทั้งหมด <strong className="text-indigo-400 font-medium">{group.duplicatesCount}</strong> สำเนา • ประหยัดเนื้อที่กลุ่มนี้ได้ <strong className="text-emerald-500 font-medium">{group.savedSpaceFormatted}</strong>
+                              </div>
                             </div>
-                            <div className="text-xs text-[var(--text-secondary)] mt-0.5">
-                              พบคู่ซ้ำทั้งหมด <strong className="text-indigo-400 font-medium">{group.duplicatesCount}</strong> สำเนา • ประหยัดเนื้อที่กลุ่มนี้ได้ <strong className="text-emerald-500 font-medium">{group.savedSpaceFormatted}</strong>
-                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 self-start md:self-auto shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => toggleGroupCollapse(group.hash)}
+                              className="px-2.5 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer h-[36px]"
+                            >
+                              {isCollapsed ? (
+                                <>
+                                  <ChevronRight className="w-3.5 h-3.5" />
+                                  <span>แสดงกลุ่ม</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                  <span>ซ่อนกลุ่ม</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleExecuteDedupGroup(group.hash)}
+                              disabled={isExecutingDedup || group.duplicates.every((d: any) => d.isHardLinked)}
+                              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs h-[36px]"
+                              title="ย้ายสำเนาในกลุ่มนี้ไป Pointer และลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์"
+                            >
+                              <Layers className="w-3.5 h-3.5" />
+                              <span>ย้ายกลุ่มนี้ไป Pointer</span>
+                            </button>
+
+                            <a
+                              href={`/api/files/view?url=${encodeURIComponent(group.masterFile.url)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-500/20 shadow-xs h-[36px] min-w-[110px]"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>เปิดไฟล์ต้นฉบับ</span>
+                            </a>
                           </div>
                         </div>
 
-                        <a
-                          href={`/api/files/view?url=${encodeURIComponent(group.masterFile.url)}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 self-start md:self-auto cursor-pointer border border-indigo-500/20 shadow-xs h-[36px] min-w-[120px]"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>เปิดไฟล์หลัก</span>
-                        </a>
-                      </div>
-
-                      {/* Master file Section */}
-                      <div className="pl-3 sm:pl-4 border-l-2 border-indigo-500 space-y-1.5">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                          <span>ไฟล์หลัก (Master File):</span>
-                        </div>
-                        <div className="text-xs text-[var(--text-primary)] font-mono bg-[var(--bg-surface)] p-3 rounded-lg border border-[var(--border-lighter)] flex flex-col md:flex-row md:items-center justify-between gap-2 shadow-xs">
-                          <span className="break-all leading-relaxed select-all pr-2">{group.masterFile.url}</span>
-                          <span className="text-[10px] text-indigo-400 font-sans font-medium px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/10 shrink-0 self-start md:self-auto mt-1 md:mt-0">
-                            {group.masterFile.referencedDocs?.length > 0 ? `เชื่อมกับ ${group.masterFile.referencedDocs.length} เอกสาร` : 'ไฟล์ของระบบ'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Duplicates Section */}
-                      <div className="pl-3 sm:pl-4 border-l-2 border-[var(--border-medium)] space-y-2.5">
-                        <div className="text-xs font-semibold text-[var(--text-secondary)] flex items-center gap-1.5">
-                          <Copy className="w-3.5 h-3.5 shrink-0 text-[var(--text-muted)]" />
-                          <span>รายการสำเนาไฟล์ที่ซ้ำและสร้าง Pointer ลิงก์ ({group.duplicates.length} ไฟล์):</span>
-                        </div>
-
-                        <div className="space-y-2">
-                          {group.duplicates.map((dup: any, dIdx: number) => (
-                            <div key={dup.url || dIdx} className="text-xs bg-[var(--bg-surface)] p-3 rounded-lg border border-[var(--border-lighter)] flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
-                              <div className="font-mono text-[var(--text-secondary)] break-all flex items-start gap-2 leading-relaxed">
-                                <span className="text-[10px] text-[var(--text-muted)] font-sans mt-0.5">[{dIdx + 1}]</span>
-                                <span className="select-all">{dup.url}</span>
+                        {/* Collapsed Info Bar */}
+                        {isCollapsed ? (
+                          <div
+                            onClick={() => toggleGroupCollapse(group.hash)}
+                            className="p-3 bg-[var(--bg-canvas)]/30 hover:bg-[var(--bg-canvas)]/60 border border-dashed border-[var(--border-medium)] rounded-lg text-xs text-[var(--text-secondary)] flex items-center justify-between cursor-pointer transition-colors"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                              <span>ซ่อนรายละเอียดกลุ่มนี้อยู่ (มี 1 ไฟล์ต้นฉบับ และ {group.duplicates.length} ไฟล์สำเนา)</span>
+                            </span>
+                            <span className="text-indigo-400 font-medium flex items-center gap-1">
+                              <span>คลิกเพื่อขยายดูรายละเอียด</span>
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </span>
+                          </div>
+                        ) : (
+                          <>
+                            {/* Master file Section */}
+                            <div className="pl-3 sm:pl-4 border-l-2 border-emerald-500 space-y-1.5">
+                              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
+                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                                <span>ไฟล์ต้นฉบับจริง (Master File - เก็บรักษาไว้):</span>
                               </div>
-
-                              <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 border-t md:border-t-0 pt-2 md:pt-0 border-[var(--border-lighter)] mt-1 md:mt-0">
-                                {dup.isHardLinked ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans font-medium">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                    <span>ย้ายไป Pointer แล้ว (0 B)</span>
-                                  </span>
-                                ) : (
-                                  <span className="px-2.5 py-1 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans font-medium">
-                                    รอเคลียร์เป็น Pointer ({group.fileSizeFormatted})
-                                  </span>
-                                )}
-
-                                <a
-                                  href={`/api/files/download?url=${encodeURIComponent(dup.url)}`}
-                                  className="w-[34px] h-[34px] flex items-center justify-center bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] border border-[var(--border-medium)] rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all cursor-pointer shadow-xs"
-                                  title="ทดสอบดาวน์โหลดผ่านลิงก์สำเนา"
-                                >
-                                  <Download className="w-4 h-4" />
-                                </a>
+                              <div className="text-xs text-[var(--text-primary)] font-mono bg-[var(--bg-surface)] p-3 rounded-lg border border-emerald-500/20 flex flex-col md:flex-row md:items-center justify-between gap-2 shadow-xs">
+                                <span className="break-all leading-relaxed select-all pr-2">{group.masterFile.url}</span>
+                                <span className="text-[10px] text-emerald-400 font-sans font-medium px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 shrink-0 self-start md:self-auto mt-1 md:mt-0">
+                                  {group.masterFile.referencedDocs?.length > 0 ? `เชื่อมกับ ${group.masterFile.referencedDocs.length} เอกสาร` : 'ไฟล์ของระบบ'}
+                                </span>
                               </div>
                             </div>
-                          ))}
-                        </div>
+
+                            {/* Duplicates Section */}
+                            <div className="pl-3 sm:pl-4 border-l-2 border-[var(--border-medium)] space-y-2.5">
+                              <div className="text-xs font-semibold text-[var(--text-secondary)] flex items-center gap-1.5">
+                                <Copy className="w-3.5 h-3.5 shrink-0 text-[var(--text-muted)]" />
+                                <span>รายการสำเนาไฟล์ที่ซ้ำ (ย้ายไป Pointer & ลบไฟล์ซ้ำออกจากเซิร์ฟเวอร์ - {group.duplicates.length} ไฟล์):</span>
+                              </div>
+
+                              <div className="space-y-2">
+                                {group.duplicates.map((dup: any, dIdx: number) => (
+                                  <div key={dup.url || dIdx} className="text-xs bg-[var(--bg-surface)] p-3 rounded-lg border border-[var(--border-lighter)] flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+                                    <div className="font-mono text-[var(--text-secondary)] break-all flex items-start gap-2 leading-relaxed">
+                                      <span className="text-[10px] text-[var(--text-muted)] font-sans mt-0.5">[{dIdx + 1}]</span>
+                                      <span className="select-all">{dup.url}</span>
+                                    </div>
+
+                                    <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 border-t md:border-t-0 pt-2 md:pt-0 border-[var(--border-lighter)] mt-1 md:mt-0">
+                                      {dup.isHardLinked ? (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans font-medium">
+                                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                          <span>ย้ายไป Pointer แล้ว (0 B)</span>
+                                        </span>
+                                      ) : (
+                                        <span className="px-2.5 py-1 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans font-medium">
+                                          รอเคลียร์เป็น Pointer ({group.fileSizeFormatted})
+                                        </span>
+                                      )}
+
+                                      <a
+                                        href={`/api/files/download?url=${encodeURIComponent(dup.url)}`}
+                                        className="w-[34px] h-[34px] flex items-center justify-center bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] border border-[var(--border-medium)] rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all cursor-pointer shadow-xs"
+                                        title="ทดสอบดาวน์โหลดผ่านลิงก์สำเนา"
+                                      >
+                                        <Download className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -3785,7 +4119,7 @@ export default function Settings(props: SettingsProps) {
                     className="w-full bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
                   >
                     {departments.length === 0 ? (
-                      <option value="ฝ่ายบริหารงานทั่วไป">ฝ่ายบริหารงานทั่วไป</option>
+                      <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ</option>
                     ) : (
                       departments.map((dept: any) => (
                         <option key={dept.id} value={dept.name}>{dept.name}</option>
