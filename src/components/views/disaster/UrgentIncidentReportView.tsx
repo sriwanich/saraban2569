@@ -836,8 +836,14 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
       if (!text || String(text).trim() === '') {
         return '<span class="dotted-line" style="width: ' + length + 'px; display: inline-block; border-bottom: 1px dotted #000; height: 1.2em; vertical-align: baseline;"></span>';
       }
-      return '<span class="filled-text" style="border-bottom: 1px dotted #000; font-weight: normal; padding: 0 2px 1px 2px; color: #000; display: inline-block; vertical-align: baseline; line-height: 1.15;">' + text + '</span>';
+      return '<span class="filled-text" style="border-bottom: 1px dotted #000; font-weight: normal; padding: 0 4px 1px 4px; color: #000; display: inline-block; vertical-align: baseline; line-height: 1.15; background-color: transparent;">' + text + '</span>';
     };
+
+    const checkboxHtml = (isChecked) => `
+      <span class="checkbox" style="display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border: 1px solid #000; margin-right: 5px; vertical-align: middle; background-color: #fff; flex-shrink: 0; font-size: 11px; font-weight: bold; line-height: 1;">
+        ${isChecked ? '✓' : ''}
+      </span>
+    `;
 
     const html = `
       <html>
@@ -874,17 +880,18 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               font-style: normal;
             }
             @page { 
-              size: A4; 
+              size: A4 portrait; 
               margin: 8mm 15mm 8mm 15mm; 
             }
             body { 
               font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif; 
               font-size: 13pt; 
-              line-height: 1.20; 
+              line-height: 1.18; 
               color: #000; 
-              max-width: 210mm; 
+              width: 210mm; 
               margin: 0 auto;
               padding: 0;
+              box-sizing: border-box;
             }
             * { box-sizing: border-box; }
             .urgent-stamp { color: red; font-size: 22pt; font-weight: bold; line-height: 1; display: inline-block; font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif; }
@@ -896,32 +903,27 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               display: inline-flex; 
               align-items: center;
               justify-content: center;
-              width: 12px; 
-              height: 12px; 
+              width: 13px; 
+              height: 13px; 
               border: 1px solid #000; 
-              margin-right: 4px; 
-              position: relative; 
+              margin-right: 5px; 
               vertical-align: middle;
-              top: -1px;
-            }
-            .checked::after { 
-              content: '✓'; 
-              position: absolute; 
-              top: -8px; 
-              left: 1px; 
-              font-size: 13px; 
-              font-weight: bold; 
-              color: #000;
+              background-color: #fff;
+              flex-shrink: 0;
+              font-size: 11px;
+              font-weight: bold;
+              line-height: 1;
             }
             
             .dotted-line {
               display: inline-block;
               border-bottom: 1px dotted #000;
               height: 1.2em;
+              vertical-align: baseline;
             }
             
             .row { display: flex; flex-wrap: wrap; align-items: baseline; }
-            .item { margin-right: 12px; white-space: nowrap; font-weight: normal; }
+            .item { margin-right: 12px; white-space: nowrap; font-weight: normal; display: inline-flex; align-items: center; }
             .signature-box { margin-top: 8px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px; }
             .text-center { text-align: center; }
           </style>
@@ -959,16 +961,16 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               'การป้องกันและระงับภัยทางอากาศ', 'การก่อวินาศกรรม', 'การอพยพประชาชนและส่วนราชการ'
             ].map(t => {
               const isChecked = report.incidentTypes.includes(t) || (t === 'แผ่นดินไหวและอาคารถล่ม' && report.incidentTypes.includes('แผ่นดินไหว'));
-              return `<div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${isChecked ? 'checked' : ''}"></span> ${t}</div>`;
+              return `<div class="item">${checkboxHtml(isChecked)} ${t}</div>`;
             }).join('')}
-            <div class="item" style="display: inline-flex; align-items: center;"><span class="checkbox ${report.incidentTypes.includes('อื่นๆ') || report.incidentTypeOther ? 'checked' : ''}"></span> อื่นๆ ${fill(toThai(report.incidentTypeOther), 150)}</div>
+            <div class="item">${checkboxHtml(report.incidentTypes.includes('อื่นๆ') || report.incidentTypeOther)} อื่นๆ ${fill(toThai(report.incidentTypeOther), 150)}</div>
           </div>
           
           <div class="indent-1 mb-2 row" style="display: flex; flex-wrap: wrap; align-items: center;">
             <span style="margin-right: 10px;">ความรุนแรงและลักษณะของภัย</span>
-            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'เล็กน้อย' ? 'checked' : ''}"></span> เล็กน้อย</div>
-            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'ปานกลาง' ? 'checked' : ''}"></span> ปานกลาง</div>
-            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'รุนแรง' ? 'checked' : ''}"></span> รุนแรง</div>
+            <div class="item">${checkboxHtml(report.severity === 'เล็กน้อย')} เล็กน้อย</div>
+            <div class="item">${checkboxHtml(report.severity === 'ปานกลาง')} ปานกลาง</div>
+            <div class="item">${checkboxHtml(report.severity === 'รุนแรง')} รุนแรง</div>
             <span style="margin-left: 5px;">ลักษณะของภัย ${fill(toThai(report.incidentTypeOther || report.mitigation ? (report.incidentTypeOther + ' ' + report.mitigation).slice(0, 100) : ''), 250)}</span>
           </div>
 
@@ -1066,10 +1068,10 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           <div class="mb-1"><strong>๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong></div>
           <div class="indent-1 mb-2" style="line-height: 1.25;">
             <div class="row" style="display: inline-flex; align-items: center; margin-right: 25px;">
-              <span class="checkbox"></span> ส่วนราชการอื่น ${fill('', 300)}
+              ${checkboxHtml(false)} ส่วนราชการอื่น ${fill('', 300)}
             </div>
             <div class="row" style="display: inline-flex; align-items: center;">
-              <span class="checkbox"></span> ภาคเอกชน (ชื่อ) ${fill('', 300)}
+              ${checkboxHtml(false)} ภาคเอกชน (ชื่อ) ${fill('', 300)}
             </div>
           </div>
 
@@ -1078,15 +1080,15 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           </div>
           <div class="indent-1 mb-2" style="line-height: 1.25; display: flex; flex-direction: column; gap: 2px;">
             <div class="row" style="display: inline-flex; align-items: flex-start;">
-              <span class="checkbox ${report.proposals.includes('เพื่อโปรดทราบ') ? 'checked' : ''}" style="margin-top: 4px; margin-right: 8px; flex-shrink: 0;"></span> 
+              <span style="margin-top: 2px; margin-right: 2px; flex-shrink: 0;">${checkboxHtml(report.proposals.includes('เพื่อโปรดทราบ'))}</span>
               <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
             </div>
             <div class="row" style="display: inline-flex; align-items: flex-start;">
-              <span class="checkbox ${report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย') ? 'checked' : ''}" style="margin-top: 4px; margin-right: 8px; flex-shrink: 0;"></span> 
+              <span style="margin-top: 2px; margin-right: 2px; flex-shrink: 0;">${checkboxHtml(report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย'))}</span>
               <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
             </div>
             <div class="row" style="display: inline-flex; align-items: flex-start;">
-              <span class="checkbox ${report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? 'checked' : ''}" style="margin-top: 4px; margin-right: 8px; flex-shrink: 0;"></span> 
+              <span style="margin-top: 2px; margin-right: 2px; flex-shrink: 0;">${checkboxHtml(report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน'))}</span>
               <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
             </div>
           </div>
@@ -1157,6 +1159,29 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
       return s.replace(/[0-9]/g, match => thaiNumerals[parseInt(match)]);
     };
 
+    const renderCheckbox = (isChecked: boolean) => (
+      <span 
+        className="doc-checkbox"
+        style={{ 
+          display: 'inline-flex', 
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '13px', 
+          height: '13px', 
+          border: '1px solid #000', 
+          marginRight: '5px', 
+          verticalAlign: 'middle',
+          backgroundColor: '#fff',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          flexShrink: 0,
+          lineHeight: 1
+        }}
+      >
+        {isChecked ? '✓' : ''}
+      </span>
+    );
+
     const renderLine = (text: string | number | undefined | null, placeholder: string = '........................................................', defaultWidth?: number) => {
       const val = text !== undefined && text !== null ? String(text).trim() : '';
       if (!val) {
@@ -1181,11 +1206,12 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           style={{ 
             display: 'inline-block', 
             borderBottom: '1px dotted #000', 
-            padding: '0 3px 1px 3px', 
+            padding: '0 4px 1px 4px', 
             verticalAlign: 'baseline', 
             color: '#000', 
             fontWeight: 'normal', 
-            lineHeight: '1.15' 
+            lineHeight: '1.15',
+            backgroundColor: 'transparent'
           }}
         >
           {toThaiNum(val)}
@@ -1255,47 +1281,13 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                       const isChecked = previewData.incidentTypes.includes(t) || (t === 'แผ่นดินไหวและอาคารถล่ม' && previewData.incidentTypes.includes('แผ่นดินไหว'));
                       return (
                         <span key={idx} className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginRight: '14px', marginBottom: '2px' }}>
-                          <span 
-                            className="doc-checkbox"
-                            style={{ 
-                              display: 'inline-flex', 
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: '12px', 
-                              height: '12px', 
-                              border: '1px solid #000', 
-                              marginRight: '5px', 
-                              position: 'relative',
-                              fontSize: '11px',
-                              fontWeight: 'bold',
-                              flexShrink: 0
-                            }}
-                          >
-                            {isChecked ? '✓' : ''}
-                          </span>
+                          {renderCheckbox(isChecked)}
                           <span>{t}</span>
                         </span>
                       );
                     })}
                     <span className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginBottom: '2px' }}>
-                      <span 
-                        className="doc-checkbox"
-                        style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '12px', 
-                          height: '12px', 
-                          border: '1px solid #000', 
-                          marginRight: '5px', 
-                          position: 'relative',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          flexShrink: 0
-                        }}
-                      >
-                        {previewData.incidentTypes.includes('อื่นๆ') || previewData.incidentTypeOther ? '✓' : ''}
-                      </span>
+                      {renderCheckbox(previewData.incidentTypes.includes('อื่นๆ') || Boolean(previewData.incidentTypeOther))}
                       <span>อื่นๆ {renderLine(previewData.incidentTypeOther, '.............................................', 240)}</span>
                     </span>
                   </div>
@@ -1305,24 +1297,7 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                   <span className="font-normal" style={{ marginRight: '10px' }}>ความรุนแรงและลักษณะของภัย</span>
                   {['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map((sev, idx) => (
                     <span key={idx} className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginRight: '14px' }}>
-                      <span 
-                        className="doc-checkbox"
-                        style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '12px', 
-                          height: '12px', 
-                          border: '1px solid #000', 
-                          marginRight: '5px', 
-                          position: 'relative',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          flexShrink: 0
-                        }}
-                      >
-                        {previewData.severity === sev ? '✓' : ''}
-                      </span>
+                      {renderCheckbox(previewData.severity === sev)}
                       <span>{sev}</span>
                     </span>
                   ))}
@@ -1430,32 +1405,12 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                 <div>
                   <strong className="font-bold">๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong>
                   <div className="pl-[2.5em] font-normal" style={{ lineHeight: '1.3' }}>
-                    <span className="doc-item" style={{ display: 'inline-block', marginRight: '28px', verticalAlign: 'middle' }}>
-                      <span 
-                        className="doc-checkbox"
-                        style={{ 
-                          display: 'inline-block', 
-                          width: '12px', 
-                          height: '12px', 
-                          border: '1px solid #000', 
-                          marginRight: '6px', 
-                          verticalAlign: 'middle' 
-                        }} 
-                      />
+                    <span className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', marginRight: '28px', verticalAlign: 'middle' }}>
+                      {renderCheckbox(false)}
                       <span style={{ verticalAlign: 'middle' }}>ส่วนราชการอื่น {renderLine('', '........................................', 240)}</span>
                     </span>
-                    <span className="doc-item" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
-                      <span 
-                        className="doc-checkbox"
-                        style={{ 
-                          display: 'inline-block', 
-                          width: '12px', 
-                          height: '12px', 
-                          border: '1px solid #000', 
-                          marginRight: '6px', 
-                          verticalAlign: 'middle' 
-                        }} 
-                      />
+                    <span className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', verticalAlign: 'middle' }}>
+                      {renderCheckbox(false)}
                       <span style={{ verticalAlign: 'middle' }}>ภาคเอกชน (ชื่อ) {renderLine('', '........................................', 240)}</span>
                     </span>
                   </div>
@@ -1464,77 +1419,26 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                 {/* 9. ข้อเสนอ / คำลงท้ายรับรอง */}
                 <div>
                   <strong className="font-bold">๙. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติ ซึ่งเกิดความเสียหายจริง โดยมีความประสงค์</strong>
-                  <div className="pl-[2.5em] mt-1 font-normal">
-                    <div style={{ display: 'table', width: '100%', marginBottom: '3px', lineHeight: '1.25' }}>
-                      <div style={{ display: 'table-cell', width: '22px', verticalAlign: 'top', paddingTop: '2px' }}>
-                        <span 
-                          className="doc-checkbox"
-                          style={{ 
-                            display: 'inline-block', 
-                            width: '12px', 
-                            height: '12px', 
-                            border: '1px solid #000', 
-                            position: 'relative', 
-                            textAlign: 'center', 
-                            lineHeight: '10px', 
-                            fontSize: '11px', 
-                            fontWeight: 'bold' 
-                          }}
-                        >
-                          {previewData.proposals.includes('เพื่อโปรดทราบ') ? '✓' : ''}
-                        </span>
-                      </div>
-                      <div style={{ display: 'table-cell', verticalAlign: 'top' }}>
-                        <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
-                      </div>
+                  <div className="pl-[2.5em] mt-1 font-normal space-y-1">
+                    <div style={{ display: 'flex', alignItems: 'flex-start', lineHeight: '1.25' }}>
+                      <span style={{ marginRight: '6px', marginTop: '2px', flexShrink: 0 }}>
+                        {renderCheckbox(previewData.proposals.includes('เพื่อโปรดทราบ'))}
+                      </span>
+                      <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
                     </div>
 
-                    <div style={{ display: 'table', width: '100%', marginBottom: '3px', lineHeight: '1.25' }}>
-                      <div style={{ display: 'table-cell', width: '22px', verticalAlign: 'top', paddingTop: '2px' }}>
-                        <span 
-                          className="doc-checkbox"
-                          style={{ 
-                            display: 'inline-block', 
-                            width: '12px', 
-                            height: '12px', 
-                            border: '1px solid #000', 
-                            position: 'relative', 
-                            textAlign: 'center', 
-                            lineHeight: '10px', 
-                            fontSize: '11px', 
-                            fontWeight: 'bold' 
-                          }}
-                        >
-                          {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย') ? '✓' : ''}
-                        </span>
-                      </div>
-                      <div style={{ display: 'table-cell', verticalAlign: 'top' }}>
-                        <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', lineHeight: '1.25' }}>
+                      <span style={{ marginRight: '6px', marginTop: '2px', flexShrink: 0 }}>
+                        {renderCheckbox(previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย'))}
+                      </span>
+                      <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
                     </div>
 
-                    <div style={{ display: 'table', width: '100%', marginBottom: '3px', lineHeight: '1.25' }}>
-                      <div style={{ display: 'table-cell', width: '22px', verticalAlign: 'top', paddingTop: '2px' }}>
-                        <span 
-                          className="doc-checkbox"
-                          style={{ 
-                            display: 'inline-block', 
-                            width: '12px', 
-                            height: '12px', 
-                            border: '1px solid #000', 
-                            position: 'relative', 
-                            textAlign: 'center', 
-                            lineHeight: '10px', 
-                            fontSize: '11px', 
-                            fontWeight: 'bold' 
-                          }}
-                        >
-                          {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? '✓' : ''}
-                        </span>
-                      </div>
-                      <div style={{ display: 'table-cell', verticalAlign: 'top' }}>
-                        <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', lineHeight: '1.25' }}>
+                      <span style={{ marginRight: '6px', marginTop: '2px', flexShrink: 0 }}>
+                        {renderCheckbox(previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน'))}
+                      </span>
+                      <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
                     </div>
                   </div>
                 </div>
