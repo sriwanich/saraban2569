@@ -1017,7 +1017,7 @@ export default function ProjectSummaryView({ user }: Props) {
                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer"
                   >
                     <FileDown className="w-3.5 h-3.5" />
-                    <span>ส่งออก Word (.doc)</span>
+                    <span>ส่งออก Word (.docx)</span>
                   </button>
                 </div>
               </div>

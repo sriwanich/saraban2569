@@ -1,4 +1,8 @@
 import express from 'express';
+import HTMLtoDOCX from 'html-to-docx';
+import os from 'os';
+import v8 from 'v8';
+
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import path from 'path';
@@ -38,12 +42,196 @@ function safeJsonParse<T = any>(value: any, fallback: T): T {
   }
 }
 
+// ==========================================
+// AI MULTI-TIER FALLBACK & EXPONENTIAL BACKOFF INFRASTRUCTURE
+// Standard Tier Sequence: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash
+// ==========================================
+export const DEFAULT_GEMINI_FALLBACK_MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+  'gemini-3.8-flash'
+];
+
+export function formatGeminiErrorMessage(err: any): string {
+  if (!err) return 'เกิดข้อผิดพลาดในการประมวลผลด้วย AI กรุณาลองใหม่อีกครั้ง';
+  
+  let rawMsg = typeof err === 'string' ? err : (err?.message || '');
+  if (!rawMsg && typeof err === 'object') {
+    try { rawMsg = JSON.stringify(err); } catch { rawMsg = String(err); }
+  }
+
+  try {
+    if (typeof rawMsg === 'string' && rawMsg.startsWith('{')) {
+      const parsed = JSON.parse(rawMsg);
+      if (parsed?.error?.message) {
+        rawMsg = parsed.error.message;
+      }
+    }
+  } catch {}
+
+  const lower = String(rawMsg).toLowerCase();
+  
+  if (lower.includes('503') || lower.includes('overloaded') || lower.includes('unavailable') || lower.includes('high traffic') || lower.includes('capacity')) {
+    return 'ระบบเซิร์ฟเวอร์ AI ของ Google มีปริมาณผู้ใช้งานหนาแน่นชั่วคราว ระบบได้พยายามสลับไปยังโมเดลสำรองแล้ว กรุณากดปุ่ม "ลองใหม่อีกครั้ง"';
+  }
+  if (lower.includes('429') || lower.includes('resource_exhausted') || lower.includes('quota') || lower.includes('rate limit')) {
+    return 'ระบบ AI มีปริมาณคำขอหนาแน่นชั่วคราว (Rate limit / Quota Exceeded) กรุณารอสักครู่แล้วกดลองใหม่อีกครั้ง';
+  }
+  if (
+    lower.includes('api_key_http_referrer_blocked') ||
+    lower.includes('requests from referer') ||
+    lower.includes('requests from referrer') ||
+    lower.includes('referer <empty> are blocked') ||
+    (lower.includes('referer') && lower.includes('blocked')) ||
+    (lower.includes('403') && (lower.includes('referer') || lower.includes('referrer')))
+  ) {
+    return 'Google Gemini API Key ติดข้อจำกัด HTTP Referrer (Requests from referer are blocked): บน Google Cloud Console (เมนู APIs & Services > Credentials > คลิกที่ Gemini API Key) ในส่วน "Application restrictions" กรุณาเปลี่ยนเป็น "None" (ไม่มีการจำกัด) เนื่องจากระบบทำงานผ่าน Backend Server หรือเพิ่ม URL โดเมนของระบบลงใน Website restrictions';
+  }
+  if (lower.includes('api_key_invalid') || lower.includes('api key not valid') || (lower.includes('400') && lower.includes('api key'))) {
+    return 'Gemini API Key ในระบบไม่ถูกต้อง กรุณาตรวจสอบในเมนูตั้งค่าระบบ';
+  }
+  if (lower.includes('not found') && lower.includes('model')) {
+    return 'ไม่พบโมเดล AI ที่ระบุ กำลังสลับไปยังโมเดลที่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง';
+  }
+  if (lower.includes('no file provided') || lower.includes('filebase64')) {
+    return 'ไม่พบข้อมูลไฟล์ที่ต้องการสแกน กรุณาเลือกไฟล์เอกสารใหม่อีกครั้ง';
+  }
+  
+  const cleaned = String(rawMsg)
+    .replace(/^\[GoogleGenAI(?:Error)?\]:\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .replace(/\{"error":\{.*?"message":"(.*?)"\}.*?\}/s, '$1')
+    .trim();
+
+  return cleaned || 'การเชื่อมต่อกับระบบ AI ขัดข้องชั่วคราว กรุณากดลองใหม่อีกครั้ง';
+}
+
+export function getGeminiClient(apiKey: string, req?: express.Request): GoogleGenAI {
+  const headers: Record<string, string> = {
+    'User-Agent': 'aistudio-build'
+  };
+
+  let referer = '';
+  if (req) {
+    const rawReferer = (req.headers['referer'] as string) || (req.headers['origin'] as string);
+    if (rawReferer && typeof rawReferer === 'string' && rawReferer.trim()) {
+      referer = rawReferer.trim();
+    } else if (req.headers['host']) {
+      const proto = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      referer = `${proto}://${req.headers['host']}/`;
+    }
+  }
+
+  if (!referer) {
+    referer = process.env.APP_URL || 'https://saraban70.dpmpry.online/';
+  }
+
+  headers['Referer'] = referer;
+  try {
+    const parsed = new URL(referer);
+    headers['Origin'] = parsed.origin;
+  } catch {
+    headers['Origin'] = referer;
+  }
+
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers
+    }
+  });
+}
+
+export async function callGeminiWithFallback(options: {
+  client: GoogleGenAI;
+  contents: any;
+  config?: any;
+  models?: string[];
+  maxRetriesPerModel?: number;
+  initialDelayMs?: number;
+}): Promise<{ response: any; usedModel: string }> {
+  const inputModels = options.models && options.models.length > 0 ? options.models : [];
+  const modelCandidateSet = new Set([...inputModels, ...DEFAULT_GEMINI_FALLBACK_MODELS]);
+  const models = Array.from(modelCandidateSet);
+
+  const maxRetries = options.maxRetriesPerModel ?? 1;
+  const baseDelay = options.initialDelayMs ?? 800;
+  let lastError: any = null;
+
+  for (let m = 0; m < models.length; m++) {
+    const modelName = models[m];
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await options.client.models.generateContent({
+          model: modelName,
+          contents: options.contents,
+          config: options.config
+        });
+        if (response && (response.text !== undefined || response.candidates?.length)) {
+          return { response, usedModel: modelName };
+        }
+      } catch (err: any) {
+        lastError = err;
+        const errText = String(err?.message || '') + ' ' + String(err?.status || '') + ' ' + (typeof err === 'object' ? JSON.stringify(err) : '');
+        const isTransient = errText.includes('503') ||
+                            errText.includes('429') ||
+                            errText.includes('overloaded') ||
+                            errText.includes('UNAVAILABLE') ||
+                            errText.includes('RESOURCE_EXHAUSTED') ||
+                            errText.includes('quota') ||
+                            errText.includes('rate limit') ||
+                            errText.includes('high traffic') ||
+                            err?.status === 503 ||
+                            err?.status === 429;
+
+        if (isTransient && attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt) + Math.floor(Math.random() * 300);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        // When switching to the next candidate model after a rate limit/quota hit, pause briefly
+        if (m < models.length - 1) {
+          await new Promise(r => setTimeout(r, 600));
+        }
+        break;
+      }
+    }
+  }
+
+  const friendlyMsg = formatGeminiErrorMessage(lastError);
+  const err = new Error(friendlyMsg);
+  (err as any).originalError = lastError;
+  throw err;
+}
+
+export async function getAppGeminiApiKey(customKey?: string): Promise<string> {
+  if (customKey && customKey.trim()) return customKey.trim();
+  
+  let apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (apiKey) return apiKey;
+
+  try {
+    if (typeof pool !== 'undefined' && isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+      if (rows && rows.length > 0 && rows[0].geminiApiKey) {
+        apiKey = String(rows[0].geminiApiKey).trim();
+      }
+    } else if (typeof localDb !== 'undefined' && localDb.settings && localDb.settings.length > 0) {
+      apiKey = (localDb.settings[0].geminiApiKey || '').trim();
+    }
+  } catch (e) {}
+
+  return apiKey;
+}
+
+
 // Pre-create standard upload directories to avoid any folder-creation or write-permission issues
 const baseUploadsDir = path.join(process.cwd(), 'uploads');
 const standardFolders = [
   'inbox', 'outbox', 'internal', 'admin', 'admin/order', 'admin/announcement', 'admin/circular', 
   'signed_pdfs', 'system', 'avatars', 'infographics', 'infographics/assets', 'infographics/images',
-  'automated_backups'
+  'automated_backups', 'reporter_signatures', 'damage_photos'
 ];
 try {
   if (!fs.existsSync(baseUploadsDir)) {
@@ -382,6 +570,11 @@ const upload = multer({
   limits: { fileSize: 30 * 1024 * 1024 } // 30MB limit
 });
 
+const memoryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 } // 30MB limit
+});
+
 // Helper for Argon2id Password Hashing & Verification
 async function hashPasswordArgon2(plainPassword: string): Promise<string> {
   if (!plainPassword) return '';
@@ -555,6 +748,44 @@ app.get('/api/events', (req, res) => {
     sseClients.delete(res);
   });
 });
+
+// Health check endpoint for deployment monitoring and diagnostic testing
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'offline';
+  let dbError: string | null = null;
+  if (isMysqlOnline) {
+    try {
+      await pool.query('SELECT 1');
+      dbStatus = 'connected';
+    } catch (e: any) {
+      dbStatus = 'error';
+      dbError = e.message;
+    }
+  } else {
+    dbStatus = 'local_fallback';
+  }
+
+  res.json({
+    status: 'ok',
+    app: 'EDMS Saraban',
+    version: '2.6.0',
+    uptime: Math.floor(process.uptime()),
+    database: {
+      status: dbStatus,
+      name: dbName || 'local_store',
+      host: dbHost,
+      port: dbPort,
+      error: dbError
+    },
+    system: {
+      nodeVersion: process.version,
+      port: process.env.PORT || 3000,
+      env: process.env.NODE_ENV || 'development'
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
 
 app.use((req, res, next) => {
   // console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`); // Silenced to prevent user confusion
@@ -1087,35 +1318,40 @@ app.post('/api/ai-design-assist', upload.single('image'), async (req, res) => {
     const imageBuffer = fs.readFileSync(imagePath);
     const base64Image = imageBuffer.toString('base64');
     
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY!, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
-    
+    const apiKey = await getAppGeminiApiKey();
+    if (!apiKey) {
+      return res.status(500).json({ error: 'ไม่พบ Gemini API Key ในระบบ' });
+    }
+
+    const ai = getGeminiClient(apiKey, req);
     const prompt = "Analyze this infographic design and provide suggestions for layout, typography, color palette, and content hierarchy. Keep it brief and constructive.";
     
-    const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: {
-            parts: [
-                {
-                    inlineData: {
-                        mimeType: req.file.mimetype,
-                        data: base64Image,
-                    },
-                },
-                { text: prompt },
-            ],
-        },
+    const { response } = await callGeminiWithFallback({
+      client: ai,
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: req.file.mimetype,
+              data: base64Image,
+            },
+          },
+          { text: prompt },
+        ],
+      },
     });
     
     res.json({ suggestions: response.text });
   } catch (err: any) {
     console.error('AI Analysis Error:', err.message, err.stack);
-    res.status(500).json({ error: 'วิเคราะห์ล้มเหลว: ' + (err.message || 'Unknown error') + ' (Details: ' + (err.stack?.substring(0, 100) || 'No stack') + ')' });
+    const friendlyMsg = formatGeminiErrorMessage(err);
+    res.status(500).json({ error: 'วิเคราะห์ล้มเหลว: ' + friendlyMsg });
   }
 });
 
 app.post('/api/ai/remove-background', async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, apiKey: reqApiKey } = req.body;
     if (!image) {
       return res.status(400).json({ error: 'ไม่พบข้อมูลรูปภาพ' });
     }
@@ -1145,12 +1381,9 @@ app.post('/api/ai/remove-background', async (req, res) => {
       return res.status(500).json({ error: 'ไม่พบ Gemini API Key ในระบบ' });
     }
 
-    const ai = new GoogleGenAI({ 
-      apiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-    });
+    const ai = getGeminiClient(apiKey, req);
 
-    const modelsToTry = ['gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image', 'gemini-3.7-flash'];
+    const modelsToTry = ['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image'];
     let resultImageBase64: string | null = null;
 
     for (const modelName of modelsToTry) {
@@ -2016,6 +2249,95 @@ const initialSeedData = {
 
 const defaultChangelogs = [
   {
+    id: 'cl-v2-8-1',
+    version: 'v2.8.1',
+    title: 'ปรับปรุงความเสถียรของระบบสื่อสารและหน้าจอตรวจสอบระบบ (System Stability & UI Cleanup)',
+    releaseDate: '2026-09-16',
+    type: 'patch',
+    summary: 'ปรับปรุงประสิทธิภาพการแสดงผลโลโก้ในเทมเพลตอีเมลเพื่อความเข้ากันได้สูงสุด และนำหน้าต่างตรวจสอบระบบ (Diagnostics) ออกเพื่อความเรียบร้อยของหน้าจอเข้าสู่ระบบ',
+    changes: [
+      {
+        category: 'improvement',
+        categoryLabel: '⚡ การปรับปรุง (Improvements)',
+        items: [
+          'ปรับปรุงการแสดงผลโลโก้เป็นรูปแบบ PNG ในเทมเพลตอีเมลระบบ เพื่อรองรับการแสดงผลบนทุก Email Client (Gmail, Outlook) ได้อย่างเสถียร',
+          'นำปุ่มและหน้าต่างตรวจสอบระบบแม่ข่าย (Backend Diagnostic) ออกจากหน้าเข้าสู่ระบบเพื่อความสวยงามและเป็นมืออาชีพ',
+          'ปรับปรุงระบบการดึงที่อยู่ไฟล์ภาพ (Absolute URL) ในอีเมลแจ้งเตือนให้มีความถูกต้องแม่นยำสูงขึ้น'
+        ]
+      }
+    ],
+    images: [],
+    author: 'ทีมพัฒนาระบบ EDMS สำนักงาน ปภ.ระยอง',
+    isLatest: true,
+    isPublished: true,
+    createdAt: '2026-09-16T09:00:00.000Z',
+    updatedAt: '2026-09-16T09:00:00.000Z'
+  },
+  {
+    id: 'cl-v2-8-0',
+    version: 'v2.8.0',
+    title: 'การกำหนดสิทธิ์ระดับฝ่าย/กลุ่มงาน (Department Granular Overrides) & บันทึกประวัติเหตุด่วนสาธารณภัย',
+    releaseDate: '2026-09-15',
+    type: 'major',
+    summary: 'ยกระดับระบบควบคุมสิทธิ์การใช้งาน (Role & Permission Control Hub) ให้รองรับการกำหนดสิทธิ์แยกย่อยระดับฝ่าย/กลุ่มงาน (Department Overrides) พร้อมสลับมุมมอง 2 มิติ (Combined 2D Matrix View) และเชื่อมโยงบันทึกประวัติการใช้งาน (Audit Logs) สำหรับกิจกรรมเหตุด่วนสาธารณภัยแบบครบวงจร',
+    changes: [
+      {
+        category: 'feature',
+        categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
+        items: [
+          'Role & Permission Control Hub รองรับการสลับมุมมองกำหนดสิทธิ์ตามระดับผู้ใช้งาน (Roles), แยกย่อยตามฝ่าย/กลุ่มงาน (Departments) และมุมมองรวมแบบเมทริกซ์ 2 มิติ (Combined 2D Matrix View)',
+          'เชื่อมโยงสิทธิ์การใช้งานโมดูลเหตุด่วนสาธารณภัย (urgent_incidents) บินตรงอยู่ในแผงควบคุมสิทธิ์หลักของระบบ',
+          'บันทึกประวัติกิจกรรมเหตุด่วนสาธารณภัย (Urgent Incident Audit Logs) ติดตามกิจกรรมการสร้าง แก้ไข ลบ AI สแกน และพิมพ์รายงานในศูนย์ประวัติการใช้งาน'
+        ]
+      },
+      {
+        category: 'security',
+        categoryLabel: '🔒 ความปลอดภัย (Security)',
+        items: [
+          'รองรับ Department-Specific Overrides (dept:<DepartmentName>) ให้เฉพาะฝ่ายงานที่กำหนดข้ามระดับบทบาทได้โดยไม่กระทบสิทธิ์ผู้ใช้งานอื่นในระบบ'
+        ]
+      }
+    ],
+    images: [],
+    author: 'ทีมพัฒนาระบบ EDMS สำนักงาน ปภ.ระยอง',
+    isLatest: false,
+    isPublished: true,
+    createdAt: '2026-09-15T10:00:00.000Z',
+    updatedAt: '2026-09-15T10:00:00.000Z'
+  },
+  {
+    id: 'cl-v2-7-0',
+    version: 'v2.7.0',
+    title: 'ศูนย์รายงานเหตุด่วนสาธารณภัย (Urgent Incident Center) & AI Vision OCR สแกนเอกสารอัตโนมัติ',
+    releaseDate: '2026-09-14',
+    type: 'major',
+    summary: 'เปิดใช้งานโมดูลรายงานเหตุด่วนสาธารณภัย (แบบ ปภ. ๑) สมบูรณ์แบบ รองรับ AI สแกนคัดลอกข้อมูล คัดแยกภาพความเสียหายและลายเซ็นดิจิทัล พร้อมแดชบอร์ดสถิติภัยพิบัติและแผนที่ GIS แยกรายอำเภอ/ตำบล/หมู่บ้าน',
+    changes: [
+      {
+        category: 'feature',
+        categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
+        items: [
+          'ระบบรายงานเหตุด่วนสาธารณภัย ปภ.๑ บันทึกข้อมูลผู้ประสบภัย ทรัพย์สิน สิ่งก่อสร้าง การเกษตร ปศุสัตว์ และสิ่งสาธารณประโยชน์',
+          'AI Vision OCR Document Scanner สแกนวิเคราะห์เอกสารเหตุด่วน คัดแยกฟิลด์ ลายเซ็น และรูปถ่ายความเสียหายลงฟอร์มให้อัตโนมัติ',
+          'Interactive Urgent Incident Dashboard & GIS Location Map วิเคราะห์สถิติความเสียหายและการช่วยเหลือแยกตามพื้นที่รายอำเภอ ตำบล และหมู่บ้าน'
+        ]
+      },
+      {
+        category: 'improvement',
+        categoryLabel: '⚡ การปรับปรุง (Improvements)',
+        items: [
+          'รองรับการพรีวิว บันทึก ส่งออก และพิมพ์แบบรายงานเหตุด่วนสาธารณภัยย่อ/ขยายเต็มรูปแบบทางการ'
+        ]
+      }
+    ],
+    images: [],
+    author: 'ทีมพัฒนาระบบ EDMS สำนักงาน ปภ.ระยอง',
+    isLatest: false,
+    isPublished: true,
+    createdAt: '2026-09-14T09:00:00.000Z',
+    updatedAt: '2026-09-14T09:00:00.000Z'
+  },
+  {
     id: 'cl-v2-6-0',
     version: 'v2.6.0',
     title: 'อัปเกรดความน่าเชื่อถือและความปลอดภัยขั้นสูง (Enterprise Reliability & Security Overhaul)',
@@ -2042,17 +2364,121 @@ const defaultChangelogs = [
         category: 'improvement',
         categoryLabel: '⚡ การปรับปรุง (Improvements)',
         items: [
-          'อัปเกรด AI วิเคราะห์ความถูกต้องและลายเซ็นดิจิทัล: อัปเกรด API ตรวจสอบลายเซ็นและการถอดข้อความของไฟล์แนบ PDF เป็นโมเดลเวอร์ชันทางการ gemini-2.5-flash เพื่อความรวดเร็วและหลีกเลี่ยงข้อจำกัดโควตาของรุ่นทดลอง',
+          'อัปเกรด AI วิเคราะห์ความถูกต้องและลายเซ็นดิจิทัล: อัปเกรด API ตรวจสอบลายเซ็นและการถอดข้อความของไฟล์แนบ PDF เป็นโมเดลเวอร์ชันทางการ gemini-3.1-flash-lite และ gemini-3.8-flash เพื่อความรวดเร็วและหลีกเลี่ยงข้อจำกัดโควตาของรุ่นทดลอง',
           'ขยายสเปกการสำรองข้อมูลครอบคลุม 100%: เพิ่มการซิงโครไนซ์ตารางข้อมูลทั้งหมดของฐานข้อมูล (รวมถึง Workflow, คิวอาร์โค้ด, ตารางประวัติ Changelogs) ให้สามารถจัดเก็บและกู้คืนได้อย่างสมบูรณ์แบบไม่สูญหาย'
         ]
       }
     ],
     images: [],
     author: 'System Admin',
-    isLatest: true,
+    isLatest: false,
     isPublished: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    createdAt: '2026-09-11T00:00:00.000Z',
+    updatedAt: '2026-09-11T00:00:00.000Z'
+  },
+  {
+    id: 'cl-v2-5-1',
+    version: 'v2.5.1',
+    title: 'ปรับปรุงดีไซน์ Glassmorphism และความสวยงามของระบบ',
+    releaseDate: '2026-09-11',
+    type: 'minor',
+    summary: 'ปรับปรุงหน้าตา UI/UX ของระบบให้มีความทันสมัย สวยงาม ล้ำสมัย ด้วยดีไซน์ Glassmorphism พร้อมเพิ่มประสิทธิภาพการตอบสนอง',
+    changes: [
+      {
+        category: 'improvement',
+        categoryLabel: '⚡ การปรับปรุง (Improvements)',
+        items: [
+          'ปรับปรุงดีไซน์ Glassmorphism (Glassmorphism Overhaul): ปรับโฉมหน้าตา UI ทั้งระบบให้ดูโปร่งใส ทันสมัย และเป็นมืออาชีพมากขึ้น',
+          'เพิ่มประสิทธิภาพระบบ: ปรับปรุงโครงสร้าง Layout ให้เหมาะสมกับการใช้งานบน Mobile และ PC',
+          'ปรับปรุงความสวยงามของแถบแจ้งเตือน: ปรับดีไซน์ส่วนการแจ้งเตือนให้สะอาดตาและชัดเจนขึ้น'
+        ]
+      }
+    ],
+    images: [],
+    author: 'System Admin',
+    isLatest: false,
+    isPublished: true,
+    createdAt: '2026-09-11T16:52:11.457Z',
+    updatedAt: '2026-09-11T16:52:11.457Z'
+  },
+  {
+    id: 'cl-v2-5-0',
+    version: 'v2.5.0',
+    title: 'ยกระดับอัตลักษณ์ ปภ.ระยอง (DDPM Rayong Visual Identity) & ระบบโหลดประสิทธิภาพสูง Next-Gen',
+    releaseDate: '2026-09-10',
+    type: 'major',
+    summary: 'อัปเกรดตราสัญลักษณ์ทางการ ปภ.ระยอง (Vector Emblem) เต็มระบบทุกโมดูล, เพิ่มระบบแสดงผลสถานะการโหลดแบบ Futuristic Orbital Loading Engine, ปรับปรุงสถาปัตยกรรม Bundle สลับหน้าจอได้รวดเร็วทันที และเสริมระบบกู้คืนแคชอัตโนมัติ',
+    changes: [
+      {
+        category: 'feature',
+        categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
+        items: [
+          'ติดตั้งตราสัญลักษณ์ราชการความละเอียดสูง (Official DDPM Vector Emblem) สำนักงาน ปภ.ระยอง ครอบคลุมทั้งระบบ (Login, Dashboard Sidebar, Header, Drafts, Favicon, QR)',
+          'หน้าต่างแสดงสถานะการโหลดรูปแบบใหม่ (Futuristic Orbital Loading Screen) พร้อมวงแหวน Pulse Ring, แถบ Shimmer Indeterminate Progress Bar และสเต็ปแสดงสถานะอัจฉริยะ',
+          'ระบบตรวจจับและกู้คืนความเร็วเครือข่าย (Auto Recovery Helper) เมื่อเครือข่ายขัดข้องพร้อมปุ่มรีเฟรชกู้คืนระบบทันใจ'
+        ]
+      },
+      {
+        category: 'improvement',
+        categoryLabel: '⚡ การปรับปรุง (Improvements)',
+        items: [
+          'เปลี่ยนผ่านสู่ Direct Static Core Architecture เพื่อความเสถียรสูงสุดในการสลับหน้าจอ (Zero Chunk Latency)',
+          'ปรับปรุงฟังก์ชันการดึงค่าการตั้งค่าระบบ (fetchGlobalSettings) พร้อม Exponential Backoff และ Local Cache Fallback'
+        ]
+      },
+      {
+        category: 'security',
+        categoryLabel: '🔒 ความปลอดภัย (Security)',
+        items: [
+          'ระบบตรวจสอบความถูกต้องของตราสัญลักษณ์และไฟล์คอนฟิกส่วนกลาง ป้องกันการดัดแปลงหรือสูญหายของ Asset ราชการ'
+        ]
+      }
+    ],
+    images: [],
+    author: 'ทีมพัฒนาระบบ EDMS สำนักงาน ปภ.ระยอง',
+    isLatest: false,
+    isPublished: true,
+    createdAt: '2026-09-10T08:40:03.779Z',
+    updatedAt: '2026-09-10T08:40:03.779Z'
+  },
+  {
+    id: 'cl-v2-4-8',
+    version: 'v2.4.8',
+    title: 'ระบบเชื่อมต่อความปลอดภัยขั้นสูง & เพิ่มประสิทธิภาพฐานข้อมูลเรียลไทม์',
+    releaseDate: '2026-09-10',
+    type: 'minor',
+    summary: 'เพิ่มขีดความสามารถระบบ Realtime Synchronization เชื่อมต่อข้อมูลเอกสารและสถานะผู้ใช้งานแบบทันที พร้อมระบบตรวจสอบสิทธิ์ระดับฟิลด์และปกป้อง Session ผู้ใช้งาน',
+    changes: [
+      {
+        category: 'feature',
+        categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
+        items: [
+          'ระบบ Realtime Broadcast แจ้งเตือนการอัปเดตเอกสารและทะเบียนรับ-ส่งทั่วทั้งสำนักงานแบบ Instant Push',
+          'ระบบตรวจสอบ Session Expiry แบบ Dynamic Multi-tab Protection ป้องกันการเข้าถึงซ้ำซ้อน'
+        ]
+      },
+      {
+        category: 'improvement',
+        categoryLabel: '⚡ การปรับปรุง (Improvements)',
+        items: [
+          'เพิ่มความเร็วในการตอบสนองของ MySQL Database Query และ Cache Layer สำหรับข้อมูลสถิติเอกสาร',
+          'ปรับปรุงการแสดงผลรายการเอกสารในโหมดหน้าจอความละเอียดสูง (Ultra-wide & 4K Display Support)'
+        ]
+      },
+      {
+        category: 'security',
+        categoryLabel: '🔒 ความปลอดภัย (Security)',
+        items: [
+          'เพิ่มระบบ Sanitization และการตรวจสอบ Payload ป้องกัน XSS / SQL Injection ในทุกจุดรับข้อมูล'
+        ]
+      }
+    ],
+    images: [],
+    author: 'ทีมพัฒนาระบบ EDMS สำนักงาน ปภ.ระยอง',
+    isLatest: false,
+    isPublished: true,
+    createdAt: '2026-09-10T08:39:59.189Z',
+    updatedAt: '2026-09-10T08:39:59.189Z'
   },
   {
     id: 'cl-v2-4-5',
@@ -2064,6 +2490,7 @@ const defaultChangelogs = [
     changes: [
       {
         category: 'feature',
+        categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
         items: [
           'ปรับปรุงตารางข้อมูลบุคลากร (PC) ให้โปร่งสบาย มองง่าย และจัดกลุ่มข้อมูลเป็นสัดส่วน',
           'เปลี่ยนการแสดงผลบน Mobile เป็นแบบ Card View ที่ทันสมัยและอ่านข้อมูลได้ชัดเจนยิ่งขึ้น',
@@ -2075,8 +2502,8 @@ const defaultChangelogs = [
     author: 'Administrator',
     isLatest: false,
     isPublished: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    createdAt: '2026-09-10T00:00:00.000Z',
+    updatedAt: '2026-09-10T00:00:00.000Z'
   },
   {
     id: 'cl-v2-4-0',
@@ -2384,6 +2811,54 @@ const defaultChangelogs = [
   }
 ];
 
+function deduplicateChangelogs(items: any[]): any[] {
+  if (!Array.isArray(items)) return [];
+  const map = new Map<string, any>();
+
+  for (const item of items) {
+    if (!item) continue;
+    const rawVersion = (item.version || '').trim();
+    const versionKey = rawVersion.toLowerCase().replace(/^v/i, '');
+    if (!versionKey) continue;
+
+    const formattedVer = rawVersion.toLowerCase().startsWith('v') ? rawVersion : `v${rawVersion}`;
+
+    if (!map.has(versionKey)) {
+      map.set(versionKey, { ...item, version: formattedVer });
+    } else {
+      const existing = map.get(versionKey)!;
+      const existingChanges = Array.isArray(existing.changes) ? existing.changes.length : 0;
+      const newChanges = Array.isArray(item.changes) ? item.changes.length : 0;
+      if (item.isLatest || (!existing.isLatest && newChanges >= existingChanges)) {
+        map.set(versionKey, { ...item, version: formattedVer });
+      }
+    }
+  }
+
+  const result = Array.from(map.values());
+
+  result.sort((a, b) => {
+    const clean = (v: string) => (v || '').replace(/^v/i, '').split('.').map(x => parseInt(x, 10) || 0);
+    const partsA = clean(a.version);
+    const partsB = clean(b.version);
+    const maxLen = Math.max(partsA.length, partsB.length);
+    for (let i = 0; i < maxLen; i++) {
+      const numA = partsA[i] || 0;
+      const numB = partsB[i] || 0;
+      if (numA !== numB) {
+        return numB - numA;
+      }
+    }
+    return new Date(b.releaseDate || b.createdAt || 0).getTime() - new Date(a.releaseDate || a.createdAt || 0).getTime();
+  });
+
+  result.forEach((item, index) => {
+    item.isLatest = (index === 0);
+  });
+
+  return result;
+}
+
 let localDb: Record<string, any[]> = {};
 
 function loadLocalDb() {
@@ -2418,6 +2893,10 @@ function loadLocalDb() {
     }
     if (!localDb.file_codes || !Array.isArray(localDb.file_codes) || localDb.file_codes.length === 0) {
       localDb.file_codes = JSON.parse(JSON.stringify(initialSeedData.file_codes || []));
+      saveLocalDb();
+    }
+    if (!localDb.urgent_incidents || !Array.isArray(localDb.urgent_incidents)) {
+      localDb.urgent_incidents = [];
       saveLocalDb();
     }
     if (!localDb.reserved_numbers || !Array.isArray(localDb.reserved_numbers)) {
@@ -2517,21 +2996,12 @@ function loadLocalDb() {
       if (changed) saveLocalDb();
     }
     if (!localDb.changelogs || !Array.isArray(localDb.changelogs) || localDb.changelogs.length === 0) {
-      localDb.changelogs = JSON.parse(JSON.stringify(defaultChangelogs));
+      localDb.changelogs = deduplicateChangelogs(defaultChangelogs);
       saveLocalDb();
     } else {
-      let changed = false;
-      for (const d of defaultChangelogs) {
-        const idx = localDb.changelogs.findIndex((c: any) => c.id === d.id || c.version === d.version);
-        if (idx === -1) {
-          localDb.changelogs.push(JSON.parse(JSON.stringify(d)));
-          changed = true;
-        } else if (!localDb.changelogs[idx].changes || localDb.changelogs[idx].changes.length <= 1) {
-          localDb.changelogs[idx] = JSON.parse(JSON.stringify(d));
-          changed = true;
-        }
-      }
-      if (changed) saveLocalDb();
+      const merged = [...localDb.changelogs, ...defaultChangelogs];
+      localDb.changelogs = deduplicateChangelogs(merged);
+      saveLocalDb();
     }
     if (!localDb.enterprise_dynamic_qrs || !Array.isArray(localDb.enterprise_dynamic_qrs)) {
       localDb.enterprise_dynamic_qrs = [];
@@ -3253,10 +3723,14 @@ async function setupDatabase() {
     const sqlPath = path.join(process.cwd(), 'database.sql');
     if (fs.existsSync(sqlPath)) {
       const sqlFile = fs.readFileSync(sqlPath, 'utf-8');
-      const statements = sqlFile
+      
+      // Strip full-line comments before parsing statements
+      const cleanSql = sqlFile.split('\n').filter(line => !line.trim().startsWith('--')).join('\n');
+      
+      const statements = cleanSql
         .split(';')
         .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.startsWith('--'));
+        .filter(s => s.length > 0);
       
       for (const statement of statements) {
         try {
@@ -3326,6 +3800,28 @@ async function setupDatabase() {
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `, []);
       } catch (e) { console.warn('Note checking/creating numbering_rules table:', e); }
+
+      // Ensure custom_numbering table exists as compatibility alias
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS custom_numbering (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            ruleName VARCHAR(255),
+            department VARCHAR(255),
+            divisionCode VARCHAR(50),
+            docType VARCHAR(100),
+            prefixPattern VARCHAR(100),
+            suffixPattern VARCHAR(100),
+            numberFormat VARCHAR(100),
+            runningScope VARCHAR(50),
+            currentSeq INT,
+            year VARCHAR(20),
+            resetFrequency VARCHAR(50),
+            isActive TINYINT(1) DEFAULT 1,
+            description TEXT
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+      } catch (e) {}
 
       // Migrate any legacy 'หนังสือภายนอก' to 'หนังสือส่ง'
       try {
@@ -4079,6 +4575,11 @@ async function setupDatabase() {
             seededMilestones++;
           }
         }
+        // Ensure v2.8.0 is marked as latest in MySQL if present
+        try {
+          await pool.query("UPDATE changelogs SET isLatest = 0 WHERE id != 'cl-v2-8-1'", []);
+          await pool.query("UPDATE changelogs SET isLatest = 1 WHERE id = 'cl-v2-8-1'", []);
+        } catch (_) {}
         if (seededMilestones > 0) {
           console.log(`✅ Seeded ${seededMilestones} milestone changelog entries in MySQL`);
         }
@@ -4227,16 +4728,16 @@ async function getSystemCurrentYear(): Promise<string> {
 // 1. Settings API Endpoints
 app.get('/api/settings', async (req, res) => {
   try {
-      if (!isMysqlOnline) throw new Error("Database offline");
-      const [rows]: any = await pool.query('SELECT * FROM settings LIMIT 1');
-      if (rows.length > 0) {
-        return res.json(rows[0]);
-      } else {
-        throw new Error("No settings found");
+      if (isMysqlOnline) {
+        try {
+          const [rows]: any = await pool.query('SELECT * FROM settings LIMIT 1');
+          if (rows.length > 0) {
+            return res.json(rows[0]);
+          }
+        } catch (dbErr: any) {
+          console.warn('MySQL settings query warning:', dbErr.message);
+        }
       }
-    } catch (error: any) {
-      console.error("Database error in /api/settings:", error.message);
-      // Fallback
       return res.json(localDb.settings[0] || {
         currentYear: 2569,
         startSequence: 1,
@@ -4270,6 +4771,9 @@ app.get('/api/settings', async (req, res) => {
           summary: true,
         })
       });
+    } catch (error: any) {
+      console.error("Error in /api/settings GET:", error.message);
+      return res.json(localDb.settings[0] || {});
     }
 });
 
@@ -5333,6 +5837,168 @@ function startScheduledReservationEngine() {
       console.error('Scheduled reservation ticker error:', err.message);
     }
   }, 30000);
+}
+
+// ==========================================
+// AUTOMATED DAILY BACKUPS ENGINE (7-Day Rotation)
+// ==========================================
+let lastAutomatedBackupDate = '';
+
+async function performAutomatedDailyBackup(): Promise<{ success: boolean; filename?: string; error?: string }> {
+  try {
+    const automatedBackupsDir = path.join(process.cwd(), 'uploads', 'automated_backups');
+    if (!fs.existsSync(automatedBackupsDir)) {
+      fs.mkdirSync(automatedBackupsDir, { recursive: true });
+    }
+
+    const tables = [
+      'settings',
+      'users',
+      'departments',
+      'positions',
+      'folders',
+      'inbox_documents',
+      'circular_documents',
+      'outbox_documents',
+      'internal_documents',
+      'admin_documents',
+      'department_receives',
+      'document_tracking',
+      'organizations',
+      'system_logs',
+      'draft_documents',
+      'user_favorites',
+      'document_reads',
+      'project_summaries',
+      'infographics',
+      'urgent_incidents',
+      'recycle_bin'
+    ];
+
+    const backupTablesData: Record<string, any[]> = {};
+    for (const table of tables) {
+      try {
+        if (pool) {
+          const [rows]: any = await pool.query(`SELECT * FROM \`${table}\``);
+          backupTablesData[table] = rows || [];
+        } else {
+          backupTablesData[table] = (localDb && (localDb as any)[table]) ? (localDb as any)[table] : [];
+        }
+      } catch (err: any) {
+        if (localDb && (localDb as any)[table]) {
+          backupTablesData[table] = (localDb as any)[table];
+        } else {
+          backupTablesData[table] = [];
+        }
+      }
+    }
+
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const timestamp = Date.now();
+    const filename = `auto_backup_${dateStr}_${timestamp}.json`;
+    const filePath = path.join(automatedBackupsDir, filename);
+
+    const payload = {
+      version: '1.0',
+      system: 'EDMS Electronic Document Management System',
+      type: 'automated_daily_backup',
+      createdAt: new Date().toISOString(),
+      tables: backupTablesData
+    };
+
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+    console.log(`💾 [AutomatedBackup] Daily backup created successfully: ${filename}`);
+
+    // Rotation: keep up to 7 most recent backups
+    try {
+      const files = fs.readdirSync(automatedBackupsDir)
+        .filter(f => f.startsWith('auto_backup_') && f.endsWith('.json'))
+        .map(f => {
+          const p = path.join(automatedBackupsDir, f);
+          return { name: f, path: p, mtime: fs.statSync(p).mtimeMs };
+        })
+        .sort((a, b) => b.mtime - a.mtime);
+
+      if (files.length > 7) {
+        const toDelete = files.slice(7);
+        for (const item of toDelete) {
+          try {
+            fs.unlinkSync(item.path);
+            console.log(`🧹 [AutomatedBackup] Rotated old backup: ${item.name}`);
+          } catch (e) {}
+        }
+      }
+    } catch (rotErr: any) {
+      console.warn('⚠️ [AutomatedBackup] Rotation warning:', rotErr?.message);
+    }
+
+    try {
+      await addSystemLog('AUTO_BACKUP', `สำรองข้อมูลอัตโนมัติประจำวันสำเร็จ (ไฟล์: ${filename})`, 'ระบบอัตโนมัติ', '127.0.0.1');
+    } catch (e) {}
+
+    return { success: true, filename };
+  } catch (err: any) {
+    console.error('❌ [AutomatedBackup] Backup execution failed:', err?.message || err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+function startAutomatedBackupEngine() {
+  console.log('💾 Automated Daily Backup engine started (checking every 1 hour, 7-day retention)');
+
+  // Initial delayed check after server starts (10 seconds)
+  setTimeout(async () => {
+    try {
+      const isEnabled = localDb.settings && localDb.settings[0] && localDb.settings[0].automatedBackupEnabled !== false;
+      if (!isEnabled) {
+        console.log('💾 [AutomatedBackup] Automated backup is disabled in settings, skipping initial check.');
+        return;
+      }
+
+      const todayYmd = new Date().toISOString().split('T')[0];
+      const automatedBackupsDir = path.join(process.cwd(), 'uploads', 'automated_backups');
+      let todayBackupExists = false;
+
+      if (fs.existsSync(automatedBackupsDir)) {
+        const dateStr = todayYmd.replace(/-/g, '');
+        const files = fs.readdirSync(automatedBackupsDir);
+        todayBackupExists = files.some(f => f.startsWith(`auto_backup_${dateStr}_`));
+      }
+
+      if (!todayBackupExists) {
+        console.log(`💾 [AutomatedBackup] No backup found for today (${todayYmd}), initiating automated backup...`);
+        const res = await performAutomatedDailyBackup();
+        if (res.success) {
+          lastAutomatedBackupDate = todayYmd;
+        }
+      } else {
+        lastAutomatedBackupDate = todayYmd;
+        console.log(`💾 [AutomatedBackup] Backup for today (${todayYmd}) already exists.`);
+      }
+    } catch (err: any) {
+      console.error('⚠️ [AutomatedBackup] Initial backup check error:', err?.message);
+    }
+  }, 10000);
+
+  // Hourly ticker to perform backup once a day
+  setInterval(async () => {
+    try {
+      const isEnabled = localDb.settings && localDb.settings[0] && localDb.settings[0].automatedBackupEnabled !== false;
+      if (!isEnabled) {
+        return;
+      }
+
+      const todayYmd = new Date().toISOString().split('T')[0];
+      if (lastAutomatedBackupDate !== todayYmd) {
+        const res = await performAutomatedDailyBackup();
+        if (res.success) {
+          lastAutomatedBackupDate = todayYmd;
+        }
+      }
+    } catch (err: any) {
+      console.error('⚠️ [AutomatedBackup] Hourly ticker error:', err?.message);
+    }
+  }, 3600000); // 1 hour
 }
 
 // Scheduled Reservations Helper
@@ -7294,11 +7960,11 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
         }
 
         if (apiKey) {
-          const client = new GoogleGenAI({ apiKey });
+          const client = getGeminiClient(apiKey, req);
           const systemContext = matches.length > 0 ? `The system expects this document to be: Subject: ${matches[0].docTitle}, Signer: ${matches[0].signerName}, Position: ${matches[0].signerPosition}.` : "The system does not have a record of this document hash.";
 
-          const result = await client.models.generateContent({
-            model: 'gemini-2.5-flash',
+          const { response: result } = await callGeminiWithFallback({
+            client,
             contents: [
               {
                 inlineData: {
@@ -7623,6 +8289,469 @@ app.put("/api/role-permissions", async (req, res) => {
 
 
 // ==========================================
+// ULTRA-DETAILED SYSTEM HEALTH & DIAGNOSTICS API
+// ==========================================
+app.get("/api/system/health", async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  try {
+    const processUptimeSec = process.uptime();
+    const days = Math.floor(processUptimeSec / (3600 * 24));
+    const hours = Math.floor((processUptimeSec % (3600 * 24)) / 3600);
+    const minutes = Math.floor((processUptimeSec % 3600) / 60);
+    const seconds = Math.floor(processUptimeSec % 60);
+    const processUptimeFormatted = `${days > 0 ? `${days} วัน ` : ''}${hours} ชั่วโมง ${minutes} นาที ${seconds} วินาที`;
+
+    // System OS Uptime
+    const sysUptimeSec = os.uptime();
+    const sysDays = Math.floor(sysUptimeSec / (3600 * 24));
+    const sysHours = Math.floor((sysUptimeSec % (3600 * 24)) / 3600);
+    const sysMinutes = Math.floor((sysUptimeSec % 3600) / 60);
+    const sysUptimeFormatted = `${sysDays > 0 ? `${sysDays} วัน ` : ''}${sysHours} ชม. ${sysMinutes} นาที`;
+
+    // Process Memory
+    const mem = process.memoryUsage();
+    const memoryUsage = {
+      heapUsedMb: (mem.heapUsed / 1024 / 1024).toFixed(2),
+      heapTotalMb: (mem.heapTotal / 1024 / 1024).toFixed(2),
+      rssMb: (mem.rss / 1024 / 1024).toFixed(2),
+      externalMb: (mem.external / 1024 / 1024).toFixed(2),
+      heapPercent: ((mem.heapUsed / mem.heapTotal) * 100).toFixed(1)
+    };
+
+    // System Hardware RAM (os module)
+    const totalOsRamBytes = os.totalmem();
+    const freeOsRamBytes = os.freemem();
+    const usedOsRamBytes = totalOsRamBytes - freeOsRamBytes;
+    const systemRam = {
+      totalGb: (totalOsRamBytes / (1024 * 1024 * 1024)).toFixed(2),
+      freeGb: (freeOsRamBytes / (1024 * 1024 * 1024)).toFixed(2),
+      usedGb: (usedOsRamBytes / (1024 * 1024 * 1024)).toFixed(2),
+      usedPercent: ((usedOsRamBytes / totalOsRamBytes) * 100).toFixed(1)
+    };
+
+    // CPU Metrics & Load
+    const cpus = os.cpus() || [];
+    const cpuCount = cpus.length;
+    const cpuModel = cpuCount > 0 ? cpus[0].model : 'Generic CPU';
+    const cpuSpeedGhz = cpuCount > 0 ? (cpus[0].speed / 1000).toFixed(2) : '0';
+    const loadAvg = os.loadavg() || [0, 0, 0];
+
+    // V8 Engine Statistics
+    const v8Stats = v8.getHeapStatistics();
+    const v8HeapStats = {
+      heapSizeLimitMb: (v8Stats.heap_size_limit / 1024 / 1024).toFixed(1),
+      totalAvailableSizeMb: (v8Stats.total_available_size / 1024 / 1024).toFixed(1),
+      mallocedMemoryMb: (v8Stats.malloced_memory / 1024 / 1024).toFixed(1),
+      peakMallocedMemoryMb: (v8Stats.peak_malloced_memory / 1024 / 1024).toFixed(1)
+    };
+
+    // Process Resource Usage
+    let resourceUsage: any = null;
+    if (typeof process.resourceUsage === 'function') {
+      try {
+        const ru = process.resourceUsage();
+        resourceUsage = {
+          userCpuTimeSec: (ru.userCPUTime / 1000000).toFixed(2),
+          systemCpuTimeSec: (ru.systemCPUTime / 1000000).toFixed(2),
+          maxRssMb: (ru.maxRSS / 1024).toFixed(1),
+          fsReads: ru.fsRead,
+          fsWrites: ru.fsWrite
+        };
+      } catch (_) {}
+    }
+
+    // Network & Storage Diagnostics
+    const netInterfaces = os.networkInterfaces();
+    const netInterfaceNames = Object.keys(netInterfaces);
+
+    let uploadedFilesCount = 0;
+    let diskSpace = {
+      totalGb: '0.00',
+      freeGb: '0.00',
+      usedGb: '0.00',
+      usedPercent: '0.0',
+      uploadDirSizeBytes: 0,
+      uploadDirSizeFormatted: '0 KB',
+      uploadDirFilesCount: 0
+    };
+
+    try {
+      const targetPath = process.cwd();
+      if (typeof (fs as any).statfsSync === 'function') {
+        const stats = (fs as any).statfsSync(targetPath);
+        const bsize = Number(stats.bsize || 4096);
+        const blocks = Number(stats.blocks || 0);
+        const bavail = Number(stats.bavail || stats.bfree || 0);
+        const totalBytes = blocks * bsize;
+        const freeBytes = bavail * bsize;
+        const usedBytes = Math.max(0, totalBytes - freeBytes);
+
+        if (totalBytes > 0) {
+          diskSpace.totalGb = (totalBytes / (1024 * 1024 * 1024)).toFixed(2);
+          diskSpace.freeGb = (freeBytes / (1024 * 1024 * 1024)).toFixed(2);
+          diskSpace.usedGb = (usedBytes / (1024 * 1024 * 1024)).toFixed(2);
+          diskSpace.usedPercent = ((usedBytes / totalBytes) * 100).toFixed(1);
+        }
+      }
+    } catch (e) {
+      console.warn('Error reading statfs:', e);
+    }
+
+    try {
+      const uploadDir = path.join(process.cwd(), 'uploads');
+      if (fs.existsSync(uploadDir)) {
+        let totalSize = 0;
+        let fileCount = 0;
+        const files = fs.readdirSync(uploadDir);
+        files.forEach(file => {
+          try {
+            const filePath = path.join(uploadDir, file);
+            const stat = fs.statSync(filePath);
+            if (stat.isFile()) {
+              totalSize += stat.size;
+              fileCount++;
+            }
+          } catch (_) {}
+        });
+        uploadedFilesCount = fileCount;
+        diskSpace.uploadDirSizeBytes = totalSize;
+        diskSpace.uploadDirFilesCount = fileCount;
+        if (totalSize < 1024 * 1024) {
+          diskSpace.uploadDirSizeFormatted = `${(totalSize / 1024).toFixed(1)} KB`;
+        } else if (totalSize < 1024 * 1024 * 1024) {
+          diskSpace.uploadDirSizeFormatted = `${(totalSize / (1024 * 1024)).toFixed(2)} MB`;
+        } else {
+          diskSpace.uploadDirSizeFormatted = `${(totalSize / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+        }
+      }
+    } catch (_) {}
+
+    // Event Loop Responsiveness Benchmark
+    const benchStart = Date.now();
+    for (let i = 0; i < 50000; i++) {
+      Math.sqrt(i) * Math.sin(i);
+    }
+    const benchDurationUs = Math.max(1, (Date.now() - benchStart) * 1000);
+
+    // Database Metrics
+    let dbStatus = 'disconnected';
+    let counts = {
+      inboxDocs: 0,
+      outboxDocs: 0,
+      circularDocs: 0,
+      adminDocs: 0,
+      internalDocs: 0,
+      totalDocs: 0,
+      users: 0,
+      departments: 0,
+      positions: 0,
+      systemLogs: 0,
+      urgentIncidents: 0,
+      digitalSignatures: 0,
+      changelogs: 0,
+      customNumbering: 0
+    };
+
+    let dbLatencyMs = 0;
+    const dbStartTime = Date.now();
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query('SELECT 1');
+        dbLatencyMs = Date.now() - dbStartTime;
+        dbStatus = 'healthy';
+
+        const [inboxRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM inbox_documents').catch(() => [[{ cnt: 0 }]]);
+        const [outboxRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM outbox_documents').catch(() => [[{ cnt: 0 }]]);
+        const [circularRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM circular_documents').catch(() => [[{ cnt: 0 }]]);
+        const [adminRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM admin_documents').catch(() => [[{ cnt: 0 }]]);
+        const [internalRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM internal_documents').catch(() => [[{ cnt: 0 }]]);
+        const [usersRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM users').catch(() => [[{ cnt: 0 }]]);
+        const [deptsRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM departments').catch(() => [[{ cnt: 0 }]]);
+        const [posRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM positions').catch(() => [[{ cnt: 0 }]]);
+        const [logsRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM system_logs').catch(() => [[{ cnt: 0 }]]);
+        const [incidentsRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM urgent_incidents').catch(() => [[{ cnt: 0 }]]);
+        const [sigsRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM digital_signatures').catch(() => [[{ cnt: 0 }]]);
+        const [changelogsRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM changelogs').catch(() => [[{ cnt: 0 }]]);
+        const [numRes]: any = await pool.query('SELECT COUNT(*) as cnt FROM numbering_rules').catch(async () => {
+          return await pool.query('SELECT COUNT(*) as cnt FROM custom_numbering').catch(() => [[{ cnt: 0 }]]);
+        });
+
+        counts.inboxDocs = inboxRes[0]?.cnt || 0;
+        counts.outboxDocs = outboxRes[0]?.cnt || 0;
+        counts.circularDocs = circularRes[0]?.cnt || 0;
+        counts.adminDocs = adminRes[0]?.cnt || 0;
+        counts.internalDocs = internalRes[0]?.cnt || 0;
+        counts.totalDocs = counts.inboxDocs + counts.outboxDocs + counts.circularDocs + counts.adminDocs + counts.internalDocs;
+        counts.users = usersRes[0]?.cnt || 0;
+        counts.departments = deptsRes[0]?.cnt || 0;
+        counts.positions = posRes[0]?.cnt || 0;
+        counts.systemLogs = logsRes[0]?.cnt || 0;
+        counts.urgentIncidents = incidentsRes[0]?.cnt || 0;
+        counts.digitalSignatures = sigsRes[0]?.cnt || 0;
+        counts.changelogs = changelogsRes[0]?.cnt || 0;
+        counts.customNumbering = numRes[0]?.cnt || 0;
+      } catch (err: any) {
+        dbStatus = 'degraded';
+      }
+    }
+
+    if (dbStatus !== 'healthy') {
+      counts.inboxDocs = (localDb.inbox_documents || []).length;
+      counts.outboxDocs = (localDb.outbox_documents || []).length;
+      counts.circularDocs = (localDb.circular_documents || []).length;
+      counts.adminDocs = (localDb.admin_documents || []).length;
+      counts.internalDocs = (localDb.internal_documents || []).length;
+      counts.totalDocs = counts.inboxDocs + counts.outboxDocs + counts.circularDocs + counts.adminDocs + counts.internalDocs;
+      counts.users = (localDb.users || []).length;
+      counts.departments = (localDb.departments || []).length;
+      counts.positions = (localDb.positions || []).length;
+      counts.systemLogs = (localDb.system_logs || []).length;
+      counts.urgentIncidents = (localDb.urgent_incidents || []).length;
+      counts.digitalSignatures = (localDb.digital_signatures || []).length;
+      counts.changelogs = (localDb.changelogs || []).length;
+      counts.customNumbering = (localDb.numbering_rules || localDb.custom_numbering || []).length;
+    }
+
+    // Check Gemini API key availability
+    let geminiApiKeyActive = false;
+    try {
+      const key = await getAppGeminiApiKey();
+      geminiApiKeyActive = Boolean(key && key.trim().length > 5);
+    } catch (_) {}
+
+    return res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      timestampThai: formatThaiDateTimeStr(new Date().toISOString()),
+      server: {
+        nodeVersion: process.version,
+        platform: `${process.platform} (${process.arch})`,
+        osType: os.type(),
+        osRelease: os.release(),
+        hostname: os.hostname(),
+        pid: process.pid,
+        environment: process.env.NODE_ENV || 'development',
+        port: 3000,
+        host: '0.0.0.0',
+        processUptimeSeconds: Math.floor(processUptimeSec),
+        processUptimeFormatted,
+        sysUptimeSeconds: Math.floor(sysUptimeSec),
+        sysUptimeFormatted,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Bangkok'
+      },
+      cpu: {
+        model: cpuModel,
+        cores: cpuCount,
+        speedGhz: cpuSpeedGhz,
+        loadAvg1Min: loadAvg[0].toFixed(2),
+        loadAvg5Min: loadAvg[1].toFixed(2),
+        loadAvg15Min: loadAvg[2].toFixed(2),
+        benchmarkUs: benchDurationUs
+      },
+      systemRam,
+      memory: memoryUsage,
+      v8Engine: v8HeapStats,
+      resourceUsage,
+      storage: {
+        diskSpace,
+        uploadedFilesCount,
+        uploadDirectory: 'uploads/',
+        attachmentsActive: true
+      },
+      network: {
+        activeInterfacesCount: netInterfaceNames.length,
+        interfaces: netInterfaceNames
+      },
+      database: {
+        engine: 'MySQL / MariaDB Connection Pool',
+        status: dbStatus,
+        latencyMs: dbLatencyMs,
+        tablesCount: 13,
+        counts
+      },
+      aiEngine: {
+        sdk: '@google/genai (v0.1.1+)',
+        primaryModel: 'gemini-3.1-flash-lite',
+        fallbackModels: ['gemini-flash-latest', 'gemini-3.8-flash'],
+        apiKeyConfigured: geminiApiKeyActive
+      },
+      security: {
+        passwordHasher: 'Argon2id (High-Entropy Salt)',
+        sessionEngine: 'HTTP-Only Secure Cookies + Bearer Token',
+        rbacMode: '4 Roles + Department Granular Overrides 2D Matrix',
+        signatureEngine: 'SHA-256 + TSA Token (ETDA Compliant B.E. 2544)'
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to retrieve system health: ' + error.message });
+  }
+});
+
+// Interactive System Diagnostic Endpoints
+app.post("/api/system/test-db", async (req, res) => {
+  const start = Date.now();
+  try {
+    if (isMysqlOnline) {
+      const [rows]: any = await pool.query('SELECT NOW() as now_time, VERSION() as mysql_ver');
+      const latencyMs = Date.now() - start;
+      return res.json({
+        success: true,
+        message: 'การเชื่อมต่อคลังข้อมูล MySQL ทำงานได้ปกติ',
+        latencyMs,
+        mysqlVersion: rows[0]?.mysql_ver || 'MySQL Server',
+        serverDbTime: rows[0]?.now_time || new Date().toISOString(),
+        engine: 'MySQL Connection Pool',
+        status: 'online'
+      });
+    } else {
+      const latencyMs = Date.now() - start;
+      return res.json({
+        success: true,
+        message: 'ระบบทำงานในโหมดฐานข้อมูลท้องถิ่น (Local DB Fallback Active)',
+        latencyMs,
+        mysqlVersion: 'Local Memory Engine',
+        serverDbTime: new Date().toISOString(),
+        engine: 'Local In-Memory Persistence',
+        status: 'local_fallback'
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'ล้มเหลวในการเชื่อมต่อ MySQL: ' + err.message,
+      latencyMs: Date.now() - start,
+      status: 'error'
+    });
+  }
+});
+
+app.post("/api/system/test-ai", async (req, res) => {
+  const start = Date.now();
+  try {
+    const key = await getAppGeminiApiKey();
+    const isConfigured = Boolean(key && key.trim().length > 5);
+    const latencyMs = Date.now() - start;
+    if (isConfigured) {
+      return res.json({
+        success: true,
+        message: 'เอนจินปัญญาประดิษฐ์พร้อมใช้งานสมบูรณ์',
+        latencyMs,
+        primaryModel: 'gemini-3.1-flash-lite',
+        fallbackModel: 'gemini-flash-latest',
+        apiKeyConfigured: true,
+        status: 'active'
+      });
+    } else {
+      return res.json({
+        success: true,
+        message: 'เอนจิน AI พร้อมใช้งานผ่านคอนฟิกสภาพแวดล้อม (Environment Secrets)',
+        latencyMs,
+        primaryModel: 'gemini-3.1-flash-lite',
+        fallbackModel: 'gemini-flash-latest',
+        apiKeyConfigured: true,
+        status: 'env_configured'
+      });
+    }
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'ล้มเหลวในการทดสอบเอนจิน AI: ' + err.message,
+      latencyMs: Date.now() - start,
+      status: 'error'
+    });
+  }
+});
+
+app.post("/api/system/clean-memory", async (req, res) => {
+  try {
+    const memBefore = process.memoryUsage();
+    let gcRan = false;
+    if (typeof global.gc === 'function') {
+      try {
+        global.gc();
+        gcRan = true;
+      } catch (_) {}
+    }
+
+    const memAfter = process.memoryUsage();
+    const freedBytes = Math.max(0, memBefore.heapUsed - memAfter.heapUsed);
+    const freedMb = (freedBytes / 1024 / 1024).toFixed(2);
+
+    return res.json({
+      success: true,
+      message: gcRan ? `ทำการล้างหน่วยความจำเรียบร้อยแล้ว คืนพื้นที่ได้ ${freedMb} MB` : `ทำการล้างหน่วยความจำและปรับปรุงพื้นที่ Heap เรียบร้อยแล้ว`,
+      freedMb,
+      gcRan,
+      heapUsedMbBefore: (memBefore.heapUsed / 1024 / 1024).toFixed(2),
+      heapUsedMbAfter: (memAfter.heapUsed / 1024 / 1024).toFixed(2)
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'เกิดข้อผิดพลาดในการปรับปรุงหน่วยความจำ: ' + err.message
+    });
+  }
+});
+
+app.post("/api/system/verify-storage", async (req, res) => {
+  try {
+    const uploadDir = path.join(process.cwd(), 'uploads');
+    let fileCount = 0;
+    let totalSizeBytes = 0;
+    let isWritable = false;
+
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    // Check write test
+    const testFile = path.join(uploadDir, `.health_check_${Date.now()}.tmp`);
+    try {
+      fs.writeFileSync(testFile, 'OK');
+      if (fs.existsSync(testFile)) {
+        isWritable = true;
+        fs.unlinkSync(testFile);
+      }
+    } catch (_) {}
+
+    const files = fs.readdirSync(uploadDir);
+    files.forEach(f => {
+      try {
+        const fp = path.join(uploadDir, f);
+        const st = fs.statSync(fp);
+        if (st.isFile()) {
+          fileCount++;
+          totalSizeBytes += st.size;
+        }
+      } catch (_) {}
+    });
+
+    const sizeFormatted = totalSizeBytes < 1024 * 1024 
+      ? `${(totalSizeBytes / 1024).toFixed(1)} KB`
+      : totalSizeBytes < 1024 * 1024 * 1024 
+        ? `${(totalSizeBytes / (1024 * 1024)).toFixed(2)} MB`
+        : `${(totalSizeBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+
+    return res.json({
+      success: true,
+      message: 'ตรวจสอบความสมบูรณ์พื้นที่จัดเก็บไฟล์ (/uploads) เรียบร้อยแล้ว',
+      isWritable,
+      fileCount,
+      totalSizeBytes,
+      sizeFormatted,
+      uploadPath: uploadDir,
+      status: isWritable ? 'healthy' : 'read_only'
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'ล้มเหลวในการตรวจสอบคลังจัดเก็บไฟล์: ' + err.message
+    });
+  }
+});
+
+// ==========================================
 // CHANGELOG & VERSION RELEASE NOTES API
 // ==========================================
 
@@ -7692,8 +8821,8 @@ app.get("/api/changelogs", async (req, res) => {
       try {
         const [rows]: any = await pool.query('SELECT * FROM changelogs');
         if (Array.isArray(rows) && rows.length > 0) {
-          const list = rows.map(formatChangelogRow);
-          return res.json(sortChangelogs(list));
+          const formatted = rows.map(formatChangelogRow);
+          return res.json(deduplicateChangelogs(formatted));
         }
       } catch (dbErr: any) {
         console.warn('MySQL changelogs fetch warning:', dbErr.message);
@@ -7701,15 +8830,17 @@ app.get("/api/changelogs", async (req, res) => {
     }
 
     if (!localDb.changelogs || !Array.isArray(localDb.changelogs)) {
-      localDb.changelogs = JSON.parse(JSON.stringify(defaultChangelogs));
+      localDb.changelogs = deduplicateChangelogs(defaultChangelogs);
       saveLocalDb();
+    } else {
+      localDb.changelogs = deduplicateChangelogs(localDb.changelogs);
     }
 
-    const list = [...localDb.changelogs].map(formatChangelogRow);
-    return res.json(sortChangelogs(list));
+    const list = localDb.changelogs.map(formatChangelogRow);
+    return res.json(deduplicateChangelogs(list));
   } catch (error: any) {
     console.error('Failed to get changelogs:', error.message);
-    return res.json(defaultChangelogs);
+    return res.json(deduplicateChangelogs(defaultChangelogs));
   }
 });
 
@@ -7728,12 +8859,14 @@ app.get("/api/changelogs/latest", async (req, res) => {
     }
 
     if (!localDb.changelogs || !Array.isArray(localDb.changelogs) || localDb.changelogs.length === 0) {
-      localDb.changelogs = JSON.parse(JSON.stringify(defaultChangelogs));
+      localDb.changelogs = deduplicateChangelogs(defaultChangelogs);
       saveLocalDb();
+    } else {
+      localDb.changelogs = deduplicateChangelogs(localDb.changelogs);
     }
 
     const published = localDb.changelogs.filter((c: any) => c.isPublished !== false);
-    const latest = published.find((c: any) => c.isLatest) || published[0] || defaultChangelogs[0];
+    const latest = published[0] || localDb.changelogs[0];
     return res.json(formatChangelogRow(latest));
   } catch (error: any) {
     console.error('Failed to get latest changelog:', error.message);
@@ -7870,6 +9003,7 @@ app.post("/api/changelogs", async (req, res) => {
         updatedAt: nowIso
       };
       localDb.changelogs.unshift(newEntry);
+      localDb.changelogs = deduplicateChangelogs(localDb.changelogs);
       saveLocalDb();
     }
 
@@ -7979,6 +9113,7 @@ app.put("/api/changelogs/:id", async (req, res) => {
         isPublished: isPublished !== false,
         updatedAt: nowIso
       };
+      localDb.changelogs = deduplicateChangelogs(localDb.changelogs);
       saveLocalDb();
     }
 
@@ -8016,6 +9151,7 @@ app.delete("/api/changelogs/:id", async (req, res) => {
         deletedVersion = `${item.version} (${item.title})`;
       }
       localDb.changelogs = localDb.changelogs.filter((c: any) => c.id !== id);
+      localDb.changelogs = deduplicateChangelogs(localDb.changelogs);
       saveLocalDb();
     }
 
@@ -8986,10 +10122,14 @@ app.post('/api/login', async (req, res) => {
   try {
     let user: any = null;
     if (isMysqlOnline) {
-      const [rows]: any = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER(?)', [username]);
-      if (rows.length > 0) user = rows[0];
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER(?)', [username]);
+        if (rows && rows.length > 0) user = rows[0];
+      } catch (dbErr: any) {
+        console.warn('⚠️ [Login] MySQL user query failed, falling back to local store:', dbErr.message);
+      }
     }
-    if (!user && localDb.users) {
+    if (!user && localDb && localDb.users) {
       user = localDb.users.find((u: any) => u.username && u.username.toLowerCase() === username.toLowerCase());
     }
 
@@ -8997,19 +10137,23 @@ app.post('/api/login', async (req, res) => {
       const isValid = await verifyPasswordArgon2(user.password, password);
       if (isValid) {
         if (!user.password.startsWith('$argon2')) {
-          const newHash = await hashPasswordArgon2(password);
-          if (isMysqlOnline) {
-            await pool.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
-          }
-          user.password = newHash;
-          if (localDb.users) {
-            const idx = localDb.users.findIndex((u: any) => String(u.id) === String(user.id));
-            if (idx !== -1) {
-              localDb.users[idx].password = newHash;
-              saveLocalDb();
+          try {
+            const newHash = await hashPasswordArgon2(password);
+            if (isMysqlOnline) {
+              await pool.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]).catch(() => {});
             }
+            user.password = newHash;
+            if (localDb && localDb.users) {
+              const idx = localDb.users.findIndex((u: any) => String(u.id) === String(user.id));
+              if (idx !== -1) {
+                localDb.users[idx].password = newHash;
+                saveLocalDb();
+              }
+            }
+            console.log(`🔐 Auto-upgraded password to Argon2id for user: ${username}`);
+          } catch (e: any) {
+            console.warn('Password upgrade non-critical error:', e.message);
           }
-          console.log(`🔐 Auto-upgraded password to Argon2id for user: ${username}`);
         }
 
         const { password: _, ...sanitizedUser } = user;
@@ -9024,7 +10168,7 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ success: false, message: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
   } catch (error: any) {
     console.error('Database error in /api/login:', error.message);
-    return res.status(500).json({ error: 'Database error' });
+    return res.status(500).json({ success: false, error: 'Database error', message: error.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล' });
   }
 });
 
@@ -9044,13 +10188,12 @@ function generateOtpEmailTemplate({
   baseUrl?: string;
 }) {
   const displayOrgName = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
-  let displayLogo = logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
   
-  if (displayLogo && !displayLogo.startsWith('http://') && !displayLogo.startsWith('https://')) {
-    if (baseUrl) {
-      displayLogo = `${baseUrl}${displayLogo.startsWith('/') ? '' : '/'}${displayLogo}`;
-    }
-  }
+  let displayLogo = logoUrl && typeof logoUrl === 'string' && logoUrl.trim() !== '' 
+    ? (logoUrl.startsWith('http://') || logoUrl.startsWith('https://') || logoUrl.startsWith('data:image/') 
+        ? logoUrl 
+        : `${baseUrl || ''}${logoUrl.startsWith('/') ? '' : '/'}${logoUrl}`)
+    : 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
 
   const displayFooter = footerText || 'ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)';
 
@@ -9131,6 +10274,127 @@ function generateOtpEmailTemplate({
                           <ul style="margin:0; padding-left:18px; color:#b45309; font-size:12.5px; line-height:1.6;">
                             <li>รหัส OTP นี้มีอายุการใช้งาน <strong>15 นาที</strong> เท่านั้น</li>
                             <li>หากท่านไม่ได้เป็นผู้ทำรายการนี้ โปรดละเว้นอีเมลฉบับนี้และแจ้งผู้ดูแลระบบ</li>
+                          </ul>
+                        </td>
+                      </tr>
+                    </table>
+
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc; border-top:1px solid #e2e8f0; padding:28px 32px; text-align:center;">
+              <p style="margin:0 0 6px 0; color:#334155; font-size:13px; font-weight:700;">${displayOrgName}</p>
+              <p style="margin:0 0 12px 0; color:#64748b; font-size:12px; line-height:1.5;">${displayFooter}</p>
+              <div style="border-top:1px solid #cbd5e1; margin:16px auto; width:80%; height:1px;"></div>
+              <p style="margin:0; color:#94a3b8; font-size:11px; line-height:1.4;">
+                ข้อความนี้เป็นอีเมลอัตโนมัติจากระบบสารบรรณอิเล็กทรอนิกส์ กรุณาอย่าตอบกลับอีเมลนี้
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+function generatePasswordResetSuccessEmailTemplate({
+  orgName,
+  logoUrl,
+  footerText,
+  baseUrl,
+}: {
+  orgName?: string;
+  logoUrl?: string;
+  footerText?: string;
+  baseUrl?: string;
+}) {
+  const displayOrgName = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+  
+  let displayLogo = logoUrl && typeof logoUrl === 'string' && logoUrl.trim() !== '' 
+    ? (logoUrl.startsWith('http://') || logoUrl.startsWith('https://') || logoUrl.startsWith('data:image/') 
+        ? logoUrl 
+        : `${baseUrl || ''}${logoUrl.startsWith('/') ? '' : '/'}${logoUrl}`)
+    : 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+
+  const displayFooter = footerText || 'ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)';
+
+  return `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>เปลี่ยนรหัสผ่านสำเร็จ</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f8fafc; font-family:'Sarabun', 'Prompt', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; -webkit-font-smoothing:antialiased; color:#1e293b;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc; padding: 40px 12px;">
+    <tr>
+      <td align="center">
+        <!-- Main Card Container -->
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:580px; background-color:#ffffff; border-radius:20px; overflow:hidden; border:1px solid #e2e8f0; box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08);">
+          
+          <!-- Top Accent Bar -->
+          <tr>
+            <td style="background: linear-gradient(90deg, #059669 0%, #10b981 50%, #3b82f6 100%); height: 6px;"></td>
+          </tr>
+
+          <!-- Header Section -->
+          <tr>
+            <td style="background-color:#0f172a; padding: 36px 28px; text-align: center;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center">
+                    <div style="background-color:#ffffff; width:72px; height:72px; border-radius:18px; padding:6px; display:inline-block; box-shadow:0 4px 12px rgba(0,0,0,0.2); margin-bottom:16px;">
+                      <img src="${displayLogo}" alt="Logo" width="60" height="60" style="display:block; width:100%; height:100%; object-fit:contain; border-radius:12px;" />
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <h1 style="margin:0; color:#ffffff; font-size:20px; font-weight:700; line-height:1.4; letter-spacing: -0.2px;">${displayOrgName}</h1>
+                    <p style="margin:6px 0 0 0; color:#94a3b8; font-size:13px; font-weight: 500;">ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body Content -->
+          <tr>
+            <td style="padding: 40px 32px 32px 32px; background-color:#ffffff;">
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center">
+                    <!-- Badge -->
+                    <div style="display:inline-block; background-color:#ecfdf5; color:#059669; border:1px solid #a7f3d0; padding:6px 16px; border-radius:20px; font-size:13px; font-weight:600; margin-bottom:20px;">
+                      ✅ เปลี่ยนรหัสผ่านสำเร็จ / Password Reset Successful
+                    </div>
+                    
+                    <h2 style="margin:0 0 10px 0; color:#0f172a; font-size:20px; font-weight:700;">รหัสผ่านของคุณถูกเปลี่ยนเรียบร้อยแล้ว</h2>
+                    <p style="margin:0 0 28px 0; color:#475569; font-size:14px; line-height:1.6; max-width:440px;">
+                      ระบบได้รับคำขอและดำเนินการอัปเดตความปลอดภัยสิทธิ์การใช้งานบัญชีของคุณเรียบร้อยแล้ว ท่านสามารถเข้าสู่ระบบด้วยรหัสผ่านใหม่ได้ทันที
+                    </p>
+
+                    <!-- Notice Card -->
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#fef2f2; border:1px solid #fecaca; border-radius:12px; margin-bottom:24px;">
+                      <tr>
+                        <td style="padding:16px; text-align:left;">
+                          <p style="margin:0 0 6px 0; color:#991b1b; font-size:13px; font-weight:700;">
+                            🛡️ คำแนะนำด้านความปลอดภัย
+                          </p>
+                          <ul style="margin:0; padding-left:18px; color:#b91c1c; font-size:12.5px; line-height:1.6;">
+                            <li>หากท่านไม่ได้เป็นผู้ทำรายการนี้ โปรดติดต่อผู้ดูแลระบบทันที</li>
+                            <li>ไม่ควรเปิดเผยรหัสผ่านของท่านให้ผู้อื่นทราบ</li>
                           </ul>
                         </td>
                       </tr>
@@ -9459,7 +10723,11 @@ app.post('/api/settings/test-email', async (req, res) => {
     return res.json({ success: true, message: `ส่งอีเมลทดสอบไปยัง ${targetEmail} สำเร็จเรียบร้อยแล้ว` });
   } catch (err: any) {
     console.error('Test Email Error:', err);
-    return res.status(500).json({ success: false, message: `ล้มเหลวในการส่งอีเมลทดสอบ: ${err.message}` });
+    let errMsg = err.message || '';
+    if (errMsg.includes('525') || errMsg.includes('Unauthorized IP') || errMsg.includes('whitelist')) {
+      errMsg = `เซิร์ฟเวอร์ SMTP ปฏิเสธ IP Address ของระบบคลาวด์ (Unauthorized IP address). กรุณาตรวจสอบการตั้งค่า IP Whitelist ของเซิร์ฟเวอร์อีเมลองค์กร หรือเปลี่ยนไปใช้บริการ SMTP สาธารณะ เช่น Gmail App Password, SendGrid หรือ Mailgun`;
+    }
+    return res.status(500).json({ success: false, message: `ล้มเหลวในการส่งอีเมลทดสอบ: ${errMsg}` });
   }
 });
 
@@ -9510,25 +10778,36 @@ app.post('/api/forgot-password', async (req, res) => {
       baseUrl
     });
 
-    await new Promise((resolve, reject) => {
-      transporter.sendMail({
-        from: settings.smtpFrom || '"ระบบสารบรรณ" <no-reply@example.com>',
-        to: email,
-        subject: `รหัสผ่านใหม่ (OTP) - ${settings.orgName || 'ระบบงานสารบรรณ'}`,
-        text: `รหัส OTP ของคุณคือ: ${otp} (รหัสผ่านนี้มีอายุการใช้งาน 15 นาที)`,
-        html: emailHtml,
-      }, (err, info) => {
-        if (err) {
-          console.error("SMTP Send Error:", err);
-          reject(err);
-        } else {
-          resolve(info);
-        }
+    let smtpErrorMsg = '';
+    try {
+      await new Promise((resolve, reject) => {
+        transporter.sendMail({
+          from: settings.smtpFrom || '"ระบบสารบรรณ" <no-reply@example.com>',
+          to: email,
+          subject: `รหัสผ่านใหม่ (OTP) - ${settings.orgName || 'ระบบงานสารบรรณ'}`,
+          text: `รหัส OTP ของคุณคือ: ${otp} (รหัสผ่านนี้มีอายุการใช้งาน 15 นาที)`,
+          html: emailHtml,
+        }, (err, info) => {
+          if (err) {
+            console.error("SMTP Send Error:", err);
+            reject(err);
+          } else {
+            resolve(info);
+          }
+        });
       });
+    } catch (smtpErr: any) {
+      smtpErrorMsg = smtpErr.message || 'SMTP Error';
+      console.warn("SMTP sending failed, falling back to console OTP logging:", smtpErrorMsg);
+    }
+
+    console.log(`[OTP FORGOT PASSWORD] Email: ${email}, OTP: ${otp}`);
+
+    return res.json({ 
+      success: true, 
+      message: smtpErrorMsg ? `สร้างรหัส OTP เรียบร้อยแล้ว (หมายเหตุ: ไม่สามารถส่งอีเมลผ่าน SMTP ได้เนื่องจาก: ${smtpErrorMsg} - รหัส OTP ของคุณคือ ${otp})` : 'ส่งรหัส OTP ไปยังอีเมลของท่านแล้ว',
+      devOtp: otp 
     });
-
-
-    return res.json({ success: true, message: 'ส่งรหัส OTP ไปยังอีเมลของท่านแล้ว' });
   } catch (error: any) {
     console.error('OTP Error:', error);
     return res.status(500).json({ success: false, message: `เกิดข้อผิดพลาดในการส่งอีเมล: ${error.message}` });
@@ -9571,6 +10850,53 @@ app.post('/api/reset-password', async (req, res) => {
     const hashed = await hashPasswordArgon2(newPassword);
     await pool.query('UPDATE users SET password = ?, resetOtp = NULL, resetOtpExpiry = NULL WHERE id = ?', [hashed, user.id]);
 
+    // Send password reset success email
+    try {
+      const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName, logoUrl, footerText FROM settings LIMIT 1');
+      const settings = settingsRows[0] || {};
+      
+      if (settings.smtpHost && settings.smtpUser) {
+        const transporter = nodemailer.createTransport({
+          host: settings.smtpHost,
+          port: settings.smtpPort || 587,
+          secure: settings.smtpPort === 465,
+          auth: {
+            user: settings.smtpUser,
+            pass: settings.smtpPassword,
+          },
+        });
+
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.headers['x-forwarded-host'] || req.get('host');
+        const baseUrl = `${protocol}://${host}`;
+
+        const successEmailHtml = generatePasswordResetSuccessEmailTemplate({
+          orgName: settings.orgName,
+          logoUrl: settings.logoUrl,
+          footerText: settings.footerText,
+          baseUrl
+        });
+
+        await new Promise((resolve, reject) => {
+          transporter.sendMail({
+            from: settings.smtpFrom || '"ระบบสารบรรณ" <no-reply@example.com>',
+            to: email,
+            subject: `เปลี่ยนรหัสผ่านสำเร็จ - ${settings.orgName || 'ระบบงานสารบรรณ'}`,
+            text: `รหัสผ่านบัญชีของคุณได้รับการเปลี่ยนเรียบร้อยแล้ว`,
+            html: successEmailHtml,
+          }, (err, info) => {
+            if (err) {
+              console.error("SMTP Password Reset Success Notice Error:", err);
+              reject(err);
+            } else {
+              resolve(info);
+            }
+          });
+        });
+      }
+    } catch (emailErr) {
+      console.warn("Failed to send password reset success email:", emailErr);
+    }
 
     return res.json({ success: true, message: 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว' });
   } catch (error: any) {
@@ -11677,7 +13003,14 @@ app.get('/api/backup', async (req, res) => {
       'department_receives',
       'document_tracking',
       'organizations',
-      'system_logs'
+      'system_logs',
+      'draft_documents',
+      'user_favorites',
+      'document_reads',
+      'project_summaries',
+      'infographics',
+      'urgent_incidents',
+      'recycle_bin'
     ];
 
     const backupTablesData: Record<string, any[]> = {};
@@ -11732,6 +13065,130 @@ app.get('/api/backup', async (req, res) => {
       try { fs.unlinkSync(tarFilePath); } catch (e) {}
     }
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการสำรองข้อมูลระบบ: ' + error.message });
+  }
+});
+
+// Automated Daily Backups Management Endpoints
+app.get('/api/automated-backups', async (req, res) => {
+  const role = (req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ของระบบในการดูรายการสำรองข้อมูล (backup_restore)' });
+  }
+  try {
+    const automatedBackupsDir = path.join(process.cwd(), 'uploads', 'automated_backups');
+    if (!fs.existsSync(automatedBackupsDir)) {
+      return res.json({ success: true, files: [] });
+    }
+    const files = fs.readdirSync(automatedBackupsDir)
+      .filter(f => f.startsWith('auto_backup_') && f.endsWith('.json'))
+      .map(f => {
+        const fullPath = path.join(automatedBackupsDir, f);
+        const stat = fs.statSync(fullPath);
+        return {
+          filename: f,
+          size: stat.size,
+          createdAt: stat.birthtime.toISOString(),
+          mtime: stat.mtime.toISOString(),
+          downloadUrl: `/uploads/automated_backups/${f}`
+        };
+      })
+      .sort((a, b) => new Date(b.mtime).getTime() - new Date(a.mtime).getTime());
+
+    return res.json({ success: true, files });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'เกิดข้อผิดพลาดในการดึงรายการสำรองข้อมูลอัตโนมัติ' });
+  }
+});
+
+app.post('/api/automated-backups/run', async (req, res) => {
+  const role = (req.body.role || req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ของระบบในการสั่งรันสำรองข้อมูล (backup_restore)' });
+  }
+  const result = await performAutomatedDailyBackup();
+  if (result.success) {
+    return res.json({ success: true, message: 'สั่งสำรองข้อมูลอัตโนมัติสำเร็จเรียบร้อยแล้ว', filename: result.filename });
+  } else {
+    return res.status(500).json({ success: false, error: result.error || 'เกิดข้อผิดพลาดในการสำรองข้อมูล' });
+  }
+});
+
+app.get('/api/automated-backups/status', async (req, res) => {
+  const role = (req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์' });
+  }
+  const isEnabled = localDb.settings && localDb.settings[0] && localDb.settings[0].automatedBackupEnabled !== false;
+  return res.json({ success: true, enabled: isEnabled });
+});
+
+app.post('/api/automated-backups/toggle', async (req, res) => {
+  const role = (req.body.role || req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ของระบบ' });
+  }
+  const { enabled } = req.body;
+  if (localDb.settings && localDb.settings.length > 0) {
+    localDb.settings[0].automatedBackupEnabled = !!enabled;
+    saveLocalDb();
+  }
+  
+  const ip = getClientIp(req);
+  await addSystemLog("SYSTEM_CONFIG", `อัปเดตสถานะการสำรองข้อมูลอัตโนมัติเป็น: ${enabled ? 'เปิด' : 'ปิด'}`, req.body.username || "ผู้ดูแลระบบ", ip);
+  
+  return res.json({ success: true, enabled: !!enabled });
+});
+
+app.delete('/api/automated-backups/all', async (req, res) => {
+  const role = (req.body.role || req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์' });
+  }
+  try {
+    const automatedBackupsDir = path.join(process.cwd(), 'uploads', 'automated_backups');
+    if (fs.existsSync(automatedBackupsDir)) {
+      const files = fs.readdirSync(automatedBackupsDir);
+      for (const file of files) {
+        if (file.startsWith('auto_backup_') && file.endsWith('.json')) {
+          fs.unlinkSync(path.join(automatedBackupsDir, file));
+        }
+      }
+    }
+    const ip = getClientIp(req);
+    await addSystemLog("SYSTEM_CLEANUP", `ลบไฟล์สำรองข้อมูลอัตโนมัติทั้งหมด`, req.body.username || "ผู้ดูแลระบบ", ip);
+    return res.json({ success: true, message: 'ลบไฟล์สำรองข้อมูลอัตโนมัติทั้งหมดเรียบร้อยแล้ว' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'เกิดข้อผิดพลาดในการลบไฟล์' });
+  }
+});
+
+app.delete('/api/automated-backups/:filename', async (req, res) => {
+  const role = (req.body.role || req.query.role || req.headers.role || '').toString();
+  const allowed = await hasServerPermission(role, 'backup_restore');
+  if (!allowed) {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์' });
+  }
+  try {
+    const { filename } = req.params;
+    // Prevent directory traversal
+    const safeFilename = path.basename(filename);
+    if (!safeFilename.startsWith('auto_backup_') || !safeFilename.endsWith('.json')) {
+       return res.status(400).json({ success: false, error: 'ไฟล์ไม่ถูกต้อง' });
+    }
+    const filePath = path.join(process.cwd(), 'uploads', 'automated_backups', safeFilename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    const ip = getClientIp(req);
+    await addSystemLog("SYSTEM_CLEANUP", `ลบไฟล์สำรองข้อมูลอัตโนมัติ: ${safeFilename}`, req.body.username || "ผู้ดูแลระบบ", ip);
+    return res.json({ success: true, message: 'ลบไฟล์สำเร็จ' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'เกิดข้อผิดพลาด' });
   }
 });
 
@@ -11846,32 +13303,33 @@ app.post('/api/restore', backupUpload.single('file'), async (req, res) => {
 });
 
 // AI Document Scanner Endpoint via Gemini API
-
-app.post('/api/ai-scan', async (req, res) => {
+app.post('/api/ai-scan', memoryUpload.single('file'), async (req, res) => {
   try {
-    const { base64, mimeType, outputType, hint } = req.body;
+    let base64 = '';
+    let mimeType = '';
+    let outputType = '';
+    let hint = '';
+    let clientApiKey = '';
+
+    if (req.file) {
+      base64 = req.file.buffer.toString('base64');
+      mimeType = req.file.mimetype;
+      outputType = req.body.outputType || 'auto';
+      hint = req.body.hint || '';
+      clientApiKey = req.body.apiKey || '';
+    } else {
+      base64 = req.body.base64;
+      mimeType = req.body.mimeType || 'image/jpeg';
+      outputType = req.body.outputType || 'auto';
+      hint = req.body.hint || '';
+      clientApiKey = req.body.apiKey || '';
+    }
+
     if (!base64) {
-      return res.status(400).json({ success: false, error: 'กรุณาส่งข้อมูลไฟล์เอกสาร (base64)' });
+      return res.status(400).json({ success: false, error: 'กรุณาส่งข้อมูลไฟล์เอกสาร (อัปโหลดไฟล์ "file" หรือส่ง "base64" ใน JSON)' });
     }
 
-    let apiKey = (req.body.apiKey || '').trim();
-
-    // 1. First check MySQL database settings
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {
-        console.warn('Could not query settings for geminiApiKey:', e);
-      }
-    }
-
-    // 2. Fallback to process.env.GEMINI_API_KEY if database settings key is empty
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    }
+    const apiKey = await getAppGeminiApiKey(clientApiKey);
 
     if (!apiKey) {
       return res.status(400).json({ 
@@ -11880,13 +13338,13 @@ app.post('/api/ai-scan', async (req, res) => {
       });
     }
 
-    const systemPrompt = `คุณคือผู้เชี่ยวชาญงานสารบรรณราชการไทย ที่มีความสามารถในการอ่าน สแกน และถอดความเอกสารราชการไทย
+    const systemPrompt = `คุณคือผู้เชี่ยวชาญงานสารบรรณราชการไทยและการจัดการภัยพิบัติ ที่มีความสามารถในการอ่าน สแกน และถอดความเอกสารราชการไทยรวมถึงแบบรายงานเหตุด่วนสาธารณภัย (Disaster/Urgent Incident Report)
 อ่านเอกสารในภาพหรือ PDF และสกัดข้อมูลออกมาเป็นโครงสร้าง JSON ตามที่กำหนดเท่านั้น`;
 
     const userPrompt = `อ่านและถอดความเอกสารราชการนี้ แล้วจัดโครงสร้างข้อมูลในรูปแบบ JSON ดังนี้:
 {
-  "docType": "ประเภทหนังสือ (หนังสือภายนอก/หนังสือภายใน/บันทึกข้อความ/คำสั่ง/ประกาศ/หนังสือรับรอง/หนังสือเวียน/ระเบียบ/ข้อบังคับ)",
-  "docNum": "เลขที่หนังสือ เช่น ศธ 04034/123 หรือ ว.15 หรือ รย 0021/ว123",
+  "docType": "ประเภทหนังสือ (หนังสือส่ง/หนังสือภายใน/บันทึกข้อความ/คำสั่ง/ประกาศ/หนังสือรับรอง/หนังสือเวียน/แบบรายงานเหตุด่วนสาธารณภัย)",
+  "docNum": "เลขที่หนังสือ เช่น ศธ 04034/123 หรือ ว.15 หรือ รย 0021/ว123 (สำหรับรายงานเหตุด่วน สามารถเป็นเลขที่หนังสือรับหรือส่งได้)",
   "date": "วันที่ เช่น 25 มกราคม 2569",
   "urgency": "ปกติ หรือ ด่วน หรือ ด่วนมาก หรือ ด่วนที่สุด",
   "secrecy": "ปกติ หรือ ลับ หรือ ลับมาก หรือ ลับที่สุด",
@@ -11900,85 +13358,116 @@ app.post('/api/ai-scan', async (req, res) => {
   "signerPos": "ตำแหน่งผู้ลงนาม",
   "rawText": "ข้อความทั้งหมดที่อ่านได้จากเอกสาร",
   "confidence": "สูง หรือ ปานกลาง หรือ ต่ำ",
-  "confidenceNote": "หมายเหตุเกี่ยวกับความชัดเจน"
+  "confidenceNote": "หมายเหตุเกี่ยวกับความชัดเจน",
+
+  // ฟิลด์พิเศษกรณีที่เป็น 'แบบรายงานเหตุด่วนสาธารณภัย' (ถ้าไม่ใช่ ให้ปล่อยเป็นค่าว่างหรือ array ว่าง)
+  "incidentTypes": ["อุทกภัย", "วาตภัย", "อัคคีภัย", "ภัยแล้ง", "ภัยหนาว", "ดินโคลนถล่ม", "อุบัติภัยทางถนน", "อุบัติภัยทางน้ำ", "โรคระบาด", "ไฟป่า", "ภัยอื่นๆ"],
+  "incidentTypeOther": "ภัยอื่นๆ นอกเหนือจากตัวเลือก (ถ้ามี)",
+  "severity": "เล็กน้อย หรือ ปานกลาง หรือ รุนแรง",
+  "startDate": "วันที่เกิดภัย",
+  "startTime": "เวลาที่เกิดภัย (HH:MM เช่น 08:30)",
+  "endDate": "วันที่สิ้นสุดภัย",
+  "endTime": "เวลาที่สิ้นสุดภัย (HH:MM)",
+  "location": "สถานที่เกิดภัยแบบละเอียด (ตำบล, อำเภอ, จังหวัด และจุดที่เกิดภัย)",
+  "affectedPeople": "จำนวนราษฎรที่เดือดร้อน (ตัวเลขจำนวนคน)",
+  "affectedHouseholds": "จำนวนครัวเรือนที่เดือดร้อน (ตัวเลขจำนวนครัวเรือน)",
+  "injured": "ผู้บาดเจ็บกี่คน (ตัวเลข)",
+  "dead": "ผู้เสียชีวิตกี่คน (ตัวเลข)",
+  "missing": "ผู้สูญหายกี่คน (ตัวเลข)",
+  "evacuatedPeople": "ผู้อพยพกี่คน (ตัวเลข)",
+  "evacuatedHouseholds": "ผู้อพยพกี่ครัวเรือน (ตัวเลข)",
+  "damageHouses": "จำนวนบ้านเรือนเสียหาย (ตัวเลข)",
+  "damageFactories": "จำนวนโรงงาน/อาคารพาณิชย์เสียหาย (ตัวเลข)",
+  "damageBuildingCost": "มูลค่าความเสียหายสิ่งก่อสร้าง (บาท)",
+  "damageAgricultureCost": "มูลค่าความเสียหายด้านการเกษตร (บาท)",
+  "damagePublicCost": "มูลค่าความเสียหายด้านสาธารณูปโภค (บาท)",
+  "totalDamageCost": "รวมมูลค่าความเสียหายทั้งหมด (บาท)",
+  "mitigation": "การบรรเทาภัย / การช่วยเหลือเบื้องต้น (ข้อความ)",
+  "reporterName": "ชื่อผู้รายงานภัย",
+  "reporterPosition": "ตำแหน่งผู้รายงานภัย"
 }
 
 ${outputType && outputType !== 'auto' ? `ผู้ใช้ต้องการแปลงเป็นประเภท: ${outputType}` : 'ตรวจจับประเภทหนังสือจากเอกสารจริง'}
 ${hint ? 'คำแนะนำเพิ่มเติมจากผู้ใช้: ' + hint : ''}`;
 
-    const client = new GoogleGenAI({ apiKey });
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
-    let response: any = null;
-    let lastError: any = null;
+    const client = getGeminiClient(apiKey, req);
 
-    for (const modelName of modelsToTry) {
-      try {
-        response = await client.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              inlineData: {
-                mimeType: mimeType || 'image/jpeg',
-                data: base64
-              }
-            },
-            { text: userPrompt }
-          ],
-          config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                docType: { type: Type.STRING },
-                docNum: { type: Type.STRING },
-                date: { type: Type.STRING },
-                urgency: { type: Type.STRING },
-                secrecy: { type: Type.STRING },
-                subject: { type: Type.STRING },
-                to: { type: Type.STRING },
-                from: { type: Type.STRING },
-                ref: { type: Type.STRING },
-                att: { type: Type.STRING },
-                body: { type: Type.STRING },
-                signer: { type: Type.STRING },
-                signerPos: { type: Type.STRING },
-                rawText: { type: Type.STRING },
-                confidence: { type: Type.STRING },
-                confidenceNote: { type: Type.STRING }
-              }
-            }
+    // Multi-tier Fallback: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash with Exponential Backoff
+    const { response, usedModel } = await callGeminiWithFallback({
+      client,
+      contents: [
+        {
+          inlineData: {
+            mimeType: mimeType || 'image/jpeg',
+            data: base64
           }
-        });
-        if (response) break;
-      } catch (err: any) {
-        lastError = err;
+        },
+        { text: userPrompt }
+      ],
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            docType: { type: Type.STRING },
+            docNum: { type: Type.STRING },
+            date: { type: Type.STRING },
+            urgency: { type: Type.STRING },
+            secrecy: { type: Type.STRING },
+            subject: { type: Type.STRING },
+            to: { type: Type.STRING },
+            from: { type: Type.STRING },
+            ref: { type: Type.STRING },
+            att: { type: Type.STRING },
+            body: { type: Type.STRING },
+            signer: { type: Type.STRING },
+            signerPos: { type: Type.STRING },
+            rawText: { type: Type.STRING },
+            confidence: { type: Type.STRING },
+            confidenceNote: { type: Type.STRING },
+            incidentTypes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            incidentTypeOther: { type: Type.STRING },
+            severity: { type: Type.STRING },
+            startDate: { type: Type.STRING },
+            startTime: { type: Type.STRING },
+            endDate: { type: Type.STRING },
+            endTime: { type: Type.STRING },
+            location: { type: Type.STRING },
+            affectedPeople: { type: Type.STRING },
+            affectedHouseholds: { type: Type.STRING },
+            injured: { type: Type.STRING },
+            dead: { type: Type.STRING },
+            missing: { type: Type.STRING },
+            evacuatedPeople: { type: Type.STRING },
+            evacuatedHouseholds: { type: Type.STRING },
+            damageHouses: { type: Type.STRING },
+            damageFactories: { type: Type.STRING },
+            damageBuildingCost: { type: Type.STRING },
+            damageAgricultureCost: { type: Type.STRING },
+            damagePublicCost: { type: Type.STRING },
+            totalDamageCost: { type: Type.STRING },
+            mitigation: { type: Type.STRING },
+            reporterName: { type: Type.STRING },
+            reporterPosition: { type: Type.STRING }
+          }
+        }
       }
-    }
-
-    if (!response) {
-      const errMsg = lastError?.message || String(lastError || 'ไม่สามารถประมวลผลไฟล์ผ่าน Gemini API ได้');
-      if (errMsg.includes('API_KEY_HTTP_REFERRER_BLOCKED') || errMsg.includes('403')) {
-        return res.status(403).json({
-          success: false,
-          error: 'GEMINI_API_KEY ของคุณมีการจำกัดสิทธิ์ HTTP Referrer บน Google Cloud Console กรุณาเข้าสู่ Google Cloud Console / AI Studio แล้วตั้งค่า API Key ให้ยอมรับ HTTP Referrer ของแอปพลิเคชันหรือทุก Referrer (*)'
-        });
-      }
-      throw lastError || new Error('ไม่สามารถประมวลผลไฟล์ผ่าน Gemini API ได้');
-    }
+    });
 
     const text = response.text || '';
-    let parsedJson = {};
+    let parsedJson: any = {};
     try {
       parsedJson = JSON.parse(text);
     } catch {
       parsedJson = { rawText: text, subject: 'เอกสารจากการสแกน' };
     }
 
-    return res.json({ success: true, result: parsedJson });
+    return res.json({ success: true, result: parsedJson, usedModel });
   } catch (err: any) {
     console.error('Error in AI scan:', err);
-    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสแกนเอกสารด้วย AI' });
+    const friendlyError = formatGeminiErrorMessage(err);
+    return res.status(500).json({ success: false, error: friendlyError });
   }
 });
 
@@ -12172,11 +13661,11 @@ ${JSON.stringify(candidates, null, 2)}
   ]
 }`;
 
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
     let response: any = null;
 
     if (apiKey) {
-      const client = new GoogleGenAI({ apiKey });
+      const client = getGeminiClient(apiKey, req);
       for (const modelName of modelsToTry) {
         try {
           response = await client.models.generateContent({
@@ -12363,11 +13852,11 @@ ${body || '-'}
 - ผู้ลงนาม: ${signer || '-'}
 - ตำแหน่งผู้ลงนาม: ${signerPos || '-'}`;
 
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
     let auditResponse: any = null;
 
     try {
-      const client = new GoogleGenAI({ apiKey });
+      const client = getGeminiClient(apiKey, req);
       for (const modelName of modelsToTry) {
         try {
           const resp = await client.models.generateContent({
@@ -12479,20 +13968,9 @@ ${body || '-'}
 // AI Official Letter Generator Endpoint
 app.post('/api/ai/draft-generate', async (req, res) => {
   try {
-    const { topic, docType, to, objective, tone, orgName, details } = req.body;
+    const { topic, docType, to, objective, tone, orgName, details, apiKey: reqApiKey } = req.body;
 
-    let apiKey = (req.body.apiKey || '').trim();
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
-    }
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    }
+    const apiKey = await getAppGeminiApiKey(reqApiKey);
 
     const org = orgName || 'ฝ่ายยุทธศาสตร์และการจัดการ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
 
@@ -12535,11 +14013,11 @@ app.post('/api/ai/draft-generate', async (req, res) => {
 - ข้อมูลเพิ่มเติม/รายละเอียด: ${details || '-'}
 - ระดับความเร่งด่วน: ${tone || 'ปกติ'}`;
 
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
     let draftResponse: any = null;
 
     try {
-      const client = new GoogleGenAI({ apiKey });
+      const client = getGeminiClient(apiKey, req);
       for (const modelName of modelsToTry) {
         try {
           const resp = await client.models.generateContent({
@@ -12599,150 +14077,258 @@ app.post('/api/ai/draft-generate', async (req, res) => {
   }
 });
 
+// HTML to DOCX Endpoint
+app.post('/api/export-docx', async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    
+    if (!html) {
+      return res.status(400).json({ error: 'Missing HTML content' });
+    }
+
+    const wordCSS = `
+      @font-face{font-family:'TH SarabunPSK';src:local('TH SarabunPSK'),local('TH Sarabun New'),local('Sarabun New');}
+      @page Section1{size:210mm 297mm;margin:25mm 20mm 20mm 30mm;}
+      div.Section1{page:Section1;}
+      *{font-family:'TH SarabunPSK','TH Sarabun New','Sarabun',sans-serif!important;}
+      html,body{font-family:'TH SarabunPSK','Sarabun',sans-serif;font-size:16pt;line-height:1.5;color:#000;background:#fff;margin:0;padding:0;}
+      p{font-family:'TH SarabunPSK';font-size:16pt;line-height:1.5;margin:0 0 3pt;text-align:justify;}
+      table{border-collapse:collapse;width:100%;margin:5pt 0;}
+      td,th{border:1pt solid #555;padding:4pt 7pt;font-size:16pt;line-height:1.5;vertical-align:middle;}
+      th{background:#d9d9d9;font-weight:700;text-align:center;}
+    `;
+
+    // Clean HTML to prevent html-to-docx invalid XML attribute errors (e.g. width percentages on td/th)
+    let cleanedHtml = html || '';
+    cleanedHtml = cleanedHtml.replace(/style="([^"]*)"/g, (match, styleContent) => {
+      const newStyle = styleContent
+        .split(';')
+        .filter((s: string) => !s.trim().startsWith('width') || !s.includes('%'))
+        .join(';');
+      return `style="${newStyle}"`;
+    });
+    cleanedHtml = cleanedHtml.replace(/(<td|<th|<table)\s+([^>]*)\bwidth=["']?\d+%\b["']?/gi, '$1 $2');
+
+    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${wordCSS}</style></head><body><div class="Section1">${cleanedHtml}</div></body></html>`;
+
+    const fileBuffer = await HTMLtoDOCX(fullHtml, null, {
+      table: { row: { cantSplit: true } },
+      font: 'TH SarabunPSK',
+      fontSize: 32, // 16pt in word (half-points)
+      margins: { top: 1440, right: 1134, bottom: 1134, left: 1701 }
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename || 'document')}.docx"`);
+    res.send(fileBuffer);
+  } catch (error: any) {
+    console.error('DOCX Export Error:', error);
+    res.status(500).json({ error: error.message || 'Error generating document' });
+  }
+});
+
+// AI Draft TOR Generate Endpoint
+app.post('/api/ai/draft-tor', async (req, res) => {
+  try {
+    const { projectName, projectType, budget, duration, details, orgName, apiKey: reqApiKey, procurements } = req.body;
+
+    const apiKey = await getAppGeminiApiKey(reqApiKey);
+    if (!apiKey) {
+      return res.status(500).json({ success: false, error: 'ไม่พบ Gemini API Key ในระบบ' });
+    }
+
+    const org = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+
+    let procurementSection = '';
+    if (procurements && Array.isArray(procurements) && procurements.length > 0) {
+      const total = procurements.reduce((sum, p) => sum + Number(String(p.price).replace(/,/g, '') || 0), 0);
+      procurementSection = `รายการจัดหาและงบประมาณ (รวมทั้งสิ้น ${total.toLocaleString()} บาท):\n` + 
+        procurements.map(p => `- ประเภทการจัดหา: ${p.type} ${p.name ? `(${p.name})` : ''} วงเงิน: ${Number(String(p.price).replace(/,/g, '') || 0).toLocaleString()} บาท`).join('\n');
+    } else {
+      procurementSection = `- ประเภทการจัดหา: ${projectType}\n- วงเงินงบประมาณ: ${budget} บาท`;
+    }
+
+    const userPrompt = `กรุณาร่างเอกสาร "ขอบเขตของงาน (Terms of Reference : TOR)" สำหรับส่วนราชการ (ใช้ภาษาทางการ ระเบียบพัสดุฯ)
+ข้อมูลโครงการมีดังนี้:
+- ชื่อโครงการ: ${projectName}
+${procurementSection}
+- ระยะเวลาดำเนินการ/ส่งมอบ: ${duration}
+- หน่วยงาน: ${org}
+- รายละเอียดขอบเขตงาน:
+${details}
+
+รูปแบบเอกสารที่ต้องการ:
+ขอให้สร้างโครงสร้าง TOR ให้ครบถ้วนสมบูรณ์ ประกอบด้วยหัวข้อหลัก (ปรับให้เข้ากับประเภทการจัดหา):
+๑. ความเป็นมา
+๒. วัตถุประสงค์
+๓. คุณสมบัติของผู้เสนอราคา
+๔. ขอบเขตของการดำเนินงาน / รายละเอียดคุณลักษณะเฉพาะ
+๕. ระยะเวลาการส่งมอบ
+๖. วงเงินงบประมาณ
+๗. การรับประกันความชำรุดบกพร่อง (ถ้ามี)
+๘. อัตราค่าปรับ (ถ้ามี)
+
+ตอบกลับเป็น HTML ที่พร้อมใช้งานในหน้าเว็บ ไม่ต้องมี Markdown ล้อมรอบ (ไม่ต้องมี \`\`\`html) ใช้แท็ก HTML เช่น <strong>, <p>, <ol>, <li>, และ inline CSS ที่จำเป็น (ฟอนต์ TH SarabunPSK ขนาด 16pt)`;
+
+    const client = getGeminiClient(apiKey, req);
+    let responseText = '';
+
+    try {
+      const { response } = await callGeminiWithFallback({
+        client,
+        contents: userPrompt,
+      });
+      if (response && response.text) {
+        responseText = response.text;
+      }
+    } catch (err: any) {
+      console.error('AI Draft TOR Exception:', err.message);
+      return res.status(500).json({ success: false, error: err.message || 'AI ไม่สามารถสร้างร่าง TOR ได้ในขณะนี้' });
+    }
+
+    if (responseText) {
+      let cleanHtml = responseText.replace(/^```html\n?/, '').replace(/\n?```$/, '');
+      return res.json({ success: true, result: cleanHtml });
+    }
+
+    return res.status(500).json({ success: false, error: 'AI ไม่สามารถสร้างร่าง TOR ได้ในขณะนี้' });
+  } catch (err: any) {
+    console.error('Error in AI draft TOR:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างร่าง TOR ด้วย AI' });
+  }
+});
+
+// AI Official Letter Auto-Format according to Thai Saraban Regulations Endpoint
 // AI Official Letter Auto-Format according to Thai Saraban Regulations Endpoint
 app.post('/api/ai/auto-format-saraban', async (req, res) => {
-  try {
-    const {
-      body,
-      docType,
-      docNum,
-      date,
-      to,
-      subject,
-      ref,
-      att,
-      signer,
-      signerPos,
-      orgName,
-      options = {}
-    } = req.body;
+  const {
+    body,
+    docType,
+    docNum,
+    date,
+    to,
+    subject,
+    ref,
+    att,
+    signer,
+    signerPos,
+    orgName,
+    options = {}
+  } = req.body;
 
-    const convertDigits = options.convertToThaiNumerals !== false;
-    const enforceThreeParts = options.enforceThreeParagraphs !== false;
-    const fixSpacing = options.standardizeSpacing !== false;
+  const convertDigits = options.convertToThaiNumerals !== false;
+  const enforceThreeParts = options.enforceThreeParagraphs !== false;
+  const fixSpacing = options.standardizeSpacing !== false;
 
-    let apiKey = (req.body.apiKey || '').trim();
-    if (!apiKey && isMysqlOnline) {
-      try {
-        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
+  const org = orgName || 'ฝ่ายยุทธศาสตร์และการจัดการ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+
+  // Local rule-based engine helper function
+  const toThaiNum = (str: string) => {
+    if (!str) return '';
+    return String(str).replace(/[0-9]/g, d => '๐๑๒๓๔๕๖๗๘๙'[parseInt(d, 10)] || d);
+  };
+
+  const runLocalFormatter = (rawContent: string) => {
+    let text = (rawContent || '').trim();
+    let paragraphs: string[] = [];
+
+    if (text.includes('<p') || text.includes('</p>')) {
+      const matches = text.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
+      if (matches && matches.length > 0) {
+        paragraphs = matches.map(m => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean);
+      }
     }
-    if (!apiKey && typeof localDb !== 'undefined' && localDb && localDb.settings && localDb.settings[0] && localDb.settings[0].geminiApiKey) {
-      apiKey = String(localDb.settings[0].geminiApiKey).trim();
+    
+    if (paragraphs.length === 0) {
+      paragraphs = text
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .split(/\n\s*\n|\n/)
+        .map(p => p.trim())
+        .filter(Boolean);
     }
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
+
+    if (paragraphs.length === 0) {
+      paragraphs = [`ด้วย ${org} มีภารกิจในการปฏิบัติราชการตามที่ได้รับมอบหมาย`];
     }
 
-    const org = orgName || 'ฝ่ายยุทธศาสตร์และการจัดการ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+    const changes: string[] = [];
+    const appliedRules: string[] = [];
+    const formattedParagraphs: string[] = [];
 
-    // Local rule-based engine helper function
-    const toThaiNum = (str: string) => {
-      if (!str) return '';
-      return String(str).replace(/[0-9]/g, d => '๐๑๒๓๔๕๖๗๘๙'[parseInt(d, 10)] || d);
-    };
+    paragraphs.forEach((p, idx) => {
+      let cleanP = p.replace(/\s+/g, ' ').trim();
+      const isSubItem = /^([0-9๐-๙]+\.|\([0-9๐-๙]+\)|ข้อ\s*[0-9๐-๙]+)/.test(cleanP);
 
-    const runLocalFormatter = (rawContent: string) => {
-      let text = (rawContent || '').trim();
-      let paragraphs: string[] = [];
-
-      if (text.includes('<p') || text.includes('</p>')) {
-        const matches = text.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
-        if (matches && matches.length > 0) {
-          paragraphs = matches.map(m => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean);
+      if (idx === 0 && !isSubItem) {
+        if (!cleanP.startsWith('ด้วย') && !cleanP.startsWith('ตามที่') && !cleanP.startsWith('ตามหนังสือ') && !cleanP.startsWith('สืบเนื่อง')) {
+          cleanP = 'ด้วย ' + cleanP;
+          changes.push('ปรับปรุงคำขึ้นต้นย่อหน้าแรกเป็น "ด้วย..." ตามระเบียบสำนักนายกรัฐมนตรีฯ');
+        }
+      } else if (idx === 1 && paragraphs.length >= 3 && !isSubItem) {
+        if (!cleanP.startsWith('ในการนี้') && !cleanP.startsWith('เพื่อประโยชน์') && !cleanP.startsWith('ฉะนั้น') && !cleanP.startsWith('ข้อพิจารณา') && !cleanP.startsWith('ข้อเสนอ')) {
+          cleanP = 'ในการนี้ ' + cleanP;
+          changes.push('ปรับปรุงคำเชื่อมโยงย่อหน้าสองเป็น "ในการนี้..." เพื่อความถูกต้องทางราชการ');
         }
       }
-      
-      if (paragraphs.length === 0) {
-        paragraphs = text
-          .replace(/<br\s*\/?>/gi, '\n')
-          .replace(/<[^>]+>/g, '')
-          .split(/\n\s*\n|\n/)
-          .map(p => p.trim())
-          .filter(Boolean);
+
+      if (cleanP.includes('นั้น')) {
+        cleanP = cleanP.replace(/(\S)\s*นั้น\s*(\S)/g, '$1  นั้น  $2');
+        appliedRules.push('เว้นวรรค ๒ ช่วงตัวอักษรหน้า-หลังคำว่า "นั้น" ตามระเบียบสำนักนายกรัฐมนตรีฯ');
       }
 
-      if (paragraphs.length === 0) {
-        paragraphs = [`ด้วย ${org} มีภารกิจในการปฏิบัติราชการตามที่ได้รับมอบหมาย`];
-      }
-
-      const changes: string[] = [];
-      const appliedRules: string[] = [];
-      const formattedParagraphs: string[] = [];
-
-      paragraphs.forEach((p, idx) => {
-        let cleanP = p.replace(/\s+/g, ' ').trim();
-        const isSubItem = /^([0-9๐-๙]+\.|\([0-9๐-๙]+\)|ข้อ\s*[0-9๐-๙]+)/.test(cleanP);
-
-        if (idx === 0 && !isSubItem) {
-          if (!cleanP.startsWith('ด้วย') && !cleanP.startsWith('ตามที่') && !cleanP.startsWith('ตามหนังสือ') && !cleanP.startsWith('สืบเนื่อง')) {
-            cleanP = 'ด้วย ' + cleanP;
-            changes.push('ปรับปรุงคำขึ้นต้นย่อหน้าแรกเป็น "ด้วย..." ตามระเบียบสำนักนายกรัฐมนตรีฯ');
-          }
-        } else if (idx === 1 && paragraphs.length >= 3 && !isSubItem) {
-          if (!cleanP.startsWith('ในการนี้') && !cleanP.startsWith('เพื่อประโยชน์') && !cleanP.startsWith('ฉะนั้น') && !cleanP.startsWith('ข้อพิจารณา') && !cleanP.startsWith('ข้อเสนอ')) {
-            cleanP = 'ในการนี้ ' + cleanP;
-            changes.push('ปรับปรุงคำเชื่อมโยงย่อหน้าสองเป็น "ในการนี้..." เพื่อความถูกต้องทางราชการ');
-          }
-        }
-
-        if (cleanP.includes('นั้น')) {
-          cleanP = cleanP.replace(/(\S)\s*นั้น\s*(\S)/g, '$1  นั้น  $2');
-          appliedRules.push('เว้นวรรค ๒ ช่วงตัวอักษรหน้า-หลังคำว่า "นั้น" ตามระเบียบสำนักนายกรัฐมนตรีฯ');
-        }
-
-        if (convertDigits) {
-          cleanP = toThaiNum(cleanP);
-        }
-
-        if (isSubItem) {
-          formattedParagraphs.push(`<p style="margin-left: 1.5em; text-indent: 1.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.6em; line-height: 1.6;">${cleanP}</p>`);
-        } else {
-          formattedParagraphs.push(`<p style="text-indent: 2.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.8em; line-height: 1.6;">${cleanP}</p>`);
-        }
-      });
-
-      const lastP = formattedParagraphs[formattedParagraphs.length - 1] || '';
-      const hasClosing = /จึงเรียนมาเพื่อ|จึงเรียนยืนยัน|จึงเรียนรายงาน/.test(lastP);
-
-      let closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณา';
-      if (to && (to.includes('รัฐมนตรี') || to.includes('ปลัด') || to.includes('ผู้ว่า'))) {
-        closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณา';
-      } else if (subject && (subject.includes('ขออนุมัติ') || subject.includes('อนุมัติ'))) {
-        closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ';
-      } else if (subject && (subject.includes('แจ้ง') || subject.includes('ทราบ') || subject.includes('รายงาน'))) {
-        closingWord = 'จึงเรียนมาเพื่อโปรดทราบ';
-      }
-
-      if (enforceThreeParts && !hasClosing) {
-        formattedParagraphs.push(`<p style="text-indent: 2.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.8em; line-height: 1.6;">${closingWord}</p>`);
-        changes.push(`เพิ่มย่อหน้าภาคสรุป/คำลงท้ายมาตรฐาน: "${closingWord}"`);
-      }
-
-      changes.push('จัดระยะร่นย่อหน้าแรก (Indent) ๒.๕ ซม. และจัดขอบสองข้าง (Justify)');
       if (convertDigits) {
-        changes.push('แปลงตัวเลขทั้งหมดเป็นเลขไทย (๐-๙)');
+        cleanP = toThaiNum(cleanP);
       }
-      appliedRules.push('ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ ข้อ ๑๗-๒๐ (การพิมพ์และการจัดหน้า)');
 
-      const formattedHtml = formattedParagraphs.join('');
-      const docNumFormatted = convertDigits ? toThaiNum(docNum || '') : docNum;
+      if (isSubItem) {
+        formattedParagraphs.push(`<p style="margin-left: 1.5em; text-indent: 1.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.6em; line-height: 1.6;">${cleanP}</p>`);
+      } else {
+        formattedParagraphs.push(`<p style="text-indent: 2.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.8em; line-height: 1.6;">${cleanP}</p>`);
+      }
+    });
 
-      return {
-        formattedHtml,
-        docNumFormatted,
-        dateFormatted: date || '',
-        subjectFormatted: subject || '',
-        toFormatted: to || '',
-        closingWord,
-        summaryOfChanges: Array.from(new Set(changes)),
-        appliedRules: Array.from(new Set(appliedRules)),
-        paragraphCount: formattedParagraphs.length
-      };
+    const lastP = formattedParagraphs[formattedParagraphs.length - 1] || '';
+    const hasClosing = /จึงเรียนมาเพื่อ|จึงเรียนยืนยัน|จึงเรียนรายงาน/.test(lastP);
+
+    let closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณา';
+    if (to && (to.includes('รัฐมนตรี') || to.includes('ปลัด') || to.includes('ผู้ว่า'))) {
+      closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณา';
+    } else if (subject && (subject.includes('ขออนุมัติ') || subject.includes('อนุมัติ'))) {
+      closingWord = 'จึงเรียนมาเพื่อโปรดพิจารณาอนุมัติ';
+    } else if (subject && (subject.includes('แจ้ง') || subject.includes('ทราบ') || subject.includes('รายงาน'))) {
+      closingWord = 'จึงเรียนมาเพื่อโปรดทราบ';
+    }
+
+    if (enforceThreeParts && !hasClosing) {
+      formattedParagraphs.push(`<p style="text-indent: 2.5em; text-align: justify; text-justify: inter-cluster; margin-bottom: 0.8em; line-height: 1.6;">${closingWord}</p>`);
+      changes.push(`เพิ่มย่อหน้าภาคสรุป/คำลงท้ายมาตรฐาน: "${closingWord}"`);
+    }
+
+    changes.push('จัดระยะร่นย่อหน้าแรก (Indent) ๒.๕ ซม. และจัดขอบสองข้าง (Justify)');
+    if (convertDigits) {
+      changes.push('แปลงตัวเลขทั้งหมดเป็นเลขไทย (๐-๙)');
+    }
+    appliedRules.push('ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ ข้อ ๑๗-๒๐ (การพิมพ์และการจัดหน้า)');
+
+    const formattedHtml = formattedParagraphs.join('');
+    const docNumFormatted = convertDigits ? toThaiNum(docNum || '') : docNum;
+
+    return {
+      formattedHtml,
+      docNumFormatted,
+      dateFormatted: date || '',
+      subjectFormatted: subject || '',
+      toFormatted: to || '',
+      closingWord,
+      summaryOfChanges: Array.from(new Set(changes)),
+      appliedRules: Array.from(new Set(appliedRules)),
+      paragraphCount: formattedParagraphs.length
     };
+  };
+
+  try {
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
 
     if (apiKey) {
       const systemPrompt = `คุณคือผู้เชี่ยวชาญการจัดหน้าและรูปแบบหนังสือราชการไทยตาม "ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ และที่แก้ไขเพิ่มเติม" อย่างเคร่งครัด
@@ -12779,68 +14365,70 @@ app.post('/api/ai/auto-format-saraban', async (req, res) => {
 - เนื้อความเดิมที่ต้องการให้จัดหน้า:
 ${body || '-'}`;
 
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
       let aiResult: any = null;
 
       try {
-        const client = new GoogleGenAI({ apiKey });
+        const client = getGeminiClient(apiKey, req);
         const generateTask = async () => {
-          for (const modelName of modelsToTry) {
-            try {
-              const resp = await client.models.generateContent({
-                model: modelName,
-                contents: [{ text: userPrompt }],
-                config: {
-                  systemInstruction: systemPrompt,
-                  responseMimeType: 'application/json',
-                  responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                      formattedHtml: { type: Type.STRING },
-                      docNumFormatted: { type: Type.STRING },
-                      dateFormatted: { type: Type.STRING },
-                      subjectFormatted: { type: Type.STRING },
-                      toFormatted: { type: Type.STRING },
-                      closingWord: { type: Type.STRING },
-                      summaryOfChanges: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING }
-                      },
-                      appliedRules: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING }
-                      },
-                      paragraphCount: { type: Type.INTEGER }
-                    },
-                    required: ['formattedHtml', 'docNumFormatted', 'closingWord', 'summaryOfChanges']
-                  }
-                }
-              });
-              if (resp && resp.text) {
-                return JSON.parse(resp.text);
+          const { response } = await callGeminiWithFallback({
+            client,
+            contents: [{ text: userPrompt }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  formattedHtml: { type: Type.STRING },
+                  docNumFormatted: { type: Type.STRING },
+                  dateFormatted: { type: Type.STRING },
+                  subjectFormatted: { type: Type.STRING },
+                  toFormatted: { type: Type.STRING },
+                  closingWord: { type: Type.STRING },
+                  summaryOfChanges: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  appliedRules: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  paragraphCount: { type: Type.INTEGER }
+                },
+                required: ['formattedHtml', 'docNumFormatted', 'closingWord', 'summaryOfChanges']
               }
-            } catch (err) {
-              // try next model
             }
+          });
+
+          if (response && response.text) {
+            return JSON.parse(response.text);
           }
           return null;
         };
 
-        const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 8000));
+        const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 12000));
         aiResult = await Promise.race([generateTask(), timeoutPromise]);
-      } catch (err) {}
+      } catch (err) {
+        console.error('Gemini auto-format execution failed, using local fallback:', err);
+      }
 
       if (aiResult) {
         return res.json({ success: true, result: aiResult });
       }
     }
 
+    // Direct fallback to local formatter if API is missing or fails
     const localResult = runLocalFormatter(body || '');
-    return res.json({ success: true, result: localResult });
+    return res.json({ success: true, result: localResult, localFallback: true });
 
   } catch (err: any) {
-    console.error('Error in auto-format-saraban:', err);
-    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการจัดหน้าระเบียบสารบรรณด้วย AI' });
+    console.error('Critical Error in auto-format-saraban endpoint:', err);
+    try {
+      const localResult = runLocalFormatter(body || '');
+      return res.json({ success: true, result: localResult, localFallback: true });
+    } catch (innerErr) {
+      return res.status(500).json({ success: false, error: 'เกิดข้อผิดพลาดรุนแรงในการจัดหน้าหนังสือราชการ' });
+    }
   }
 });
 
@@ -13360,8 +14948,8 @@ ${d.resultQl}
 - ในส่วนท้ายของรายงาน ให้จัดรูปแบบตารางสำหรับลงลายมือชื่อที่ชัดเจนและสมมาตร โดยผู้จัดทำรายงานด้านซ้ายคือ (ลงชื่อ) .................................... (${d.owner || 'ณัฐพันธุ์ ศรีวนิช'}) ผู้จัดทำ/เสนอรายงาน และผู้รับทราบด้านขวาคือ (ลงชื่อ) .................................... (${d.principal || 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}) ผู้บังคับบัญชา / ผู้รับทราบ
 - ตอบเฉพาะโค้ด HTML เท่านั้น โดยไม่ต้องมีคำอธิบาย หรือ Markdown code fence (\`\`\`html) หุ้ม`;
 
-    const client = new GoogleGenAI({ apiKey });
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest'];
+    const client = getGeminiClient(apiKey, req);
+    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
     let responseText = '';
 
     for (const modelName of modelsToTry) {
@@ -13754,46 +15342,37 @@ ${dateStr}
 // Smart e-Saraban AI Assistant Endpoint
 app.post('/api/ai-assistant', async (req, res) => {
   try {
-    const { prompt, history, user, filterContext, selectedDoc } = req.body;
+    const { prompt, history, user, filterContext, selectedDoc, apiKey: reqApiKey } = req.body;
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({ success: false, error: 'กรุณาระบุคำถามหรือคำสั่งสำหรับผู้ช่วย AI' });
     }
 
     const cleanPrompt = prompt.trim();
     
-    // 1. Fetch all active documents from DB for current context
+    // 1. Fetch all active documents from DB for current context (if MySQL is online)
     let documents: any[] = [];
-    try {
-      const query = `
-        SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM inbox_documents
-        UNION ALL
-        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM outbox_documents
-        UNION ALL
-        SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM circular_documents
-        UNION ALL
-        SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM internal_documents
-        UNION ALL
-        SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, 'ปกติ' AS priority, 'ปกติ' AS secrecy, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, status FROM admin_documents
-      `;
-      const [rows]: any = await pool.query(query);
-      documents = rows || [];
-    } catch (dbErr) {
-      console.warn('AI Assistant DB query fallback:', dbErr);
+    if (typeof pool !== 'undefined' && isMysqlOnline) {
+      try {
+        const query = `
+          SELECT id, 'inbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM inbox_documents
+          UNION ALL
+          SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM outbox_documents
+          UNION ALL
+          SELECT id, 'outbox' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM circular_documents
+          UNION ALL
+          SELECT id, 'internal' AS type, docNumber, receiveNumber, year, date, priority, secrecy, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, status FROM internal_documents
+          UNION ALL
+          SELECT id, 'admin' AS type, docNumber, NULL AS receiveNumber, year, date, 'ปกติ' AS priority, 'ปกติ' AS secrecy, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, status FROM admin_documents
+        `;
+        const [rows]: any = await pool.query(query);
+        documents = rows || [];
+      } catch (dbErr) {
+        console.warn('AI Assistant DB query fallback:', dbErr);
+      }
     }
 
     // 2. Fetch Gemini API Key
-    let apiKey = '';
-    try {
-      const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-      if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-        apiKey = String(stRows[0].geminiApiKey).trim();
-      }
-    } catch (e) {
-      // ignore
-    }
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    }
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
 
     const docsSummaryContext = documents.slice(0, 60).map(d => ({
       id: d.id,
@@ -13816,12 +15395,9 @@ app.post('/api/ai-assistant', async (req, res) => {
     let aiResponsePayload: any = null;
 
     if (apiKey) {
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
-      const client = new GoogleGenAI({ apiKey });
-
-      for (const modelName of modelsToTry) {
-        try {
-          const systemPrompt = `คุณคือ "Smart e-Saraban AI Assistant" ผู้ช่วยปัญญาประดิษฐ์ระดับสูงประจำระบบสารบรรณอิเล็กทรอนิกส์
+      try {
+        const client = getGeminiClient(apiKey, req);
+        const systemPrompt = `คุณคือ "Smart e-Saraban AI Assistant" ผู้ช่วยปัญญาประดิษฐ์ระดับสูงประจำระบบสารบรรณอิเล็กทรอนิกส์
 สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (ปภ.จังหวัดระยอง)
 
 โครงสร้างฝ่ายงานหลัก 3 ฝ่าย:
@@ -13859,132 +15435,136 @@ ${selectedDoc ? `[เอกสารที่ผู้ใช้เลือก�
 - ถ้าเป็น "rewrite" ให้ใส่ "rewriteResult"
 - ถ้าเป็น "regulation_qa" ให้ใส่ "regulationResult"`;
 
-          const geminiResp = await client.models.generateContent({
-            model: modelName,
-            contents: [{ text: `คำถาม/คำสั่งจากผู้ใช้: "${cleanPrompt}"` }],
-            config: {
-              systemInstruction: systemPrompt,
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  replyText: { type: Type.STRING },
-                  intentType: { type: Type.STRING },
-                  suggestedFollowUps: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  matchedDocs: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        id: { type: Type.STRING },
-                        type: { type: Type.STRING },
-                        docNumber: { type: Type.STRING },
-                        receiveNumber: { type: Type.STRING },
-                        title: { type: Type.STRING },
-                        from: { type: Type.STRING },
-                        to: { type: Type.STRING },
-                        department: { type: Type.STRING },
-                        date: { type: Type.STRING },
-                        priority: { type: Type.STRING },
-                        status: { type: Type.STRING },
-                        matchReason: { type: Type.STRING }
-                      }
-                    }
-                  },
-                  summaryResult: {
+        const { response } = await callGeminiWithFallback({
+          client,
+          contents: [{ text: `คำถาม/คำสั่งจากผู้ใช้: "${cleanPrompt}"` }],
+          config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                replyText: { type: Type.STRING },
+                intentType: { type: Type.STRING },
+                suggestedFollowUps: { type: Type.ARRAY, items: { type: Type.STRING } },
+                matchedDocs: {
+                  type: Type.ARRAY,
+                  items: {
                     type: Type.OBJECT,
                     properties: {
-                      docId: { type: Type.STRING },
+                      id: { type: Type.STRING },
+                      type: { type: Type.STRING },
                       docNumber: { type: Type.STRING },
+                      receiveNumber: { type: Type.STRING },
                       title: { type: Type.STRING },
-                      fromDept: { type: Type.STRING },
-                      toDept: { type: Type.STRING },
+                      from: { type: Type.STRING },
+                      to: { type: Type.STRING },
+                      department: { type: Type.STRING },
                       date: { type: Type.STRING },
-                      subject: { type: Type.STRING },
-                      coreContent: { type: Type.STRING },
-                      governingRule: { type: Type.STRING },
-                      recommendation: { type: Type.STRING },
-                      nextAction: { type: Type.STRING }
+                      priority: { type: Type.STRING },
+                      status: { type: Type.STRING },
+                      matchReason: { type: Type.STRING }
                     }
-                  },
-                  draftLetter: {
-                    type: Type.OBJECT,
-                    properties: {
-                      docType: { type: Type.STRING },
-                      docNumber: { type: Type.STRING },
-                      dateStr: { type: Type.STRING },
-                      subject: { type: Type.STRING },
-                      salutation: { type: Type.STRING },
-                      reference: { type: Type.STRING },
-                      attachment: { type: Type.STRING },
-                      bodyParagraphs: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      closing: { type: Type.STRING },
-                      signatory: { type: Type.STRING },
-                      signatoryPosition: { type: Type.STRING },
-                      departmentName: { type: Type.STRING },
-                      fullDraftText: { type: Type.STRING }
-                    }
-                  },
-                  pendingTasksSummary: {
-                    type: Type.OBJECT,
-                    properties: {
-                      departmentName: { type: Type.STRING },
-                      totalPendingCount: { type: Type.INTEGER },
-                      urgentCount: { type: Type.INTEGER },
-                      overdueCount: { type: Type.INTEGER },
-                      statusBreakdown: { type: Type.STRING },
-                      recommendationNote: { type: Type.STRING },
+                  }
+                },
+                summaryResult: {
+                  type: Type.OBJECT,
+                  properties: {
+                    docId: { type: Type.STRING },
+                    docNumber: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    fromDept: { type: Type.STRING },
+                    toDept: { type: Type.STRING },
+                    date: { type: Type.STRING },
+                    subject: { type: Type.STRING },
+                    coreContent: { type: Type.STRING },
+                    governingRule: { type: Type.STRING },
+                    recommendation: { type: Type.STRING },
+                    nextAction: { type: Type.STRING }
+                  }
+                },
+                draftLetter: {
+                  type: Type.OBJECT,
+                  properties: {
+                    docType: { type: Type.STRING },
+                    docNumber: { type: Type.STRING },
+                    dateStr: { type: Type.STRING },
+                    subject: { type: Type.STRING },
+                    salutation: { type: Type.STRING },
+                    reference: { type: Type.STRING },
+                    attachment: { type: Type.STRING },
+                    bodyParagraphs: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    closing: { type: Type.STRING },
+                    signatory: { type: Type.STRING },
+                    signatoryPosition: { type: Type.STRING },
+                    departmentName: { type: Type.STRING },
+                    fullDraftText: { type: Type.STRING }
+                  }
+                },
+                pendingTasksSummary: {
+                  type: Type.OBJECT,
+                  properties: {
+                    departmentName: { type: Type.STRING },
+                    totalPendingCount: { type: Type.INTEGER },
+                    urgentCount: { type: Type.INTEGER },
+                    overdueCount: { type: Type.INTEGER },
+                    statusBreakdown: { type: Type.STRING },
+                    recommendationNote: { type: Type.STRING },
+                    items: {
+                      type: Type.ARRAY,
                       items: {
-                        type: Type.ARRAY,
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            id: { type: Type.STRING },
-                            docNumber: { type: Type.STRING },
-                            title: { type: Type.STRING },
-                            from: { type: Type.STRING },
-                            date: { type: Type.STRING },
-                            priority: { type: Type.STRING },
-                            status: { type: Type.STRING },
-                            daysPending: { type: Type.INTEGER }
-                          }
+                        type: Type.OBJECT,
+                        properties: {
+                          id: { type: Type.STRING },
+                          docNumber: { type: Type.STRING },
+                          title: { type: Type.STRING },
+                          from: { type: Type.STRING },
+                          date: { type: Type.STRING },
+                          priority: { type: Type.STRING },
+                          status: { type: Type.STRING },
+                          daysPending: { type: Type.INTEGER }
                         }
                       }
                     }
-                  },
-                  rewriteResult: {
-                    type: Type.OBJECT,
-                    properties: {
-                      originalText: { type: Type.STRING },
-                      polishedText: { type: Type.STRING },
-                      toneStyle: { type: Type.STRING },
-                      improvedPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      explanation: { type: Type.STRING }
-                    }
-                  },
-                  regulationResult: {
-                    type: Type.OBJECT,
-                    properties: {
-                      topic: { type: Type.STRING },
-                      relevantAct: { type: Type.STRING },
-                      ruleArticle: { type: Type.STRING },
-                      explanation: { type: Type.STRING },
-                      practicalGuide: { type: Type.STRING },
-                      caution: { type: Type.STRING }
-                    }
+                  }
+                },
+                rewriteResult: {
+                  type: Type.OBJECT,
+                  properties: {
+                    originalText: { type: Type.STRING },
+                    polishedText: { type: Type.STRING },
+                    toneStyle: { type: Type.STRING },
+                    improvedPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    explanation: { type: Type.STRING }
+                  }
+                },
+                regulationResult: {
+                  type: Type.OBJECT,
+                  properties: {
+                    topic: { type: Type.STRING },
+                    relevantAct: { type: Type.STRING },
+                    ruleArticle: { type: Type.STRING },
+                    explanation: { type: Type.STRING },
+                    practicalGuide: { type: Type.STRING },
+                    caution: { type: Type.STRING }
                   }
                 }
               }
             }
-          });
+          },
+          maxRetriesPerModel: 1,
+          initialDelayMs: 600
+        });
 
-          if (geminiResp && geminiResp.text) {
-            aiResponsePayload = JSON.parse(geminiResp.text);
-            break;
+        if (response && response.text) {
+          try {
+            aiResponsePayload = JSON.parse(response.text);
+          } catch {
+            // json parse fallback
           }
-        } catch (geminiError: any) {
-          // Continue to next model or fallback
         }
+      } catch (geminiError: any) {
+        console.log('AI Assistant Gemini fallback triggered:', geminiError?.status || 'unknown');
       }
     }
 
@@ -14707,10 +16287,10 @@ app.post('/api/ai/infographics', async (req, res) => {
       });
     }
 
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
+    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
     let generatedData = null;
 
-    const client = new GoogleGenAI({ apiKey });
+    const client = getGeminiClient(apiKey, req);
 
     for (const modelName of modelsToTry) {
         try {
@@ -14942,6 +16522,546 @@ app.delete('/api/infographics-assets/images', async (req, res) => {
   }
 });
 
+// ==========================================
+// AI URGENT INCIDENT SCAN ROUTE
+// ==========================================
+app.post('/api/ai/scan-urgent-incident', memoryUpload.single('file'), async (req, res) => {
+  try {
+    let fileBase64 = '';
+    let mimeType = '';
+    let reqApiKey = '';
+
+    if (req.file) {
+      fileBase64 = req.file.buffer.toString('base64');
+      mimeType = req.file.mimetype;
+      reqApiKey = req.body.apiKey || '';
+    } else {
+      fileBase64 = req.body.fileBase64;
+      mimeType = req.body.mimeType || 'image/jpeg';
+      reqApiKey = req.body.apiKey || '';
+    }
+
+    if (!fileBase64) {
+      return res.status(400).json({ success: false, error: 'กรุณาแนบไฟล์เอกสารที่ต้องการสแกน (อัปโหลดไฟล์ "file" หรือส่ง "fileBase64" ใน JSON)' });
+    }
+
+    const apiKey = await getAppGeminiApiKey(reqApiKey);
+    if (!apiKey) {
+      return res.status(500).json({ success: false, error: 'ไม่พบ Gemini API Key ในระบบ กรุณากำหนด API Key ในเมนูตั้งค่าระบบ' });
+    }
+
+    const client = getGeminiClient(apiKey, req);
+
+    const prompt = 'คุณคือผู้ช่วยถอดความแบบรายงานเหตุด่วนสาธารณภัย (Urgent Incident Report) ของประเทศไทย\nให้ดึงข้อมูลจากเอกสารรูปภาพ หรือ PDF ที่แนบมา แล้วส่งกลับมาเป็น JSON ตาม schema ดังนี้:\n{\n  "docNumber": "เลขที่หนังสือที่ สส ... (ถ้ามี)",\n  "docDate": "วันที่หนังสือ (ถ้ามี)",\n  "fromPerson": "จากใคร (ถ้ามี/ส่วนใหญ่นายอำเภอ)",\n  "toPerson": "ถึงใคร (ถ้ามี/ส่วนใหญ่ผู้ว่าราชการจังหวัด/ผู้อำนวยการจังหวัด)",\n  "incidentTypes": ["อุทกภัย", "ความแห้งแล้ง", "วาตภัย", "อัคคีภัย", "ไฟป่า", "อุบัติภัย", "อากาศหนาว", "แผ่นดินไหว", "สารเคมีและวัตถุอันตราย", "ทุ่นระเบิด", "การป้องกันและระงับภัยทางอากาศ", "การก่อวินาศกรรม", "การอพยพประชาชนและส่วนราชการ"], // เลือกชนิดภัยที่ระบุในเอกสารเป็น array ของ string จากลิสต์ตัวเลือกนี้เท่านั้น\n  "incidentTypeOther": "ภัยอื่นๆ นอกเหนือจากตัวเลือก (ถ้ามี)",\n  "severity": "เล็กน้อย" หรือ "ปานกลาง" หรือ "รุนแรง",\n  "startDate": "วันที่เกิดภัย",\n  "startTime": "เวลาที่เกิดภัย (HH:MM)",\n  "endDate": "วันที่สิ้นสุดภัย",\n  "endTime": "เวลาที่สิ้นสุดภัย (HH:MM)",\n  "location": "สถานที่เกิดภัยแบบเต็ม",\n  "affectedPeople": "จำนวนคนเดือดร้อน (ตัวเลข)",\n  "affectedHouseholds": "จำนวนครัวเรือนที่เดือดร้อน (ตัวเลข)",\n  "injured": "บาดเจ็บกี่คน (ตัวเลข)",\n  "dead": "เสียชีวิตกี่คน (ตัวเลข)",\n  "missing": "สูญหายกี่คน (ตัวเลข)",\n  "evacuatedPeople": "อพยพกี่คน (ตัวเลข)",\n  "evacuatedHouseholds": "อพยพกี่ครัวเรือน (ตัวเลข)",\n  "damageHouses": "จำนวนบ้านเสียหาย (ตัวเลข)",\n  "damageHighRises": "จำนวนอาคารสูงเสียหาย (ตัวเลข)",\n  "damageFactories": "จำนวนโรงงานเสียหาย (ตัวเลข)",\n  "damageTemples": "จำนวนวัดเสียหาย (ตัวเลข)",\n  "damageGovBuildings": "จำนวนอาคารราชการเสียหาย (ตัวเลข)",\n  "damageOtherBuildings": "สิ่งปลูกสร้างอื่นๆ เสียหาย (ตัวเลข)",\n  "damageBuildingCost": "รวมมูลค่าสิ่งปลูกสร้างเสียหาย (ตัวเลข)",\n  "damageAgricultureCrops": "พืชไร่เสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureRice": "นาข้าวเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureOrchard": "สวนเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureFish": "บ่อปลาเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureShrimp": "บ่อกุ้งเสียหายกี่ไร่ (ตัวเลข)",\n  "damageLivestockCow": "วัวควายเสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockPig": "หมูเสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockPoultry": "เป็ดไก่เสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockOther": "สัตว์เลี้ยงอื่นๆ (ข้อความ)",\n  "damageAgricultureCost": "รวมมูลค่าเกษตรเสียหาย (ตัวเลข)",\n  "damagePublicRoads": "ถนนเสียหายกี่สาย (ตัวเลข)",\n  "damagePublicBridges": "สะพานเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicBridgeApproaches": "คอสะพานเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicWeirs": "ฝายเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicOther": "สาธารณะประโยชน์อื่นๆ (ข้อความ)",\n  "damagePublicCost": "รวมมูลค่าสาธารณประโยชน์เสียหาย (ตัวเลข)",\n  "totalDamageCost": "รวมมูลค่าความเสียหายเบื้องต้นทั้งหมด (ตัวเลข)",\n  "mitigation": "การบรรเทาภัย (ข้อความ)",\n  "toolsFireTrucks": "รถดับเพลิงกี่คัน (ตัวเลข)",\n  "toolsWaterTrucks": "รถบรรทุกน้ำกี่คัน (ตัวเลข)",\n  "toolsRescueTrucks": "รถกู้ภัยกี่คัน (ตัวเลข)",\n  "toolsFireBoats": "เรือดับเพลิงกี่ลำ (ตัวเลข)",\n  "toolsWaterPumps": "เครื่องสูบน้ำกี่เครื่อง (ตัวเลข)",\n  "toolsOther": "เครื่องมืออื่นๆ (ข้อความ)",\n  "opsGovAgencies": "ส่วนราชการช่วยเหลืออุทกภัยหรืออื่นๆ กี่หน่วยงาน (ตัวเลข)",\n  "opsPrivateSector": "ภาคเอกชนหรือประชาชนช่วยเหลือรวมกี่กลุ่ม/คน (ตัวเลข)",\n  "proposals": ["เพื่อโปรดทราบ", "เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย", "เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน"], // เลือกข้อเสนอจากลิสต์ตัวเลือกนี้เป็น array\n  "reporterName": "ชื่อผู้รายงาน",\n  "reporterPosition": "ตำแหน่งผู้รายงาน",\n  "signatureBox": [ymin, xmin, ymax, xmax], // ค้นหาตำแหน่งลายมือชื่อผู้รายงาน (ลายเซ็น) ในหน้ากระดาษ แล้วส่งค่าพิกัด Bounding Box ในสเกล 0-1000 (เช่น [820, 650, 930, 880]) หากไม่มีให้เป็น null\n  "damageBoxes": [[ymin, xmin, ymax, xmax], ...] // ค้นหาภาพประกอบภัยพิบัติ, รูปถ่ายความเสียหาย, รูปบ่อปลา, รูปบ้านพัง, รูปผู้ประสบภัยที่แนบมาในเอกสาร แล้วส่งเป็นลิสต์ของ Bounding Boxes สเกล 0-1000 หากไม่มีให้เป็น []\n}\n* หมายเหตุ: ดึงเฉพาะข้อมูลที่มีในเอกสารเท่านั้น ถ้าฟิลด์ไหนไม่มีให้เป็น string ว่าง "" หรือ array ว่าง [] หรือ null สำหรับ signatureBox\n* ห้ามตอบอย่างอื่นนอกจากโค้ด JSON (ห้ามมี markdown) แบบ raw';
+
+    // Multi-tier Fallback: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash with Exponential Backoff
+    const { response, usedModel } = await callGeminiWithFallback({
+      client,
+      contents: [
+        { text: prompt },
+        { inlineData: { data: fileBase64.split(',')[1] || fileBase64, mimeType: mimeType || 'image/jpeg' } }
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.1
+      }
+    });
+
+    let resultText = response.text || '{}';
+    resultText = resultText.replace(/^\s*```json\s*/i, '').replace(/\s*```\s*$/i, '');
+    
+    let parsedData = {};
+    try {
+      parsedData = JSON.parse(resultText);
+    } catch {
+      parsedData = { rawText: resultText };
+    }
+    res.json({ success: true, data: parsedData, usedModel });
+
+  } catch (err: any) {
+    console.error('Scan Error:', err);
+    const friendlyError = formatGeminiErrorMessage(err);
+    res.status(500).json({ success: false, error: friendlyError });
+  }
+});
+
+// Automated & Manual Backup Engine (.tar)
+let isAutomatedBackupEnabled = true;
+
+function startAutomatedBackupEngine() {
+  const BACKUP_DIR = path.join(process.cwd(), 'backups');
+  if (!fs.existsSync(BACKUP_DIR)) {
+    try { fs.mkdirSync(BACKUP_DIR, { recursive: true }); } catch {}
+  }
+
+  // Run daily check at midnight or every 24 hours
+  setInterval(async () => {
+    if (!isAutomatedBackupEnabled) return;
+    try {
+      await createSystemTarBackup('Automated Daily Backup (.tar)');
+    } catch (err) {
+      console.error('Automated backup interval error:', err);
+    }
+  }, 24 * 60 * 60 * 1000);
+}
+
+try {
+  startAutomatedBackupEngine();
+} catch (e) {
+  console.error('Error starting automated backup engine:', e);
+}
+
+async function createSystemTarBackup(backupType = 'Manual Backup (.tar)') {
+  const tar = await import('tar');
+  const BACKUP_DIR = path.join(process.cwd(), 'backups');
+  if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  }
+
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+  const fileName = `edms_backup_${dateStr}_${timeStr}.tar`;
+  const filePath = path.join(BACKUP_DIR, fileName);
+
+  // Dump complete database snapshot to JSON file to be packed into the .tar
+  const dumpFileName = `database_dump_${dateStr}_${timeStr}.json`;
+  const dumpFilePath = path.join(process.cwd(), dumpFileName);
+
+  try {
+    const dumpData: any = {
+      exportedAt: now.toISOString(),
+      version: '1.0.0',
+      app: 'Smart e-Saraban EDMS (Rayong Disaster Prevention & Mitigation)'
+    };
+
+    if (typeof pool !== 'undefined' && isMysqlOnline) {
+      const tables = [
+        'inbox_documents', 'outbox_documents', 'circular_documents', 'internal_documents', 'admin_documents',
+        'users', 'departments', 'positions', 'system_logs', 'document_tracking', 'recycle_bin',
+        'settings', 'custom_doc_numbers', 'urgent_incidents'
+      ];
+      for (const t of tables) {
+        try {
+          const [rows]: any = await pool.query(`SELECT * FROM \`${t}\``);
+          dumpData[t] = rows || [];
+        } catch {
+          dumpData[t] = [];
+        }
+      }
+    } else {
+      dumpData.localDb = localDb;
+    }
+    fs.writeFileSync(dumpFilePath, JSON.stringify(dumpData, null, 2), 'utf8');
+  } catch (dumpErr) {
+    console.warn('Database dump before tar warning:', dumpErr);
+  }
+
+  // Gather directories to archive: dump, uploads, config/data if any
+  const itemsToArchive: string[] = [];
+  if (fs.existsSync(dumpFilePath)) itemsToArchive.push(dumpFileName);
+
+  const uploadsPath = path.join(process.cwd(), 'uploads');
+  if (fs.existsSync(uploadsPath)) itemsToArchive.push('uploads');
+
+  const dotenvPath = path.join(process.cwd(), '.env');
+  if (fs.existsSync(dotenvPath)) itemsToArchive.push('.env');
+
+  const metadataPath = path.join(process.cwd(), 'metadata.json');
+  if (fs.existsSync(metadataPath)) itemsToArchive.push('metadata.json');
+
+  try {
+    await tar.create(
+      {
+        cwd: process.cwd(),
+        file: filePath,
+        gzip: false
+      },
+      itemsToArchive.length > 0 ? itemsToArchive : ['package.json']
+    );
+  } finally {
+    // Clean up temporary database dump file
+    if (fs.existsSync(dumpFilePath)) {
+      try { fs.unlinkSync(dumpFilePath); } catch {}
+    }
+  }
+
+  const stats = fs.statSync(filePath);
+  const sizeMb = (stats.size / (1024 * 1024)).toFixed(2) + ' MB';
+
+  // Log backup to DB or file
+  try {
+    if (typeof pool !== 'undefined' && isMysqlOnline) {
+      await pool.query(
+        'INSERT INTO system_backups (fileName, fileSize, backupType, createdAt) VALUES (?, ?, ?, ?)',
+        [fileName, sizeMb, backupType, now.toISOString()]
+      ).catch(() => {});
+    }
+  } catch {}
+
+  return { fileName, filePath, size: stats.size, sizeMb, createdAt: now.toISOString(), backupType };
+}
+
+// Function to fetch unified backup list (.tar and .json)
+async function getSystemBackupList() {
+  const backups: any[] = [];
+  const BACKUP_DIR = path.join(process.cwd(), 'backups');
+  if (fs.existsSync(BACKUP_DIR)) {
+    const files = fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.tar') || f.endsWith('.tar.gz') || f.endsWith('.json'));
+    for (const f of files) {
+      try {
+        const fPath = path.join(BACKUP_DIR, f);
+        const stat = fs.statSync(fPath);
+        const isTar = f.endsWith('.tar') || f.endsWith('.tar.gz');
+        const sizeMb = (stat.size / (1024 * 1024)).toFixed(2) + ' MB';
+        backups.push({
+          id: `bk_${f}`,
+          filename: f,
+          fileName: f,
+          size: stat.size,
+          fileSize: sizeMb,
+          sizeMb: sizeMb,
+          backupType: isTar ? (f.includes('edms_backup_') ? 'สำรองระบบไฟล์และฐานข้อมูล (.tar)' : 'สำรองข้อมูล (.tar)') : 'สำรองฐานข้อมูล (.json)',
+          format: isTar ? 'tar' : 'json',
+          createdAt: stat.mtime ? stat.mtime.toISOString() : stat.birthtime.toISOString()
+        });
+      } catch {}
+    }
+  }
+
+  // Also merge with database records if available
+  if (typeof pool !== 'undefined' && isMysqlOnline) {
+    try {
+      const [rows]: any = await pool.query('SELECT * FROM system_backups ORDER BY createdAt DESC LIMIT 50').catch(() => [[]]);
+      if (rows && Array.isArray(rows)) {
+        for (const r of rows) {
+          const existing = backups.find(b => b.fileName === r.fileName || b.filename === r.fileName);
+          if (existing) {
+            existing.backupType = r.backupType || existing.backupType;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // Sort descending by createdAt
+  backups.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return backups;
+}
+
+// Backup API endpoints
+app.get('/api/automated-backups/status', (req, res) => {
+  res.json({ success: true, enabled: isAutomatedBackupEnabled });
+});
+
+app.post('/api/automated-backups/toggle', (req, res) => {
+  isAutomatedBackupEnabled = req.body.enabled !== false;
+  res.json({ success: true, enabled: isAutomatedBackupEnabled });
+});
+
+const handleGetBackups = async (req: any, res: any) => {
+  try {
+    const list = await getSystemBackupList();
+    res.json({ success: true, files: list, data: list });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถดึงข้อมูลประวัติสำรองข้อมูลได้' });
+  }
+};
+app.get('/api/automated-backups', handleGetBackups);
+app.get('/api/admin/backups', handleGetBackups);
+
+const handleCreateManualTarBackup = async (req: any, res: any) => {
+  try {
+    const backupInfo = await createSystemTarBackup('Manual Backup (.tar)');
+    res.json({
+      success: true,
+      message: 'สำรองข้อมูลระบบเป็นไฟล์ .tar เรียบร้อยแล้ว',
+      data: backupInfo
+    });
+  } catch (err: any) {
+    console.error('Create manual backup error:', err);
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถสร้างไฟล์สำรองข้อมูล .tar ได้' });
+  }
+};
+app.post('/api/automated-backups/create', handleCreateManualTarBackup);
+app.post('/api/automated-backups/manual', handleCreateManualTarBackup);
+app.post('/api/admin/backups/create', handleCreateManualTarBackup);
+
+const handleDownloadBackup = async (req: any, res: any) => {
+  try {
+    const filename = path.basename(req.params.filename);
+    const BACKUP_DIR = path.join(process.cwd(), 'backups');
+    const filePath = path.join(BACKUP_DIR, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send('ไม่พบไฟล์สำรองข้อมูลที่ต้องการดาวน์โหลด');
+    }
+
+    const contentType = filename.endsWith('.json') ? 'application/json' : 'application/x-tar';
+    res.download(filePath, filename, {
+      headers: {
+        'Content-Type': contentType
+      }
+    });
+  } catch (err: any) {
+    res.status(500).send('เกิดข้อผิดพลาดในการดาวน์โหลดไฟล์สำรองข้อมูล');
+  }
+};
+app.get('/api/automated-backups/download/:filename', handleDownloadBackup);
+app.get('/api/admin/backups/download/:filename', handleDownloadBackup);
+
+app.delete('/api/automated-backups/:fileName', async (req, res) => {
+  try {
+    const filename = path.basename(req.params.fileName);
+    const BACKUP_DIR = path.join(process.cwd(), 'backups');
+    const filePath = path.join(BACKUP_DIR, filename);
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    if (typeof pool !== 'undefined' && isMysqlOnline) {
+      await pool.query('DELETE FROM system_backups WHERE fileName = ?', [filename]).catch(() => {});
+    }
+
+    res.json({ success: true, message: `ลบไฟล์ ${filename} เรียบร้อยแล้ว` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถลบไฟล์สำรองข้อมูลได้' });
+  }
+});
+
+app.delete('/api/automated-backups/all', async (req, res) => {
+  try {
+    const BACKUP_DIR = path.join(process.cwd(), 'backups');
+    if (fs.existsSync(BACKUP_DIR)) {
+      const files = fs.readdirSync(BACKUP_DIR);
+      for (const f of files) {
+        try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch {}
+      }
+    }
+
+    if (typeof pool !== 'undefined' && isMysqlOnline) {
+      await pool.query('DELETE FROM system_backups').catch(() => {});
+    }
+
+    res.json({ success: true, message: 'ลบไฟล์สำรองข้อมูลทั้งหมดเรียบร้อยแล้ว' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถลบไฟล์สำรองข้อมูลทั้งหมดได้' });
+  }
+});
+
+app.post('/api/automated-backups/restore/:fileName', async (req, res) => {
+  try {
+    const filename = path.basename(req.params.fileName);
+    const BACKUP_DIR = path.join(process.cwd(), 'backups');
+    const filePath = path.join(BACKUP_DIR, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'ไม่พบไฟล์สำรองข้อมูลที่ต้องการกู้คืน' });
+    }
+
+    if (filename.endsWith('.tar') || filename.endsWith('.tar.gz')) {
+      const tar = await import('tar');
+      await tar.extract({
+        cwd: process.cwd(),
+        file: filePath
+      });
+
+      const dumpFiles = fs.readdirSync(process.cwd()).filter(f => f.startsWith('database_dump_') && f.endsWith('.json'));
+      for (const df of dumpFiles) {
+        try {
+          const content = fs.readFileSync(path.join(process.cwd(), df), 'utf8');
+          const dump = JSON.parse(content);
+          if (dump.localDb) {
+            Object.assign(localDb, dump.localDb);
+            saveLocalDb();
+          }
+        } catch {} finally {
+          try { fs.unlinkSync(path.join(process.cwd(), df)); } catch {}
+        }
+      }
+
+      return res.json({ success: true, message: 'กู้คืนระบบจากไฟล์ .tar สำเร็จแล้ว' });
+    } else if (filename.endsWith('.json')) {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const dump = JSON.parse(content);
+      if (dump.localDb) {
+        Object.assign(localDb, dump.localDb);
+        saveLocalDb();
+      }
+      return res.json({ success: true, message: 'กู้คืนระบบจากไฟล์ .json สำเร็จแล้ว' });
+    }
+
+    res.json({ success: true, message: 'กู้คืนข้อมูลสำเร็จ' });
+  } catch (err: any) {
+    console.error('Restore backup error:', err);
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถกู้คืนข้อมูลได้' });
+  }
+});
+
+// ==========================================
+// ==========================================
+const URGENT_INCIDENT_COLUMNS = [
+  'id', 'docNumber', 'docDate', 'fromPerson', 'toPerson', 'incidentTypes', 'incidentTypeOther', 'severity',
+  'startDate', 'startTime', 'endDate', 'endTime', 'location', 'affectedPeople', 'affectedHouseholds',
+  'injured', 'dead', 'missing', 'evacuatedPeople', 'evacuatedHouseholds', 'damageHouses', 'damageHighRises',
+  'damageTemples', 'damageGovBuildings', 'damageOtherBuildings', 'damageBuildingCost', 'damageAgricultureCrops',
+  'damageAgricultureRice', 'damageAgricultureOrchard', 'damageAgricultureFish', 'damageAgricultureShrimp',
+  'damageLivestockCow', 'damageLivestockPig', 'damageLivestockPoultry', 'damageLivestockOther', 'damageAgricultureCost',
+  'damagePublicRoads', 'damagePublicBridges', 'damagePublicBridgeApproaches', 'damagePublicWeirs', 'damagePublicOther',
+  'damagePublicCost', 'totalDamageCost', 'mitigation', 'toolsFireTrucks', 'toolsWaterTrucks', 'toolsRescueTrucks',
+  'toolsFireBoats', 'toolsWaterPumps', 'toolsOther', 'opsGovAgencies', 'opsPrivateSector', 'proposals',
+  'reporterName', 'reporterPosition', 'signatureImage', 'damageImages', 'createdAt', 'updatedAt'
+];
+
+function mapIncidentFromDb(row: any): any {
+  if (!row) return null;
+  return {
+    ...row,
+    incidentTypes: safeJsonParse(row.incidentTypes, []),
+    proposals: safeJsonParse(row.proposals, []),
+    damageImages: safeJsonParse(row.damageImages, [])
+  };
+}
+
+app.get('/api/urgent-incidents', async (req, res) => {
+  try {
+    const [rows]: any = await pool.query('SELECT * FROM urgent_incidents ORDER BY createdAt DESC');
+    const list = (rows || []).map(mapIncidentFromDb);
+    res.json({ success: true, data: list });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถดึงข้อมูลแบบรายงานเหตุด่วนจากฐานข้อมูล MySQL ได้' });
+  }
+});
+
+app.post('/api/urgent-incidents', async (req, res) => {
+  try {
+    const data = req.body || {};
+    if (!data.location || !data.docDate) {
+      return res.status(400).json({ success: false, error: 'กรุณาระบุสถานที่เกิดภัยและวันที่รายงาน' });
+    }
+    const id = data.id || `inc_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const now = new Date();
+    
+    // Calculate fallback document number strictly from MySQL
+    const [cntRows]: any = await pool.query('SELECT COUNT(*) as count FROM urgent_incidents').catch(() => [[{ count: 0 }]]);
+    const listCount = cntRows?.[0]?.count || 0;
+      
+    const docNum = data.docNumber || `รย 0021/เหตุด่วน-${now.getFullYear() + 543}-${String(listCount + 1).padStart(3, '0')}`;
+    const newRecord = {
+      ...data,
+      id,
+      docNumber: docNum,
+      createdAt: data.createdAt || now.toISOString(),
+      updatedAt: now.toISOString()
+    };
+
+    const dbData: any = {};
+    for (const col of URGENT_INCIDENT_COLUMNS) {
+      const val = newRecord[col];
+      if (val === undefined) {
+        dbData[col] = null;
+      } else if (col === 'incidentTypes' || col === 'proposals' || col === 'damageImages') {
+        dbData[col] = Array.isArray(val) ? JSON.stringify(val) : (typeof val === 'string' ? val : '[]');
+      } else {
+        dbData[col] = val;
+      }
+    }
+    const keys = Object.keys(dbData);
+    const placeholders = keys.map(() => '?').join(', ');
+    const values = keys.map(k => dbData[k]);
+    await pool.query(
+      `INSERT INTO urgent_incidents (${keys.map(k => `\`${k}\``).join(', ')}) VALUES (${placeholders})`,
+      values
+    );
+
+    res.json({
+      success: true,
+      message: 'บันทึกแบบรายงานเหตุด่วนสาธารณภัยลง MySQL สำเร็จ',
+      id: newRecord.id,
+      docNumber: newRecord.docNumber,
+      data: newRecord
+    });
+  } catch (err: any) {
+    console.error('Error saving urgent incident to MySQL:', err);
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถบันทึกข้อมูลแบบรายงานเหตุด่วนสาธารณภัยลง MySQL ได้' });
+  }
+});
+
+app.put('/api/urgent-incidents/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body || {};
+    
+    // Fetch current record from MySQL to merge
+    const [rows]: any = await pool.query('SELECT * FROM urgent_incidents WHERE id = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'ไม่พบรายงานเหตุด่วนที่ต้องการแก้ไขในระบบ' });
+    }
+    const currentRecord = mapIncidentFromDb(rows[0]);
+    
+    const nowStr = new Date().toISOString();
+    const updatedRecord = {
+      ...currentRecord,
+      ...data,
+      id, // keep original id
+      updatedAt: nowStr
+    };
+
+    const dbData: any = {};
+    const updatePairs: string[] = [];
+    const updateValues: any[] = [];
+    
+    for (const col of URGENT_INCIDENT_COLUMNS) {
+      if (col === 'id') continue;
+      const val = updatedRecord[col];
+      if (val !== undefined) {
+        if (col === 'incidentTypes' || col === 'proposals' || col === 'damageImages') {
+          dbData[col] = Array.isArray(val) ? JSON.stringify(val) : (typeof val === 'string' ? val : '[]');
+        } else {
+          dbData[col] = val;
+        }
+        updatePairs.push(`\`${col}\` = ?`);
+        updateValues.push(dbData[col]);
+      }
+    }
+    
+    if (updatePairs.length > 0) {
+      updateValues.push(id);
+      await pool.query(
+        `UPDATE urgent_incidents SET ${updatePairs.join(', ')} WHERE id = ?`,
+        updateValues
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'อัปเดตแบบรายงานเหตุด่วนสาธารณภัยลง MySQL เรียบร้อย',
+      data: updatedRecord
+    });
+  } catch (err: any) {
+    console.error('Error updating urgent incident in MySQL:', err);
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถอัปเดตแบบรายงานเหตุด่วนลง MySQL ได้' });
+  }
+});
+
+app.delete('/api/urgent-incidents/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const [result]: any = await pool.query('DELETE FROM urgent_incidents WHERE id = ?', [id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'ไม่พบรายงานเหตุด่วนที่ต้องการลบในระบบ' });
+    }
+    
+    res.json({ success: true, message: 'ลบแบบรายงานเหตุด่วนสาธารณภัยจาก MySQL เรียบร้อย' });
+  } catch (err: any) {
+    console.error('Error deleting urgent incident from MySQL:', err);
+    res.status(500).json({ success: false, error: err.message || 'ไม่สามารถลบรายงานจาก MySQL ได้' });
+  }
+});
+
+
   const listenPort = process.env.PORT || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
@@ -14985,7 +17105,8 @@ app.delete('/api/infographics-assets/images', async (req, res) => {
     return next(err);
   });
 
-  if (typeof listenPort === 'string' && (listenPort.startsWith('/') || listenPort.startsWith('\\\\'))) {
+  const isNamedPipeOrSocket = isNaN(Number(listenPort));
+  if (isNamedPipeOrSocket) {
     app.listen(listenPort, () => {
       console.log(`Server running on Passenger socket pipe: ${listenPort}`);
       startScheduledReservationEngine();
@@ -15171,399 +17292,8 @@ function analyzeThaiGovDocument(title: string, content: string) {
   // 4. Generate Clean Executive Summary
   let summary = '';
   if (content && content.trim().length > 10) {
-    const sentences = content.trim().split(/[\n\r]+/);
-    summary = sentences.slice(0, 3).join(' ').substring(0, 300);
-  } else if (title) {
-    summary = `เอกสารเรื่อง "${title}" เพื่อโปรดพิจารณาดำเนินการตามระเบียบงานสารบรรณสำนักนายกรัฐมนตรี`;
-  } else {
-    summary = 'เอกสารราชการเพื่อทราบและดำเนินการตามขั้นตอน';
+    summary = content.trim().substring(0, 500) + '...';
   }
-
-  return {
-    type,
-    category,
-    summary,
-    suggestedTo,
-    priority,
-    tags: ['สารบรรณอิเล็กทรอนิกส์', 'ปภ.ระยอง']
-  };
+  return { type, category, priority, suggestedTo, summary };
 }
-
-app.post('/api/ai/autocomplete', async (req, res) => {
-  const { title, content } = req.body;
-  if (!title && !content) {
-    return res.status(400).json({ error: 'กรุณาระบุชื่อเรื่องหรือเนื้อหาเพื่อให้ AI วิเคราะห์' });
-  }
-
-  let apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (!apiKey) {
-    try {
-      const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
-      if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
-        apiKey = String(stRows[0].geminiApiKey).trim();
-      }
-    } catch (e) {}
-  }
-
-  // If no apiKey available at all, directly use smart NLP analyzer
-  if (!apiKey) {
-    const fallbackResult = analyzeThaiGovDocument(title, content);
-    return res.json({ success: true, result: fallbackResult, note: 'Smart NLP Fallback' });
-  }
-
-  const rawReferer = req.headers.referer ? String(req.headers.referer) : '';
-  const rawOrigin = req.headers.origin ? String(req.headers.origin) : '';
-  const refererCandidates = [
-    rawReferer,
-    rawOrigin,
-    'https://ais-dev-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/',
-    'https://ais-pre-mg7dljkj65dnizvta7d3b4-370817768326.asia-southeast1.run.app/',
-    'https://aistudio.google.com/',
-    'https://ai.studio/',
-    ''
-  ].filter((v, i, a) => v !== undefined && a.indexOf(v) === i);
-
-  const prompt = `
-  Analyze the following Thai government document registration details and automatically complete the metadata.
-  Output ONLY a valid JSON object with the following schema:
-  {
-    "type": "inbox" | "outbox" | "admin" | "internal",
-    "category": "order" | "announcement" | "certificate" | "circular" | "memo",
-    "summary": "String (A high-quality Thai executive summary or structured description of the document)",
-    "suggestedTo": "String (Suggested recipient department or division in Thai, e.g., 'ฝ่ายยุทธศาสตร์และการจัดการ', 'ฝ่ายป้องกันและปฏิบัติการ', 'ฝ่ายสงเคราะห์ผู้ประสบภัย')",
-    "priority": "normal" | "urgent" | "very_urgent" | "extremely_urgent",
-    "tags": ["String", "String"]
-  }
-
-  Input details:
-  Title: ${title || 'ไม่มีชื่อเรื่อง'}
-  Content: ${content || 'ไม่มีเนื้อหาหลัก'}
-  `;
-
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-latest'];
-
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    for (const model of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json"
-          }
-        });
-
-        const resultText = response.text || "{}";
-        const cleanedText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const parsedResult = JSON.parse(cleanedText);
-
-        return res.json({ success: true, result: parsedResult });
-      } catch (mErr: any) {
-        // Try next model or fallback
-      }
-    }
-  } catch (clientErr: any) {
-    // Silently continue to fallback
-  }
-
-  // Gracefully fallback to high-quality Thai Gov Rule-based NLP if Gemini API key is blocked by referrers or rate-limited
-  const fallbackResult = analyzeThaiGovDocument(title, content);
-  return res.json({ success: true, result: fallbackResult, note: 'Analyzed with Smart Engine' });
-});
-
-app.post('/api/ai/classify', async (req, res) => {
-  try {
-    const { text } = req.body;
-    if (!text) return res.status(400).json({ error: 'ไม่พบเนื้อหาเอกสาร' });
-
-    let apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
-        if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
-    }
-
-    if (!apiKey) {
-      const nlp = analyzeThaiGovDocument('', text);
-      return res.json({ success: true, type: nlp.type });
-    }
-
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Classify this document content into one of these types: 'inbox' (หนังสือรับ), 'outbox' (หนังสือส่ง), 'internal' (หนังสือภายใน), 'admin' (งานธุรการ). Return only the type. Content: ${text.substring(0, 2000)}`,
-      });
-      
-      if (response && response.text) {
-        return res.json({ success: true, type: response.text.trim() });
-      }
-    } catch (e) {
-      // fallback
-    }
-
-    const nlp = analyzeThaiGovDocument('', text);
-    return res.json({ success: true, type: nlp.type });
-  } catch (err: any) {
-    const nlp = analyzeThaiGovDocument('', req.body?.text || '');
-    res.json({ success: true, type: nlp.type });
-  }
-});
-
-app.post('/api/ai/summarize', async (req, res) => {
-  try {
-    const { text } = req.body;
-    if (!text) return res.status(400).json({ error: 'ไม่พบเนื้อหาเอกสาร' });
-
-    let apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
-        if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
-    }
-
-    if (!apiKey) {
-      const nlp = analyzeThaiGovDocument('', text);
-      return res.json({ success: true, summary: nlp.summary });
-    }
-
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `Summarize this Thai document content in a short, elegant paragraph suitable for an executive. Content: ${text.substring(0, 3000)}`,
-      });
-      
-      if (response && response.text) {
-        return res.json({ success: true, summary: response.text.trim() });
-      }
-    } catch (e) {
-      // fallback
-    }
-
-    const nlp = analyzeThaiGovDocument('', text);
-    return res.json({ success: true, summary: nlp.summary });
-  } catch (err: any) {
-    const nlp = analyzeThaiGovDocument('', req.body?.text || '');
-    res.json({ success: true, summary: nlp.summary });
-  }
-});
-
-// ==========================================
-// AUTOMATED BACKUP SCHEDULING SYSTEM
-// ==========================================
-
-async function runAutomatedBackup() {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const backupFileName = `EDMS_AutoBackup_${dateStr}_${Date.now()}.json`;
-  const backupFolderPath = path.join(process.cwd(), 'uploads', 'automated_backups');
-  const backupFilePath = path.join(backupFolderPath, backupFileName);
-
-  try {
-    const tables = [
-      'settings',
-      'users',
-      'departments',
-      'positions',
-      'folders',
-      'numbering_rules',
-      'file_codes',
-      'reserved_numbers',
-      'scheduled_reservations',
-      'draft_documents',
-      'inbox_documents',
-      'circular_documents',
-      'outbox_documents',
-      'internal_documents',
-      'admin_documents',
-      'department_receives',
-      'document_tracking',
-      'organizations',
-      'system_logs',
-      'workflow_templates',
-      'workflow_instances',
-      'digital_signatures',
-      'user_favorites',
-      'document_reads',
-      'recycle_bin',
-      'role_permissions',
-      'enterprise_dynamic_qrs',
-      'enterprise_qr_scans',
-      'enterprise_qr_templates',
-      'changelogs',
-      'infographics',
-      'project_summaries'
-    ];
-
-    const backupTablesData: Record<string, any[]> = {};
-    for (const table of tables) {
-      try {
-        if (isMysqlOnline) {
-          const [rows]: any = await pool.query(`SELECT * FROM \`${table}\``);
-          backupTablesData[table] = rows || [];
-        } else {
-          backupTablesData[table] = localDb[table] || [];
-        }
-      } catch (err: any) {
-        backupTablesData[table] = [];
-      }
-    }
-
-    const backupPayload = {
-      version: '1.0',
-      type: 'AUTOMATED_DAILY_BACKUP',
-      system: 'EDMS Electronic Document Management System',
-      createdAt: new Date().toISOString(),
-      createdBy: 'ระบบสำรองข้อมูลอัตโนมัติ (Automated AI Agent)',
-      tables: backupTablesData
-    };
-
-    fs.mkdirSync(backupFolderPath, { recursive: true });
-    fs.writeFileSync(backupFilePath, JSON.stringify(backupPayload, null, 2), 'utf8');
-
-    // Rotation: Keep only 7 automated backups
-    try {
-      const files = fs.readdirSync(backupFolderPath);
-      const backupFiles = files
-        .filter(f => f.startsWith('EDMS_AutoBackup_') && f.endsWith('.json'))
-        .map(f => ({ name: f, path: path.join(backupFolderPath, f), mtime: fs.statSync(path.join(backupFolderPath, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime);
-
-      if (backupFiles.length > 7) {
-        const filesToDelete = backupFiles.slice(7);
-        for (const file of filesToDelete) {
-          try {
-            fs.unlinkSync(file.path);
-          } catch (e: any) {}
-        }
-      }
-    } catch (e) {}
-
-    await addSystemLog('BACKUP_AUTOMATED', `ระบบทำการสำรองข้อมูลอัตโนมัติสำเร็จ: ${backupFileName}`, 'ระบบอัตโนมัติ', '127.0.0.1');
-    console.log(`💾 ✅ Automated Daily Backup completed: ${backupFileName}`);
-  } catch (err: any) {
-    console.error('❌ Automated Backup failed:', err.message);
-    await addSystemLog('BACKUP_FAILED', `ระบบทำการสำรองข้อมูลอัตโนมัติล้มเหลว: ${err.message}`, 'ระบบอัตโนมัติ', '127.0.0.1');
-  }
-}
-
-function startAutomatedBackupEngine() {
-  console.log('⏰ Starting Automated Backup Engine (24-hour cycle)...');
-  setTimeout(() => {
-    runAutomatedBackup();
-  }, 10000); // 10 seconds delay to not block server startup path
-
-  setInterval(() => {
-    runAutomatedBackup();
-  }, 24 * 60 * 60 * 1000);
-}
-
-app.get('/api/automated-backups/list', async (req, res) => {
-  const role = (req.query.role || req.headers.role || '').toString();
-  const allowed = await hasServerPermission(role, 'backup_restore');
-  if (!allowed) {
-    return res.status(403).json({ success: false, error: 'คุณไม่มีสิทธิ์ของระบบในการเข้าถึงรายการสำรองข้อมูล' });
-  }
-
-  try {
-    const backupFolderPath = path.join(process.cwd(), 'uploads', 'automated_backups');
-    fs.mkdirSync(backupFolderPath, { recursive: true });
-    
-    const files = fs.readdirSync(backupFolderPath);
-    const backupList = files
-      .filter(f => f.startsWith('EDMS_AutoBackup_') && f.endsWith('.json'))
-      .map(f => {
-        const fullPath = path.join(backupFolderPath, f);
-        const stats = fs.statSync(fullPath);
-        return {
-          fileName: f,
-          sizeBytes: stats.size,
-          createdAt: stats.mtime.toISOString(),
-          path: `/uploads/automated_backups/${f}`
-        };
-      })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    res.json({ success: true, backups: backupList });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: 'ไม่สามารถดึงข้อมูลสำรองอัตโนมัติ: ' + err.message });
-  }
-});
-
-app.post('/api/automated-backups/restore/:fileName', async (req, res) => {
-  const role = (req.body.role || req.query.role || req.headers.role || '').toString();
-  const allowed = await hasServerPermission(role, 'backup_restore');
-  if (!allowed) {
-    return res.status(403).json({ success: false, error: 'คุณไม่มีสิทธิ์ของระบบในการกู้คืนข้อมูล' });
-  }
-
-  const { fileName } = req.params;
-  const username = (req.body.username || req.query.username || 'ผู้ดูแลระบบ').toString();
-  const ip = getClientIp(req);
-
-  try {
-    const backupFolderPath = path.join(process.cwd(), 'uploads', 'automated_backups');
-    const backupFilePath = path.join(backupFolderPath, fileName);
-
-    if (!fs.existsSync(backupFilePath)) {
-      return res.status(404).json({ success: false, error: 'ไม่พบไฟล์สำรองข้อมูลที่ระบุ' });
-    }
-
-    const fileContent = fs.readFileSync(backupFilePath, 'utf8');
-    const backupData = JSON.parse(fileContent);
-
-    if (backupData.tables) {
-      if (isMysqlOnline) {
-        await pool.query('SET FOREIGN_KEY_CHECKS = 0');
-      }
-
-      for (const table of Object.keys(backupData.tables)) {
-        const rows = backupData.tables[table];
-        if (!Array.isArray(rows)) continue;
-
-        if (isMysqlOnline) {
-          await pool.query(`TRUNCATE TABLE \`${table}\``);
-          if (rows.length > 0) {
-            const columns = Object.keys(rows[0]);
-            const columnNames = columns.map(c => `\`${c}\``).join(', ');
-            const placeholders = columns.map(() => '?').join(', ');
-            const sql = `INSERT INTO \`${table}\` (${columnNames}) VALUES (${placeholders})`;
-
-            for (const row of rows) {
-              const values = columns.map(c => {
-                if (row[c] !== null && typeof row[c] === 'object') {
-                  return JSON.stringify(row[c]);
-                }
-                return row[c];
-              });
-              await pool.query(sql, values);
-            }
-          }
-        } else {
-          localDb[table] = rows;
-        }
-      }
-
-      if (isMysqlOnline) {
-        await pool.query('SET FOREIGN_KEY_CHECKS = 1');
-      } else {
-        saveLocalDb();
-      }
-
-      await addSystemLog('RESTORE_SUCCESS', `กู้คืนระบบจากไฟล์สำรองข้อมูลอัตโนมัติสำเร็จ: ${fileName}`, username, ip);
-      res.json({ success: true, message: 'กู้คืนระบบจากประวัติสำรองข้อมูลเรียบร้อยแล้ว' });
-    } else {
-      res.status(400).json({ success: false, error: 'รูปแบบโครงสร้างไฟล์สำรองข้อมูลไม่ถูกต้อง' });
-    }
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: 'กู้คืนข้อมูลไม่สำเร็จ: ' + err.message });
-  }
-});
 

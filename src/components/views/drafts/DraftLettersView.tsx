@@ -28,6 +28,7 @@ import {
 import { parseDocNumberStructure } from '../../../lib/fileCodeUtils';
 import { useRealtimeSync } from '../../../utils/realtimeSync';
 import { useConfirm } from '../../../context/ConfirmContext';
+import A4PaperPreview from '../../A4PaperPreview';
 
 interface Props {
   user: any;
@@ -1079,7 +1080,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
               <button
                 onClick={() => downloadAsDoc(getCurrentDocHtml(), `ร่างหนังสือ_${subject || 'ราชการ'}`)}
                 className="p-1.5 bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-lg transition-colors cursor-pointer"
-                title="ส่งออกไฟล์ Word (.doc)"
+                title="ส่งออกไฟล์ Word (.docx)"
               >
                 <FileDown className="w-4 h-4 text-blue-500" />
               </button>
@@ -1636,46 +1637,13 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
             {/* RIGHT COLUMN: REALISTIC A4 LIVE SHEET PREVIEW */}
             {(viewMode === 'split' || viewMode === 'preview') && (
               <div className={`${viewMode === 'split' ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12'} flex flex-col items-center space-y-3`}>
-                {/* A4 Sheet Toolbar */}
-                <div className="w-full flex items-center justify-between px-2 text-xs text-[var(--text-secondary)]">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold flex items-center gap-1 text-[var(--text-primary)]">
-                      <Eye className="w-4 h-4 text-emerald-500" /> ตัวอย่างหน้ากระดาษจริง (A4)
-                    </span>
-                    <span className="text-[10px] text-[var(--text-muted)] hidden sm:inline">(อัปเดตแบบ Real-time)</span>
-                  </div>
-
-                  {/* Zoom Controls */}
-                  <div className="flex items-center gap-1.5 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-lg px-2 py-0.5 shadow-sm">
-                    <button
-                      onClick={() => setZoomLevel(prev => Math.max(prev - 10, 60))}
-                      className="p-1 hover:text-[var(--text-primary)] cursor-pointer"
-                      title="ย่อลง"
-                    >
-                      <ZoomOut className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="font-mono text-[11px] w-10 text-center">{zoomLevel}%</span>
-                    <button
-                      onClick={() => setZoomLevel(prev => Math.min(prev + 10, 150))}
-                      className="p-1 hover:text-[var(--text-primary)] cursor-pointer"
-                      title="ขยายขึ้น"
-                    >
-                      <ZoomIn className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Desk Container with Simulated A4 Paper */}
-                <div className="w-full bg-slate-200 dark:bg-slate-950 p-4 sm:p-8 rounded-2xl border border-[var(--border-light)] overflow-x-auto custom-scrollbar flex justify-center shadow-inner min-h-[700px]">
-                  <div
-                    className="bg-white text-slate-900 shadow-2xl p-8 sm:p-12 w-full max-w-[760px] min-h-[1050px] transition-transform origin-top select-text"
-                    style={{
-                      transform: `scale(${zoomLevel / 100})`,
-                      fontFamily: "'TH SarabunPSK', 'Sarabun', sans-serif"
-                    }}
-                    dangerouslySetInnerHTML={{ __html: getCurrentDocHtml() }}
-                  />
-                </div>
+                <A4PaperPreview
+                  title="ตัวอย่างหน้ากระดาษจริง (A4 Live Preview)"
+                  subtitle="รองรับการปรับสัดส่วนอัตโนมัติบนหน้าจอมือถือและเดสก์ท็อป (Real-time)"
+                  htmlContent={getCurrentDocHtml()}
+                  onPrint={handlePrintDoc}
+                  paperClassName="p-8 sm:p-12"
+                />
               </div>
             )}
           </div>
@@ -1828,7 +1796,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                               downloadAsDoc(html, `ร่างหนังสือ_${item.subject}`);
                             }}
                             className="p-1.5 text-emerald-400 hover:bg-emerald-400/10 rounded transition-colors cursor-pointer"
-                            title="ส่งออก Word (.doc)"
+                            title="ส่งออก Word (.docx)"
                           >
                             <FileDown className="w-3.5 h-3.5" />
                           </button>
@@ -2543,7 +2511,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                 onClick={() => downloadAsDoc(previewHtml, `หนังสือราชการ_${subject || 'ร่าง'}`)}
                 className="px-4 py-2 bg-[var(--primary-color)] text-white text-xs font-medium rounded-lg hover:bg-[var(--primary-hover)] flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.doc)
+                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.docx)
               </button>
             </div>
           </div>

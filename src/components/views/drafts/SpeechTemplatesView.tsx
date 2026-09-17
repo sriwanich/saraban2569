@@ -271,7 +271,7 @@ ${extraText ? `<div style="margin-top:10pt;text-indent:3em;text-align:justify;">
                 onClick={() => downloadAsDoc(buildSpeechHTML(), `คำกล่าว_${getSelectedSpeech()?.title}`)}
                 className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-500 flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <FileDown className="w-4 h-4" /> ส่งออก Word (.doc)
+                <FileDown className="w-4 h-4" /> ส่งออก Word (.docx)
               </button>
             </div>
           </div>
@@ -304,7 +304,7 @@ ${extraText ? `<div style="margin-top:10pt;text-indent:3em;text-align:justify;">
                 onClick={() => downloadAsDoc(previewHtml, `คำกล่าว_${getSelectedSpeech()?.title}`)}
                 className="px-4 py-2 bg-[var(--primary-color)] text-white text-xs font-bold rounded-lg hover:bg-[var(--primary-hover)] flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.doc)
+                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.docx)
               </button>
             </div>
           </div>

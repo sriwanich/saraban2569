@@ -71,6 +71,32 @@ export interface AiScanResult {
   rawText?: string;
   confidence?: string;
   confidenceNote?: string;
+  
+  // Disaster report fields
+  incidentTypes?: string[];
+  incidentTypeOther?: string;
+  severity?: string;
+  startDate?: string;
+  startTime?: string;
+  endDate?: string;
+  endTime?: string;
+  location?: string;
+  affectedPeople?: string;
+  affectedHouseholds?: string;
+  injured?: string;
+  dead?: string;
+  missing?: string;
+  evacuatedPeople?: string;
+  evacuatedHouseholds?: string;
+  damageHouses?: string;
+  damageFactories?: string;
+  damageBuildingCost?: string;
+  damageAgricultureCost?: string;
+  damagePublicCost?: string;
+  totalDamageCost?: string;
+  mitigation?: string;
+  reporterName?: string;
+  reporterPosition?: string;
 }
 
 // ── Thai Formatting Helpers ──
@@ -195,7 +221,7 @@ export function getSingleSealHTML(size = 80): string {
 }
 
 // ── Word Export helper ──
-export function downloadAsDoc(bodyHTML: string, filename = 'document') {
+export function fallbackDownloadAsDoc(bodyHTML: string, filename = 'document') {
   const wordCSS = `
     @font-face{font-family:'TH SarabunPSK';src:local('TH SarabunPSK'),local('TH Sarabun New'),local('Sarabun New');}
     @page Section1{size:210mm 297mm;margin:25mm 20mm 20mm 30mm;}
@@ -768,3 +794,30 @@ export const PRESET_OFFICIAL_TEMPLATES: PresetOfficialTemplate[] = [
   }
 ];
 
+
+export async function downloadAsDoc(bodyHTML: string, filename = 'document') {
+  try {
+    const res = await fetch('/api/export-docx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html: bodyHTML, filename })
+    });
+    
+    if (!res.ok) {
+      throw new Error('Failed to generate DOCX via API');
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('Error downloading docx, falling back to .doc:', error);
+    fallbackDownloadAsDoc(bodyHTML, filename);
+  }
+}

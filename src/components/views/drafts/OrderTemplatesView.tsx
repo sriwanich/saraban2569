@@ -447,7 +447,7 @@ ${committeeHTML}
                 onClick={() => downloadAsDoc(previewHtml, subject)}
                 className="px-4 py-2 bg-[var(--primary-color)] text-white text-xs font-bold rounded-lg hover:bg-[var(--primary-hover)] flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.doc)
+                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.docx)
               </button>
             </div>
           </div>

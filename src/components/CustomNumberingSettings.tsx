@@ -755,33 +755,29 @@ export default function CustomNumberingSettings() {
         </div>
       )}
 
-      {/* Futuristic Command Center Header & Telemetry HUD */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white p-6 shadow-2xl border border-indigo-500/20">
-        {/* Ambient Glow Background Effect */}
-        <div className="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-cyan-500/10 blur-3xl pointer-events-none"></div>
-        <div className="absolute -left-20 -bottom-20 w-80 h-80 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none"></div>
-
+      {/* Official Government Command Header & Summary */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-950 via-slate-900 to-blue-900 text-white p-6 shadow-md border border-blue-900/40">
         <div className="relative z-10 space-y-6">
           {/* Top Bar: Title & Action Controls */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="space-y-2">
               <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold tracking-wider font-mono uppercase">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Registry Core • Online
+                <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold tracking-wider font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  ระบบทะเบียนสารบรรณกลาง • พร้อมใช้งาน
                 </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 text-[10px] font-mono">
-                  พ.ศ. {systemCurrentYear}
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-200 border border-blue-500/30 text-[10px] font-mono">
+                  ปี พ.ศ. {systemCurrentYear}
                 </span>
               </div>
-              <h1 className="text-xl lg:text-2xl font-black text-white tracking-tight flex items-center gap-3">
-                <span className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500/30 to-indigo-500/30 border border-cyan-400/30 text-cyan-300 shadow-inner">
-                  <Cpu className="w-5 h-5" />
+              <h1 className="text-xl lg:text-2xl font-bold text-white tracking-tight flex items-center gap-3">
+                <span className="p-2 rounded-xl bg-blue-900/60 border border-blue-700/50 text-blue-200 shadow-xs">
+                  <Hash className="w-5 h-5" />
                 </span>
-                ระบบตั้งค่าเลขที่หนังสือและรหัสแฟ้มดิจิทัล
+                ระบบตั้งค่าเลขที่หนังสือและรหัสหมวดแฟ้มราชการ
               </h1>
-              <p className="text-xs text-slate-300/80 max-w-2xl leading-relaxed">
-                ศูนย์ควบคุมการจัดสรรเลขสารบรรณอัตโนมัติ (Custom Numbering Rules), โครงสร้างรหัสหมวดแฟ้มจำแนกตามกอง/ฝ่าย, พร้อมระบบจำลองการออกเลขแบบ Real-time และคลังเลขสำรองเชิงรุก
+              <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                ศูนย์ควบคุมการจัดสรรเลขสารบรรณอัตโนมัติตามระเบียบสำนักนายกรัฐมนตรีฯ โครงสร้างรหัสหมวดแฟ้มจำแนกตามกอง/ฝ่าย พร้อมระบบจำลองการออกเลขแบบเรียลไทม์และคลังเลขสำรอง
               </p>
             </div>
 
@@ -791,10 +787,10 @@ export default function CustomNumberingSettings() {
                 <>
                   <button
                     onClick={handleSyncRules}
-                    className="px-3.5 py-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 shadow-sm backdrop-blur hover:scale-[1.02] active:scale-[0.98]"
+                    className="px-3.5 py-2 bg-white/10 hover:bg-white/15 text-blue-100 border border-white/20 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 shadow-xs cursor-pointer"
                     title="ตรวจสอบและปรับปรุงลำดับปัจจุบันให้ตรงกับข้อมูลจริงในฐานข้อมูล"
                   >
-                    <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                    <RefreshCw className="w-3.5 h-3.5 text-blue-300" />
                     ซิงค์ลำดับปัจจุบัน
                   </button>
                   <button
@@ -813,7 +809,7 @@ export default function CustomNumberingSettings() {
                       });
                       setShowRuleModal(true);
                     }}
-                    className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/25 hover:scale-[1.02] active:scale-[0.98]"
+                    className="px-4 py-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer"
                   >
                     <Plus className="w-4 h-4" /> เพิ่มกฎออกเลขใหม่
                   </button>
@@ -826,7 +822,7 @@ export default function CustomNumberingSettings() {
                     setFileCodeFormData({ code: '', name: '', department: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: '' });
                     setShowFileCodeModal(true);
                   }}
-                  className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/25 hover:scale-[1.02] active:scale-[0.98]"
+                  className="px-4 py-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer"
                 >
                   <Plus className="w-4 h-4" /> เพิ่มรหัสหมวดแฟ้มใหม่
                 </button>
@@ -835,7 +831,7 @@ export default function CustomNumberingSettings() {
               {activeSubTab === 'reserved' && (
                 <button
                   onClick={() => setShowReserveModal(true)}
-                  className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-amber-500/25 hover:scale-[1.02] active:scale-[0.98]"
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer"
                 >
                   <Bookmark className="w-4 h-4" /> สำรอง/จองเลขหนังสือ
                 </button>
@@ -861,7 +857,7 @@ export default function CustomNumberingSettings() {
                     });
                     setShowScheduleModal(true);
                   }}
-                  className="px-4 py-2.5 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.98]"
+                  className="px-4 py-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer"
                 >
                   <Clock className="w-4 h-4" /> ตั้งเวลาจองอัตโนมัติ
                 </button>
@@ -869,33 +865,33 @@ export default function CustomNumberingSettings() {
             </div>
           </div>
 
-          {/* 4 Cyber Telemetry HUD Status Tiles */}
+          {/* 4 Summary Status Tiles */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
             {/* Tile 1: Rules */}
             <div 
               onClick={() => setActiveSubTab('rules')}
-              className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                 activeSubTab === 'rules'
-                  ? 'bg-slate-800/90 border-cyan-500/50 shadow-md ring-1 ring-cyan-500/30'
-                  : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/70 hover:border-slate-600'
+                  ? 'bg-blue-900/60 border-blue-400 shadow-sm ring-1 ring-blue-400/50'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-slate-400 group-hover:text-cyan-300 transition-colors">
+                <span className="text-[11px] font-medium text-slate-300">
                   กฎออกเลขเปิดใช้งาน
                 </span>
-                <span className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400">
+                <span className="p-1.5 rounded-lg bg-blue-500/20 text-blue-300">
                   <Layers className="w-3.5 h-3.5" />
                 </span>
               </div>
               <div className="mt-2 flex items-baseline gap-1.5">
-                <span className="text-xl font-black font-mono text-cyan-300">
+                <span className="text-xl font-bold font-mono text-white">
                   {rules.filter(r => r.isActive).length}
                 </span>
-                <span className="text-xs text-slate-400 font-mono">/ {rules.length} กฎ</span>
+                <span className="text-xs text-slate-300 font-mono">/ {rules.length} กฎ</span>
               </div>
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
                 <span>สารบรรณกลาง & ฝ่ายงาน</span>
               </div>
             </div>
@@ -903,27 +899,27 @@ export default function CustomNumberingSettings() {
             {/* Tile 2: File Codes */}
             <div 
               onClick={() => setActiveSubTab('fileCodes')}
-              className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                 activeSubTab === 'fileCodes'
-                  ? 'bg-slate-800/90 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/30'
-                  : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/70 hover:border-slate-600'
+                  ? 'bg-blue-900/60 border-blue-400 shadow-sm ring-1 ring-blue-400/50'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-slate-400 group-hover:text-emerald-300 transition-colors">
+                <span className="text-[11px] font-medium text-slate-300">
                   รหัสหมวดแฟ้มดิจิทัล
                 </span>
-                <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+                <span className="p-1.5 rounded-lg bg-blue-500/20 text-blue-300">
                   <FolderOpen className="w-3.5 h-3.5" />
                 </span>
               </div>
               <div className="mt-2 flex items-baseline gap-1.5">
-                <span className="text-xl font-black font-mono text-emerald-300">
+                <span className="text-xl font-bold font-mono text-white">
                   {fileCodes.length}
                 </span>
-                <span className="text-xs text-slate-400">หมวดแฟ้ม</span>
+                <span className="text-xs text-slate-300">หมวดแฟ้ม</span>
               </div>
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                 <span>มาตรฐานงานสารบรรณ</span>
               </div>
@@ -932,27 +928,27 @@ export default function CustomNumberingSettings() {
             {/* Tile 3: Reserved Numbers */}
             <div 
               onClick={() => setActiveSubTab('reserved')}
-              className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                 activeSubTab === 'reserved'
-                  ? 'bg-slate-800/90 border-amber-500/50 shadow-md ring-1 ring-amber-500/30'
-                  : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/70 hover:border-slate-600'
+                  ? 'bg-blue-900/60 border-blue-400 shadow-sm ring-1 ring-blue-400/50'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-slate-400 group-hover:text-amber-300 transition-colors">
+                <span className="text-[11px] font-medium text-slate-300">
                   คลังเลขพร้อมใช้งาน
                 </span>
-                <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
+                <span className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300">
                   <Bookmark className="w-3.5 h-3.5" />
                 </span>
               </div>
               <div className="mt-2 flex items-baseline gap-1.5">
-                <span className="text-xl font-black font-mono text-amber-300">
+                <span className="text-xl font-bold font-mono text-amber-200">
                   {reservedNumbers.filter(r => r.status === 'available').length}
                 </span>
-                <span className="text-xs text-slate-400 font-mono">/ {reservedNumbers.length} ทั้งหมด</span>
+                <span className="text-xs text-slate-300 font-mono">/ {reservedNumbers.length} ทั้งหมด</span>
               </div>
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
                 <span>เลขจอง + เลขคืนจากยกเลิก</span>
               </div>
@@ -961,28 +957,28 @@ export default function CustomNumberingSettings() {
             {/* Tile 4: Scheduled */}
             <div 
               onClick={() => setActiveSubTab('scheduled')}
-              className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                 activeSubTab === 'scheduled'
-                  ? 'bg-slate-800/90 border-purple-500/50 shadow-md ring-1 ring-purple-500/30'
-                  : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/70 hover:border-slate-600'
+                  ? 'bg-blue-900/60 border-blue-400 shadow-sm ring-1 ring-blue-400/50'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-slate-400 group-hover:text-purple-300 transition-colors">
+                <span className="text-[11px] font-medium text-slate-300">
                   ตั้งเวลาจองอัตโนมัติ
                 </span>
-                <span className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400">
+                <span className="p-1.5 rounded-lg bg-blue-500/20 text-blue-300">
                   <Clock className="w-3.5 h-3.5" />
                 </span>
               </div>
               <div className="mt-2 flex items-baseline gap-1.5">
-                <span className="text-xl font-black font-mono text-purple-300">
+                <span className="text-xl font-bold font-mono text-white">
                   {scheduledReservations.filter(s => s.isActive).length}
                 </span>
-                <span className="text-xs text-slate-400">คิวทำงาน</span>
+                <span className="text-xs text-slate-300">คิวทำงาน</span>
               </div>
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
                 <span>ออโต้รอบเย็น 18:00 น.</span>
               </div>
             </div>
@@ -990,20 +986,20 @@ export default function CustomNumberingSettings() {
         </div>
       </div>
 
-      {/* Futuristic Segmented Navigation Bar */}
-      <div className="p-1.5 rounded-2xl bg-[var(--bg-canvas)] border border-[var(--border-light)] flex gap-1.5 overflow-x-auto scrollbar-none shadow-sm">
+      {/* Navigation Tabs Bar */}
+      <div className="p-1 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex gap-1 overflow-x-auto scrollbar-none shadow-2xs">
         <button
           onClick={() => setActiveSubTab('rules')}
-          className={`px-4 py-2.5 rounded-xl font-semibold text-xs transition-all flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-lg font-semibold text-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeSubTab === 'rules'
-              ? 'bg-gradient-to-r from-indigo-600 to-cyan-600 text-white shadow-md shadow-indigo-500/20'
-              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
+              ? 'bg-[var(--primary-color)] text-white shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          <Layers className="w-4 h-4" />
+          <Layers className="w-3.5 h-3.5" />
           กฎกำหนดเลขหนังสือตาม กอง/ฝ่าย
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-            activeSubTab === 'rules' ? 'bg-white/20 text-white' : 'bg-[var(--bg-overlay)] text-[var(--text-muted)] border border-[var(--border-light)]'
+            activeSubTab === 'rules' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
           }`}>
             {rules.length}
           </span>
@@ -1011,16 +1007,16 @@ export default function CustomNumberingSettings() {
 
         <button
           onClick={() => setActiveSubTab('fileCodes')}
-          className={`px-4 py-2.5 rounded-xl font-semibold text-xs transition-all flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-lg font-semibold text-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeSubTab === 'fileCodes'
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20'
-              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
+              ? 'bg-[var(--primary-color)] text-white shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          <FolderOpen className="w-4 h-4" />
+          <FolderOpen className="w-3.5 h-3.5" />
           รหัสหมวดแฟ้มแบบกำหนดเอง
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-            activeSubTab === 'fileCodes' ? 'bg-white/20 text-white' : 'bg-[var(--bg-overlay)] text-[var(--text-muted)] border border-[var(--border-light)]'
+            activeSubTab === 'fileCodes' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
           }`}>
             {fileCodes.length}
           </span>
@@ -1028,16 +1024,16 @@ export default function CustomNumberingSettings() {
 
         <button
           onClick={() => setActiveSubTab('reserved')}
-          className={`px-4 py-2.5 rounded-xl font-semibold text-xs transition-all flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-lg font-semibold text-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeSubTab === 'reserved'
-              ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-md shadow-amber-500/20'
-              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
+              ? 'bg-[var(--primary-color)] text-white shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          <Bookmark className="w-4 h-4" />
+          <Bookmark className="w-3.5 h-3.5" />
           คลังเลขสำรอง / เลขจอง / เลขคืน
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-            activeSubTab === 'reserved' ? 'bg-white/20 text-white' : 'bg-[var(--bg-overlay)] text-[var(--text-muted)] border border-[var(--border-light)]'
+            activeSubTab === 'reserved' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
           }`}>
             {reservedNumbers.filter(r => r.status === 'available').length}
           </span>
@@ -1045,16 +1041,16 @@ export default function CustomNumberingSettings() {
 
         <button
           onClick={() => setActiveSubTab('scheduled')}
-          className={`px-4 py-2.5 rounded-xl font-semibold text-xs transition-all flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-lg font-semibold text-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeSubTab === 'scheduled'
-              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-500/20'
-              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
+              ? 'bg-[var(--primary-color)] text-white shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          <Clock className="w-4 h-4" />
+          <Clock className="w-3.5 h-3.5" />
           ตั้งเวลาจองเลขอัตโนมัติ
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-            activeSubTab === 'scheduled' ? 'bg-white/20 text-white' : 'bg-[var(--bg-overlay)] text-[var(--text-muted)] border border-[var(--border-light)]'
+            activeSubTab === 'scheduled' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
           }`}>
             {scheduledReservations.filter(s => s.isActive).length}
           </span>
@@ -1064,19 +1060,19 @@ export default function CustomNumberingSettings() {
       {/* ================= TAB 1: RULES ================= */}
       {activeSubTab === 'rules' && (
         <div className="space-y-6">
-          {/* Futuristic Live Pattern Terminal (จำลองการออกเลขจริง) */}
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--bg-surface)] to-[var(--bg-canvas)] border border-cyan-500/20 shadow-lg p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--border-light)] pb-3">
+          {/* Government Document Numbering Simulator (จำลองการออกเลขจริง) */}
+          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400">
+                <span className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-900 dark:text-blue-300">
                   <Terminal className="w-4 h-4" />
                 </span>
-                <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider flex items-center gap-1.5">
-                  Quantum Registry Simulator (จำลองการออกเลขหนังสือจริง)
+                <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  ระบบจำลองการสร้างเลขที่หนังสือราชการ (Document Number Preview)
                 </h3>
               </div>
-              <span className="text-[11px] text-[var(--text-muted)] flex items-center gap-1 font-mono">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-ping"></span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 font-mono">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
                 ACTIVE RULES ENGINE
               </span>
             </div>
@@ -1084,13 +1080,13 @@ export default function CustomNumberingSettings() {
             {/* Interactive Selectors */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="text-[11px] font-semibold text-[var(--text-secondary)] block mb-1.5">
+                <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 block mb-1.5">
                   1. เลือกฝ่าย / กอง:
                 </label>
                 <select
                   value={previewDept}
                   onChange={(e) => setPreviewDept(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-xl bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-primary)] font-medium outline-none focus:border-cyan-500 transition-colors shadow-sm"
+                  className="w-full text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium outline-none focus:border-blue-600 transition-colors shadow-2xs"
                 >
                   <option value="ฝ่ายยุทธศาสตร์และการจัดการ">ฝ่ายยุทธศาสตร์และการจัดการ (รย 0021.1)</option>
                   <option value="ฝ่ายสงเคราะห์ผู้ประสบภัย">ฝ่ายสงเคราะห์ผู้ประสบภัย (รย 0021.2)</option>
@@ -1100,13 +1096,13 @@ export default function CustomNumberingSettings() {
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-[var(--text-secondary)] block mb-1.5">
+                <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 block mb-1.5">
                   2. เลือกประเภทเอกสาร:
                 </label>
                 <select
                   value={previewDocType}
                   onChange={(e) => setPreviewDocType(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-xl bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-primary)] font-medium outline-none focus:border-cyan-500 transition-colors shadow-sm"
+                  className="w-full text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium outline-none focus:border-blue-600 transition-colors shadow-2xs"
                 >
                   <option value="หนังสือรับ">หนังสือรับ (ทะเบียนรับ)</option>
                   <option value="หนังสือส่ง">หนังสือส่ง (หนังสือภายนอก/ส่งออก)</option>
@@ -1119,21 +1115,21 @@ export default function CustomNumberingSettings() {
 
               <div className="flex flex-col justify-end">
                 {previewDocType !== 'หนังสือรับ' ? (
-                  <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[var(--bg-overlay)] border border-[var(--border-light)] cursor-pointer hover:border-cyan-500/50 transition-colors">
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-blue-500/50 transition-colors">
                     <input
                       type="checkbox"
                       id="previewCirc"
                       checked={previewIsCircular}
                       onChange={(e) => setPreviewIsCircular(e.target.checked)}
-                      className="w-4 h-4 rounded accent-cyan-600 cursor-pointer"
+                      className="w-4 h-4 rounded text-blue-900 focus:ring-blue-600 cursor-pointer"
                     />
                     <div className="text-xs">
-                      <span className="font-semibold text-[var(--text-primary)]">หนังสือเวียน (เติม "ว")</span>
-                      <p className="text-[10px] text-[var(--text-muted)]">แทรกอักษร ว หน้าลำดับเลข</p>
+                      <span className="font-semibold text-slate-900 dark:text-white">หนังสือเวียน (เติม "ว")</span>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">แทรกอักษร ว หน้าลำดับเลข</p>
                     </div>
                   </label>
                 ) : (
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-[11px] flex items-center gap-2">
+                  <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-[11px] flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>ทะเบียนหนังสือรับ รันแยกระหว่างส่วนกลางและฝ่ายงานเด็ดขาด</span>
                   </div>
@@ -1141,22 +1137,22 @@ export default function CustomNumberingSettings() {
               </div>
             </div>
 
-            {/* Glowing Holographic Result Screen */}
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-cyan-500/30 text-white flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-inner">
+            {/* Official Result Screen */}
+            <div className="p-4 rounded-xl bg-blue-950 text-white flex flex-col md:flex-row md:items-center justify-between gap-4 border border-blue-900/70 shadow-xs">
               <div className="space-y-1">
-                <span className="text-[11px] font-mono tracking-wider text-cyan-400 font-semibold uppercase flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-[11px] font-mono tracking-wider text-blue-200 font-semibold uppercase flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-blue-300" />
                   {previewDocType === 'หนังสือรับ' 
                     ? `เลขทะเบียนรับ${previewDept === 'ทุกฝ่ายงาน' ? 'สารบรรณกลาง' : ` (${previewDept})`}ถัดไป:` 
                     : 'เลขหนังสือที่จะออกถัดไป:'}
                 </span>
                 <div className="flex items-center gap-3">
-                  <span className="text-xl md:text-2xl font-black font-mono tracking-wider text-cyan-300 drop-shadow-[0_0_12px_rgba(6,182,212,0.5)]">
+                  <span className="text-xl md:text-2xl font-bold font-mono tracking-wider text-amber-300">
                     {getDemoGeneratedNumber()}
                   </span>
                   <button
                     onClick={handleCopyDemo}
-                    className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-xs font-semibold flex items-center gap-1 transition-colors border border-cyan-500/40"
+                    className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1 transition-colors border border-white/20 cursor-pointer"
                     title="คัดลอกเลขตัวอย่างนี้"
                   >
                     {copiedDemo ? (
@@ -1176,11 +1172,11 @@ export default function CustomNumberingSettings() {
 
               <div className="flex items-center gap-2 flex-wrap text-right text-xs">
                 <div className="p-2 rounded-xl bg-white/5 border border-white/10 space-y-0.5 text-left font-mono">
-                  <span className="text-[10px] text-slate-400 block">ปี พ.ศ. ปัจจุบัน</span>
+                  <span className="text-[10px] text-slate-300 block">ปี พ.ศ. ปัจจุบัน</span>
                   <span className="font-bold text-amber-300">{systemCurrentYear}</span>
                 </div>
                 <div className="p-2 rounded-xl bg-white/5 border border-white/10 space-y-0.5 text-left font-mono">
-                  <span className="text-[10px] text-slate-400 block">ระบบทะเบียน</span>
+                  <span className="text-[10px] text-slate-300 block">ระบบทะเบียน</span>
                   <span className="font-bold text-emerald-300">
                     {previewDocType === 'หนังสือรับ' ? 'ทะเบียนรับอิสระ' : 'ทะเบียนส่งออก'}
                   </span>
@@ -1302,10 +1298,10 @@ export default function CustomNumberingSettings() {
                   </thead>
                   <tbody className="divide-y divide-[var(--border-light)]">
                     {filteredRules.map((rule) => (
-                      <tr key={rule.id} className="hover:bg-cyan-500/[0.03] transition-colors group">
+                      <tr key={rule.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors group">
                         <td className="px-4 py-3.5 font-medium text-[var(--text-primary)]">
                           <div className="flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 opacity-60 group-hover:opacity-100 transition-opacity"></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary-color)] opacity-60 group-hover:opacity-100 transition-opacity"></span>
                             <span className="font-bold">{rule.ruleName}</span>
                           </div>
                           {rule.description && (
@@ -1316,7 +1312,7 @@ export default function CustomNumberingSettings() {
                         </td>
                         <td className="px-4 py-3.5 text-[var(--text-secondary)]">
                           <span className="inline-flex items-center gap-1.5 bg-[var(--bg-canvas)] px-2.5 py-1 rounded-lg border border-[var(--border-light)] text-[11px] font-medium">
-                            <Building2 className="w-3 h-3 text-cyan-600 dark:text-cyan-400" />
+                            <Building2 className="w-3 h-3 text-[var(--primary-color)]" />
                             {rule.department}
                           </span>
                         </td>
@@ -1325,11 +1321,11 @@ export default function CustomNumberingSettings() {
                             {rule.docType === 'หนังสือภายนอก' ? 'หนังสือส่ง' : rule.docType}
                           </span>
                         </td>
-                        <td className="px-4 py-3.5 font-mono text-cyan-600 dark:text-cyan-400 font-bold text-sm">
+                        <td className="px-4 py-3.5 font-mono text-[var(--primary-color)] font-bold text-sm">
                           {rule.prefixPattern}
                         </td>
                         <td className="px-4 py-3.5 text-center font-mono font-bold text-[var(--text-primary)]">
-                          <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 text-xs shadow-inner">
+                          <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 text-xs">
                             #{rule.currentSeq}
                           </span>
                         </td>

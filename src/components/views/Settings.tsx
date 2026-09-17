@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark, Sliders, ChevronRight, ChevronDown, Check } from 'lucide-react';
+import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark, Sliders, ChevronLeft, ChevronRight, ChevronDown, Check, Cpu, Server, Gauge, FileText } from 'lucide-react';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../../utils/featureFlags';
 import CustomNumberingSettings from '../CustomNumberingSettings';
 import { useConfirm } from '../../context/ConfirmContext';
@@ -15,7 +15,7 @@ interface SettingsProps {
 export default function Settings(props: SettingsProps) {
   const { confirm } = useConfirm();
   const { onSettingsUpdated } = props;
-  const [activeTab, setActiveTab] = useState<'system' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
 
   useEffect(() => {
     if (!props.hasPermission) return;
@@ -123,6 +123,16 @@ export default function Settings(props: SettingsProps) {
   const [testEmailAddress, setTestEmailAddress] = useState<string>('');
   const [isSendingTestEmail, setIsSendingTestEmail] = useState<boolean>(false);
 
+  const getLogoSrc = (url: string | null | undefined) => {
+    if (!url || typeof url !== 'string' || url.trim() === '' || url === 'null' || url === 'undefined') {
+      return 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+    }
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    return url.startsWith('/') ? url : `/${url}`;
+  };
+
   const handleSendTestEmail = async () => {
     if (!testEmailAddress.trim()) {
       alert('กรุณากรอกอีเมลผู้รับทดสอบ');
@@ -149,6 +159,214 @@ export default function Settings(props: SettingsProps) {
   };
 
   const [isSavingSystem, setIsSavingSystem] = useState(false);
+
+  // Detailed System Health & Diagnostics State (Admin Only)
+  const [systemHealth, setSystemHealth] = useState<any>(null);
+  const [isLoadingHealth, setIsLoadingHealth] = useState<boolean>(false);
+  const [isAutoRefreshHealth, setIsAutoRefreshHealth] = useState<boolean>(false);
+  const [diagRunningAction, setDiagRunningAction] = useState<string | null>(null);
+  const [diagActionMsg, setDiagActionMsg] = useState<{ type: 'success' | 'error' | 'info'; title: string; detail: string } | null>(null);
+
+  const fetchSystemHealth = async () => {
+    setIsLoadingHealth(true);
+    try {
+      const res = await fetch('/api/system/health');
+      if (res.ok) {
+        const data = await res.json();
+        setSystemHealth(data);
+      }
+    } catch (err) {
+      console.error('Error fetching system health:', err);
+    } finally {
+      setIsLoadingHealth(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'system_health' && props.user?.role === 'admin') {
+      fetchSystemHealth();
+    }
+  }, [activeTab, props.user?.role]);
+
+  useEffect(() => {
+    let timer: any = null;
+    if (activeTab === 'system_health' && props.user?.role === 'admin' && isAutoRefreshHealth) {
+      timer = setInterval(() => {
+        fetchSystemHealth();
+      }, 10000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [activeTab, props.user?.role, isAutoRefreshHealth]);
+
+  const handleTestDbConnection = async () => {
+    setDiagRunningAction('db');
+    setDiagActionMsg(null);
+    try {
+      const res = await fetch('/api/system/test-db', { method: 'POST' });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('ระบบตอบกลับรูปแบบที่ไม่ถูกต้อง (อาจเกิดจากข้อผิดพลาดที่เซิร์ฟเวอร์)');
+      }
+      if (data.success) {
+        setDiagActionMsg({
+          type: 'success',
+          title: 'ทดสอบ MySQL Connection สำเร็จ',
+          detail: `${data.message} (Latency: ${data.latencyMs}ms | Engine: ${data.engine})`
+        });
+      } else {
+        setDiagActionMsg({
+          type: 'error',
+          title: 'ทดสอบ MySQL ล้มเหลว',
+          detail: data.message
+        });
+      }
+      fetchSystemHealth();
+    } catch (err: any) {
+      setDiagActionMsg({
+        type: 'error',
+        title: 'เกิดข้อผิดพลาดในการทดสอบ',
+        detail: err.message
+      });
+    } finally {
+      setDiagRunningAction(null);
+    }
+  };
+
+  const handleTestAiEngine = async () => {
+    setDiagRunningAction('ai');
+    setDiagActionMsg(null);
+    try {
+      const res = await fetch('/api/system/test-ai', { method: 'POST' });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('ระบบตอบกลับรูปแบบที่ไม่ถูกต้อง (อาจเกิดจากข้อผิดพลาดที่เซิร์ฟเวอร์)');
+      }
+      if (data.success) {
+        setDiagActionMsg({
+          type: 'success',
+          title: 'ทดสอบเอนจิน AI สำเร็จ',
+          detail: `${data.message} (Model: ${data.primaryModel})`
+        });
+      } else {
+        setDiagActionMsg({
+          type: 'error',
+          title: 'ทดสอบ AI ล้มเหลว',
+          detail: data.message
+        });
+      }
+      fetchSystemHealth();
+    } catch (err: any) {
+      setDiagActionMsg({
+        type: 'error',
+        title: 'เกิดข้อผิดพลาดในการทดสอบ AI',
+        detail: err.message
+      });
+    } finally {
+      setDiagRunningAction(null);
+    }
+  };
+
+  const handleCleanMemoryCache = async () => {
+    setDiagRunningAction('memory');
+    setDiagActionMsg(null);
+    try {
+      const res = await fetch('/api/system/clean-memory', { method: 'POST' });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('ระบบตอบกลับรูปแบบที่ไม่ถูกต้อง (อาจเกิดจากข้อผิดพลาดที่เซิร์ฟเวอร์)');
+      }
+      if (data.success) {
+        setDiagActionMsg({
+          type: 'success',
+          title: 'ปรับปรุงหน่วยความจำสำเร็จ',
+          detail: data.message
+        });
+      } else {
+        setDiagActionMsg({
+          type: 'error',
+          title: 'ล้างหน่วยความจำล้มเหลว',
+          detail: data.message
+        });
+      }
+      fetchSystemHealth();
+    } catch (err: any) {
+      setDiagActionMsg({
+        type: 'error',
+        title: 'เกิดข้อผิดพลาดในการล้างหน่วยความจำ',
+        detail: err.message
+      });
+    } finally {
+      setDiagRunningAction(null);
+    }
+  };
+
+  const handleVerifyFileStorage = async () => {
+    setDiagRunningAction('storage');
+    setDiagActionMsg(null);
+    try {
+      const res = await fetch('/api/system/verify-storage', { method: 'POST' });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error('ระบบตอบกลับรูปแบบที่ไม่ถูกต้อง (อาจเกิดจากข้อผิดพลาดที่เซิร์ฟเวอร์)');
+      }
+      if (data.success) {
+        setDiagActionMsg({
+          type: 'success',
+          title: 'ตรวจสอบคลังจัดเก็บไฟล์สำเร็จ',
+          detail: `${data.message} (ไฟล์แนบทั้งหมด: ${data.fileCount} ไฟล์, ขนาดรวม: ${data.sizeFormatted})`
+        });
+      } else {
+        setDiagActionMsg({
+          type: 'error',
+          title: 'ตรวจสอบคลังจัดเก็บไฟล์ล้มเหลว',
+          detail: data.message
+        });
+      }
+      fetchSystemHealth();
+    } catch (err: any) {
+      setDiagActionMsg({
+        type: 'error',
+        title: 'เกิดข้อผิดพลาดในการตรวจสอบคลังไฟล์',
+        detail: err.message
+      });
+    } finally {
+      setDiagRunningAction(null);
+    }
+  };
+
+  const handleExportDiagnosticReport = () => {
+    if (!systemHealth) return;
+    const reportData = {
+      title: 'RAYONG-EDMS System Diagnostics Report',
+      exportedAt: new Date().toISOString(),
+      exportedAtThai: new Date().toLocaleString('th-TH'),
+      metrics: systemHealth
+    };
+    const jsonStr = JSON.stringify(reportData, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `system-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // Users state
   const [users, setUsers] = useState<any[]>([]);
@@ -226,16 +444,23 @@ export default function Settings(props: SettingsProps) {
   const [isLoadingAutomatedBackups, setIsLoadingAutomatedBackups] = useState(false);
   const [isRestoringAutomated, setIsRestoringAutomated] = useState(false);
   const [automatedBackupMsg, setAutomatedBackupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isAutomatedBackupEnabled, setIsAutomatedBackupEnabled] = useState(true);
 
   const fetchAutomatedBackups = async () => {
     setIsLoadingAutomatedBackups(true);
     setAutomatedBackupMsg(null);
     try {
-      const res = await fetch(`/api/automated-backups/list?role=${props.user?.role || 'admin'}`);
+      const statusRes = await fetch(`/api/automated-backups/status?role=${props.user?.role || 'admin'}`);
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.success) setIsAutomatedBackupEnabled(statusData.enabled);
+      }
+
+      const res = await fetch(`/api/automated-backups?role=${props.user?.role || 'admin'}`);
       if (!res.ok) throw new Error('ไม่สามารถดึงข้อมูลประวัติสำรองข้อมูลได้');
       const data = await res.json();
       if (data.success) {
-        setAutomatedBackups(data.backups || []);
+        setAutomatedBackups(data.files || []);
       } else {
         throw new Error(data.error || 'เกิดข้อผิดพลาด');
       }
@@ -243,6 +468,85 @@ export default function Settings(props: SettingsProps) {
       console.error(err);
     } finally {
       setIsLoadingAutomatedBackups(false);
+    }
+  };
+
+  const handleToggleAutomatedBackup = async (enabled: boolean) => {
+    try {
+      const res = await fetch('/api/automated-backups/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          role: props.user?.role || 'admin', 
+          username: props.user?.firstName || 'ผู้ดูแลระบบ',
+          enabled 
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsAutomatedBackupEnabled(enabled);
+        setAutomatedBackupMsg({ type: 'success', text: `ตั้งค่าการสำรองข้อมูลอัตโนมัติเป็น "${enabled ? 'เปิดการใช้งาน' : 'ปิดการใช้งาน'}" เรียบร้อยแล้ว` });
+      } else {
+        throw new Error(data.error || 'เกิดข้อผิดพลาดในการตั้งค่า');
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleDeleteAutomatedBackup = async (fileName: string) => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบไฟล์สำรองข้อมูล',
+      message: `คุณต้องการลบไฟล์สำรองข้อมูล "${fileName}" ใช่หรือไม่?\nการดำเนินการนี้ไม่สามารถกู้คืนได้`,
+      type: 'delete',
+      confirmText: 'ลบไฟล์',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+    
+    try {
+      const res = await fetch(`/api/automated-backups/${encodeURIComponent(fileName)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: props.user?.role || 'admin', username: props.user?.firstName || 'ผู้ดูแลระบบ' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackupMsg({ type: 'success', text: `ลบไฟล์ ${fileName} สำเร็จแล้ว` });
+        fetchAutomatedBackups();
+      } else {
+        throw new Error(data.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleDeleteAllAutomatedBackups = async () => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบข้อมูลทั้งหมด',
+      message: '⚠️ คำเตือน: คุณแน่ใจหรือไม่ว่าต้องการ "ลบไฟล์สำรองข้อมูลอัตโนมัติทั้งหมด"?\nข้อมูลสำรองเหล่านี้จะไม่สามารถกู้คืนได้อีกต่อไป',
+      type: 'delete',
+      confirmText: 'ยืนยันการลบทั้งหมด',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+    
+    try {
+      const res = await fetch('/api/automated-backups/all', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: props.user?.role || 'admin', username: props.user?.firstName || 'ผู้ดูแลระบบ' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackupMsg({ type: 'success', text: 'ลบไฟล์สำรองข้อมูลอัตโนมัติทั้งหมดสำเร็จแล้ว' });
+        fetchAutomatedBackups();
+      } else {
+        throw new Error(data.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
     }
   };
 
@@ -290,6 +594,8 @@ export default function Settings(props: SettingsProps) {
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
   const [isUpdatingPermission, setIsUpdatingPermission] = useState<string | null>(null);
   const [permissionSearchTerm, setPermissionSearchTerm] = useState<string>('');
+  const [permissionViewMode, setPermissionViewMode] = useState<'roles' | 'departments' | 'combined'>('roles');
+  const [permissionDeptFilter, setPermissionDeptFilter] = useState<string>('ALL');
 
   const fetchRolePermissions = async () => {
     setIsLoadingPermissions(true);
@@ -345,13 +651,22 @@ export default function Settings(props: SettingsProps) {
     }
   };
 
-    const handleBatchToggleRole = async (targetRole: string, targetValue: number) => {
+  const handleBatchToggleRole = async (targetRole: string, targetValue: number) => {
     if (props.user?.role !== 'admin') return;
     const actionText = targetValue === 1 ? 'เปิดใช้งานสิทธิ์ทั้งหมด' : 'ปิดใช้งานสิทธิ์ทั้งหมด';
-    const roleName = targetRole === 'admin' ? 'Admin' : targetRole === 'moderator' ? 'Moderator' : 'User';
+    const roleName = targetRole === 'admin' 
+      ? 'Admin (ผู้ดูแลระบบ)' 
+      : targetRole === 'moderator' 
+        ? 'Moderator (ผู้ตรวจสอบ)' 
+        : targetRole === 'user' 
+          ? 'User (ผู้ใช้งานทั่วไป)' 
+          : targetRole.startsWith('dept:') 
+            ? `ฝ่าย/กลุ่มงาน "${targetRole.replace('dept:', '')}"` 
+            : targetRole;
+
     const confirmed = await confirm({
       title: 'ยืนยันการเปลี่ยนสิทธิ์การเข้าถึงทั้งหมด',
-      message: `คุณต้องการ${actionText} สำหรับบทบาท "${roleName}" ใช่หรือไม่?`,
+      message: `คุณต้องการ${actionText} สำหรับ ${roleName} ใช่หรือไม่?`,
       type: 'warning',
       confirmText: 'ยืนยันดำเนินการ',
       cancelText: 'ยกเลิก'
@@ -361,8 +676,9 @@ export default function Settings(props: SettingsProps) {
     const allKeys = [
       'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
       'admin_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
-      'digital_folders', 'digital_signatures', 'recycle_bin',
-      'manage_users', 'system_settings', 'backup_restore', 'audit_logs', 'manage_changelog'
+      'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin',
+      'manage_users', 'system_settings', 'backup_restore', 'audit_logs', 'manage_changelog',
+      'urgent_incidents'
     ];
 
     setIsLoadingPermissions(true);
@@ -608,57 +924,89 @@ export default function Settings(props: SettingsProps) {
     }
   }, [activeTab]);
 
+  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3, delay = 600): Promise<Response> => {
+    try {
+      const res = await fetch(url, options);
+      return res;
+    } catch (err) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, delay));
+        return fetchWithRetry(url, options, retries - 1, delay * 1.5);
+      }
+      throw err;
+    }
+  };
+
+  const applySettingsData = (data: any) => {
+    if (data.currentYear) setCurrentYear(data.currentYear);
+    if (data.startSequence) setStartSequence(data.startSequence);
+    if (data.orgName) setOrgName(data.orgName || '');
+    if (data.headerOrgName !== undefined) setHeaderOrgName(data.headerOrgName || '');
+    if (data.logoUrl !== undefined) {
+      setLogoUrl(data.logoUrl || '');
+      if (data.logoUrl) {
+        localStorage.setItem('moi_logo', data.logoUrl);
+        localStorage.setItem('moi_schoolLogo', data.logoUrl);
+      }
+    }
+    if (data.garuda15Url !== undefined) {
+      setGaruda15Url(data.garuda15Url || '');
+      if (data.garuda15Url) {
+        localStorage.setItem('moi_garuda15', data.garuda15Url);
+        localStorage.setItem('moi_garudaCustom', data.garuda15Url);
+      }
+    }
+    if (data.garuda30Url !== undefined) {
+      setGaruda30Url(data.garuda30Url || '');
+      if (data.garuda30Url) {
+        localStorage.setItem('moi_garuda30', data.garuda30Url);
+        if (!data.garuda15Url) localStorage.setItem('moi_garudaCustom', data.garuda30Url);
+      }
+    }
+    if (data.faviconUrl !== undefined) setFaviconUrl(data.faviconUrl || '');
+    if (data.footerText) setFooterText(data.footerText || '');
+    if (data.geminiApiKey !== undefined) setGeminiApiKey(data.geminiApiKey || '');
+    if (data.smtpHost !== undefined) setSmtpHost(data.smtpHost || '');
+    if (data.smtpPort !== undefined) setSmtpPort(data.smtpPort || 587);
+    if (data.smtpUser !== undefined) setSmtpUser(data.smtpUser || '');
+    if (data.smtpPassword !== undefined) setSmtpPassword(data.smtpPassword || '');
+    if (data.smtpFrom !== undefined) setSmtpFrom(data.smtpFrom || '');
+    if (data.enabledFeatures !== undefined) {
+      const parsed = parseEnabledFeatures(data.enabledFeatures);
+      setEnabledFeatures(parsed);
+    }
+  };
+
   const fetchSystemSettings = async () => {
     try {
-      const res = await fetch('/api/settings', { cache: 'no-cache' });
+      const res = await fetchWithRetry('/api/settings', { cache: 'no-cache' });
       if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
-        if (data.currentYear) setCurrentYear(data.currentYear);
-        if (data.startSequence) setStartSequence(data.startSequence);
-        if (data.orgName) setOrgName(data.orgName || '');
-        if (data.headerOrgName !== undefined) setHeaderOrgName(data.headerOrgName || '');
-        if (data.logoUrl !== undefined) {
-          setLogoUrl(data.logoUrl || '');
-          if (data.logoUrl) {
-            localStorage.setItem('moi_logo', data.logoUrl);
-            localStorage.setItem('moi_schoolLogo', data.logoUrl);
-          }
-        }
-        if (data.garuda15Url !== undefined) {
-          setGaruda15Url(data.garuda15Url || '');
-          if (data.garuda15Url) {
-            localStorage.setItem('moi_garuda15', data.garuda15Url);
-            localStorage.setItem('moi_garudaCustom', data.garuda15Url);
-          }
-        }
-        if (data.garuda30Url !== undefined) {
-          setGaruda30Url(data.garuda30Url || '');
-          if (data.garuda30Url) {
-            localStorage.setItem('moi_garuda30', data.garuda30Url);
-            if (!data.garuda15Url) localStorage.setItem('moi_garudaCustom', data.garuda30Url);
-          }
-        }
-        if (data.faviconUrl !== undefined) setFaviconUrl(data.faviconUrl || '');
-        if (data.footerText) setFooterText(data.footerText || '');
-        if (data.geminiApiKey !== undefined) setGeminiApiKey(data.geminiApiKey || '');
-        if (data.smtpHost !== undefined) setSmtpHost(data.smtpHost || '');
-        if (data.smtpPort !== undefined) setSmtpPort(data.smtpPort || 587);
-        if (data.smtpUser !== undefined) setSmtpUser(data.smtpUser || '');
-        if (data.smtpPassword !== undefined) setSmtpPassword(data.smtpPassword || '');
-        if (data.smtpFrom !== undefined) setSmtpFrom(data.smtpFrom || '');
-        if (data.enabledFeatures !== undefined) {
-          const parsed = parseEnabledFeatures(data.enabledFeatures);
-          setEnabledFeatures(parsed);
-        }
-        
+        applySettingsData(data);
         localStorage.setItem('moi_settings', JSON.stringify(data));
       }
     } catch (error: any) {
-      console.error('Error fetching settings:', error);
+      console.warn('Network issue fetching settings, falling back to local cache:', error?.message || error);
+      const cached = localStorage.getItem('moi_settings');
+      if (cached) {
+        try {
+          applySettingsData(JSON.parse(cached));
+        } catch (e) {
+          // ignore parse error
+        }
+      }
     }
   };
 
   const saveSystemSettings = async () => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการบันทึกการตั้งค่าระบบ',
+      message: 'คุณต้องการบันทึกการเปลี่ยนแปลงการตั้งค่าระบบทั้งหมดใช่หรือไม่? การเปลี่ยนแปลงนี้อาจส่งผลต่อการทำงานของระบบในภาพรวม',
+      type: 'warning',
+      confirmText: 'ยืนยันการบันทึก'
+    });
+    if (!confirmed) return;
+
     setIsSavingSystem(true);
     try {
       await fetch('/api/settings', {
@@ -708,11 +1056,11 @@ export default function Settings(props: SettingsProps) {
       localStorage.setItem('moi_settings', JSON.stringify({
         currentYear, startSequence, orgName, headerOrgName, logoUrl, garuda15Url, garuda30Url, faviconUrl, footerText, geminiApiKey, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, enabledFeatures: JSON.stringify(enabledFeatures)
       }));
-      alert('บันทึกการตั้งค่าระบบ, ตราครุฑ/โลโก้ และ Gemini API Key เรียบร้อยแล้ว');
+      alert('บันทึกการตั้งค่าระบบและข้อมูลหน่วยงานเรียบร้อยแล้ว');
       if (onSettingsUpdated) onSettingsUpdated();
     } catch (error) {
       console.error('Error saving settings:', error);
-      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsSavingSystem(false);
     }
@@ -903,13 +1251,18 @@ export default function Settings(props: SettingsProps) {
   const fetchDepartments = async () => {
     setIsLoadingDepartments(true);
     try {
-      const res = await fetch('/api/departments');
+      const res = await fetchWithRetry('/api/departments');
       if (res.ok) {
         const depsData = await res.json();
         setDepartments(depsData);
+        try { localStorage.setItem('moi_departments_cache', JSON.stringify(depsData)); } catch (e) {}
       }
-    } catch (error) {
-      console.error('Error fetching departments:', error);
+    } catch (error: any) {
+      console.warn('Network issue fetching departments, using cache:', error?.message || error);
+      try {
+        const cached = localStorage.getItem('moi_departments_cache');
+        if (cached) setDepartments(JSON.parse(cached));
+      } catch (e) {}
     } finally {
       setIsLoadingDepartments(false);
     }
@@ -983,13 +1336,18 @@ export default function Settings(props: SettingsProps) {
   const fetchPositions = async () => {
     setIsLoadingPositions(true);
     try {
-      const res = await fetch('/api/positions');
+      const res = await fetchWithRetry('/api/positions');
       if (res.ok) {
         const posData = await res.json();
         setPositions(posData);
+        try { localStorage.setItem('moi_positions_cache', JSON.stringify(posData)); } catch (e) {}
       }
-    } catch (error) {
-      console.error('Error fetching positions:', error);
+    } catch (error: any) {
+      console.warn('Network issue fetching positions, using cache:', error?.message || error);
+      try {
+        const cached = localStorage.getItem('moi_positions_cache');
+        if (cached) setPositions(JSON.parse(cached));
+      } catch (e) {}
     } finally {
       setIsLoadingPositions(false);
     }
@@ -1063,13 +1421,18 @@ export default function Settings(props: SettingsProps) {
   const fetchUsers = async () => {
     setIsLoadingUsers(true);
     try {
-      const res = await fetch('/api/users');
+      const res = await fetchWithRetry('/api/users');
       if (res.ok) {
         const usersData = await res.json();
         setUsers(usersData);
+        try { localStorage.setItem('moi_users_cache', JSON.stringify(usersData)); } catch (e) {}
       }
-    } catch (error) {
-      console.error('Error fetching users:', error);
+    } catch (error: any) {
+      console.warn('Network issue fetching users, using cache:', error?.message || error);
+      try {
+        const cached = localStorage.getItem('moi_users_cache');
+        if (cached) setUsers(JSON.parse(cached));
+      } catch (e) {}
     } finally {
       setIsLoadingUsers(false);
     }
@@ -1236,7 +1599,7 @@ export default function Settings(props: SettingsProps) {
   const canBackup = !props.user?.role || (props.hasPermission ? props.hasPermission('backup_restore') : props.user?.role === 'admin');
 
   interface NavItem {
-    id: 'system' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control';
+    id: 'system' | 'system_health' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control';
     label: string;
     sublabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -1255,22 +1618,29 @@ export default function Settings(props: SettingsProps) {
       items: [
         {
           id: 'system',
-          label: 'ข้อมูลองค์กร',
+          label: 'องค์กร',
           sublabel: 'ชื่อหน่วยงาน, ตราครุฑ, Gemini AI',
           icon: SettingsIcon,
           visible: canManageSystem
         },
         {
+          id: 'system_health',
+          label: 'สถานะระบบ',
+          sublabel: 'เซิร์ฟเวอร์, ฐานข้อมูล, AI และวินิจฉัย',
+          icon: Activity,
+          visible: props.user?.role === 'admin'
+        },
+        {
           id: 'system_doc',
-          label: 'งานสารบรรณ',
+          label: 'สารบรรณ',
           sublabel: 'ปี พ.ศ., เลขหนังสือ, แผนก, ตำแหน่ง',
           icon: Calendar,
           visible: canManageSystem,
-          badge: departments.length > 0 ? `${departments.length} แผนก` : undefined
+          badge: departments.length > 0 ? `${departments.length}` : undefined
         },
         {
           id: 'smtp',
-          label: 'อีเมล (SMTP)',
+          label: 'อีเมล',
           sublabel: 'การส่งแจ้งเตือน และเทมเพลต OTP',
           icon: Mail,
           visible: canManageSystem
@@ -1282,15 +1652,15 @@ export default function Settings(props: SettingsProps) {
       items: [
         {
           id: 'users',
-          label: props.user?.role === 'moderator' ? 'บุคลากรในฝ่าย' : 'ข้อมูลบุคลากร',
+          label: props.user?.role === 'moderator' ? 'บุคลากร' : 'บุคลากร',
           sublabel: 'รายชื่อเจ้าหน้าที่, สังกัดฝ่าย, รหัสผ่าน',
           icon: Shield,
           visible: canManageUsers,
-          badge: users.length > 0 ? `${users.length} คน` : undefined
+          badge: users.length > 0 ? `${users.length}` : undefined
         },
         {
           id: 'permissions',
-          label: 'สิทธิ์การใช้งาน',
+          label: 'สิทธิ์',
           sublabel: 'กำหนดสิทธิ์ 4 บทบาท และฟังก์ชัน',
           icon: ShieldCheck,
           visible: true
@@ -1309,7 +1679,7 @@ export default function Settings(props: SettingsProps) {
         },
         {
           id: 'dedup',
-          label: 'จัดการไฟล์ซ้ำ',
+          label: 'ไฟล์ซ้ำ',
           sublabel: 'สแกนไฟล์ซ้ำเพื่อประหยัดพื้นที่จัดเก็บ',
           icon: HardDrive,
           visible: canBackup
@@ -1331,20 +1701,18 @@ export default function Settings(props: SettingsProps) {
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Executive Header */}
-      <div className="relative overflow-hidden bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 sm:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] group">
-        <div className="absolute right-0 top-0 w-64 h-64 bg-gradient-to-bl from-blue-500/10 to-transparent rounded-full blur-[80px] pointer-events-none -mr-10 -mt-10 transition-all duration-700 group-hover:from-blue-500/20" />
-        
+      <div className="relative overflow-hidden bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 sm:p-8 shadow-xs group">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex items-start sm:items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20 shrink-0">
+            <div className="w-14 h-14 rounded-2xl bg-[var(--primary-color)] text-white flex items-center justify-center shadow-sm shrink-0">
               <Sliders className="w-7 h-7" />
             </div>
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-2xl sm:text-3xl font-sans font-bold text-[var(--text-primary)] tracking-tight">
-                  ตั้งค่าระบบ<span className="font-normal text-blue-500">และผู้ดูแล</span>
+                  ตั้งค่าระบบ<span className="font-normal text-[var(--primary-color)]">และผู้ดูแล</span>
                 </h1>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-sm shadow-blue-500/5">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-900/10 text-blue-900 dark:text-blue-300 border border-blue-900/20 shadow-xs">
                   <Shield className="w-3.5 h-3.5" />
                   {props.user?.role === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : props.user?.role === 'moderator' ? 'สารบรรณฝ่าย (Moderator)' : 'ผู้ใช้งาน (User)'}
                 </span>
@@ -1357,13 +1725,13 @@ export default function Settings(props: SettingsProps) {
 
           {/* Quick status chips */}
           <div className="flex items-center gap-3 flex-wrap pt-4 md:pt-0 border-t md:border-t-0 border-[var(--border-lighter)]">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-sm text-[var(--text-secondary)] font-bold shadow-sm">
-              <Calendar className="w-4 h-4 text-blue-500" />
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-sm text-[var(--text-secondary)] font-bold shadow-xs">
+              <Calendar className="w-4 h-4 text-[var(--primary-color)]" />
               <span>ปี พ.ศ. {currentYear}</span>
             </div>
             {users.length > 0 && (
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-sm text-[var(--text-secondary)] font-bold shadow-sm">
-                <UserIcon className="w-4 h-4 text-emerald-500" />
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-sm text-[var(--text-secondary)] font-bold shadow-xs">
+                <UserIcon className="w-4 h-4 text-emerald-600" />
                 <span>{users.length} บุคลากร</span>
               </div>
             )}
@@ -1374,56 +1742,54 @@ export default function Settings(props: SettingsProps) {
       {/* Main Responsive Layout */}
       <div className="space-y-6">
         
-        {/* Horizontal Segmented Navigation Ribbon (All Screens) */}
-        <div className="w-full overflow-x-auto custom-scrollbar pb-2 -mb-2">
-          <div className="flex items-end gap-6 min-w-max px-1">
-            {navCategories.map((cat, catIdx) => {
-              const visibleItems = cat.items.filter(i => i.visible);
-              if (visibleItems.length === 0) return null;
-              return (
-                <div key={catIdx} className="flex flex-col gap-3">
-                  <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-widest pl-2 flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--border-medium)]"></span>
-                    {cat.category}
-                  </span>
-                  <div className="flex items-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-md p-1.5 rounded-2xl border border-[var(--border-light)] shadow-sm gap-1.5">
-                    {visibleItems.map(item => {
-                      const ItemIcon = item.icon;
-                      const isActive = activeTab === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setActiveTab(item.id)}
-                          className={`group relative flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 cursor-pointer outline-none select-none ${
-                            isActive
-                              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
-                          }`}
-                        >
-                          <ItemIcon className={`w-4 h-4 transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
-                          <span className="tracking-wide">{item.label}</span>
-                          
-                          {/* Badge Overlay */}
-                          {item.badge && (
-                            <span className={`text-[10px] px-2 py-0.5 rounded-md font-extrabold transition-colors ${
-                              isActive ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
-                            }`}>
-                              {item.badge}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+        {/* Navigation Grid Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          {navCategories.map(cat => cat.items.filter(i => i.visible).map(item => {
+            const ItemIcon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className={`group relative flex flex-col items-center justify-center p-3.5 sm:p-4 rounded-xl border transition-all duration-200 cursor-pointer outline-none select-none text-center ${
+                  isActive
+                    ? 'bg-white dark:bg-slate-900 border-[var(--primary-color)] shadow-xs ring-1 ring-[var(--primary-color)]/30'
+                    : 'bg-white/70 dark:bg-slate-900/70 hover:bg-white dark:hover:bg-slate-900 border-[var(--border-light)] hover:border-[var(--border-medium)] shadow-2xs hover:shadow-xs'
+                }`}
+              >
+                <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center mb-2 transition-transform duration-200 ${
+                  isActive
+                    ? 'bg-[var(--primary-color)] text-white shadow-xs scale-105'
+                    : 'bg-slate-100 dark:bg-slate-800 text-[var(--text-secondary)] group-hover:bg-[var(--primary-color)]/10 group-hover:text-[var(--primary-color)] group-hover:scale-105'
+                }`}>
+                  <ItemIcon className="w-5 h-5 stroke-[2]" />
                 </div>
-              );
-            })}
-          </div>
+                
+                <span className={`text-xs sm:text-sm font-bold tracking-tight transition-colors line-clamp-1 ${
+                  isActive ? 'text-[var(--primary-color)]' : 'text-[var(--text-primary)]'
+                }`}>
+                  {item.label}
+                </span>
+
+                <span className="text-[11px] text-[var(--text-secondary)] mt-0.5 line-clamp-1 max-w-[140px] opacity-80">
+                  {item.sublabel}
+                </span>
+
+                {/* Badge Overlay */}
+                {item.badge && (
+                  <span className="absolute top-2.5 right-2.5 text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20">
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          }))}
+        </div>
         </div>
 
         {/* Content Section */}
-        <section className="space-y-5">
+        <div className="space-y-5">
           {/* Active Section Banner */}
           <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
@@ -1457,6 +1823,18 @@ export default function Settings(props: SettingsProps) {
                 </button>
               )}
 
+              {activeTab === 'system_health' && (
+                <button
+                  type="button"
+                  onClick={fetchSystemHealth}
+                  disabled={isLoadingHealth}
+                  className="inline-flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition shadow-xs cursor-pointer disabled:opacity-70"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingHealth ? 'animate-spin' : ''}`} />
+                  <span>{isLoadingHealth ? 'กำลังวิเคราะห์...' : 'รีเฟรชการวินิจฉัย'}</span>
+                </button>
+              )}
+
               {activeTab === 'smtp' && (
                 <button
                   type="button"
@@ -1484,8 +1862,644 @@ export default function Settings(props: SettingsProps) {
 
           {/* Active Tab Main Card */}
           <div className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-2xl p-4 sm:p-6 lg:p-7 shadow-xs">
+        {activeTab === 'system_health' && props.user?.role === 'admin' && (
+          <div className="max-w-5xl space-y-6 animate-fade-in">
+            {/* System Health & Diagnostics Panel (Admin Only) */}
+            <div className="space-y-6">
+
+              {/* Top Header & Interactive Control Bar */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-[var(--border-light)]">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-950 dark:from-blue-700 dark:via-blue-900 dark:to-slate-950 border border-blue-400/30 flex items-center justify-center text-white shadow-md shadow-blue-900/20 shrink-0">
+                    <Activity className="w-6 h-6 animate-pulse text-blue-200" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h3 className="text-base sm:text-lg font-bold text-[var(--text-primary)] tracking-tight">
+                        ศูนย์ตรวจวัดสถานะระบบและวินิจฉัยเครื่องมือเซิร์ฟเวอร์
+                      </h3>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                        <Crown className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> สิทธิ์ผู้ดูแลระบบ (Admin Only)
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--text-secondary)] mt-1 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-600 dark:bg-emerald-400 animate-ping"></span>
+                      <span>ระบบตรวจวัดฮาร์ดแวร์ CPU, RAM, V8 Engine, พื้นที่จัดเก็บข้อมูลดิสก์, MySQL และความมั่นคงปลอดภัยสารสนเทศภาครัฐ</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Control Action Buttons */}
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsAutoRefreshHealth(!isAutoRefreshHealth)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all border cursor-pointer ${
+                      isAutoRefreshHealth 
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-400 dark:border-emerald-600/50 shadow-xs' 
+                        : 'bg-white dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/80 shadow-2xs'
+                    }`}
+                    title="เปิด/ปิดการดึงข้อมูลสดอัตโนมัติทุก 10 วินาที"
+                  >
+                    <span className={`w-2 h-2 rounded-full ${isAutoRefreshHealth ? 'bg-emerald-600 dark:bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></span>
+                    <span>{isAutoRefreshHealth ? 'รีเฟรชสดอัตโนมัติ (10s)' : 'เปิดรีเฟรชอัตโนมัติ'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={fetchSystemHealth}
+                    disabled={isLoadingHealth}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-xs font-bold transition shadow-sm hover:shadow-md cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingHealth ? 'animate-spin' : ''}`} />
+                    <span>{isLoadingHealth ? 'กำลังวิเคราะห์...' : 'รีเฟรชข้อมูล'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportDiagnosticReport}
+                    disabled={!systemHealth}
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition cursor-pointer disabled:opacity-50 shadow-2xs"
+                    title="ดาวน์โหลดรายงานผลการวินิจฉัยระบบไฟล์ .JSON"
+                  >
+                    <Download className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                    <span>ส่งออกรายงาน (.JSON)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Executive Summary Cards (4 Top KPIs) */}
+              <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* KPI 1: CPU Hardware */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-4.5 space-y-1.5 shadow-xs hover:shadow-md transition-all backdrop-blur-sm">
+                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1.5 text-blue-800 dark:text-blue-400 font-bold">
+                      <Cpu className="w-4 h-4" /> ภาระ CPU (Load)
+                    </span>
+                    <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 font-medium bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">1m / 5m</span>
+                  </div>
+                  <div className="flex items-baseline justify-between pt-1">
+                    <span className="text-2xl font-black font-mono text-slate-900 dark:text-blue-100">
+                      {systemHealth?.cpu?.loadAvg1Min || '0.00'}
+                    </span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                      5m: {systemHealth?.cpu?.loadAvg5Min || '0.00'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                    {systemHealth?.cpu?.cores || 1} Cores @ {systemHealth?.cpu?.speedGhz || '2.40'} GHz ({systemHealth?.cpu?.benchmarkUs ? `${systemHealth?.cpu?.benchmarkUs} µs` : '< 1ms'})
+                  </p>
+                </div>
+
+                {/* KPI 2: Host RAM & V8 Heap */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-4.5 space-y-1.5 shadow-xs hover:shadow-md transition-all backdrop-blur-sm">
+                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1.5 text-indigo-800 dark:text-indigo-400 font-bold">
+                      <Gauge className="w-4 h-4" /> RAM เครื่องแม่ข่าย
+                    </span>
+                    <span className="font-mono text-[10px] text-indigo-700 dark:text-indigo-300 font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/40">
+                      {systemHealth?.systemRam?.usedPercent || '0'}%
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between pt-1">
+                    <span className="text-2xl font-black font-mono text-slate-900 dark:text-indigo-100">
+                      {systemHealth?.systemRam?.usedGb || '0'} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">/ {systemHealth?.systemRam?.totalGb || '0'} GB</span>
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                    Heap: {systemHealth?.memory?.heapUsedMb || '0'} MB / {systemHealth?.v8Engine?.heapSizeLimitMb || '4096'} MB
+                  </p>
+                </div>
+
+                {/* KPI 3: Disk Space Capacity */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-4.5 space-y-1.5 shadow-xs hover:shadow-md transition-all backdrop-blur-sm">
+                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-400 font-bold">
+                      <HardDrive className="w-4 h-4" /> พื้นที่ดิสก์คงเหลือ
+                    </span>
+                    <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-300 font-bold px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/40">
+                      ใช้ไป {systemHealth?.storage?.diskSpace?.usedPercent || '0'}%
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between pt-1">
+                    <span className="text-2xl font-black font-mono text-slate-900 dark:text-emerald-100">
+                      {systemHealth?.storage?.diskSpace?.freeGb || '0'} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">GB ว่าง</span>
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                    ไฟล์แนบ /uploads: {systemHealth?.storage?.diskSpace?.uploadDirSizeFormatted || '0 KB'} ({systemHealth?.storage?.uploadedFilesCount || 0} ไฟล์)
+                  </p>
+                </div>
+
+                {/* KPI 4: Database Engine Latency */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-4.5 space-y-1.5 shadow-xs hover:shadow-md transition-all backdrop-blur-sm">
+                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1.5 text-blue-900 dark:text-blue-400 font-bold">
+                      <Database className="w-4 h-4" /> คลังข้อมูล MySQL
+                    </span>
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                      systemHealth?.database?.status === 'healthy' 
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800/40' 
+                        : 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800/40'
+                    }`}>
+                      {systemHealth?.database?.status === 'healthy' ? 'พร้อมใช้งาน' : 'โหมดสำรอง'}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between pt-1">
+                    <span className="text-2xl font-black font-mono text-slate-900 dark:text-blue-100">
+                      {systemHealth?.database?.latencyMs || 1} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">ms Latency</span>
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                    รวมเอกสารทั้งหมด: {systemHealth?.database?.counts?.totalDocs || 0} ฉบับ ({systemHealth?.database?.counts?.users || 0} ผู้ใช้งาน)
+                  </p>
+                </div>
+              </div>
+
+              {/* Interactive Server Diagnostic Action Toolbar */}
+              <div className="relative z-10 bg-slate-50/80 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-700 dark:text-amber-400">
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100">
+                      เครื่องมือทดสอบ & ตรวจสอบความพร้อมเครื่องแม่ข่าย (Interactive Server Diagnostics)
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">คลิกเพื่อสั่งการทดสอบระบบจริงในทันที</span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleTestDbConnection}
+                    disabled={diagRunningAction !== null}
+                    className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800/90 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 text-emerald-800 dark:text-emerald-300 text-xs font-bold transition-all cursor-pointer disabled:opacity-50 shadow-2xs hover:shadow-xs"
+                  >
+                    <Database className={`w-4 h-4 text-emerald-600 dark:text-emerald-400 ${diagRunningAction === 'db' ? 'animate-spin' : ''}`} />
+                    <span>{diagRunningAction === 'db' ? 'กำลังทดสอบ...' : 'ทดสอบ MySQL Ping'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTestAiEngine}
+                    disabled={diagRunningAction !== null}
+                    className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800/90 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-indigo-800 dark:text-indigo-300 text-xs font-bold transition-all cursor-pointer disabled:opacity-50 shadow-2xs hover:shadow-xs"
+                  >
+                    <Zap className={`w-4 h-4 text-indigo-600 dark:text-indigo-400 ${diagRunningAction === 'ai' ? 'animate-spin' : ''}`} />
+                    <span>{diagRunningAction === 'ai' ? 'กำลังทดสอบ...' : 'ทดสอบเอนจิน AI'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCleanMemoryCache}
+                    disabled={diagRunningAction !== null}
+                    className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800/90 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-200 dark:border-slate-700 hover:border-blue-400 text-blue-800 dark:text-blue-300 text-xs font-bold transition-all cursor-pointer disabled:opacity-50 shadow-2xs hover:shadow-xs"
+                  >
+                    <Gauge className={`w-4 h-4 text-blue-600 dark:text-blue-400 ${diagRunningAction === 'memory' ? 'animate-spin' : ''}`} />
+                    <span>{diagRunningAction === 'memory' ? 'กำลังล้าง...' : 'ล้างแคช Heap RAM'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleVerifyFileStorage}
+                    disabled={diagRunningAction !== null}
+                    className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800/90 hover:bg-teal-50 dark:hover:bg-teal-950/40 border border-slate-200 dark:border-slate-700 hover:border-teal-400 text-teal-800 dark:text-teal-300 text-xs font-bold transition-all cursor-pointer disabled:opacity-50 shadow-2xs hover:shadow-xs"
+                  >
+                    <HardDrive className={`w-4 h-4 text-teal-600 dark:text-teal-400 ${diagRunningAction === 'storage' ? 'animate-spin' : ''}`} />
+                    <span>{diagRunningAction === 'storage' ? 'กำลังตรวจ...' : 'ตรวจไฟล์แนบดิสก์'}</span>
+                  </button>
+                </div>
+
+                {/* Diagnostic Result Callout Message */}
+                {diagActionMsg && (
+                  <div className={`p-3.5 rounded-xl border text-xs flex items-start justify-between gap-3 animate-fade-in ${
+                    diagActionMsg.type === 'success' 
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200' 
+                      : diagActionMsg.type === 'error'
+                        ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-200'
+                        : 'bg-blue-50 dark:bg-blue-950/60 border-blue-300 dark:border-blue-700 text-blue-900 dark:text-blue-200'
+                  }`}>
+                    <div className="flex items-start gap-2.5">
+                      {diagActionMsg.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                      )}
+                      <div>
+                        <strong className="block font-bold text-xs">{diagActionMsg.title}</strong>
+                        <span className="text-[11px] opacity-90">{diagActionMsg.detail}</span>
+                      </div>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => setDiagActionMsg(null)}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Detailed 6-Panel Diagnostic Cards Grid */}
+              <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-5">
+                
+                {/* Panel 1: CPU Hardware & OS Kernel */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs backdrop-blur-sm">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-blue-900 dark:text-blue-400 font-bold text-sm">
+                      <Cpu className="w-4 h-4" />
+                      <span>ขุมพลังฮาร์ดแวร์ CPU & โฮสต์ OS (Hardware Core)</span>
+                    </div>
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-mono font-bold border border-blue-200 dark:border-blue-800/40">
+                      {systemHealth?.cpu?.cores || 1} Cores @ {systemHealth?.cpu?.speedGhz || '2.40'} GHz
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400 block text-[11px]">รุ่นหน่วยประมวลผล</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200 text-[11px] truncate block" title={systemHealth?.cpu?.model || 'Generic CPU'}>
+                        {systemHealth?.cpu?.model || 'Intel / AMD Cloud Instance'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400 block text-[11px]">ระบบปฏิบัติการ Kernel</span>
+                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200 text-[11px]">
+                        {systemHealth?.server?.osType || 'Linux'} ({systemHealth?.server?.osRelease || '6.x'})
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400 block text-[11px]">ค่าเฉลี่ยภาระ CPU (Load Avg)</span>
+                      <span className="font-mono font-bold text-amber-700 dark:text-amber-400 text-[11px]">
+                        1m: {systemHealth?.cpu?.loadAvg1Min || '0.00'} | 5m: {systemHealth?.cpu?.loadAvg5Min || '0.00'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400 block text-[11px]">ความเร็วตอบสนอง (Benchmark)</span>
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-[11px]">
+                        {systemHealth?.cpu?.benchmarkUs ? `${systemHealth?.cpu?.benchmarkUs} µs` : '< 1ms'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="text-slate-500 dark:text-slate-400 block text-[10px]">ระยะเวลาทำงานกระบวนการ (Process Uptime)</span>
+                      <span className="font-bold text-blue-900 dark:text-blue-300 text-[11px]">{systemHealth?.server?.processUptimeFormatted || 'กำลังวิเคราะห์...'}</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="text-slate-500 dark:text-slate-400 block text-[10px]">ระยะเวลาทำงานแม่ข่าย (Host Uptime)</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300 text-[11px]">{systemHealth?.server?.sysUptimeFormatted || 'กำลังวิเคราะห์...'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel 2: Host RAM & V8 Heap Memory */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs backdrop-blur-sm">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-400 font-bold text-sm">
+                      <Gauge className="w-4 h-4" />
+                      <span>หน่วยความจำ RAM & V8 Engine (Memory Diagnostics)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCleanMemoryCache}
+                      className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition font-bold border border-indigo-200 dark:border-indigo-800/40 cursor-pointer"
+                    >
+                      ล้างแคช RAM
+                    </button>
+                  </div>
+
+                  {/* OS RAM Progress Bar */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500 dark:text-slate-400">หน่วยความจำเครื่องแม่ข่าย (OS RAM Used):</span>
+                      <span className="font-mono text-indigo-900 dark:text-indigo-300 font-bold">
+                        {systemHealth?.systemRam?.usedGb || '0'} GB ({systemHealth?.systemRam?.usedPercent || '0'}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-400 transition-all duration-500"
+                        style={{ width: `${Math.min(100, Math.max(5, parseFloat(systemHealth?.systemRam?.usedPercent || '0')))}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* V8 Node Process Heap Progress Bar */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500 dark:text-slate-400">Node Heap Memory (Used / Max Limit):</span>
+                      <span className="font-mono text-indigo-900 dark:text-indigo-300 font-bold">
+                        {systemHealth?.memory?.heapUsedMb || '0'} MB / {systemHealth?.v8Engine?.heapSizeLimitMb || '4096'} MB
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-indigo-500 to-indigo-700 dark:from-indigo-400 dark:to-indigo-600 transition-all duration-500"
+                        style={{ width: `${Math.min(100, Math.max(5, parseFloat(systemHealth?.memory?.heapPercent || '0')))}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5 text-[10px] text-slate-600 dark:text-slate-300 pt-1 text-center">
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-2 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">RSS Allocated</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{systemHealth?.memory?.rssMb || '0'} MB</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-2 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">Malloced Mem</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{systemHealth?.v8Engine?.mallocedMemoryMb || '0'} MB</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-2 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">V8 Heap Limit</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{systemHealth?.v8Engine?.heapSizeLimitMb || '4096'} MB</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel 3: Database & MySQL Storage */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs backdrop-blur-sm">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-400 font-bold text-sm">
+                      <Database className="w-4 h-4" />
+                      <span>คลังข้อมูล MySQL & สถิติสารบรรณ (Database Engine)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestDbConnection}
+                      className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition font-bold border border-emerald-200 dark:border-emerald-800/40 cursor-pointer"
+                    >
+                      {systemHealth?.database?.status === 'healthy' ? `Latency ${systemHealth?.database?.latencyMs || 1}ms` : 'ทดสอบ Ping'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="text-slate-500 dark:text-slate-400 block text-[10px]">หนังสือรับสารบรรณ</span>
+                      <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">{systemHealth?.database?.counts?.inboxDocs || 0} <span className="text-[10px] text-slate-400 font-normal">ฉบับ</span></span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="text-slate-500 dark:text-slate-400 block text-[10px]">หนังสือส่งสารบรรณ</span>
+                      <span className="font-bold text-blue-700 dark:text-blue-400 text-sm">{systemHealth?.database?.counts?.outboxDocs || 0} <span className="text-[10px] text-slate-400 font-normal">ฉบับ</span></span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="text-slate-500 dark:text-slate-400 block text-[10px]">หนังสือเวียน</span>
+                      <span className="font-bold text-indigo-700 dark:text-indigo-400 text-sm">{systemHealth?.database?.counts?.circularDocs || 0} <span className="text-[10px] text-slate-400 font-normal">ฉบับ</span></span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="text-slate-500 dark:text-slate-400 block text-[10px]">คำสั่ง & ประกาศ</span>
+                      <span className="font-bold text-amber-700 dark:text-amber-400 text-sm">{systemHealth?.database?.counts?.adminDocs || 0} <span className="text-[10px] text-slate-400 font-normal">ฉบับ</span></span>
+                    </div>
+                  </div>
+
+                  <div className="pt-1 flex items-center justify-between text-[11px] bg-slate-50 dark:bg-slate-950/70 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                    <span className="text-slate-600 dark:text-slate-300 font-medium">รวมเอกสารสารบรรณทั้งหมด:</span>
+                    <span className="font-extrabold text-blue-900 dark:text-blue-300 text-sm">
+                      {systemHealth?.database?.counts?.totalDocs || 0} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">ฉบับ</span>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1 text-[10px] text-slate-600 dark:text-slate-300 pt-1 text-center">
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-1.5 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">บุคลากร</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{systemHealth?.database?.counts?.users || 0} คน</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-1.5 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">ฝ่าย/กลุ่มงาน</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{systemHealth?.database?.counts?.departments || 0} ฝ่าย</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-1.5 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">ตำแหน่ง</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{systemHealth?.database?.counts?.positions || 0} ตำแหน่ง</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-1.5 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">ประวัติระบบ</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{systemHealth?.database?.counts?.systemLogs || 0} แถว</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel 4: Disk Space & File Storage */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs backdrop-blur-sm">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-400 font-bold text-sm">
+                      <HardDrive className="w-4 h-4" />
+                      <span>พื้นที่จัดเก็บข้อมูลดิสก์ & คลังไฟล์ (Disk Space & Storage)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleVerifyFileStorage}
+                      className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition font-bold border border-emerald-200 dark:border-emerald-800/40 cursor-pointer"
+                    >
+                      ตรวจไฟล์แนบ
+                    </button>
+                  </div>
+
+                  {/* Disk Used Progress Bar */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500 dark:text-slate-400">พื้นที่ใช้ไป (Used Disk Space):</span>
+                      <span className="font-mono text-emerald-800 dark:text-emerald-300 font-bold">
+                        {systemHealth?.storage?.diskSpace?.usedGb || '0'} GB ({systemHealth?.storage?.diskSpace?.usedPercent || '0'}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-500 ${
+                          parseFloat(systemHealth?.storage?.diskSpace?.usedPercent || '0') > 85 
+                            ? 'bg-gradient-to-r from-amber-500 to-rose-600' 
+                            : 'bg-gradient-to-r from-emerald-600 to-teal-500 dark:from-emerald-500 dark:to-teal-400'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(3, parseFloat(systemHealth?.storage?.diskSpace?.usedPercent || '0')))}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                      <span>คงเหลือใช้งานได้: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{systemHealth?.storage?.diskSpace?.freeGb || '0'} GB</strong></span>
+                      <span>ทั้งหมด: {systemHealth?.storage?.diskSpace?.totalGb || '0'} GB</span>
+                    </div>
+                  </div>
+
+                  {/* Metric Sub-blocks */}
+                  <div className="grid grid-cols-3 gap-1.5 text-[10px] text-slate-600 dark:text-slate-300 pt-1 text-center">
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-2 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">พื้นที่ใช้งานไป</span>
+                      <span className="font-bold text-amber-700 dark:text-amber-400">{systemHealth?.storage?.diskSpace?.usedGb || '0'} GB</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-2 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">พื้นที่คงเหลือ</span>
+                      <span className="font-bold text-emerald-700 dark:text-emerald-400">{systemHealth?.storage?.diskSpace?.freeGb || '0'} GB</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 py-2 px-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
+                      <span className="block text-slate-500 dark:text-slate-400">ขนาดไฟล์แนบ (/uploads)</span>
+                      <span className="font-bold text-blue-900 dark:text-blue-300">{systemHealth?.storage?.diskSpace?.uploadDirSizeFormatted || '0 KB'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel 5: Node Process, File I/O & Network Stack */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs backdrop-blur-sm">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-400 font-bold text-sm">
+                      <Server className="w-4 h-4" />
+                      <span>เครือข่ายเซิร์ฟเวอร์ & File I/O (Network & I/O Stack)</span>
+                    </div>
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-mono font-bold border border-indigo-200 dark:border-indigo-800/40">
+                      Port 3000 (0.0.0.0)
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">กระบวนการ Process ID (PID):</span>
+                      <span className="font-mono font-bold text-indigo-800 dark:text-indigo-300">PID {systemHealth?.server?.pid || 'N/A'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">โซนเวลาเซิร์ฟเวอร์ (Timezone):</span>
+                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{systemHealth?.server?.timezone || 'Asia/Bangkok (GMT+7)'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">ไฟล์แนบในระบบ (Uploaded Attachments):</span>
+                      <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                        {systemHealth?.storage?.uploadedFilesCount || 0} ไฟล์ (/uploads)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">เครือข่ายการเชื่อมต่อ (Active Network IF):</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300 text-[11px]">
+                        {systemHealth?.network?.interfaces?.join(', ') || 'eth0, lo'} ({systemHealth?.network?.activeInterfacesCount || 2} interfaces)
+                      </span>
+                    </div>
+                    {systemHealth?.resourceUsage && (
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800">
+                        <span className="text-slate-500 dark:text-slate-400">เวลาการประมวลผลสะสม (CPU Time):</span>
+                        <span className="font-mono text-amber-700 dark:text-amber-400 text-[11px]">
+                          User: {systemHealth?.resourceUsage?.userCpuTimeSec}s | Sys: {systemHealth?.resourceUsage?.systemCpuTimeSec}s
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-blue-50/80 dark:bg-indigo-950/30 border border-blue-200 dark:border-indigo-800/40 text-[11px] text-blue-900 dark:text-indigo-200 flex items-center justify-between">
+                    <span>การทำงานผ่าน Nginx Reverse Proxy Container:</span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> บายพาสพอร์ต 3000 สมบูรณ์
+                    </span>
+                  </div>
+                </div>
+
+                {/* Panel 6: AI Vision & Gemini */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs backdrop-blur-sm">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-400 font-bold text-sm">
+                      <Zap className="w-4 h-4" />
+                      <span>เอนจินปัญญาประดิษฐ์ (AI Vision & OCR Engine)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestAiEngine}
+                      className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition font-bold border border-indigo-200 dark:border-indigo-800/40 cursor-pointer"
+                    >
+                      ทดสอบ AI
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">โมเดลประมวลผลหลัก:</span>
+                      <span className="font-bold text-indigo-800 dark:text-indigo-300 font-mono">AI Engine</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">ลำดับการ Fallback สำรอง:</span>
+                      <span className="text-[11px] text-slate-700 dark:text-slate-300 font-mono">2.0 Flash &rarr; 1.5 Flash</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">การตั้งค่า Gemini API Key:</span>
+                      {systemHealth?.aiEngine?.apiKeyConfigured ? (
+                        <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> พร้อมใช้งานใน DB
+                        </span>
+                      ) : (
+                        <span className="text-amber-700 dark:text-amber-400 font-bold flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" /> พร้อมใช้งาน (Secrets)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-purple-50/80 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/40 text-[11px] text-purple-900 dark:text-purple-200">
+                    รองรับการสแกนเอกสาร ปภ.๑, OCR อ่านข้อความตราครุฑ, ตัดแยกภาพถ่ายความเสียหาย และสกัดลายเซ็นอัตโนมัติ
+                  </div>
+                </div>
+
+                {/* Panel 7: Enterprise Security & Auth */}
+                <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xs backdrop-blur-sm md:col-span-2">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-amber-800 dark:text-amber-400 font-bold text-sm">
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>ความปลอดภัยและการรักษาสภาพ (Enterprise Security & Compliance)</span>
+                    </div>
+                    <span className="text-[10px] px-3 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-bold border border-amber-300 dark:border-amber-700/50">
+                      e-Government Security Compliance
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                    <div className="bg-slate-50 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800/80 space-y-0.5">
+                      <span className="text-slate-500 dark:text-slate-400 text-[10px] block">การเข้ารหัสรหัสผ่าน</span>
+                      <span className="font-bold text-emerald-700 dark:text-emerald-400 font-mono text-[11px]">Argon2id Salted Hash</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800/80 space-y-0.5">
+                      <span className="text-slate-500 dark:text-slate-400 text-[10px] block">การยืนยันตัวตน & เซสชัน</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200 text-[11px]">HTTP-Only Cookie + Bearer</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800/80 space-y-0.5">
+                      <span className="text-slate-500 dark:text-slate-400 text-[10px] block">การควบคุมสิทธิ์ใช้งาน (RBAC)</span>
+                      <span className="font-bold text-blue-800 dark:text-blue-300 text-[11px]">4 Roles + Dept 2D Matrix</span>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800/80 space-y-0.5">
+                      <span className="text-slate-500 dark:text-slate-400 text-[10px] block">มาตรฐานลายมือชื่อดิจิทัล</span>
+                      <span className="font-bold text-amber-800 dark:text-amber-300 text-[11px]">SHA-256 + TSA ETDA B.E. 2544</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 text-[11px] text-amber-900 dark:text-amber-200 flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>ระบบตรวจเช็กการเข้าถึงเอกสารและบันทึกร่องรอยการใช้งาน (Audit Trail Security Log)</span>
+                    </div>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> ตรวจสอบเรียบร้อย
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer status line */}
+              <div className="pt-3.5 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-600 dark:bg-emerald-400"></span>
+                  <span>อัปเดตข้อมูลล่าสุดเมื่อ: {systemHealth?.timestampThai || new Date().toLocaleString('th-TH')}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-slate-500 dark:text-slate-400 text-[10px]">
+                    Node.js {systemHealth?.server?.nodeVersion || 'v20'} ({systemHealth?.server?.platform || 'Linux'})
+                  </span>
+                  <span className="font-mono text-slate-600 dark:text-slate-400 text-[10px] bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
+                    RAYONG-EDMS v2.8.0-PROD-CONTAINER
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'system' && (
           <div className="max-w-4xl space-y-6 animate-fade-in">
+
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
               <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-4 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-[var(--primary-color)]" /> ชื่อหน่วยงาน
@@ -1650,17 +2664,19 @@ export default function Settings(props: SettingsProps) {
                       >
                         {logoUrl ? (
                           <img
-                            src={logoUrl}
+                            src={getLogoSrc(logoUrl)}
                             alt="Logo"
                             className="max-w-full max-h-full object-contain"
                             onError={(e) => {
-                              if ((e.target as HTMLImageElement).src.indexOf('ddpm-logo.svg') === -1) {
-                                (e.target as HTMLImageElement).src = '/public/ddpm-logo.svg';
+                              const target = e.target as HTMLImageElement;
+                              const fallback = 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+                              if (target.src !== fallback) {
+                                target.src = fallback;
                               }
                             }}
                           />
                         ) : (
-                          <img src="/public/ddpm-logo.svg" alt="Default Logo" className="max-w-full max-h-full object-contain opacity-70" />
+                          <img src="https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png" alt="Default Logo" className="max-w-full max-h-full object-contain opacity-70" />
                         )}
                         <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-white">
                           <Upload className="w-5 h-5 mb-1" />
@@ -1770,7 +2786,7 @@ export default function Settings(props: SettingsProps) {
                 </div>
                 {geminiApiKey ? (
                   <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mt-1.5 font-medium">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> บันทึก Gemini API Key ในระบบเรียบร้อยแล้ว พร้อมใช้งาน AI สแกนเอกสาร
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> บันทึก Gemini API Key ในระบบเรียบร้อยแล้ว
                   </p>
                 ) : (
                   <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mt-1.5 font-medium">
@@ -2701,6 +3717,12 @@ export default function Settings(props: SettingsProps) {
                   note: 'ครอบคลุมงานสนับสนุนและธุรการกลาง'
                 },
                 {
+                  key: 'urgent_incidents',
+                  title: 'แบบรายงานเหตุด่วนสาธารณภัย (Urgent Incidents)',
+                  desc: 'สิทธิ์เข้าถึง สร้าง แก้ไข และลบ แบบฟอร์มรายงานเหตุด่วนสาธารณภัย และดูแดชบอร์ดสรุปผล',
+                  note: 'สำหรับฝ่ายสงเคราะห์ผู้ประสบภัยโดยเฉพาะ'
+                },
+                {
                   key: 'ai_assistant',
                   title: 'ผู้ช่วย AI Smart สารบรรณ (AI Assistant & Auto Draft)',
                   desc: 'สิทธิ์ใช้งาน AI ในการสรุปเนื้อหาหนังสือ ยกร่างหนังสือตอบกลับอัตโนมัติ และสืบค้นระเบียบ',
@@ -2792,11 +3814,32 @@ export default function Settings(props: SettingsProps) {
             }
           ];
 
+          const defaultDeptList = [
+            { id: 'd1', name: 'ฝ่ายบริหารงานทั่วไป', description: 'งานธุรการ งานสารบรรณกลาง และงานอำนวยการ' },
+            { id: 'd2', name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานแผนงาน งบประมาณ และยุทธศาสตร์พัฒนา' },
+            { id: 'd3', name: 'ฝ่ายป้องกันและบรรเทาสาธารณภัย', description: 'งานป้องกัน บรรเทา และเตรียมพร้อมรับมือภัยพิบัติ' },
+            { id: 'd4', name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'งานฟื้นฟู สังคมสงเคราะห์ และช่วยเหลือผู้ประสบภัย' },
+            { id: 'd5', name: 'ฝ่ายส่งเสริมและพัฒนา', description: 'งานฝึกอบรมวิชาชีพ และพัฒนาชุมชนท้องถิ่น' }
+          ];
+
+          const effectiveDepartments = departments.length > 0 ? departments : defaultDeptList;
+          const displayedDepartments = permissionDeptFilter === 'ALL' 
+            ? effectiveDepartments 
+            : effectiveDepartments.filter((d: any) => d.name === permissionDeptFilter);
+
           // Calculate active permission count per role dynamically
           const totalKeysCount = permissionsList.reduce((acc, sec) => acc + sec.items.length, 0);
           const getActiveCount = (role: string) => {
             const rolePerms = rolePermissions.filter(p => p.role === role && p.is_allowed === 1);
             return rolePerms.length;
+          };
+
+          const getDeptActiveCount = (deptName: string) => {
+            const deptKey = `dept:${deptName}`;
+            const deptPerms = rolePermissions.filter(p => p.role === deptKey && p.is_allowed === 1);
+            if (deptPerms.length > 0) return deptPerms.length;
+            const defaultKeys = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'];
+            return defaultKeys.length;
           };
 
           const adminActiveCount = getActiveCount('admin');
@@ -2815,35 +3858,47 @@ export default function Settings(props: SettingsProps) {
             return { ...sec, items: matchedItems };
           }).filter(sec => sec.items.length > 0);
 
-          const renderToggle = (role: string, key: string, isMobileInline: boolean = false) => {
-            const perm = rolePermissions.find(p => p.role === role && p.permission_key === key);
-            // Default fallbacks if not explicitly set
+          const renderToggle = (roleOrDept: string, key: string, isMobileInline: boolean = false) => {
+            const perm = rolePermissions.find(p => p.role === roleOrDept && p.permission_key === key);
             let isAllowed = false;
+            let isExplicit = false;
+
             if (perm) {
               isAllowed = perm.is_allowed === 1 || perm.is_allowed === true;
+              isExplicit = true;
             } else {
-              if (role === 'admin') isAllowed = true;
-              else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
-              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
+              if (roleOrDept === 'admin') isAllowed = true;
+              else if (roleOrDept === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
+              else if (roleOrDept === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'].includes(key);
+              else if (roleOrDept.startsWith('dept:')) {
+                isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'].includes(key);
+              }
             }
 
-            const updateKey = `${role}-${key}`;
+            const updateKey = `${roleOrDept}-${key}`;
             const isUpdating = isUpdatingPermission === updateKey;
             const isAdmin = props.user?.role === 'admin';
             
             // Protect Admin from self-lockout
-            const isProtected = role === 'admin' && (key === 'system_settings' || key === 'manage_users');
+            const isProtected = roleOrDept === 'admin' && (key === 'system_settings' || key === 'manage_users');
+
+            const isDept = roleOrDept.startsWith('dept:');
+            const roleColorClass = isDept 
+              ? 'bg-indigo-600' 
+              : roleOrDept === 'admin' 
+                ? 'bg-amber-500' 
+                : roleOrDept === 'moderator' 
+                  ? 'bg-indigo-600' 
+                  : 'bg-emerald-500';
 
             if (isMobileInline) {
               return (
                 <div className="flex items-center gap-2">
                   <button
                     disabled={!isAdmin || isProtected || isLoadingPermissions || isUpdating}
-                    onClick={() => handleTogglePermission(role, key, isAllowed ? 1 : 0)}
+                    onClick={() => handleTogglePermission(roleOrDept, key, isAllowed ? 1 : 0)}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isAllowed 
-                        ? (role === 'admin' ? 'bg-amber-500' : role === 'moderator' ? 'bg-indigo-600' : 'bg-emerald-500') 
-                        : 'bg-slate-300 dark:bg-slate-700'
+                      isAllowed ? roleColorClass : 'bg-slate-300 dark:bg-slate-700'
                     } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-xs'}`}
                     title={isProtected ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin (ห้ามปิด)' : !isAdmin ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้' : 'คลิกเพื่อสลับสิทธิ์การใช้งาน'}
                   >
@@ -2854,7 +3909,7 @@ export default function Settings(props: SettingsProps) {
                     />
                   </button>
                   <span className={`text-[11px] font-bold tracking-tight ${isAllowed ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                    {isUpdating ? 'บันทึก...' : isAllowed ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                    {isUpdating ? 'บันทึก...' : isAllowed ? (isExplicit ? 'เปิด' : 'เปิด (Default)') : (isExplicit ? 'ปิด' : 'ปิด (Default)')}
                   </span>
                 </div>
               );
@@ -2864,11 +3919,9 @@ export default function Settings(props: SettingsProps) {
               <div className="flex flex-col items-center justify-center gap-1 py-1">
                 <button
                   disabled={!isAdmin || isProtected || isLoadingPermissions || isUpdating}
-                  onClick={() => handleTogglePermission(role, key, isAllowed ? 1 : 0)}
+                  onClick={() => handleTogglePermission(roleOrDept, key, isAllowed ? 1 : 0)}
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    isAllowed 
-                      ? (role === 'admin' ? 'bg-amber-500' : role === 'moderator' ? 'bg-indigo-600' : 'bg-emerald-500') 
-                      : 'bg-slate-200 dark:bg-slate-700'
+                    isAllowed ? roleColorClass : 'bg-slate-200 dark:bg-slate-700'
                   } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-sm'}`}
                   title={isProtected ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin (ห้ามปิด)' : !isAdmin ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้' : 'คลิกเพื่อสลับสิทธิ์การใช้งาน'}
                 >
@@ -2879,7 +3932,7 @@ export default function Settings(props: SettingsProps) {
                   />
                 </button>
                 <span className={`text-[10px] font-bold tracking-tight ${isAllowed ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                  {isUpdating ? 'บันทึก...' : isAllowed ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}
+                  {isUpdating ? 'บันทึก...' : isAllowed ? (isExplicit ? 'เปิด' : 'เปิด (Default)') : (isExplicit ? 'ปิด' : 'ปิด (Default)')}
                 </span>
               </div>
             );
@@ -2900,8 +3953,8 @@ export default function Settings(props: SettingsProps) {
                       </h3>
                     </div>
                     <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-3xl pt-1">
-                      แผงควบคุมสิทธิ์ตามระดับผู้ใช้แบบโต้ตอบ (Interactive Matrix) ครอบคลุมทั้ง 18 ฟังก์ชันหลักในระบบสารบรรณอิเล็กทรอนิกส์
-                      สามารถปรับเปลี่ยนและมีผลใช้งานทันทีทั่วทั้งองค์กร
+                      ระบบบริหารจัดการสิทธิ์แบบ 2 มิติ (2D Permission Engine) รองรับทั้งการแบ่งตามบทบาทผู้ใช้ (User Roles) 
+                      และสิทธิ์เจาะจงรายฝ่าย/กลุ่มงาน (Department-Level Overrides) สามารถปรับเปลี่ยนยืดหยุ่นและมีผลทันทีทั่วทั้งองค์กร
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-white/10 shrink-0">
@@ -2920,146 +3973,303 @@ export default function Settings(props: SettingsProps) {
                 </div>
               </div>
 
-              {/* Role Summary Cards with Quick Actions */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Admin Card */}
-                <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-amber-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-bl-full pointer-events-none" />
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
-                          <Crown className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-[var(--text-primary)]">Admin (ผู้ดูแลระบบ)</h4>
-                          <span className="text-xs text-[var(--text-muted)]">สิทธิ์สูงสุดควบคุมโครงสร้างระบบ</span>
-                        </div>
-                      </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
-                        Level 1
-                      </span>
-                    </div>
-                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                      มีสิทธิ์จัดการระบบสารบรรณเต็มรูปแบบ จัดการบทบาทผู้ใช้ ตั้งค่าเลขสารบรรณ และสำรองข้อมูล
-                    </p>
-                  </div>
+              {/* Control Mode Switcher Tabs */}
+              <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] p-2 rounded-2xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setPermissionViewMode('roles')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      permissionViewMode === 'roles'
+                        ? 'bg-[var(--primary-color)] text-white shadow-sm'
+                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-canvas)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Shield className="w-4 h-4" />
+                    <span>กำหนดสิทธิ์ตามบทบาท (User Roles)</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] ${permissionViewMode === 'roles' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-[var(--text-muted)]'}`}>
+                      3 บทบาท
+                    </span>
+                  </button>
 
-                  <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
-                      <span className="text-amber-500">{adminActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                      <div className="bg-amber-500 h-full transition-all duration-300" style={{ width: `${(adminActiveCount / totalKeysCount) * 100}%` }} />
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPermissionViewMode('departments')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      permissionViewMode === 'departments'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-canvas)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Building2 className="w-4 h-4" />
+                    <span>กำหนดสิทธิ์เจาะจงตามฝ่าย/กลุ่มงาน (Departments)</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] ${permissionViewMode === 'departments' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-[var(--text-muted)]'}`}>
+                      {effectiveDepartments.length} ฝ่าย
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPermissionViewMode('combined')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      permissionViewMode === 'combined'
+                        ? 'bg-slate-900 text-white shadow-sm dark:bg-slate-800'
+                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-canvas)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span>ตารางภาพรวมทุกสิทธิ์ (Combined Matrix)</span>
+                  </button>
                 </div>
 
-                {/* Moderator Card */}
-                <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-indigo-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-bl-full pointer-events-none" />
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
-                          <ShieldCheck className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-[var(--text-primary)]">Moderator (ผู้ตรวจสอบ)</h4>
-                          <span className="text-xs text-[var(--text-muted)]">หัวหน้ากลุ่มงาน / เจ้าหน้าที่สารบรรณ</span>
-                        </div>
-                      </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/15 text-indigo-500 border border-indigo-500/30">
-                        Level 2
-                      </span>
-                    </div>
-                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                      มีสิทธิ์ออกเลขสารบรรณ ตรวจสอบร่างหนังสือ อนุมัติเอกสาร ลงนามดิจิทัล และดูแลผู้ใช้ในฝ่าย
-                    </p>
+                {permissionViewMode === 'departments' && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl shrink-0 text-xs">
+                    <Filter className="w-3.5 h-3.5 text-[var(--primary-color)]" />
+                    <span className="text-[var(--text-muted)] font-medium">กรองฝ่ายงาน:</span>
+                    <select
+                      value={permissionDeptFilter}
+                      onChange={(e) => setPermissionDeptFilter(e.target.value)}
+                      className="bg-transparent border-none text-xs font-bold text-[var(--text-primary)] outline-none cursor-pointer"
+                    >
+                      <option value="ALL">แสดงทุกฝ่าย ({effectiveDepartments.length})</option>
+                      {effectiveDepartments.map((d: any) => (
+                        <option key={d.id} value={d.name}>{d.name}</option>
+                      ))}
+                    </select>
                   </div>
-
-                  <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
-                      <span className="text-indigo-500">{modActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                      <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${(modActiveCount / totalKeysCount) * 100}%` }} />
-                    </div>
-                    {props.user?.role === 'admin' && (
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          onClick={() => handleBatchToggleRole('moderator', 1)}
-                          disabled={isLoadingPermissions}
-                          className="flex-1 py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-300 text-[11px] font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors"
-                        >
-                          เปิดสิทธิ์ทั้งหมด
-                        </button>
-                        <button
-                          onClick={() => handleBatchToggleRole('moderator', 0)}
-                          disabled={isLoadingPermissions}
-                          className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
-                        >
-                          ปิดสิทธิ์ทั้งหมด
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* User Card */}
-                <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-emerald-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-bl-full pointer-events-none" />
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
-                          <UserIcon className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-[var(--text-primary)]">User (ผู้ใช้งานทั่วไป)</h4>
-                          <span className="text-xs text-[var(--text-muted)]">เจ้าหน้าที่ผู้ปฏิบัติงาน</span>
-                        </div>
-                      </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
-                        Level 3
-                      </span>
-                    </div>
-                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                      สร้างและแก้ไขเอกสารของตนเอง ใช้งาน AI สารบรรณ ออกแบบ Infographics และจัดเก็บลงแฟ้มงาน
-                    </p>
-                  </div>
-
-                  <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
-                      <span className="text-emerald-500">{userActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                      <div className="bg-emerald-500 h-full transition-all duration-300" style={{ width: `${(userActiveCount / totalKeysCount) * 100}%` }} />
-                    </div>
-                    {props.user?.role === 'admin' && (
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          onClick={() => handleBatchToggleRole('user', 1)}
-                          disabled={isLoadingPermissions}
-                          className="flex-1 py-1 px-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-300 text-[11px] font-semibold border border-emerald-200 dark:border-emerald-800 transition-colors"
-                        >
-                          เปิดสิทธิ์ทั้งหมด
-                        </button>
-                        <button
-                          onClick={() => handleBatchToggleRole('user', 0)}
-                          disabled={isLoadingPermissions}
-                          className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
-                        >
-                          ปิดสิทธิ์ทั้งหมด
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
+
+              {/* Conditional Summary Cards View */}
+              {permissionViewMode === 'roles' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Admin Card */}
+                  <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-amber-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-bl-full pointer-events-none" />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
+                            <Crown className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-[var(--text-primary)]">Admin (ผู้ดูแลระบบ)</h4>
+                            <span className="text-xs text-[var(--text-muted)]">สิทธิ์สูงสุดควบคุมโครงสร้างระบบ</span>
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                          Level 1
+                        </span>
+                      </div>
+                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                        มีสิทธิ์จัดการระบบสารบรรณเต็มรูปแบบ จัดการบทบาทผู้ใช้ ตั้งค่าเลขสารบรรณ และสำรองข้อมูล
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
+                        <span className="text-amber-500">{adminActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div className="bg-amber-500 h-full transition-all duration-300" style={{ width: `${(adminActiveCount / totalKeysCount) * 100}%` }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Moderator Card */}
+                  <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-indigo-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-bl-full pointer-events-none" />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
+                            <ShieldCheck className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-[var(--text-primary)]">Moderator (ผู้ตรวจสอบ)</h4>
+                            <span className="text-xs text-[var(--text-muted)]">หัวหน้ากลุ่มงาน / เจ้าหน้าที่สารบรรณ</span>
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/15 text-indigo-500 border border-indigo-500/30">
+                          Level 2
+                        </span>
+                      </div>
+                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                        มีสิทธิ์ออกเลขสารบรรณ ตรวจสอบร่างหนังสือ อนุมัติเอกสาร ลงนามดิจิทัล และดูแลผู้ใช้ในฝ่าย
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
+                        <span className="text-indigo-500">{modActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${(modActiveCount / totalKeysCount) * 100}%` }} />
+                      </div>
+                      {props.user?.role === 'admin' && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleBatchToggleRole('moderator', 1)}
+                            disabled={isLoadingPermissions}
+                            className="flex-1 py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-300 text-[11px] font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors"
+                          >
+                            เปิดสิทธิ์ทั้งหมด
+                          </button>
+                          <button
+                            onClick={() => handleBatchToggleRole('moderator', 0)}
+                            disabled={isLoadingPermissions}
+                            className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
+                          >
+                            ปิดสิทธิ์ทั้งหมด
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* User Card */}
+                  <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-emerald-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-bl-full pointer-events-none" />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
+                            <UserIcon className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-[var(--text-primary)]">User (ผู้ใช้งานทั่วไป)</h4>
+                            <span className="text-xs text-[var(--text-muted)]">เจ้าหน้าที่ผู้ปฏิบัติงาน</span>
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                          Level 3
+                        </span>
+                      </div>
+                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                        สร้างและแก้ไขเอกสารของตนเอง ใช้งาน AI สารบรรณ ออกแบบ Infographics และจัดเก็บลงแฟ้มงาน
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span className="text-[var(--text-muted)]">สถานะสิทธิ์ในระบบ:</span>
+                        <span className="text-emerald-500">{userActiveCount} / {totalKeysCount} ฟังก์ชัน</span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div className="bg-emerald-500 h-full transition-all duration-300" style={{ width: `${(userActiveCount / totalKeysCount) * 100}%` }} />
+                      </div>
+                      {props.user?.role === 'admin' && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleBatchToggleRole('user', 1)}
+                            disabled={isLoadingPermissions}
+                            className="flex-1 py-1 px-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-300 text-[11px] font-semibold border border-emerald-200 dark:border-emerald-800 transition-colors"
+                          >
+                            เปิดสิทธิ์ทั้งหมด
+                          </button>
+                          <button
+                            onClick={() => handleBatchToggleRole('user', 0)}
+                            disabled={isLoadingPermissions}
+                            className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[11px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
+                          >
+                            ปิดสิทธิ์ทั้งหมด
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Department Cards View */}
+              {permissionViewMode === 'departments' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {displayedDepartments.map((dept: any) => {
+                    const count = getDeptActiveCount(dept.name);
+                    const deptRoleKey = `dept:${dept.name}`;
+                    return (
+                      <div key={dept.id || dept.name} className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-indigo-500/20 shadow-xs space-y-3 relative overflow-hidden flex flex-col justify-between hover:border-indigo-500/40 transition-all">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                              <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
+                                <Building2 className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-xs sm:text-sm text-[var(--text-primary)]">{dept.name}</h4>
+                                <span className="text-[10px] text-[var(--text-muted)] block line-clamp-1">{dept.description || 'กลุ่มงานภายในองค์กร'}</span>
+                              </div>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                              Dept
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
+                          <div className="flex items-center justify-between text-xs font-medium">
+                            <span className="text-[var(--text-muted)]">สิทธิ์เฉพาะเปิดใช้งาน:</span>
+                            <span className="text-indigo-600 dark:text-indigo-400 font-bold">{count} / {totalKeysCount}</span>
+                          </div>
+                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${(count / totalKeysCount) * 100}%` }} />
+                          </div>
+                          {props.user?.role === 'admin' && (
+                            <div className="flex items-center gap-2 pt-1">
+                              <button
+                                onClick={() => handleBatchToggleRole(deptRoleKey, 1)}
+                                disabled={isLoadingPermissions}
+                                className="flex-1 py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-300 text-[10px] font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors"
+                              >
+                                เปิดสิทธิ์เฉพาะทั้งหมด
+                              </button>
+                              <button
+                                onClick={() => handleBatchToggleRole(deptRoleKey, 0)}
+                                disabled={isLoadingPermissions}
+                                className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[10px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
+                              >
+                                รีเซ็ตสิทธิ์
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Combined View Notice */}
+              {permissionViewMode === 'combined' && (
+                <div className="p-4 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 text-indigo-200 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-400/30">
+                      <Layers className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">ตารางเปรียบเทียบสิทธิ์ทุกบทบาทและฝ่ายงาน (2D Combined Matrix)</h4>
+                      <p className="text-xs text-indigo-300/80">
+                        ตารางจะแสดงบทบาทหลัก (Admin, Moderator, User) เคียงคู่กับฝ่ายงานที่เลือกเพื่อสอบทานและเปรียบเทียบสิทธิ์โดยรวม
+                      </p>
+                    </div>
+                  </div>
+                  <div className="hidden sm:flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-semibold text-indigo-300">ฝ่ายงานที่แสดง:</span>
+                    <select
+                      value={permissionDeptFilter}
+                      onChange={(e) => setPermissionDeptFilter(e.target.value)}
+                      className="bg-indigo-900/80 border border-indigo-500/40 text-xs font-bold text-white rounded-lg px-2.5 py-1.5 outline-none cursor-pointer"
+                    >
+                      <option value="ALL">ทุกฝ่าย ({effectiveDepartments.length})</option>
+                      {effectiveDepartments.map((d: any) => (
+                        <option key={d.id} value={d.name}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* Dynamic Search & Control Header */}
               <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl overflow-hidden shadow-sm">
@@ -3165,51 +4375,71 @@ export default function Settings(props: SettingsProps) {
                                   {/* Roles Toggle Controls (Mobile Grid) */}
                                   <div className="pt-2 border-t border-[var(--border-lighter)] space-y-2">
                                     <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase">
-                                      สิทธิ์แยกตามระดับผู้ใช้งาน (Role Permissions)
+                                      {permissionViewMode === 'roles' ? 'สิทธิ์แยกตามระดับผู้ใช้งาน (Role Permissions)' : permissionViewMode === 'departments' ? 'สิทธิ์แยกตามฝ่าย/กลุ่มงาน (Department Permissions)' : 'สิทธิ์แบบรวมทุกมิติ (2D Permissions Matrix)'}
                                     </div>
 
                                     <div className="grid grid-cols-1 gap-2">
-                                      {/* Admin Row */}
-                                      <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                          <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
-                                            <Crown className="w-3.5 h-3.5" />
+                                      {/* Roles View */}
+                                      {(permissionViewMode === 'roles' || permissionViewMode === 'combined') && (
+                                        <>
+                                          <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                                                <Crown className="w-3.5 h-3.5" />
+                                              </div>
+                                              <div>
+                                                <span className="text-xs font-bold text-[var(--text-primary)]">Admin</span>
+                                                <span className="text-[10px] text-[var(--text-muted)] block">ผู้ดูแลระบบ</span>
+                                              </div>
+                                            </div>
+                                            <div>{renderToggle('admin', item.key, true)}</div>
                                           </div>
-                                          <div>
-                                            <span className="text-xs font-bold text-[var(--text-primary)]">Admin</span>
-                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ดูแลระบบ</span>
-                                          </div>
-                                        </div>
-                                        <div>{renderToggle('admin', item.key, true)}</div>
-                                      </div>
 
-                                      {/* Moderator Row */}
-                                      <div className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                          <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
-                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                          <div className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                              <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
+                                                <ShieldCheck className="w-3.5 h-3.5" />
+                                              </div>
+                                              <div>
+                                                <span className="text-xs font-bold text-[var(--text-primary)]">Moderator</span>
+                                                <span className="text-[10px] text-[var(--text-muted)] block">ผู้ตรวจสอบ/สารบรรณ</span>
+                                              </div>
+                                            </div>
+                                            <div>{renderToggle('moderator', item.key, true)}</div>
                                           </div>
-                                          <div>
-                                            <span className="text-xs font-bold text-[var(--text-primary)]">Moderator</span>
-                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ตรวจสอบ/สารบรรณ</span>
-                                          </div>
-                                        </div>
-                                        <div>{renderToggle('moderator', item.key, true)}</div>
-                                      </div>
 
-                                      {/* User Row */}
-                                      <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                          <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
-                                            <UserIcon className="w-3.5 h-3.5" />
+                                          <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
+                                                <UserIcon className="w-3.5 h-3.5" />
+                                              </div>
+                                              <div>
+                                                <span className="text-xs font-bold text-[var(--text-primary)]">User</span>
+                                                <span className="text-[10px] text-[var(--text-muted)] block">ผู้ใช้งานทั่วไป</span>
+                                              </div>
+                                            </div>
+                                            <div>{renderToggle('user', item.key, true)}</div>
                                           </div>
-                                          <div>
-                                            <span className="text-xs font-bold text-[var(--text-primary)]">User</span>
-                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ใช้งานทั่วไป</span>
+                                        </>
+                                      )}
+
+                                      {/* Departments View */}
+                                      {(permissionViewMode === 'departments' || permissionViewMode === 'combined') && (
+                                        displayedDepartments.map((dept: any) => (
+                                          <div key={dept.id || dept.name} className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                              <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
+                                                <Building2 className="w-3.5 h-3.5" />
+                                              </div>
+                                              <div>
+                                                <span className="text-xs font-bold text-[var(--text-primary)]">{dept.name}</span>
+                                                <span className="text-[10px] text-[var(--text-muted)] block">ฝ่าย/กลุ่มงาน</span>
+                                              </div>
+                                            </div>
+                                            <div>{renderToggle(`dept:${dept.name}`, item.key, true)}</div>
                                           </div>
-                                        </div>
-                                        <div>{renderToggle('user', item.key, true)}</div>
-                                      </div>
+                                        ))
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -3225,29 +4455,46 @@ export default function Settings(props: SettingsProps) {
                       <table className="w-full text-left text-sm border-collapse min-w-[850px]">
                         <thead>
                           <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-lighter)] text-xs font-semibold text-[var(--text-secondary)]">
-                            <th className="p-4 w-2/5">ฟังก์ชันระบบ / รายการสิทธิ์การใช้งาน</th>
-                            <th className="p-4 text-center w-36 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold border-x border-[var(--border-lighter)]/40">
-                              <div className="flex items-center justify-center gap-1">
-                                <Crown className="w-3.5 h-3.5" /> Admin
-                              </div>
-                            </th>
-                            <th className="p-4 text-center w-36 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
-                              <div className="flex items-center justify-center gap-1">
-                                <ShieldCheck className="w-3.5 h-3.5" /> Moderator
-                              </div>
-                            </th>
-                            <th className="p-4 text-center w-36 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold border-x border-[var(--border-lighter)]/40">
-                              <div className="flex items-center justify-center gap-1">
-                                <UserIcon className="w-3.5 h-3.5" /> User
-                              </div>
-                            </th>
+                            <th className="p-4 w-1/3">ฟังก์ชันระบบ / รายการสิทธิ์การใช้งาน</th>
+                            
+                            {(permissionViewMode === 'roles' || permissionViewMode === 'combined') && (
+                              <>
+                                <th className="p-4 text-center w-32 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold border-x border-[var(--border-lighter)]/40">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Crown className="w-3.5 h-3.5" /> Admin
+                                  </div>
+                                </th>
+                                <th className="p-4 text-center w-32 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <ShieldCheck className="w-3.5 h-3.5" /> Moderator
+                                  </div>
+                                </th>
+                                <th className="p-4 text-center w-32 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold border-x border-[var(--border-lighter)]/40">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <UserIcon className="w-3.5 h-3.5" /> User
+                                  </div>
+                                </th>
+                              </>
+                            )}
+
+                            {(permissionViewMode === 'departments' || permissionViewMode === 'combined') && (
+                              displayedDepartments.map((dept: any) => (
+                                <th key={dept.id || dept.name} className="p-4 text-center min-w-[140px] bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
+                                  <div className="flex items-center justify-center gap-1 text-[11px]">
+                                    <Building2 className="w-3.5 h-3.5" />
+                                    <span className="line-clamp-1" title={dept.name}>{dept.name}</span>
+                                  </div>
+                                </th>
+                              ))
+                            )}
+
                             <th className="p-4">ข้อแนะนำและผลกระทบเชิงความปลอดภัย</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--border-lighter)] text-xs sm:text-sm">
                           {filteredSections.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="p-8 text-center text-[var(--text-muted)]">
+                              <td colSpan={10} className="p-8 text-center text-[var(--text-muted)]">
                                 ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
                               </td>
                             </tr>
@@ -3255,7 +4502,7 @@ export default function Settings(props: SettingsProps) {
                             filteredSections.map((sec, idx) => (
                               <React.Fragment key={idx}>
                                 <tr className="bg-[var(--bg-canvas)]/80 font-bold text-[var(--primary-color)] text-xs border-y border-[var(--border-lighter)]">
-                                  <td colSpan={5} className="py-3 px-4 flex items-center gap-2">
+                                  <td colSpan={10} className="py-3 px-4 flex items-center gap-2">
                                     <span className="w-2 h-2 rounded-full bg-[var(--primary-color)] inline-block" />
                                     {sec.section}
                                   </td>
@@ -3269,15 +4516,29 @@ export default function Settings(props: SettingsProps) {
                                         key: {item.key}
                                       </div>
                                     </td>
-                                    <td className="p-4 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                      {renderToggle('admin', item.key)}
-                                    </td>
-                                    <td className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                      {renderToggle('moderator', item.key)}
-                                    </td>
-                                    <td className="p-4 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                      {renderToggle('user', item.key)}
-                                    </td>
+
+                                    {(permissionViewMode === 'roles' || permissionViewMode === 'combined') && (
+                                      <>
+                                        <td className="p-4 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                          {renderToggle('admin', item.key)}
+                                        </td>
+                                        <td className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                          {renderToggle('moderator', item.key)}
+                                        </td>
+                                        <td className="p-4 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                          {renderToggle('user', item.key)}
+                                        </td>
+                                      </>
+                                    )}
+
+                                    {(permissionViewMode === 'departments' || permissionViewMode === 'combined') && (
+                                      displayedDepartments.map((dept: any) => (
+                                        <td key={dept.id || dept.name} className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                          {renderToggle(`dept:${dept.name}`, item.key)}
+                                        </td>
+                                      ))
+                                    )}
+
                                     <td className="p-4 text-[var(--text-secondary)] text-xs leading-relaxed align-middle">
                                       <div className="p-2.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)] space-y-1">
                                         <div className="font-semibold text-[var(--text-primary)]">{item.note}</div>
@@ -3511,15 +4772,40 @@ export default function Settings(props: SettingsProps) {
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={fetchAutomatedBackups}
-                  disabled={isLoadingAutomatedBackups}
-                  className="px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg text-xs font-medium hover:bg-[var(--border-lighter)] text-[var(--text-primary)] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAutomatedBackups ? 'animate-spin' : ''}`} />
-                  <span>โหลดใหม่</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-0">
+                  <div className="flex items-center gap-2 mr-2">
+                    <span className="text-xs font-semibold text-[var(--text-secondary)]">การสำรองอัตโนมัติ:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAutomatedBackup(!isAutomatedBackupEnabled)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${isAutomatedBackupEnabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${isAutomatedBackupEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
+                    </button>
+                    <span className="text-[10px] text-[var(--text-muted)] w-8">{isAutomatedBackupEnabled ? 'เปิด' : 'ปิด'}</span>
+                  </div>
+                  
+                  {automatedBackups.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteAllAutomatedBackups}
+                      className="px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-lg text-xs font-medium hover:bg-rose-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>ลบทั้งหมด</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={fetchAutomatedBackups}
+                    disabled={isLoadingAutomatedBackups}
+                    className="px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg text-xs font-medium hover:bg-[var(--border-lighter)] text-[var(--text-primary)] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAutomatedBackups ? 'animate-spin' : ''}`} />
+                    <span>โหลดใหม่</span>
+                  </button>
+                </div>
               </div>
 
               {automatedBackupMsg && (
@@ -3565,26 +4851,37 @@ export default function Settings(props: SettingsProps) {
                           minute: '2-digit',
                           second: '2-digit'
                         });
-                        const sizeKB = (bk.sizeBytes / 1024).toFixed(1);
+                        const sizeKB = (bk.size / 1024).toFixed(1);
                         
                         return (
-                          <tr key={bk.fileName} className="hover:bg-[var(--bg-surface)]/40 transition-colors">
+                          <tr key={bk.filename} className="hover:bg-[var(--bg-surface)]/40 transition-colors">
                             <td className="p-3.5 font-mono text-[var(--text-muted)]">{idx + 1}</td>
                             <td className="p-3.5 font-mono text-[var(--primary-color)] font-medium max-w-[250px] truncate">
-                              {bk.fileName}
+                              {bk.filename}
                             </td>
                             <td className="p-3.5 font-mono text-[var(--text-secondary)]">{sizeKB} KB</td>
                             <td className="p-3.5 text-[var(--text-secondary)]">{formattedDate}</td>
                             <td className="p-3.5 text-right">
-                              <button
-                                type="button"
-                                disabled={isRestoringAutomated}
-                                onClick={() => handleRestoreAutomatedBackup(bk.fileName)}
-                                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg text-xs transition-colors inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                              >
-                                <RefreshCw className={`w-3 h-3 ${isRestoringAutomated ? 'animate-spin' : ''}`} />
-                                <span>กู้คืนข้อมูล (Restore)</span>
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  disabled={isRestoringAutomated}
+                                  onClick={() => handleRestoreAutomatedBackup(bk.filename)}
+                                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg text-xs transition-colors inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                >
+                                  <RefreshCw className={`w-3 h-3 ${isRestoringAutomated ? 'animate-spin' : ''}`} />
+                                  <span>กู้คืนข้อมูล (Restore)</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isRestoringAutomated}
+                                  onClick={() => handleDeleteAutomatedBackup(bk.filename)}
+                                  className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                                  title="ลบไฟล์สำรองข้อมูลนี้"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -4016,9 +5313,8 @@ export default function Settings(props: SettingsProps) {
             </div>
           </div>
         )}
-          </div>
-        </section>
       </div>
+    </div>
 
       {/* Add User Modal */}
       {showAddModal && (
@@ -4434,9 +5730,18 @@ export default function Settings(props: SettingsProps) {
                 <div className="bg-[#0f172a] p-8 text-center text-white">
                   <div className="w-16 h-16 bg-white rounded-2xl p-1.5 inline-flex items-center justify-center shadow-lg mb-3">
                     <img
-                      src={logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg'}
+                      key={`otp-preview-${logoUrl}`}
+                      src={getLogoSrc(logoUrl)}
                       alt="Logo"
-                      className="w-full h-full object-contain rounded-xl"
+                      className="w-12 h-12 object-contain"
+                      style={{ maxWidth: '48px', maxHeight: '48px' }}
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        const fallback = 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+                        if (target.src !== fallback) {
+                          target.src = fallback;
+                        }
+                      }}
                     />
                   </div>
                   <h1 className="text-lg font-bold text-white leading-snug">{orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}</h1>

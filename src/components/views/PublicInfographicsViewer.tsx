@@ -249,6 +249,16 @@ export const PublicInfographicsViewer: React.FC = () => {
     }
   };
 
+  const getLogoSrc = (url: string | null | undefined) => {
+    if (!url || typeof url !== 'string' || url.trim() === '' || url === 'null' || url === 'undefined') {
+      return 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+    }
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    return url.startsWith('/') ? url : `/${url}`;
+  };
+
   const fetchInfographic = async (id: string, customPasscode?: string, isSilent = false) => {
     if (!id || !id.trim()) {
       setLoading(false);
@@ -612,8 +622,19 @@ export const PublicInfographicsViewer: React.FC = () => {
               </a>
             )}
             <div className="flex items-center gap-2">
-              {searchParams.get('logo') === 'true' && logoUrl && (
-                <img src={logoUrl} alt="Logo" className="w-6 h-6 object-contain" />
+              {(searchParams.get('logo') === 'true' || true) && (
+                <img 
+                  src={getLogoSrc(logoUrl)} 
+                  alt="Logo" 
+                  className="w-6 h-6 object-contain" 
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    const fallback = 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+                    if (target.src !== fallback) {
+                      target.src = fallback;
+                    }
+                  }}
+                />
               )}
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] font-bold">
                 EDMS Infographics

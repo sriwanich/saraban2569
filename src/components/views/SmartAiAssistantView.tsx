@@ -39,7 +39,9 @@ import {
   FileCode,
   Layers,
   Calendar,
-  Tag
+  Tag,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { DocumentItem } from '../../types';
 
@@ -303,17 +305,43 @@ export default function SmartAiAssistantView({
     if (!customPrompt) setInputPrompt('');
     setIsLoading(true);
 
+    const sanitizedSelectedDoc = currentAttached ? {
+      id: currentAttached.id,
+      docNumber: currentAttached.docNumber || currentAttached.receiveNumber || '',
+      receiveNumber: currentAttached.receiveNumber || '',
+      title: currentAttached.title || '',
+      from: currentAttached.from || '',
+      to: currentAttached.to || '',
+      department: currentAttached.department || '',
+      date: currentAttached.date || '',
+      priority: currentAttached.priority || 'ปกติ',
+      status: currentAttached.status || 'pending',
+      content: (currentAttached.content || '').substring(0, 2500),
+      note: (currentAttached.note || '').substring(0, 1000)
+    } : null;
+
+    const controller = new AbortController();
+    const timeoutTimer = setTimeout(() => controller.abort(), 45000);
+
     try {
       const res = await fetch('/api/ai-assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           prompt: textToSend.trim(),
-          user: user,
-          selectedDoc: currentAttached,
+          user: user ? {
+            firstName: user.firstName,
+            lastName: user.lastName,
+            position: user.position,
+            department: user.department
+          } : undefined,
+          selectedDoc: sanitizedSelectedDoc,
           history: messages.slice(-6).map(m => ({ role: m.sender, text: m.text }))
         })
       });
+
+      clearTimeout(timeoutTimer);
 
       let json: any = null;
       try {
@@ -339,13 +367,26 @@ export default function SmartAiAssistantView({
         throw new Error('ไม่สามารถประมวลผลคำตอบได้ กรุณาลองใหม่อีกครั้ง');
       }
     } catch (err: any) {
+      clearTimeout(timeoutTimer);
       console.error('Error in AI assistant handleSend:', err);
+
+      let friendlyMsg = err?.message || 'โปรดลองใหม่อีกครั้ง';
+      if (err?.name === 'AbortError' || friendlyMsg.includes('aborted') || friendlyMsg.includes('AbortError')) {
+        friendlyMsg = 'การเชื่อมต่อไปยังระบบ AI ใช้เวลานานเกินกำหนด กรุณากดลองส่งใหม่อีกครั้ง';
+      } else if (friendlyMsg === 'Failed to fetch' || friendlyMsg.includes('Failed to fetch') || friendlyMsg.includes('NetworkError')) {
+        friendlyMsg = 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ AI ได้ในขณะนี้ (เครือข่ายขัดข้องหรือเซิร์ฟเวอร์กำลังรีสตาร์ท) กรุณากดปุ่มลองส่งใหม่อีกครั้ง';
+      }
+
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         sender: 'assistant',
         timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
-        text: `ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล: ${err.message || 'โปรดลองใหม่อีกครั้ง'}`,
-        payload: { intentType: 'error' }
+        text: `ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล: ${friendlyMsg}`,
+        payload: {
+          intentType: 'error',
+          failedPrompt: textToSend.trim(),
+          errorDetails: friendlyMsg
+        }
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
@@ -479,7 +520,7 @@ export default function SmartAiAssistantView({
                   </h2>
                   <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                    Gemini 2.5 Flash พร้อมใช้งาน
+                    พร้อมใช้งาน
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
@@ -743,6 +784,26 @@ export default function SmartAiAssistantView({
               {msg.payload && (
                 <div className="space-y-4 pt-1">
                   
+                  {/* 0. ERROR & RETRY (Error Intent) */}
+                  {msg.payload.intentType === 'error' && (
+                    <div className="mt-2 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                        <span>ท่านสามารถกดปุ่มลองส่งใหม่อีกครั้ง หรือพิมพ์คำถามใหม่ได้ทันที</span>
+                      </div>
+                      {msg.payload.failedPrompt && (
+                        <button
+                          onClick={() => handleSend(msg.payload.failedPrompt)}
+                          disabled={isLoading}
+                          className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-medium flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                          <span>ลองส่งใหม่อีกครั้ง</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {/* 1. MATCHED DOCUMENTS (Search Intent) */}
                   {msg.payload.intentType === 'search' && msg.payload.matchedDocs && msg.payload.matchedDocs.length > 0 && (
                     <div className="space-y-2 mt-2">

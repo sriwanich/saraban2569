@@ -618,7 +618,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
                         <div className="flex items-center gap-2">
                           <RefreshCw className={`w-4 h-4 ${verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'text-rose-500' : 'text-emerald-500'}`} />
                           <span className={`text-xs font-bold ${verifyResult.aiAnalysis.matchStatus === 'MISMATCH' ? 'text-rose-800 dark:text-rose-300' : 'text-emerald-800 dark:text-emerald-300'}`}>
-                            การวิเคราะห์ความสอดคล้องเนื้อหาโดยปัญญาประดิษฐ์ (Gemini AI Audit)
+                            การวิเคราะห์ความสอดคล้องเนื้อหาโดยปัญญาประดิษฐ์ (AI Audit)
                           </span>
                         </div>
                         <span className={`text-[10px] font-bold px-2.5 py-1 rounded-xl text-white ${
@@ -645,7 +645,7 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
                           </div>
                           <div className="space-y-1">
                             <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">ปัญญาประดิษฐ์</p>
-                            <div className="text-sm font-bold text-blue-600 dark:text-blue-400">Google Gemini API</div>
+                            <div className="text-sm font-bold text-blue-600 dark:text-blue-400">Google AI API</div>
                           </div>
                         </div>
 

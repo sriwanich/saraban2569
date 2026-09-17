@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, Folder, DigitalSignatureRecord, formatThaiDate, formatThaiDateFull, formatThaiDateTime, WorkflowInstance, WorkflowStepInstance } from '../types';
-import { X, Printer, Paperclip, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode, FileCode, Tag, Trash2, Clock, History, Stamp } from 'lucide-react';
+import { X, Printer, Paperclip, User, CheckCircle2, Edit2, ExternalLink, Download, FileText, Sparkles, GitBranch, ShieldCheck, PenTool, QrCode, FileCode, Tag, Trash2, Clock, History, Stamp, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import AiCrossReferencePanel, { DetectionResult } from './ai-cross-reference-panel';
 import VersionControlPanel from './VersionControlPanel';
 import DigitalSignatureModal from './DigitalSignatureModal';
 import DigitalSealStamper from './DigitalSealStamper';
+import A4PaperPreview from './A4PaperPreview';
+import { buildOfficialDoc } from './views/drafts/draftData';
 import { parseFileCodeFromDoc, parseDocNumberStructure } from '../lib/fileCodeUtils';
 import { useConfirm } from '../context/ConfirmContext';
 
@@ -22,7 +24,7 @@ interface Props {
 
 export default function DocumentDetailModal({ doc, allDocuments, onClose, user, onStatusUpdated, onEdit, onSelectDoc }: Props) {
   const { confirm } = useConfirm();
-  const [activeTab, setActiveTab] = useState<'details' | 'workflow' | 'versions' | 'reads'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'workflow' | 'versions' | 'reads' | 'a4_preview'>('details');
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sysVersion, setSysVersion] = useState<string>('v2.6.0');
@@ -659,6 +661,16 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
               <span>รายละเอียดเอกสาร</span>
             </button>
             <button 
+              onClick={() => setActiveTab('a4_preview')} 
+              className={`py-2.5 px-5 text-sm font-bold transition-all flex items-center gap-2 rounded-t-2xl shrink-0 ${activeTab === 'a4_preview' ? 'bg-[var(--bg-canvas)] text-emerald-600 dark:text-emerald-400 border border-b-0 border-[var(--border-light)] shadow-[0_-4px_10px_rgb(0,0,0,0.02)]' : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/5'}`}
+            >
+              <Eye className="w-4 h-4 text-emerald-500" />
+              <span>ตัวอย่างกระดาษ A4</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                A4 Preview
+              </span>
+            </button>
+            <button 
               onClick={() => {
                 setActiveTab('workflow');
                 fetchReads();
@@ -679,6 +691,30 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
               <span>ประวัติเวอร์ชัน</span>
             </button>
           </div>
+
+          {activeTab === 'a4_preview' && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 custom-scrollbar bg-slate-100 dark:bg-slate-900/60">
+              <A4PaperPreview
+                title={`ตัวอย่างเอกสารขนาดต้นฉบับ A4: ${doc.docNumber || doc.title}`}
+                subtitle={`ประเภท: ${docTypeName} | ออกแบบจัดรูปเล่มตามระเบียบงานสารบรรณ พ.ศ. ๒๕๒๖`}
+                htmlContent={buildOfficialDoc({
+                  docType: doc.category === 'memo' ? 'บันทึกข้อความ' : 'หนังสือภายนอก',
+                  docNum: doc.docNumber || 'มท ๐๖๑๘/..........',
+                  date: doc.date || format(new Date(), 'yyyy-MM-dd'),
+                  to: doc.to || 'ผู้เกี่ยวข้องทุกท่าน',
+                  subject: doc.title,
+                  body: doc.content 
+                    ? `<div style="text-indent:2.5em;margin-bottom:12pt;text-align:justify;">${doc.content.replace(/\n\n/g, '</div><div style="text-indent:2.5em;margin-bottom:12pt;text-align:justify;">')}</div>`
+                    : '<div style="text-indent:2.5em;margin-bottom:12pt;text-align:justify;">รายละเอียดสาระสำคัญของหนังสือราชการฉบับนี้ได้รับการลงทะเบียนถูกต้องในระบบสารบรรณสารสนเทศแล้ว</div>',
+                  signer: doc.assignee || user?.fullName || 'หัวหน้าส่วนราชการ',
+                  signerPos: doc.department || 'ฝ่ายปฏิบัติการสารบรรณ',
+                  urgency: doc.priority,
+                  secrecy: doc.secrecy,
+                  orgName: doc.department ? `หน่วยงาน ${doc.department}` : 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'
+                })}
+              />
+            </div>
+          )}
 
           {activeTab === 'versions' && (
             <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-slate-50 dark:bg-slate-900/40">

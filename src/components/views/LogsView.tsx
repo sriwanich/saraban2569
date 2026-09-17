@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, Search, RefreshCw, Trash2, Database, Clock, 
   User, HardDrive, Key, FileText, Settings, AlertTriangle, 
-  Globe, X, ChevronLeft, ChevronRight, Filter, ShieldAlert, CheckCircle2, FileEdit, Send, Sparkles
+  Globe, X, ChevronLeft, ChevronRight, Filter, ShieldAlert, CheckCircle2, FileEdit, Send, Sparkles, Printer
 } from 'lucide-react';
 import { SystemLog } from '../../types';
 import { useConfirm } from '../../context/ConfirmContext';
@@ -199,6 +199,36 @@ export default function LogsView({ user }: { user?: any }) {
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/25">
             <Settings className="w-3.5 h-3.5 shrink-0 text-rose-600 dark:text-rose-400" /> ลบตำแหน่งงาน
+          </span>
+        );
+      case 'CREATE_URGENT_INCIDENT':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/25">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600 dark:text-rose-400" /> สร้างรายงานเหตุด่วน
+          </span>
+        );
+      case 'UPDATE_URGENT_INCIDENT':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/25">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-400" /> แก้ไขรายงานเหตุด่วน
+          </span>
+        );
+      case 'DELETE_URGENT_INCIDENT':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-600/10 text-red-800 dark:text-red-400 border border-red-600/25">
+            <Trash2 className="w-3.5 h-3.5 shrink-0 text-red-600 dark:text-red-400" /> ลบรายงานเหตุด่วน
+          </span>
+        );
+      case 'SCAN_URGENT_INCIDENT':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/25">
+            <Sparkles className="w-3.5 h-3.5 shrink-0 text-purple-600 dark:text-purple-400" /> AI สแกนเหตุด่วน
+          </span>
+        );
+      case 'PRINT_URGENT_INCIDENT':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/25">
+            <Printer className="w-3.5 h-3.5 shrink-0 text-blue-600 dark:text-blue-400" /> พิมพ์/ส่งออกเหตุด่วน
           </span>
         );
       case 'CLEAR_LOGS':

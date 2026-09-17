@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { motion } from 'motion/react';
 import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3 } from 'lucide-react';
 import WorkflowSlaView from './views/WorkflowSlaView';
-import AnalyticsView from './views/AnalyticsView';
 
-import { db } from '../firebase';
 import { DocumentItem, DocType } from '../types';
 import Overview from './views/Overview';
 import DocumentList from './views/DocumentList';
@@ -46,6 +43,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   };
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [disasterPrefillData, setDisasterPrefillData] = useState<any>(null);
   const [isChangelogModalOpen, setIsChangelogModalOpen] = useState(false);
 
   // Feature flags control from settings
@@ -150,19 +148,34 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     fetchMeta();
   }, []);
 
+  const getLogoSrc = (url: string | null | undefined) => {
+    if (!url || typeof url !== 'string' || url.trim() === '' || url === 'null' || url === 'undefined') {
+      return 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+    }
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    return url.startsWith('/') ? url : `/${url}`;
+  };
+
   const hasPermission = (key: string): boolean => {
     if (!currentUser?.role) return false;
-    
-    // Urgent Incidents specific permission
-    if (key === 'urgent_incidents') {
-      return currentUser.role === 'admin' || currentUser.role === 'moderator' || currentUser.department === 'ฝ่ายสงเคราะห์ผู้ประสบภัย';
-    }
 
     // Hardcoded minimums to prevent lockout
     if (currentUser.role === 'admin' && (key === 'system_settings' || key === 'manage_users')) {
       return true;
     }
 
+    // 1. Check department-specific override first if user belongs to a department
+    if (currentUser?.department) {
+      const deptTag = `dept:${currentUser.department}`;
+      const deptPerm = rolePermissions.find(p => (p.role === deptTag || p.role === currentUser.department) && p.permission_key === key);
+      if (deptPerm) {
+        return deptPerm.is_allowed === 1 || deptPerm.is_allowed === true;
+      }
+    }
+
+    // 2. Fall back to role-based permission
     const perm = rolePermissions.find(p => p.role === currentUser.role && p.permission_key === key);
     if (perm) {
       return perm.is_allowed === 1 || perm.is_allowed === true;
@@ -180,7 +193,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (currentUser.role === 'user') {
       return [
         'create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator',
-        'draft_docs', 'digital_folders', 'workflow_sla'
+        'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'
       ].includes(key);
     }
     return false;
@@ -734,7 +747,6 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
     { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
     { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents' },
-    { id: 'analytics', icon: BarChart3, label: 'แดชบอร์ดวิเคราะห์', permKey: 'analytics' },
   ];
 
   const navItems = baseNavItems.filter(item => {
@@ -893,6 +905,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
               setCreateDocType('outbox');
               setIsCreateModalOpen(true);
             }}
+            onSendToDisasterReport={(data) => {
+              setDisasterPrefillData(data);
+              setActiveTab('urgent_incidents');
+            }}
           />
         ));
       case 'folders':
@@ -932,15 +948,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         ));
       case 'urgent_incidents':
         return renderGuardedView('urgent_incidents', 'รายงานเหตุด่วนสาธารณภัย', (
-          <UrgentIncidentReportView user={currentUser} />
-        ));
-      case 'analytics':
-        return renderGuardedView('analytics', 'แดชบอร์ดวิเคราะห์', (
-          <AnalyticsView 
-            documents={documents.filter(isDocForUserDepartment)} 
-            onViewDoc={handleViewDoc}
+          <UrgentIncidentReportView 
+            user={currentUser} 
+            prefillData={disasterPrefillData}
+            onClearPrefillData={() => setDisasterPrefillData(null)}
           />
         ));
+
       case 'recycle_bin':
         return renderGuardedView('recycle_bin', 'ถังขยะเอกสารและการกู้คืน', (
           <RecycleBinView 
@@ -1000,12 +1014,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                <div className="relative w-10 h-10 rounded-xl border border-[var(--primary-color)]/20 bg-gradient-to-b from-[var(--primary-color)]/10 to-transparent flex items-center justify-center overflow-hidden shrink-0 shadow-sm group">
                  <div className="absolute inset-0 bg-[var(--primary-color)]/10 opacity-0 group-hover:opacity-100 text-[var(--text-primary)] font-semibold transition-opacity duration-300" />
                  <img
-                   src={logoUrl || '/public/ddpm-logo.svg'}
+                   src={getLogoSrc(logoUrl)}
                    className="w-3/4 h-3/4 object-contain relative z-10 drop-shadow-sm"
                    alt="Logo"
                    onError={(e) => {
-                     if ((e.target as HTMLImageElement).src.indexOf('ddpm-logo.svg') === -1) {
-                       (e.target as HTMLImageElement).src = '/public/ddpm-logo.svg';
+                     const target = e.target as HTMLImageElement;
+                     const fallback = 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+                     if (target.src !== fallback) {
+                       target.src = fallback;
                      }
                    }}
                  />
@@ -1406,14 +1422,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-8 scroll-smooth custom-scrollbar">
            <div className="max-w-[1600px] w-full mx-auto">
-             <motion.div 
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            >
-              {renderContent()}
-            </motion.div>
+             <div 
+               key={activeTab}
+               className="animate-fade-in"
+             >
+               {renderContent()}
+             </div>
            </div>
         </div>
       </main>

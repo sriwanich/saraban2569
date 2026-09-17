@@ -236,41 +236,43 @@ export default function ChangelogModal({
   };
 
   // Filter list
-  const filteredChangelogs = changelogs.filter(item => {
+  const filteredChangelogs = (changelogs || []).filter(item => {
+    if (!item) return false;
     if (filterType === 'latest' && !item.isLatest) return false;
     if (filterType !== 'all' && filterType !== 'latest' && item.type !== filterType) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchVersion = item.version.toLowerCase().includes(q);
-      const matchTitle = item.title.toLowerCase().includes(q);
+      const matchVersion = (item.version || '').toLowerCase().includes(q);
+      const matchTitle = (item.title || '').toLowerCase().includes(q);
       const matchSummary = (item.summary || '').toLowerCase().includes(q);
       const matchChanges = (item.changes || []).some(c => 
-        c.categoryLabel.toLowerCase().includes(q) || 
-        (c.items || []).some(i => i.toLowerCase().includes(q))
+        (c?.categoryLabel || '').toLowerCase().includes(q) || 
+        (c?.items || []).some(i => i?.toLowerCase().includes(q))
       );
       return matchVersion || matchTitle || matchSummary || matchChanges;
     }
     return true;
   });
 
-  const selectedChangelog = changelogs.find(c => c.id === selectedId) || filteredChangelogs[0] || changelogs[0];
-  const selectedIndex = changelogs.findIndex(c => c.id === selectedChangelog?.id);
+  const selectedChangelog = (changelogs || []).find(c => c.id === selectedId) || filteredChangelogs[0] || (changelogs || [])[0];
+  const selectedIndex = (changelogs || []).findIndex(c => c.id === selectedChangelog?.id);
   
   // Previous & Next navigation
-  const prevVersion = selectedIndex < changelogs.length - 1 ? changelogs[selectedIndex + 1] : null;
-  const nextVersion = selectedIndex > 0 ? changelogs[selectedIndex - 1] : null;
+  const prevVersion = selectedIndex < (changelogs || []).length - 1 ? (changelogs || [])[selectedIndex + 1] : null;
+  const nextVersion = selectedIndex > 0 ? (changelogs || [])[selectedIndex - 1] : null;
 
   // Active latest version
-  const latestVersion = changelogs.find(c => c.isLatest) || changelogs[0];
+  const latestVersion = (changelogs || []).find(c => c.isLatest) || (changelogs || [])[0];
 
   // Count by types for filter tabs
   const typeCounts = useMemo(() => {
+    const list = changelogs || [];
     return {
-      all: changelogs.length,
-      latest: changelogs.filter(c => c.isLatest).length,
-      major: changelogs.filter(c => c.type === 'major').length,
-      minor: changelogs.filter(c => c.type === 'minor').length,
-      patch: changelogs.filter(c => c.type === 'patch' || c.type === 'hotfix').length
+      all: list.length,
+      latest: list.filter(c => c.isLatest).length,
+      major: list.filter(c => c.type === 'major').length,
+      minor: list.filter(c => c.type === 'minor').length,
+      patch: list.filter(c => c.type === 'patch' || c.type === 'hotfix').length
     };
   }, [changelogs]);
 

@@ -30,15 +30,17 @@ export function ImageBackgroundRemovalModal({
   const imgRef = useRef<HTMLImageElement>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
 
-  // Auto remove background via Gemini AI when clicking "AI Remove" button
+  // Auto remove background via AI when clicking "AI Remove" button
   const handleRemoveBgAi = async () => {
     setIsProcessingAi(true);
     setAiError(null);
     try {
+      const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+      const savedKey = (settings.geminiApiKey || '').trim();
       const res = await fetch('/api/ai/remove-background', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageUrl }),
+        body: JSON.stringify({ image: imageUrl, apiKey: savedKey }),
       });
       const data = await res.json();
       if (res.ok && data.transparentImage) {
@@ -282,7 +284,7 @@ export function ImageBackgroundRemovalModal({
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-bold">AI กำลังประมวลผลแยกวัตถุออกจากพื้นหลัง...</p>
-                    <p className="text-xs text-slate-300">ระบบใช้ Gemini Vision AI สกัดแยกองค์ประกอบอย่างละเอียด</p>
+                    <p className="text-xs text-slate-300">ระบบใช้ AI Vision สกัดแยกองค์ประกอบอย่างละเอียด</p>
                   </div>
                 </div>
               )}

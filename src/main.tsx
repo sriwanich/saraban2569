@@ -42,6 +42,14 @@ if (typeof window !== 'undefined') {
       const customFetch = function (this: any, input: RequestInfo | URL, init?: RequestInit) {
         let url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
 
+        // Check if user configured a custom backend API URL (e.g. http://server-ip:3000 or https://api.domain.com)
+        try {
+          const customApiBase = localStorage.getItem('edms_custom_api_url');
+          if (customApiBase && (url.startsWith('/api/') || url === '/api')) {
+            url = customApiBase.replace(/\/+$/, '') + url;
+          }
+        } catch (e) {}
+
         if (url.startsWith('/api/') || url.includes('/api/')) {
           const separator = url.includes('?') ? '&' : '?';
           if (!url.includes('_t=')) {

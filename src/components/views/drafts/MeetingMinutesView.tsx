@@ -711,7 +711,7 @@ ${agendas.map(ag => `<div style="margin-[12pt 0 6pt];">
                 onClick={() => downloadAsDoc(previewHtml, `รายงานการประชุม_${title}`)}
                 className="px-4 py-2 bg-[var(--primary-color)] text-white text-xs font-bold rounded-lg hover:bg-[var(--primary-hover)] flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.doc)
+                <FileDown className="w-4 h-4" /> ดาวน์โหลด Word (.docx)
               </button>
             </div>
           </div>

@@ -57,9 +57,13 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
       if (res.ok) {
         const data = await res.json();
         setDepartments(data);
+        try { localStorage.setItem('moi_departments_cache', JSON.stringify(data)); } catch (e) {}
       }
     } catch (err) {
-      console.error('Error fetching departments:', err);
+      try {
+        const cached = localStorage.getItem('moi_departments_cache');
+        if (cached) setDepartments(JSON.parse(cached));
+      } catch (e) {}
     }
   };
 

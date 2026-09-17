@@ -900,9 +900,13 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         if (res.ok) {
           const depsData = await res.json();
           setDepartments(depsData);
+          try { localStorage.setItem('moi_departments_cache', JSON.stringify(depsData)); } catch (e) {}
         }
       } catch (error) {
-        console.error('Error fetching departments:', error);
+        try {
+          const cached = localStorage.getItem('moi_departments_cache');
+          if (cached) setDepartments(JSON.parse(cached));
+        } catch (e) {}
       }
     };
     fetchDepartments();
@@ -1598,7 +1602,7 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
                       <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
                         ระบบช่วยเติมข้อมูลและสรุปเอกสารอัจฉริยะ (AI Smart Assist)
                         <span className="text-[9px] font-semibold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 px-2 py-0.5 rounded-full animate-pulse">
-                          Gemini Core
+                          AI Core
                         </span>
                       </h4>
                       <p className="text-[11px] text-[var(--text-muted)] mt-0.5 leading-relaxed">

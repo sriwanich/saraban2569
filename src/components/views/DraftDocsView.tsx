@@ -11,16 +11,18 @@ import SpeechTemplatesView from './drafts/SpeechTemplatesView';
 import MeetingMinutesView from './drafts/MeetingMinutesView';
 import ProjectSummaryView from './drafts/ProjectSummaryView';
 import OfficialRuleCheckerTab from './drafts/OfficialRuleCheckerTab';
+import TorGeneratorView from './drafts/TorGeneratorView';
 
 interface Props {
   user: any;
   initialSubTab?: string;
   onSendToSignQueue?: (item: any) => void;
   onSaveToRegistry?: (item: any) => void;
+  onSendToDisasterReport?: (data: any) => void;
   enabledFeatures?: Record<string, boolean>;
 }
 
-export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToSignQueue, onSaveToRegistry, enabledFeatures }: Props) {
+export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToSignQueue, onSaveToRegistry, onSendToDisasterReport, enabledFeatures }: Props) {
   const [activeSubTab, setActiveSubTab] = useState<string>(initialSubTab);
   const [aiPrefillData, setAiPrefillData] = useState<any>(null);
 
@@ -41,6 +43,7 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
     { id: 'rulecheck', label: 'ตรวจระเบียบสารบรรณ', icon: BookOpen, badge: 'ใหม่' },
     { id: 'order', label: 'คำสั่ง / ประกาศ', icon: Award, badge: '40+ แบบ' },
     { id: 'customorder', label: 'สร้างคำสั่ง/ประกาศเอง', icon: FileEdit },
+    { id: 'tor', label: 'สร้างขอบเขตงาน (TOR)', icon: FileText, badge: 'AI' },
     { id: 'speech', label: 'คำกล่าว / รายงาน', icon: Volume2, badge: '100+ แบบ' },
     { id: 'meeting', label: 'บันทึกการประชุม', icon: Users },
     { id: 'summary', label: 'สรุปโครงการอัตโนมัติ', icon: BarChart3, badge: 'AI' },
@@ -105,6 +108,7 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
             user={user}
             onSendToDraft={handleSendFromAiToDraft}
             onSaveToRegistry={onSaveToRegistry}
+            onSendToDisasterReport={onSendToDisasterReport}
           />
         )}
 
@@ -143,6 +147,13 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
         {activeSubTab === 'summary' && (
           <ProjectSummaryView
             user={user}
+          />
+        )}
+        
+        {activeSubTab === 'tor' && (
+          <TorGeneratorView
+            user={user}
+            onSendToSignQueue={onSendToSignQueue}
           />
         )}
       </div>

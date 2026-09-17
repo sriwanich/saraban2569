@@ -4710,7 +4710,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                   <div className="p-1 bg-indigo-50 rounded-lg text-indigo-600">
                     <Sparkles className="w-4 h-4 animate-bounce-slow" />
                   </div>
-                  <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">ผู้ช่วยออกแบบด้วย AI (Gemini)</h3>
+                  <h3 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">ผู้ช่วยออกแบบด้วย AI</h3>
                 </div>
                 
                 <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">

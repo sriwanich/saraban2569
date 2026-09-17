@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, onSnapshot, doc, updateDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../../../firebase';
-import { AlertTriangle, Plus, Search, Edit, Trash2, FileText, ChevronLeft, Save, FileDown } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { AlertTriangle, Plus, Search, Edit, Trash2, FileText, ChevronLeft, Save, FileDown, Scan, Loader2, RefreshCw, CheckCircle2, AlertCircle, XCircle, Printer, ArrowRight } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmContext';
 import UrgentIncidentDashboard from './UrgentIncidentDashboard';
 import { BarChart2 } from 'lucide-react';
+import { EEC_PROVINCES } from '../../../data/eecLocations';
+import { parseLocationString } from '../../../utils/locationParser';
+import A4PaperPreview from '../../A4PaperPreview';
 
 export interface UrgentIncident {
   id: string;
@@ -20,6 +21,9 @@ export interface UrgentIncident {
   endDate: string;
   endTime: string;
   location: string;
+  amphoe?: string;
+  tambon?: string;
+  muban?: string;
   affectedPeople: string;
   affectedHouseholds: string;
   injured: string;
@@ -63,14 +67,17 @@ export interface UrgentIncident {
   proposals: string[];
   reporterName: string;
   reporterPosition: string;
+  signatureImage?: string;
+  damageImages?: string[];
   createdAt: string;
   createdBy: string;
 }
 
 const initialFormState: Omit<UrgentIncident, 'id' | 'createdAt' | 'createdBy'> = {
   docNumber: '', docDate: '', fromPerson: 'นายอำเภอ', toPerson: 'ผู้ว่าราชการจังหวัด/ผู้อำนวยการจังหวัด',
-  incidentTypes: [], incidentTypeOther: '', severity: '',
+  incidentTypes: [], incidentTypeOther: '', severity: 'เล็กน้อย',
   startDate: '', startTime: '', endDate: '', endTime: '', location: '',
+  amphoe: '', tambon: '', muban: '',
   affectedPeople: '', affectedHouseholds: '', injured: '', dead: '', missing: '', evacuatedPeople: '', evacuatedHouseholds: '',
   damageHouses: '', damageHighRises: '', damageFactories: '', damageTemples: '', damageGovBuildings: '', damageOtherBuildings: '', damageBuildingCost: '',
   damageAgricultureCrops: '', damageAgricultureRice: '', damageAgricultureOrchard: '', damageAgricultureFish: '', damageAgricultureShrimp: '',
@@ -79,70 +86,593 @@ const initialFormState: Omit<UrgentIncident, 'id' | 'createdAt' | 'createdBy'> =
   totalDamageCost: '', mitigation: '',
   toolsFireTrucks: '', toolsWaterTrucks: '', toolsRescueTrucks: '', toolsFireBoats: '', toolsWaterPumps: '', toolsOther: '',
   opsGovAgencies: '', opsPrivateSector: '',
-  proposals: [], reporterName: '', reporterPosition: 'นายอำเภอ'
+  proposals: [], reporterName: '', reporterPosition: 'นายอำเภอ',
+  signatureImage: '',
+  damageImages: []
 };
 
 const INCIDENT_TYPES = ['อุทกภัย', 'ความแห้งแล้ง', 'วาตภัย', 'อัคคีภัย', 'ไฟป่า', 'อุบัติภัย', 'อากาศหนาว', 'แผ่นดินไหว', 'สารเคมีและวัตถุอันตราย', 'ทุ่นระเบิด', 'การป้องกันและระงับภัยทางอากาศ', 'การก่อวินาศกรรม', 'การอพยพประชาชนและส่วนราชการ'];
 const PROPOSALS = ['เพื่อโปรดทราบ', 'เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย', 'เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน'];
 
-export default function UrgentIncidentReportView({ user }: { user: any }) {
+export default function UrgentIncidentReportView({ user, prefillData, onClearPrefillData }: { user: any; prefillData?: any; onClearPrefillData?: () => void }) {
   const { confirm } = useConfirm();
+  const canEdit = user?.role === 'admin' || user?.department === 'ฝ่ายสงเคราะห์ผู้ประสบภัย';
   const [reports, setReports] = useState<UrgentIncident[]>([]);
+  const [currentYear, setCurrentYear] = useState<number>(2569);
+  const [yearFilter, setYearFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'list' | 'form' | 'dashboard'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'form' | 'dashboard' | 'preview'>('list');
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch('/api/settings');
+        const data = await res.json();
+        if (data && data.currentYear) {
+          setCurrentYear(Number(data.currentYear));
+        }
+      } catch (e) {
+        console.warn('Failed to fetch settings in UrgentIncidentReportView:', e);
+      }
+    };
+    fetchSettings();
+  }, []);
+  const [previousMode, setPreviousMode] = useState<'list' | 'form'>('list');
+  const [previewData, setPreviewData] = useState<UrgentIncident | null>(null);
   const [formData, setFormData] = useState(initialFormState);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanErrorMsg, setScanErrorMsg] = useState<string | null>(null);
+  
+  const [isDrawingSignature, setIsDrawingSignature] = useState(false);
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
 
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.strokeStyle = '#1e3a8a'; // Dark blue ink
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(clientX - rect.left, clientY - rect.top);
+    setIsDrawing(true);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    ctx.lineTo(clientX - rect.left, clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const saveSignature = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    // Check if canvas is empty (we can check by getting pixel data, or just save it)
+    const dataUrl = canvas.toDataURL('image/png');
+    setFormData(prev => ({ ...prev, signatureImage: dataUrl }));
+    setIsDrawingSignature(false);
+  };
+
+  // Save feedback states
+  const [isSaving, setIsSaving] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState<{
+    show: boolean;
+    status: 'success' | 'error';
+    message: string;
+    report?: UrgentIncident;
+    timestamp?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (prefillData) {
+      setFormData(prev => {
+        const base = {
+          ...prev,
+          ...prefillData,
+          incidentTypes: Array.isArray(prefillData.incidentTypes) ? prefillData.incidentTypes : [],
+        };
+        if ((!base.amphoe || !base.tambon) && base.location) {
+          const parsed = parseLocationString(base.location);
+          base.amphoe = base.amphoe || parsed.amphoe;
+          base.tambon = base.tambon || parsed.tambon;
+          base.muban = base.muban || parsed.muban;
+        }
+        return base;
+      });
+      setEditingId(null);
+      setViewMode('form');
+      if (onClearPrefillData) {
+        onClearPrefillData();
+      }
+    }
+  }, [prefillData, onClearPrefillData]);
+
+  const lastScanDataRef = React.useRef<{ fileBase64: string; mimeType: string; fileName: string } | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Load reports from both Firestore & REST API fallback
+  const fetchLocalReports = async () => {
+    try {
+      const res = await fetch('/api/urgent-incidents');
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        return json.data as UrgentIncident[];
+      }
+    } catch (e) {
+      console.warn('REST API fetch urgent incidents failed:', e);
+    }
+    return [];
+  };
 
   useEffect(() => {
     setLoading(true);
-    const q = query(collection(db, 'urgent_incidents'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UrgentIncident));
-      setReports(data);
-      setLoading(false);
-    }, (err) => {
-      console.error('Error fetching urgent reports:', err);
+    fetchLocalReports().then(localList => {
+      setReports(localList);
       setLoading(false);
     });
-    return () => unsubscribe();
   }, []);
 
-
   const handleSave = async () => {
-    if (!formData.location || !formData.docDate) {
-      await confirm({
-        title: 'ข้อมูลไม่ครบถ้วน',
-        message: 'กรุณาระบุสถานที่เกิดภัยและวันที่รายงาน',
-        type: 'warning',
-        confirmText: 'ตกลง',
-        cancelText: 'ปิด'
-      });
+    setValidationError(null);
+    setSaveFeedback(null);
+
+    // Form Validation
+    if (!formData.location || !formData.location.trim() || !formData.docDate || !formData.docDate.trim()) {
+      setValidationError('กรุณาระบุ "สถานที่เกิดภัย" และ "วันที่รายงาน" ให้ครบถ้วนก่อนบันทึก');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
+    if (!formData.incidentTypes || formData.incidentTypes.length === 0) {
+      setValidationError('กรุณาเลือกชนิดของภัยอย่างน้อย ๑ รายการ');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    setIsSaving(true);
+    const nowIso = new Date().toISOString();
+    const formattedTime = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
     try {
-      if (editingId) {
-        await updateDoc(doc(db, 'urgent_incidents', editingId), { ...formData });
-      } else {
-        await addDoc(collection(db, 'urgent_incidents'), {
-          ...formData,
-          createdAt: new Date().toISOString(),
-          createdBy: user?.username || 'System'
-        });
+      // Helper to upload base64 image and return URL
+      const uploadBase64Image = async (base64DataUrl: string, subfolder: string, originalName: string = 'image.png'): Promise<string> => {
+        if (!base64DataUrl.startsWith('data:image/')) return base64DataUrl; // Already a URL or not base64
+        
+        try {
+          const blob = base64ToBlob(base64DataUrl);
+          const uploadData = new FormData();
+          uploadData.append('subfolder', subfolder);
+          uploadData.append('uploadedBy', user?.username || 'system');
+          uploadData.append('files', blob, originalName);
+
+          const res = await fetch(`/api/upload?subfolder=${subfolder}&uploadedBy=${encodeURIComponent(user?.username || 'system')}`, {
+            method: 'POST',
+            body: uploadData
+          });
+          
+          if (res.ok) {
+            const result = await res.json();
+            if (result.files && result.files.length > 0) {
+              return result.files[0].url;
+            }
+          }
+          console.error(`Failed to upload to ${subfolder}`);
+        } catch (err) {
+          console.error(`Error uploading image to ${subfolder}:`, err);
+        }
+        return base64DataUrl; // Fallback to original base64 if upload fails
+      };
+
+      // Upload signature if it's base64
+      let processedSignature = formData.signatureImage;
+      if (processedSignature && processedSignature.startsWith('data:image/')) {
+        processedSignature = await uploadBase64Image(processedSignature, 'reporter_signatures', `signature_${Date.now()}.png`);
       }
-      setViewMode('list');
-    } catch (err) {
-      console.error('Error saving report:', err);
-      await confirm({
-        title: 'ข้อผิดพลาด',
-        message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง',
+
+      // Upload damage images if they are base64
+      let processedDamageImages = [...(formData.damageImages || [])];
+      for (let i = 0; i < processedDamageImages.length; i++) {
+        if (processedDamageImages[i] && processedDamageImages[i].startsWith('data:image/')) {
+          processedDamageImages[i] = await uploadBase64Image(processedDamageImages[i], 'damage_photos', `damage_${Date.now()}_${i}.png`);
+        }
+      }
+
+      // 1. Try REST API endpoint
+      const restPayload = {
+        ...formData,
+        signatureImage: processedSignature,
+        damageImages: processedDamageImages,
+        id: editingId || undefined,
+        createdAt: editingId ? undefined : nowIso,
+        createdBy: user?.username || user?.name || 'เจ้าหน้าที่ ปภ.'
+      };
+
+      const res = await fetch(editingId ? `/api/urgent-incidents/${editingId}` : '/api/urgent-incidents', {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(restPayload)
+      });
+      const json = await res.json();
+      
+      if (json.success) {
+        const savedRecord = json.data || { ...restPayload, id: json.id, docNumber: json.docNumber };
+        const finalId = savedRecord.id;
+        
+        // Update local list state
+        setReports(prev => {
+          const exists = prev.some(r => r.id === finalId);
+          if (exists) {
+            return prev.map(r => r.id === finalId ? savedRecord : r);
+          }
+          return [savedRecord, ...prev];
+        });
+
+        // Set SUCCESS Feedback Notice
+        setSaveFeedback({
+          show: true,
+          status: 'success',
+          message: editingId ? 'อัปเดตแบบรายงานเหตุด่วนสาธารณภัยเรียบร้อยแล้ว' : 'บันทึกแบบรายงานเหตุด่วนสาธารณภัยสำเร็จ!',
+          report: savedRecord,
+          timestamp: formattedTime
+        });
+
+        fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: editingId ? 'UPDATE_URGENT_INCIDENT' : 'CREATE_URGENT_INCIDENT', details: `${editingId ? 'แก้ไข' : 'สร้าง'}แบบรายงานเหตุด่วนสาธารณภัย: ${formData.location || 'ไม่ระบุสถานที่'}`, username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' }) }).catch(console.error); window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        throw new Error(json.error || 'ไม่สามารถบันทึกข้อมูลไปยังเซิร์ฟเวอร์ได้');
+      }
+    } catch (err: any) {
+      console.error('Error in handleSave:', err);
+      setSaveFeedback({
+        show: true,
+        status: 'error',
+        message: err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง',
+        timestamp: formattedTime
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+
+
+  const cropImageFromBase64 = (
+    base64Str: string,
+    box: [number, number, number, number] // [ymin, xmin, ymax, xmax] in 0..1000 scale
+  ): Promise<string> => {
+    return new Promise((resolve) => {
+      if (!base64Str || !base64Str.startsWith('data:image/')) {
+        resolve('');
+        return;
+      }
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve('');
+            return;
+          }
+
+          const width = img.naturalWidth;
+          const height = img.naturalHeight;
+
+          // box is [ymin, xmin, ymax, xmax] in 0..1000 scale
+          const ymin = (box[0] / 1000) * height;
+          const xmin = (box[1] / 1000) * width;
+          const ymax = (box[2] / 1000) * height;
+          const xmax = (box[3] / 1000) * width;
+
+          const cropW = Math.max(10, xmax - xmin);
+          const cropH = Math.max(10, ymax - ymin);
+
+          canvas.width = cropW;
+          canvas.height = cropH;
+
+          ctx.drawImage(img, xmin, ymin, cropW, cropH, 0, 0, cropW, cropH);
+          resolve(canvas.toDataURL('image/png'));
+        } catch (err) {
+          console.error('Error cropping image:', err);
+          resolve('');
+        }
+      };
+      img.onerror = () => {
+        resolve('');
+      };
+      img.src = base64Str;
+    });
+  };
+
+  const resizeImageBase64 = (base64Str: string, maxWidth: number = 1600, maxHeight: number = 1600): Promise<string> => {
+    return new Promise((resolve) => {
+      if (!base64Str || !base64Str.startsWith('data:image/')) {
+        resolve(base64Str);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width <= maxWidth && height <= maxHeight) {
+          resolve(base64Str);
+          return;
+        }
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        } else {
+          resolve(base64Str);
+        }
+      };
+      img.onerror = () => {
+        resolve(base64Str);
+      };
+      img.src = base64Str;
+    });
+  };
+
+  const base64ToBlob = (base64DataUrl: string): Blob => {
+    const parts = base64DataUrl.split(';base64,');
+    if (parts.length < 2) {
+      const raw = window.atob(base64DataUrl);
+      const rawLength = raw.length;
+      const uInt8Array = new Uint8Array(rawLength);
+      for (let i = 0; i < rawLength; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i);
+      }
+      return new Blob([uInt8Array], { type: 'application/octet-stream' });
+    }
+    const contentType = parts[0].split(':')[1] || 'image/jpeg';
+    const raw = window.atob(parts[1]);
+    const rawLength = raw.length;
+    const uInt8Array = new Uint8Array(rawLength);
+    for (let i = 0; i < rawLength; ++i) {
+      uInt8Array[i] = raw.charCodeAt(i);
+    }
+    return new Blob([uInt8Array], { type: contentType });
+  };
+
+  const executeScan = async (base64Data: string, mimeType: string) => {
+    setIsScanning(true);
+    setScanErrorMsg(null);
+    try {
+      const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+      const savedKey = (settings.geminiApiKey || '').trim();
+
+      // Compress and resize image first on the client-side to fit within body limits (e.g. Nginx 1MB client_max_body_size)
+      // and speed up the API uploading & processing.
+      let finalBase64 = base64Data;
+      let finalMimeType = mimeType;
+      if (base64Data.startsWith('data:image/')) {
+        try {
+          finalBase64 = await resizeImageBase64(base64Data);
+          finalMimeType = 'image/jpeg'; // converted to JPEG in resizeImageBase64
+          
+          // Also save the resized version in ref so retries don't send the huge one
+          if (lastScanDataRef.current) {
+            lastScanDataRef.current.fileBase64 = finalBase64;
+            lastScanDataRef.current.mimeType = finalMimeType;
+          }
+        } catch (resizeErr) {
+          console.warn('Failed to resize image, sending original:', resizeErr);
+        }
+      }
+
+      // Convert base64 to Blob to send as multipart/form-data (highly recommended to bypass WAF & JSON size limits)
+      const blob = base64ToBlob(finalBase64);
+      const formData = new FormData();
+      formData.append('file', blob, finalMimeType.startsWith('image/') ? 'scan-document.jpg' : 'scan-document.pdf');
+      formData.append('apiKey', savedKey);
+
+      const response = await fetch('/api/ai/scan-urgent-incident', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        let errMsg = `เซิร์ฟเวอร์ตอบกลับผิดพลาด (รหัสสถานะ: ${response.status})`;
+        if (response.status === 413) {
+          errMsg = 'ไฟล์ภาพมีขนาดใหญ่เกินขีดจำกัดของเซิร์ฟเวอร์ (413 Request Entity Too Large) ระบบได้บีบอัดแล้วแต่ยังเกินขีดจำกัดของระบบโฮสติ้งนี้ กรุณาใช้ไฟล์ภาพอื่นหรือลดความละเอียดลง';
+        } else {
+          try {
+            const errJson = JSON.parse(text);
+            if (errJson && errJson.error) {
+              errMsg = errJson.error;
+            }
+          } catch (e) {
+            if (text && text.includes('<!DOCTYPE')) {
+              errMsg = `เซิร์ฟเวอร์ขัดข้อง (รหัสสถานะ: ${response.status}) โฮสติ้งของท่านอาจไม่พบบริการ API คาดว่าเซิร์ฟเวอร์ Node.js (server.ts) ไม่ได้กำลังรันอยู่ หรือ URL เส้นทางถูกบล็อก กรุณาตั้งค่า Reverse Proxy ไปยังพอร์ต 3000`;
+            } else if (text) {
+              errMsg = text.substring(0, 200);
+            }
+          }
+        }
+        throw new Error(errMsg);
+      }
+
+      const result = await response.json();
+      if (result.success && result.data) {
+        let croppedSignature = '';
+        const croppedDamageImages: string[] = [];
+
+        // Crop signature if signatureBox is provided and it's an image
+        if (result.data.signatureBox && base64Data.startsWith('data:image/')) {
+          try {
+            croppedSignature = await cropImageFromBase64(base64Data, result.data.signatureBox);
+          } catch (e) {
+            console.error('Error cropping signature:', e);
+          }
+        }
+
+        // Crop damage images if damageBoxes are provided
+        if (Array.isArray(result.data.damageBoxes) && result.data.damageBoxes.length > 0 && base64Data.startsWith('data:image/')) {
+          for (const box of result.data.damageBoxes) {
+            try {
+              const cropped = await cropImageFromBase64(base64Data, box);
+              if (cropped) {
+                croppedDamageImages.push(cropped);
+              }
+            } catch (e) {
+              console.error('Error cropping damage box:', e);
+            }
+          }
+        }
+
+        setFormData(prev => ({
+          ...prev,
+          ...result.data,
+          incidentTypes: Array.isArray(result.data.incidentTypes) ? result.data.incidentTypes : prev.incidentTypes,
+          signatureImage: croppedSignature || prev.signatureImage,
+          damageImages: croppedDamageImages.length > 0 ? croppedDamageImages : prev.damageImages
+        }));
+        setScanErrorMsg(null);
+        fetch('/api/logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'SCAN_URGENT_INCIDENT',
+            details: `AI (${result.usedModel || 'AI'}) สแกนคัดลอกข้อมูลแบบรายงานเหตุด่วนสาธารณภัย`,
+            username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน'
+          })
+        }).catch(console.error);
+
+        await confirm({
+          title: 'ดึงข้อมูลสำเร็จ',
+          message: `AI (${result.usedModel || 'AI'}) สแกนและคัดลอกข้อมูลทั้งหมดจากเอกสารลงในฟอร์ม รวมถึงแยกสกัดลายเซ็นและรูปถ่ายความเสียหาย (ถ้ามี) เรียบร้อยแล้ว กรุณาตรวจสอบและบันทึกรายงาน`,
+          type: 'info',
+          confirmText: 'ตกลง'
+        });
+      } else {
+        throw new Error(result.error || 'ไม่สามารถดึงข้อมูลได้');
+      }
+    } catch (err: any) {
+      console.error('Scan Error:', err);
+      let errMsg = err.message || 'เกิดข้อผิดพลาดในการประมวลผลด้วย AI';
+      try {
+        if (typeof errMsg === 'string' && errMsg.startsWith('{') && errMsg.endsWith('}')) {
+          const parsed = JSON.parse(errMsg);
+          if (parsed.error) errMsg = typeof parsed.error === 'string' ? parsed.error : parsed.error.message || errMsg;
+        }
+      } catch {}
+
+      const cleanLower = String(errMsg).toLowerCase();
+      if (cleanLower.includes('503') || cleanLower.includes('overloaded') || cleanLower.includes('unavailable') || cleanLower.includes('high traffic')) {
+        errMsg = 'ระบบเซิร์ฟเวอร์ AI ของ Google มีปริมาณผู้ใช้งานหนาแน่นชั่วคราว ระบบได้พยายามสลับไปยังโมเดลสำรองแล้ว กรุณากดปุ่ม "ลองสแกนใหม่อีกครั้ง"';
+      } else if (cleanLower.includes('429') || cleanLower.includes('quota') || cleanLower.includes('rate limit')) {
+        errMsg = 'ระบบ AI มีปริมาณคำขอหนาแน่นชั่วคราว (Rate limit / Quota Exceeded) กรุณารอสักครู่แล้วกดลองใหม่อีกครั้ง';
+      }
+
+      setScanErrorMsg(errMsg);
+
+      const wantRetry = await confirm({
+        title: 'การสแกนด้วย AI ขัดข้อง',
+        message: errMsg,
+        description: 'ต้องการส่งคำร้องลองสแกนใหม่อีกครั้งทันทีหรือไม่?',
         type: 'warning',
-        confirmText: 'ตกลง',
+        confirmText: 'ลองสแกนใหม่อีกครั้ง',
         cancelText: 'ปิด'
       });
+
+      if (wantRetry && lastScanDataRef.current) {
+        executeScan(lastScanDataRef.current.fileBase64, lastScanDataRef.current.mimeType);
+      }
+    } finally {
+      setIsScanning(false);
     }
+  };
+
+  const handleScanFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64Data = reader.result as string;
+        lastScanDataRef.current = {
+          fileBase64: base64Data,
+          mimeType: file.type,
+          fileName: file.name
+        };
+        await executeScan(base64Data, file.type);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error(err);
+      setScanErrorMsg(err.message || 'ไม่สามารถอ่านไฟล์ได้');
+    }
+    // reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleDelete = async (id: string) => {
@@ -155,16 +685,53 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
     if (!isConfirmed) return;
 
     try {
-      await deleteDoc(doc(db, 'urgent_incidents', id));
+      const res = await fetch(`/api/urgent-incidents/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      
+      if (!json.success) {
+        throw new Error(json.error || 'ไม่สามารถลบข้อมูลจากเซิร์ฟเวอร์ได้');
+      }
+
+      setReports(prev => prev.filter(r => r.id !== id));
+
+      fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'DELETE_URGENT_INCIDENT',
+          details: `ลบแบบรายงานเหตุด่วนสาธารณภัยรหัส: ${id}`,
+          username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน'
+        })
+      }).catch(console.error);
     } catch (err) {
       console.error('Error deleting report:', err);
+      // Optional: Show error message
     }
   };
 
   const handleEdit = (report: UrgentIncident) => {
-    setFormData(report);
+    const updated = { ...report };
+    if ((!updated.amphoe || !updated.tambon) && updated.location) {
+      const parsed = parseLocationString(updated.location);
+      updated.amphoe = updated.amphoe || parsed.amphoe;
+      updated.tambon = updated.tambon || parsed.tambon;
+      updated.muban = updated.muban || parsed.muban;
+    }
+    setFormData(updated);
     setEditingId(report.id);
     setViewMode('form');
+  };
+
+  const handleViewPreview = (report: UrgentIncident, previous: "list" | "form") => {
+    setPreviewData(report);
+    setPreviousMode(previous);
+    setViewMode("preview");
+    fetch("/api/logs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "VIEW_URGENT_INCIDENT", details: `ดูตัวอย่างแบบรายงานเหตุด่วนสาธารณภัย: ${report.location || "ไม่ระบุสถานที่"}`, username: `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || user?.username || "ผู้ใช้งาน" }) }).catch(console.error);
+  };
+
+  const handleViewDashboard = () => {
+    setViewMode("dashboard");
+    fetch("/api/logs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "VIEW_URGENT_INCIDENT_DASHBOARD", details: "เข้าดูแดชบอร์ดสรุปรายงานเหตุด่วนสาธารณภัย", username: `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || user?.username || "ผู้ใช้งาน" }) }).catch(console.error);
   };
 
   const handleAddNew = () => {
@@ -183,11 +750,69 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
     });
   };
 
-  const filteredReports = reports.filter(r => 
-    r.location.includes(searchQuery) || 
-    r.docNumber.includes(searchQuery) ||
-    r.reporterName.includes(searchQuery)
-  );
+  const filteredReports = useMemo(() => {
+    return reports.filter(r => {
+      const matchesSearch = 
+        (r.location || '').includes(searchQuery) || 
+        (r.docNumber || '').includes(searchQuery) ||
+        (r.reporterName || '').includes(searchQuery);
+        
+      if (!matchesSearch) return false;
+
+      if (yearFilter === 'all') return true;
+      
+      const targetYear = yearFilter === 'current' ? currentYear : Number(yearFilter);
+      const targetYearStr = String(targetYear);
+      const targetThaiYearStr = targetYearStr.replace(/[0-9]/g, match => '๐๑๒๓๔๕๖๗๘๙'[parseInt(match)]);
+
+      let matchesYear = false;
+      if (r.createdAt) {
+        const dateObj = new Date(r.createdAt);
+        if (!isNaN(dateObj.getTime())) {
+          const reportThaiYear = dateObj.getFullYear() + 543;
+          if (reportThaiYear === targetYear) matchesYear = true;
+        }
+      }
+      if (r.docDate && (r.docDate.includes(targetYearStr) || r.docDate.includes(targetThaiYearStr))) {
+        matchesYear = true;
+      }
+      if (r.startDate && (r.startDate.includes(targetYearStr) || r.startDate.includes(targetThaiYearStr))) {
+        matchesYear = true;
+      }
+
+      return matchesYear;
+    });
+  }, [reports, searchQuery, yearFilter, currentYear]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    reports.forEach(r => {
+      let foundYear = false;
+      if (r.createdAt) {
+        const d = new Date(r.createdAt);
+        if (!isNaN(d.getTime())) {
+          years.add(d.getFullYear() + 543);
+          foundYear = true;
+        }
+      }
+      if (r.docDate) {
+        const match = r.docDate.match(/25\d{2}/) || r.docDate.match(/๒๕[๐-๙]{2}/);
+        if (match) {
+          const y = match[0].replace(/[๐-๙]/g, m => '๐๑๒๓๔๕๖๗๘๙'.indexOf(m).toString());
+          years.add(parseInt(y, 10));
+          foundYear = true;
+        }
+      }
+      if (r.startDate && !foundYear) {
+         const match = r.startDate.match(/25\d{2}/) || r.startDate.match(/๒๕[๐-๙]{2}/);
+         if (match) {
+           const y = match[0].replace(/[๐-๙]/g, m => '๐๑๒๓๔๕๖๗๘๙'.indexOf(m).toString());
+           years.add(parseInt(y, 10));
+         }
+      }
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [reports]);
 
   
   const printDocument = (report: UrgentIncident) => {
@@ -203,236 +828,635 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
       return;
     }
     
+    // Helper function to convert Arabic numerals to Thai numerals
+    const toThai = (str: any) => {
+      if (str === null || str === undefined) return '';
+      const s = String(str);
+      const thaiNumerals = ['๐', '๑', '๒', '๓', '๔', '๕', '๖', '๗', '๘', '๙'];
+      return s.replace(/[0-9]/g, match => thaiNumerals[parseInt(match)]);
+    };
+
     // Helper function to format dotted lines
     const fill = (text, length = 20) => {
-      if (!text) return '<span class="dotted-line" style="min-width: ' + length + 'px;"></span>';
-      return '<span class="filled-text">' + text + '</span>';
+      if (!text || String(text).trim() === '') {
+        return '<span class="dotted-line" style="width: ' + length + 'px; display: inline-block; border-bottom: 1px dotted #000; height: 16px; vertical-align: bottom;"></span>';
+      }
+      return '<span class="filled-text" style="border-bottom: 1px dotted #000; font-weight: bold; padding: 0 4px; color: #000;">' + text + '</span>';
     };
 
     const html = `
       <html>
         <head>
           <title>แบบรายงานเหตุด่วนสาธารณภัย</title>
-          <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+          <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
           <style>
-            @page { size: A4; margin: 20mm 15mm 20mm 20mm; }
+            @page { 
+              size: A4; 
+              margin: 8mm 15mm 8mm 15mm; 
+            }
             body { 
-              font-family: 'Sarabun', sans-serif; 
-              font-size: 16pt; 
-              line-height: 1.4; 
+              font-family: 'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif; 
+              font-size: 13pt; 
+              line-height: 1.20; 
               color: #000; 
               max-width: 210mm; 
               margin: 0 auto;
-              padding: 20px;
+              padding: 0;
             }
             * { box-sizing: border-box; }
-            h1 { font-size: 20pt; font-weight: bold; text-align: center; margin: 15px 0 25px 0; }
-            .urgent-stamp { color: red; font-size: 24pt; font-weight: bold; line-height: 1; margin-bottom: 15px; display: inline-block;}
-            .flex-between { display: flex; justify-content: space-between; align-items: flex-end; }
-            .flex-start { display: flex; justify-content: flex-start; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
-            .mb-2 { margin-bottom: 8px; }
-            .mb-4 { margin-bottom: 16px; }
+            .urgent-stamp { color: red; font-size: 26pt; font-weight: bold; line-height: 1; display: inline-block; font-family: 'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif; }
+            .mb-1 { margin-bottom: 2px; }
+            .mb-2 { margin-bottom: 4px; }
             .indent-1 { padding-left: 2.5em; }
-            .indent-2 { padding-left: 5em; }
             
             .checkbox { 
-              display: inline-block; 
-              width: 14px; height: 14px; 
+              display: inline-flex; 
+              align-items: center;
+              justify-content: center;
+              width: 12px; 
+              height: 12px; 
               border: 1px solid #000; 
-              margin-right: 5px; 
+              margin-right: 4px; 
               position: relative; 
-              top: 2px; 
+              vertical-align: middle;
+              top: -1px;
             }
             .checked::after { 
               content: '✓'; 
               position: absolute; 
-              top: -8px; left: 1px; 
-              font-size: 18px; 
+              top: -8px; 
+              left: 1px; 
+              font-size: 13px; 
               font-weight: bold; 
+              color: #000;
             }
             
             .dotted-line {
               display: inline-block;
               border-bottom: 1px dotted #000;
               height: 1.2em;
-              min-width: 50px;
-            }
-            .filled-text {
-              display: inline-block;
-              border-bottom: 1px dotted #000;
-              color: #000;
-              padding: 0 5px;
             }
             
             .row { display: flex; flex-wrap: wrap; align-items: baseline; }
-            .item { margin-right: 15px; white-space: nowrap; }
-            .signature-box { margin-top: 50px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px; }
+            .item { margin-right: 12px; white-space: nowrap; }
+            .signature-box { margin-top: 8px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px; }
             .text-center { text-align: center; }
           </style>
         </head>
         <body onload="window.print()">
-          <div class="flex-between">
-            <span class="urgent-stamp">ด่วนที่สุด</span>
-            <div class="text-center" style="margin-right: 20px;">
-              
-              <div>ครั้งที่ ${fill('', 40)} / ๒๕${fill('', 40)}</div>
-            </div>
+          <table style="width: 100%; border: none; border-collapse: collapse; margin-bottom: 6px;">
+            <tr>
+              <td style="width: 35%; vertical-align: bottom; text-align: left; padding: 0;">
+                <span>ความเร่งด่วน </span><span class="urgent-stamp">ด่วนที่สุด</span>
+              </td>
+              <td style="width: 40%; vertical-align: bottom; text-align: center; padding: 0;">
+                <div style="font-size: 16pt; font-weight: bold;">แบบรายงานเหตุด่วนสาธารณภัย</div>
+              </td>
+              <td style="width: 25%; vertical-align: bottom; text-align: right; padding: 0;">
+                <div>วันที่ ${fill(toThai(report.docDate), 160)}</div>
+              </td>
+            </tr>
+          </table>
+          
+          <div class="row mb-1">
+            <div style="width: 50%;">ที่ สส ${fill(toThai(report.docNumber), 200)}</div>
+          </div>
+          <div class="row mb-1">
+            จาก ${fill(report.fromPerson, 450)}
+          </div>
+          <div class="row mb-2" style="margin-bottom: 10px;">
+            ถึง ${fill(report.toPerson, 450)}
           </div>
           
-          <h1>แบบรายงานเหตุด่วนสาธารณภัย</h1>
-          
-          <div class="flex-between mb-2">
-            <div>ที่ สส ${fill(report.docNumber, 150)}</div>
-            <div>วันที่ ${fill(report.docDate, 200)}</div>
+          <div class="mb-1"><strong>๑. ชนิดของภัย</strong></div>
+          <div class="indent-1 mb-1 row" style="display: flex; flex-wrap: wrap; line-height: 1.25; gap: 2px 10px;">
+            ${[
+              'อุทกภัย', 'วาตภัย', 'ความแห้งแล้ง', 'อัคคีภัย', 'ไฟป่า', 'อากาศหนาว', 
+              'แผ่นดินไหวและอาคารถล่ม', 'สารเคมีและวัตถุอันตราย', 'อุบัติภัย', 'ทุ่นระเบิด', 
+              'การป้องกันและระงับภัยทางอากาศ', 'การก่อวินาศกรรม', 'การอพยพประชาชนและส่วนราชการ'
+            ].map(t => {
+              const isChecked = report.incidentTypes.includes(t) || (t === 'แผ่นดินไหวและอาคารถล่ม' && report.incidentTypes.includes('แผ่นดินไหว'));
+              return `<div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${isChecked ? 'checked' : ''}"></span> ${t}</div>`;
+            }).join('')}
+            <div class="item" style="display: inline-flex; align-items: center;"><span class="checkbox ${report.incidentTypes.includes('อื่นๆ') || report.incidentTypeOther ? 'checked' : ''}"></span> อื่นๆ ${fill(toThai(report.incidentTypeOther), 150)}</div>
           </div>
-          <div class="mb-2">จาก ${fill(report.fromPerson, 300)}</div>
-          <div class="mb-4">ถึง ${fill(report.toPerson, 300)}</div>
           
-          <div class="mb-2"><strong>๑. ชนิดของภัย</strong></div>
-          <div class="indent-1 mb-2 row">
-            ${INCIDENT_TYPES.map(t => `<div class="item"><span class="checkbox ${report.incidentTypes.includes(t) ? 'checked' : ''}"></span> ${t}</div>`).join('')}
-            <div class="item"><span class="checkbox ${report.incidentTypes.includes('อื่นๆ') ? 'checked' : ''}"></span> อื่นๆ ${fill(report.incidentTypeOther, 150)}</div>
-          </div>
-          <div class="indent-1 mb-4 row">
-            <span style="margin-right:15px;">ความรุนแรงและลักษณะของภัย</span>
-            <div class="item"><span class="checkbox ${report.severity === 'เล็กน้อย' ? 'checked' : ''}"></span> เล็กน้อย</div>
-            <div class="item"><span class="checkbox ${report.severity === 'ปานกลาง' ? 'checked' : ''}"></span> ปานกลาง</div>
-            <div class="item"><span class="checkbox ${report.severity === 'รุนแรง' ? 'checked' : ''}"></span> รุนแรง</div>
+          <div class="indent-1 mb-2 row" style="display: flex; flex-wrap: wrap; align-items: center;">
+            <span style="margin-right: 10px;">ความรุนแรงและลักษณะของภัย</span>
+            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'เล็กน้อย' ? 'checked' : ''}"></span> เล็กน้อย</div>
+            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'ปานกลาง' ? 'checked' : ''}"></span> ปานกลาง</div>
+            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'รุนแรง' ? 'checked' : ''}"></span> รุนแรง</div>
+            <span style="margin-left: 5px;">ลักษณะของภัย ${fill(toThai(report.incidentTypeOther || report.mitigation ? (report.incidentTypeOther + ' ' + report.mitigation).slice(0, 100) : ''), 250)}</span>
           </div>
 
-          <div class="mb-4">
-            <strong>๒. วันเวลาที่เกิดภัย</strong><br>
-            <div class="indent-1">
-              เกิดวันที่ ${fill(report.startDate, 120)} เวลา ${fill(report.startTime, 60)} น. 
-              สิ้นสุดวันที่ ${fill(report.endDate, 120)} เวลา ${fill(report.endTime, 60)} น.
-            </div>
+          <div class="mb-2">
+            <strong>๒. ภัยเกิดเมื่อ</strong> - วันที่ ${fill(toThai(report.startDate), 140)} เวลา ${fill(toThai(report.startTime), 70)} น. 
+            <strong>ภัยสิ้นสุด</strong> วันที่ ${fill(toThai(report.endDate), 140)} เวลา ${fill(toThai(report.endTime), 70)} น.
           </div>
           
-          <div class="mb-4"><strong>๓. สถานที่เกิดภัย</strong> ${fill(report.location, 500)}</div>
+          <div class="mb-2">
+            <strong>๓. สถานที่เกิดภัย</strong> - ${fill(toThai(report.location), 550)}
+          </div>
           
-          <div class="mb-2"><strong>๔. ราษฎรที่ประสบภัย</strong></div>
-          <div class="indent-1 mb-4">
+          <div class="mb-1"><strong>๔. ราษฎรที่ประสบภัย</strong></div>
+          <div class="indent-1 mb-2" style="line-height: 1.25;">
             <div class="row">
-              <span class="item">๔.๑ ราษฎรที่ได้รับความเดือดร้อน ${fill(report.affectedPeople, 80)} คน</span>
-              <span class="item">${fill(report.affectedHouseholds, 80)} ครัวเรือน</span>
+              <span class="item">๔.๑ ราษฎรได้รับความเดือดร้อน ${fill(toThai(report.affectedPeople), 70)} คน ${fill(toThai(report.affectedHouseholds), 70)} ครัวเรือน</span>
+              <span class="item">๔.๒ บาดเจ็บ (เล็กน้อย) ${fill(toThai(report.injured), 60)} คน</span>
             </div>
             <div class="row">
-              <span class="item">๔.๒ บาดเจ็บ ${fill(report.injured, 80)} คน</span>
-              <span class="item">๔.๓ เสียชีวิต ${fill(report.dead, 80)} คน</span>
-              <span class="item">๔.๔ สูญหาย ${fill(report.missing, 80)} คน</span>
+              <span class="item">๔.๓ เสียชีวิต ${fill(toThai(report.dead), 70)} คน</span>
+              <span class="item">๔.๔ สูญหาย ${fill(toThai(report.missing), 70)} คน (ให้ระบุรายละเอียด) ${fill('', 150)}</span>
             </div>
             <div class="row">
-              <span class="item">๔.๕ อพยพที่ปลอดภัย ${fill(report.evacuatedPeople, 80)} คน</span>
-              <span class="item">${fill(report.evacuatedHouseholds, 80)} ครัวเรือน</span>
+              <span class="item">๔.๕ อพยพไปที่ปลอดภัย ${fill(toThai(report.evacuatedPeople), 70)} คน ${fill(toThai(report.evacuatedHouseholds), 70)} ครัวเรือน</span>
             </div>
           </div>
 
-          <div class="mb-2"><strong>๕. พื้นที่ประสบภัยและความเสียหาย</strong></div>
-          <div class="indent-1 mb-4">
+          <div class="mb-1"><strong>๕. พื้นที่ประสบภัยและความเสียหาย</strong></div>
+          <div class="indent-1 mb-2" style="line-height: 1.25;">
             <div class="row">
-              <span class="item">๕.๑ อาคารสิ่งก่อสร้าง / บ้านพักอาศัย ${fill(report.damageHouses, 60)} หลัง</span>
+              <span class="item">๕.๑ อาคารก่อสร้าง - บ้านพักอาศัยเสียหายทั้งหลัง ${fill('', 50)} หลัง</span>
+              <span class="item">บ้านพักอาศัยเสียหายบางส่วน ${fill(toThai(report.damageHouses), 50)} หลัง</span>
             </div>
-            <div class="indent-1 row">
-              <span class="item">อาคารโรงงาน ${fill(report.damageFactories, 60)} แห่ง</span>
-              <span class="item">วัด ${fill(report.damageTemples, 60)} แห่ง</span>
-              <span class="item">สถานที่ราชการ ${fill(report.damageGovBuildings, 60)} แห่ง</span>
+            <div class="row">
+              <span class="item">อาคารสูงตั้งแต่ ๒๓ เมตรขึ้นไป ${fill(toThai(report.damageHighRises), 50)} อาคาร</span>
+              <span class="item">โรงเรียน ${fill('', 50)} แห่ง</span>
+              <span class="item">วัด ${fill(toThai(report.damageTemples), 50)} แห่ง</span>
+              <span class="item">สถานที่ราชการ ${fill(toThai(report.damageGovBuildings), 50)} แห่ง</span>
+              <span class="item">อื่นๆ ${fill(toThai(report.damageOtherBuildings), 90)}</span>
             </div>
-            <div class="indent-1 row">
-              <span class="item">อื่นๆ ${fill(report.damageOtherBuildings, 100)}</span>
-              <span class="item">ความเสียหายประมาณ ${fill(report.damageBuildingCost, 120)} บาท</span>
+            <div class="row" style="padding-left: 2.5em;">
+              <span class="item">มูลค่าความเสียหายประมาณ ${fill(toThai(report.damageBuildingCost), 130)} บาท</span>
             </div>
             
-            <div class="row" style="margin-top: 8px;">
-              <span class="item">๕.๒ พื้นที่และทรัพย์สินทางการเกษตร พืชไร่ ${fill(report.damageAgricultureCrops, 60)} ไร่</span>
-              <span class="item">นา ${fill(report.damageAgricultureRice, 60)} ไร่</span>
-              <span class="item">สวน ${fill(report.damageAgricultureOrchard, 60)} ไร่</span>
+            <div class="row" style="margin-top: 4px;">
+              <span class="item">๕.๒ พื้นที่และทรัพย์สินทางการเกษตร พืชไร่ ${fill(toThai(report.damageAgricultureCrops), 50)} ไร่</span>
+              <span class="item">นาข้าว ${fill(toThai(report.damageAgricultureRice), 50)} ไร่</span>
+              <span class="item">พืชสวน ${fill(toThai(report.damageAgricultureOrchard), 50)} ไร่</span>
+              <span class="item">บ่อปลา ${fill(toThai(report.damageAgricultureFish), 50)} บ่อ</span>
             </div>
-            <div class="indent-1 row">
-              <span class="item">บ่อปลา ${fill(report.damageAgricultureFish, 60)} ไร่</span>
-              <span class="item">บ่อกุ้ง ${fill(report.damageAgricultureShrimp, 60)} ไร่</span>
+            <div class="row" style="padding-left: 2.5em;">
+              <span class="item">บ่อกุ้ง ${fill(toThai(report.damageAgricultureShrimp), 50)} บ่อ</span>
+              <span class="item">สัตว์เลี้ยง (โค/กระบือ ${fill(toThai(report.damageLivestockCow), 50)} ตัว</span>
+              <span class="item">สุกร ${fill(toThai(report.damageLivestockPig), 50)} ตัว</span>
+              <span class="item">เป็ด/ไก่ ${fill(toThai(report.damageLivestockPoultry), 50)} ตัว)</span>
+              <span class="item">อื่นๆ ${fill(toThai(report.damageLivestockOther), 90)}</span>
             </div>
-            <div class="indent-1 row">
-              <span class="item">สัตว์เลี้ยง (โค/กระบือ ${fill(report.damageLivestockCow, 60)} ตัว</span>
-              <span class="item">สุกร ${fill(report.damageLivestockPig, 60)} ตัว</span>
-              <span class="item">เป็ด/ไก่ ${fill(report.damageLivestockPoultry, 60)} ตัว)</span>
-            </div>
-            <div class="indent-1 row">
-              <span class="item">อื่นๆ ${fill(report.damageLivestockOther, 100)}</span>
-              <span class="item">ความเสียหายประมาณ ${fill(report.damageAgricultureCost, 120)} บาท</span>
+            <div class="row" style="padding-left: 2.5em;">
+              <span class="item">มูลค่าความเสียหายประมาณ ${fill(toThai(report.damageAgricultureCost), 130)} บาท</span>
             </div>
 
-            <div class="row" style="margin-top: 8px;">
-              <span class="item">๕.๓ สิ่งสาธารณประโยชน์ ถนน ${fill(report.damagePublicRoads, 60)} สาย</span>
-              <span class="item">สะพาน ${fill(report.damagePublicBridges, 60)} แห่ง</span>
-              <span class="item">คอสะพาน ${fill(report.damagePublicBridgeApproaches, 60)} แห่ง</span>
+            <div class="row" style="margin-top: 4px;">
+              <span class="item">๕.๓ สิ่งสาธารณประโยชน์ ถนน ${fill(toThai(report.damagePublicRoads), 50)} สาย</span>
+              <span class="item">สะพาน ${fill(toThai(report.damagePublicBridges), 50)} แห่ง</span>
+              <span class="item">คอสะพาน ${fill(toThai(report.damagePublicBridgeApproaches), 50)} แห่ง</span>
+              <span class="item">ฝาย ${fill(toThai(report.damagePublicWeirs), 50)} แห่ง (อื่นๆ) ${fill(toThai(report.damagePublicOther), 90)}</span>
             </div>
-            <div class="indent-1 row">
-              <span class="item">ฝาย ${fill(report.damagePublicWeirs, 60)} แห่ง</span>
-              <span class="item">อื่นๆ ${fill(report.damagePublicOther, 100)}</span>
-              <span class="item">ความเสียหายประมาณ ${fill(report.damagePublicCost, 120)} บาท</span>
+            <div class="row" style="padding-left: 2.5em;">
+              <span class="item">ความเสียหายประมาณ ${fill(toThai(report.damagePublicCost), 130)} บาท</span>
             </div>
-            <div class="row" style="margin-top: 8px; font-weight: bold;">
-              <span class="item">รวมความเสียหายเบื้องต้น ${fill(report.totalDamageCost, 150)} บาท</span>
+            <div class="row" style="margin-top: 4px; font-weight: bold;">
+              <span class="item">๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ ${fill(toThai(report.totalDamageCost), 160)} บาท</span>
             </div>
           </div>
 
-          <div class="mb-4"><strong>๖. การบรรเทาภัย</strong> ${fill(report.mitigation, 500)}</div>
+          <div class="mb-2">
+            <strong>๖. การบรรเทาภัย</strong> - ${fill(toThai(report.mitigation), 550)}
+          </div>
           
-          <div class="mb-2"><strong>๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong></div>
-          <div class="indent-1 mb-4 row">
-            <span class="item">รถดับเพลิง ${fill(report.toolsFireTrucks, 50)} คัน</span>
-            <span class="item">รถบรรทุกน้ำ ${fill(report.toolsWaterTrucks, 50)} คัน</span>
-            <span class="item">รถกู้ภัย ${fill(report.toolsRescueTrucks, 50)} คัน</span>
-            <span class="item">เรือดับเพลิง ${fill(report.toolsFireBoats, 50)} ลำ</span>
-            <span class="item">เครื่องสูบน้ำ ${fill(report.toolsWaterPumps, 50)} เครื่อง</span>
-            <span class="item">อื่นๆ ${fill(report.toolsOther, 100)}</span>
+          <div class="mb-1"><strong>๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong></div>
+          <div class="indent-1 mb-2 row" style="line-height: 1.25;">
+            <span class="item">รถปฏิบัติการกู้ชีพ ${fill('', 50)} คัน</span>
+            <span class="item">รถดับเพลิง จำนวน ${fill(toThai(report.toolsFireTrucks), 50)} คัน</span>
+            <span class="item">รถยนต์บรรทุกน้ำ ${fill(toThai(report.toolsWaterTrucks), 50)} คัน</span>
+            <span class="item">รถกู้ภัย ${fill(toThai(report.toolsRescueTrucks), 50)} คัน</span>
+            <span class="item">เรือ ${fill(toThai(report.toolsFireBoats), 50)} ลำ</span>
+            <span class="item">เครื่องสูบน้ำ ${fill(toThai(report.toolsWaterPumps), 50)} เครื่อง</span>
+            <span class="item">อื่นๆ ${fill(toThai(report.toolsOther), 100)}</span>
           </div>
-          <div class="indent-1 mb-4 row">
-            <span class="item">๗.๑ ส่วนราชการ ${fill(report.opsGovAgencies, 80)} หน่วยงาน</span>
-            <span class="item">๗.๒ เอกชน/ประชาชน ${fill(report.opsPrivateSector, 80)} กลุ่ม/คน</span>
-          </div>
-
-          <div class="mb-2"><strong>๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong></div>
-          <div class="indent-1 mb-4">
-            <div class="row"><span class="checkbox"></span> ส่วนราชการอื่นๆ${fill('', 300)}</div>
-            <div class="row"><span class="checkbox"></span> ภาคเอกชน${fill('', 300)}</div>
+          <div class="indent-1 mb-2 row" style="line-height: 1.25;">
+            <span class="item">๗.๑ ส่วนราชการ ${fill(toThai(report.opsGovAgencies), 80)} หน่วยงาน</span>
+            <span class="item">๗.๒ เอกชน/ประชาชน ${fill(toThai(report.opsPrivateSector), 80)} กลุ่ม/คน</span>
           </div>
 
-          <div class="mb-2"><strong>๙. ข้อเสนอ</strong></div>
-          <div class="indent-1 mb-4">
-            ${PROPOSALS.map(p => `<div class="row"><span class="checkbox ${report.proposals.includes(p) ? 'checked' : ''}"></span> ${p}</div>`).join('')}
-          </div>
-
-          <div class="signature-box">
-            <div class="text-center">
-              <div>(ลงชื่อ)${fill('', 150)}ผู้รายงาน</div>
-              <div style="margin-top: 5px;">(${fill(report.reporterName, 180)})</div>
-              <div style="margin-top: 5px;">${fill(report.reporterPosition, 200)}</div>
+          <div class="mb-1"><strong>๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong></div>
+          <div class="indent-1 mb-2" style="line-height: 1.25;">
+            <div class="row" style="display: inline-flex; align-items: center; margin-right: 25px;">
+              <span class="checkbox"></span> ส่วนราชการอื่น ${fill('', 300)}
+            </div>
+            <div class="row" style="display: inline-flex; align-items: center;">
+              <span class="checkbox"></span> ภาคเอกชน (ชื่อ) ${fill('', 300)}
             </div>
           </div>
+
+          <div class="mb-1">
+            <strong>๙. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติ ซึ่งเกิดความเสียหายจริง โดยมีความประสงค์</strong>
+          </div>
+          <div class="indent-1 mb-2" style="line-height: 1.25; display: flex; flex-direction: column; gap: 2px;">
+            <div class="row" style="display: inline-flex; align-items: flex-start;">
+              <span class="checkbox ${report.proposals.includes('เพื่อโปรดทราบ') ? 'checked' : ''}" style="margin-top: 4px; margin-right: 8px; flex-shrink: 0;"></span> 
+              <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
+            </div>
+            <div class="row" style="display: inline-flex; align-items: flex-start;">
+              <span class="checkbox ${report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย') ? 'checked' : ''}" style="margin-top: 4px; margin-right: 8px; flex-shrink: 0;"></span> 
+              <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
+            </div>
+            <div class="row" style="display: inline-flex; align-items: flex-start;">
+              <span class="checkbox ${report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? 'checked' : ''}" style="margin-top: 4px; margin-right: 8px; flex-shrink: 0;"></span> 
+              <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหต่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
+            </div>
+          </div>
+
+          <div class="signature-box" style="margin-top: 16px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px;">
+            <div class="text-center" style="position: relative; width: 350px;">
+              <div style="margin-top: 4px; display: flex; justify-content: center; align-items: baseline;">
+                <span>(ลงชื่อ)</span>
+                <span style="display: inline-block; width: 180px; border-bottom: 1px dotted #000; margin: 0 5px; position: relative;">
+                  ${report.signatureImage ? `
+                    <img src="${report.signatureImage}" style="position: absolute; bottom: -15px; left: 50%; transform: translateX(-50%); max-height: 55px; width: auto; mix-blend-mode: multiply; z-index: 10;" />
+                  ` : ''}
+                </span>
+                <span>ผู้รายงาน</span>
+              </div>
+              <div style="margin-top: 3px;">
+                ( ${report.reporterName ? report.reporterName : fill('', 180)} )
+              </div>
+              <div style="margin-top: 3px;">
+                ตำแหน่ง ${report.reporterPosition ? report.reporterPosition : fill('', 200)}
+              </div>
+            </div>
+          </div>
+
+          ${report.damageImages && report.damageImages.length > 0 ? `
+            <div style="page-break-before: always; margin-top: 15mm; padding-top: 10px; font-family: 'TH Saraban New', 'TH Saraban PSK', 'Sarabun', sans-serif;">
+              <div style="text-align: center; font-size: 15pt; font-weight: bold; margin-bottom: 25px; line-height: 1.4;">
+                <div>บ้าน${report.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
+                <div>บ้านเลขที่ ${toThai(report.location || '')}</div>
+              </div>
+              
+              <!-- First row of up to 3 photos -->
+              <div style="display: grid; grid-template-columns: repeat(${report.damageImages.length >= 3 ? 3 : report.damageImages.length}, 1fr); gap: 15px; justify-content: center; margin-top: 15px;">
+                ${report.damageImages.slice(0, 3).map((imgUrl, index) => `
+                  <div style="text-align: center;">
+                    <img src="${imgUrl}" style="width: 100%; height: 210px; object-fit: cover; border-radius: 4px;" />
+                    <div style="font-size: 13pt; color: #333; margin-top: 8px; font-weight: bold;">ภาพถ่ายความเสียหายประกอบรายงาน ที่ ${toThai(String(index + 1))}</div>
+                  </div>
+                `).join('')}
+              </div>
+
+              <!-- Second row of up to 2 photos -->
+              ${report.damageImages.length > 3 ? `
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; justify-content: center; margin-top: 20px; max-width: 70%; margin-left: auto; margin-right: auto;">
+                  ${report.damageImages.slice(3, 5).map((imgUrl, index) => `
+                    <div style="text-align: center;">
+                      <img src="${imgUrl}" style="width: 100%; height: 210px; object-fit: cover; border-radius: 4px;" />
+                      <div style="font-size: 13pt; color: #333; margin-top: 8px; font-weight: bold;">ภาพถ่ายความเสียหายประกอบรายงาน ที่ ${toThai(String(index + 4))}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
         </body>
       </html>
     `;
     printWindow.document.write(html);
-    printWindow.document.close();
+    printWindow.document.close(); fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'PRINT_URGENT_INCIDENT', details: `พิมพ์แบบรายงานเหตุด่วนสาธารณภัย: ${report.location || 'ไม่ระบุสถานที่'}`, username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' }) }).catch(console.error);
   };
 
+
+  if (viewMode === 'preview' && previewData) {
+    const toThaiNum = (str: any) => {
+      if (str === null || str === undefined) return '';
+      const s = String(str);
+      const thaiNumerals = ['๐', '๑', '๒', '๓', '๔', '๕', '๖', '๗', '๘', '๙'];
+      return s.replace(/[0-9]/g, match => thaiNumerals[parseInt(match)]);
+    };
+
+    const renderLine = (text: string, placeholder: string = '........................................................') => {
+      if (!text || String(text).trim() === '') {
+        return <span className="text-zinc-400 font-normal">{placeholder}</span>;
+      }
+      return <span className="border-b border-dotted border-black px-2 font-bold text-black">{toThaiNum(text)}</span>;
+    };
+
+    const incidentTypeChoices = [
+      'อุทกภัย', 'วาตภัย', 'ความแห้งแล้ง', 'อัคคีภัย', 'ไฟป่า', 'อากาศหนาว', 
+      'แผ่นดินไหวและอาคารถล่ม', 'สารเคมีและวัตถุอันตราย', 'อุบัติภัย', 'ทุ่นระเบิด', 
+      'การป้องกันและระงับภัยทางอากาศ', 'การก่อวินาศกรรม', 'การอพยพประชาชนและส่วนราชการ'
+    ];
+
+    return (
+      <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950 -mx-4 sm:-mx-6 lg:-mx-8 p-4 sm:p-6 md:p-8 space-y-6">
+        <div className="max-w-5xl mx-auto flex items-center justify-between mb-4">
+          <button 
+            onClick={() => setViewMode(previousMode)}
+            className="flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors px-3 py-2 rounded-xl border border-[var(--border-light)] hover:bg-[var(--bg-elevated)] cursor-pointer font-bold"
+          >
+            <ChevronLeft className="w-4 h-4" /> ย้อนกลับไปแก้ไข
+          </button>
+        </div>
+
+        <A4PaperPreview
+          title="แบบรายงานเหตุด่วนสาธารณภัย (A4 Print Preview)"
+          subtitle={`เลขที่หนังสือ: สส ${previewData.docNumber || '-'} | ลงวันที่: ${previewData.docDate || '-'}`}
+          onPrint={() => printDocument(previewData)}
+        >
+          {/* Paper Container */}
+          <div className="space-y-8 select-none font-serif w-full h-full p-[8mm_15mm_8mm_15mm]" style={{ fontFamily: "'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif" }}>
+            {/* Page 1 */}
+            <div className="bg-white text-black min-h-[297mm] relative" style={{ fontSize: '13pt', lineHeight: '1.20' }}>
+              <div className="absolute top-2 right-2 text-xs text-neutral-400">หน้า ๑ (เอกสารแบบรายงาน)</div>
+            
+            {/* Header section */}
+            <div className="grid grid-cols-3 items-end mb-1.5">
+              <div className="text-left">
+                <span className="text-red-600 font-extrabold text-[26pt] leading-none">ด่วนที่สุด</span>
+              </div>
+              <div className="text-center">
+                <h1 className="text-[16pt] font-bold text-black" style={{ fontFamily: "'TH Sarabun New', 'Sarabun', sans-serif" }}>แบบรายงานเหตุด่วนสาธารณภัย</h1>
+              </div>
+              <div className="text-right">
+                วันที่ {renderLine(previewData.docDate, '.....................................')}
+              </div>
+            </div>
+
+            <div className="space-y-0.5 text-black">
+              <div className="flex justify-between">
+                <div>ที่ สส {renderLine(previewData.docNumber, '.....................................')}</div>
+              </div>
+              <div>จาก {renderLine(previewData.fromPerson, '.................................................................................................')}</div>
+              <div className="pb-0">ถึง {renderLine(previewData.toPerson, '.................................................................................................')}</div>
+
+              {/* 1. ชนิดของภัย */}
+              <div>
+                <strong className="font-bold">๑. ชนิดของภัย</strong>
+                <div className="pl-[2.5em] pt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 leading-normal">
+                  {incidentTypeChoices.map((t, idx) => {
+                    const isChecked = previewData.incidentTypes.includes(t) || (t === 'แผ่นดินไหวและอาคารถล่ม' && previewData.incidentTypes.includes('แผ่นดินไหว'));
+                    return (
+                      <div key={idx} className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className="w-3 border border-black flex items-center justify-center text-xs font-bold relative" style={{ height: '12px', width: '12px' }}>
+                          {isChecked ? '✓' : ''}
+                        </span>
+                        <span>{t}</span>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 border border-black flex items-center justify-center text-xs font-bold relative" style={{ height: '12px', width: '12px' }}>
+                      {previewData.incidentTypes.includes('อื่นๆ') || previewData.incidentTypeOther ? '✓' : ''}
+                    </span>
+                    <span>อื่นๆ: {renderLine(previewData.incidentTypeOther, '.............................................')}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pl-[2.5em] flex flex-wrap items-center gap-3">
+                <span>ความรุนแรงและลักษณะของภัย:</span>
+                {['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map((sev, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5">
+                    <span className="w-3 border border-black flex items-center justify-center text-xs font-bold relative" style={{ height: '12px', width: '12px' }}>
+                      {previewData.severity === sev ? '✓' : ''}
+                    </span>
+                    <span>{sev}</span>
+                  </div>
+                ))}
+                <span className="ml-2">ลักษณะของภัย {renderLine(previewData.incidentTypeOther || previewData.mitigation ? (previewData.incidentTypeOther + ' ' + previewData.mitigation).slice(0, 40) : '', '....................................')}</span>
+              </div>
+
+              {/* 2. วันเวลาที่เกิดภัย */}
+              <div>
+                <strong className="font-bold">๒. ภัยเกิดเมื่อ</strong> - วันที่ {renderLine(previewData.startDate, '........................')} เวลา {renderLine(previewData.startTime, '................')} น.
+                <span className="ml-3"><strong>ภัยสิ้นสุด</strong> วันที่ {renderLine(previewData.endDate, '........................')} เวลา {renderLine(previewData.endTime, '................')} น.</span>
+              </div>
+
+              {/* 3. สถานที่เกิดภัย */}
+              <div>
+                <strong className="font-bold">๓. สถานที่เกิดภัย</strong> - {renderLine(previewData.location, '............................................................................................................................................................')}
+              </div>
+
+              {/* 4. ราษฎรที่ประสบภัย */}
+              <div>
+                <strong className="font-bold">๔. ราษฎรที่ประสบภัย</strong>
+                <div className="pl-[2.5em] space-y-0.5">
+                  <div className="flex flex-wrap gap-x-4">
+                    <span>๔.๑ ราษฎรได้รับความเดือดร้อน {renderLine(previewData.affectedPeople, '........')} คน</span>
+                    <span>{renderLine(previewData.affectedHouseholds, '........')} ครัวเรือน</span>
+                    <span>๔.๒ บาดเจ็บ (เล็กน้อย) {renderLine(previewData.injured, '........')} คน</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4">
+                    <span>๔.๓ เสียชีวิต {renderLine(previewData.dead, '........')} คน</span>
+                    <span>๔.๔ สูญหาย {renderLine(previewData.missing, '........')} คน (ให้ระบุรายละเอียด) {renderLine('', '............................')}</span>
+                  </div>
+                  <div>๔.๕ อพยพไปที่ปลอดภัย {renderLine(previewData.evacuatedPeople, '........')} คน {renderLine(previewData.evacuatedHouseholds, '........')} ครัวเรือน</div>
+                </div>
+              </div>
+
+              {/* 5. พื้นที่ประสบภัยและความเสียหาย */}
+              <div>
+                <strong className="font-bold">๕. พื้นที่ประสบภัยและความเสียหาย</strong>
+                <div className="pl-[2.5em] space-y-0.5">
+                  <div className="flex flex-wrap gap-x-4">
+                    <span>๕.๑ อาคารก่อสร้าง - บ้านพักอาศัยเสียหายทั้งหลัง {renderLine('', '........')} หลัง</span>
+                    <span>บ้านพักอาศัยเสียหายบางส่วน {renderLine(previewData.damageHouses, '........')} หลัง</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4">
+                    <span>อาคารสูงตั้งแต่ ๒๓ เมตรขึ้นไป {renderLine(previewData.damageHighRises, '........')} อาคาร</span>
+                    <span>โรงเรียน {renderLine('', '........')} แห่ง</span>
+                    <span>วัด {renderLine(previewData.damageTemples, '........')} แห่ง</span>
+                    <span>สถานที่ราชการ {renderLine(previewData.damageGovBuildings, '........')} แห่ง</span>
+                    <span>อื่นๆ {renderLine(previewData.damageOtherBuildings, '........................')}</span>
+                  </div>
+                  <div>มูลค่าความเสียหายประมาณ {renderLine(previewData.damageBuildingCost, '................')} บาท</div>
+                  
+                  <div className="flex flex-wrap gap-x-4">
+                    <span>๕.๒ พื้นที่เกษตร พืชไร่ {renderLine(previewData.damageAgricultureCrops, '........')} ไร่</span>
+                    <span>นาข้าว {renderLine(previewData.damageAgricultureRice, '........')} ไร่</span>
+                    <span>พืชสวน {renderLine(previewData.damageAgricultureOrchard, '........')} ไร่</span>
+                    <span>บ่อปลา {renderLine(previewData.damageAgricultureFish, '........')} บ่อ</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4">
+                    <span>บ่อกุ้ง {renderLine(previewData.damageAgricultureShrimp, '........')} บ่อ</span>
+                    <span>สัตว์เลี้ยง (โค/กระบือ {renderLine(previewData.damageLivestockCow, '........')} ตัว</span>
+                    <span>สุกร {renderLine(previewData.damageLivestockPig, '........')} ตัว</span>
+                    <span>เป็ด/ไก่ {renderLine(previewData.damageLivestockPoultry, '........')} ตัว)</span>
+                    <span>อื่นๆ {renderLine(previewData.damageLivestockOther, '........................')}</span>
+                  </div>
+                  <div>มูลค่าความเสียหายประมาณ {renderLine(previewData.damageAgricultureCost, '................')} บาท</div>
+
+                  <div>
+                    ๕.๓ สิ่งสาธารณประโยชน์ ถนน {renderLine(previewData.damagePublicRoads, '........')} สาย
+                    สะพาน {renderLine(previewData.damagePublicBridges, '........')} แห่ง
+                    คอสะพาน {renderLine(previewData.damagePublicBridgeApproaches, '........')} แห่ง
+                    ฝาย {renderLine(previewData.damagePublicWeirs, '........')} แห่ง
+                    (อื่นๆ) {renderLine(previewData.damagePublicOther, '........................')}
+                  </div>
+                  <div>มูลค่าความเสียหายเบื้องต้น {renderLine(previewData.damagePublicCost, '................')} บาท</div>
+                  <div className="font-bold">๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ {renderLine(previewData.totalDamageCost, '........................')} บาท</div>
+                </div>
+              </div>
+
+              {/* 6. การบรรเทาภัย */}
+              <div>
+                <strong className="font-bold">๖. การบรรเทาภัย</strong> - {renderLine(previewData.mitigation, '......................................................................................................................................')}
+              </div>
+
+              {/* 7. เครื่องมือ/อุปกรณ์ที่ใช้ */}
+              <div>
+                <strong className="font-bold">๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong>
+                <div className="pl-[2.5em] flex flex-wrap gap-x-3 gap-y-0.5">
+                  <span>รถปฏิบัติการกู้ชีพ {renderLine('', '......')} คัน</span>
+                  <span>รถดับเพลิง จำนวน {renderLine(previewData.toolsFireTrucks, '......')} คัน</span>
+                  <span>รถยนต์บรรทุกน้ำ {renderLine(previewData.toolsWaterTrucks, '......')} คัน</span>
+                  <span>รถกู้ภัย {renderLine(previewData.toolsRescueTrucks, '......')} คัน</span>
+                  <span>เรือ {renderLine(previewData.toolsFireBoats, '......')} ลำ</span>
+                  <span>เครื่องสูบน้ำ {renderLine(previewData.toolsWaterPumps, '......')} เครื่อง</span>
+                  <span>อื่นๆ {renderLine(previewData.toolsOther, '........................')}</span>
+                </div>
+                <div className="pl-[2.5em] flex gap-x-8 pt-0.5">
+                  <span>๗.๑ ส่วนราชการ {renderLine(previewData.opsGovAgencies, '........')} หน่วยงาน</span>
+                  <span>๗.๒ เอกชน/ประชาชน {renderLine(previewData.opsPrivateSector, '........')} กลุ่ม/คน</span>
+                </div>
+              </div>
+
+              {/* 8. ดำเนินงาน */}
+              <div>
+                <strong className="font-bold">๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong>
+                <div className="pl-[2.5em] flex gap-8">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3.5 h-3.5 border border-black flex items-center justify-center text-[10px]"></span>
+                    <span>ส่วนราชการอื่น {renderLine('', '........................')}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3.5 h-3.5 border border-black flex items-center justify-center text-[10px]"></span>
+                    <span>ภาคเอกชน (ชื่อ) {renderLine('', '........................')}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 9. ข้อเสนอ / คำลงท้ายรับรอง */}
+              <div>
+                <strong className="font-bold">๙. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติ ซึ่งเกิดความเสียหายจริง โดยมีความประสงค์</strong>
+                <div className="pl-[2.5em] space-y-0.5 mt-0.5">
+                  <div className="flex items-start gap-2">
+                    <span className="w-3.5 h-3.5 border border-black mt-1 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
+                      {previewData.proposals.includes('เพื่อโปรดทราบ') ? '✓' : ''}
+                    </span>
+                    <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-3.5 h-3.5 border border-black mt-1 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
+                      {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย') ? '✓' : ''}
+                    </span>
+                    <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-3.5 h-3.5 border border-black mt-1 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
+                      {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? '✓' : ''}
+                    </span>
+                    <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Signatures Area */}
+              <div className="flex flex-col items-end pr-8 pt-3" style={{ minHeight: '65px' }}>
+                <div className="w-[300px] text-center">
+                  <div className="flex items-baseline justify-center gap-1">
+                    <span>(ลงชื่อ)</span>
+                    <span className="inline-block w-40 border-b border-dotted border-black relative">
+                      {previewData.signatureImage && (
+                        <img src={previewData.signatureImage} alt="Signature Preview" className="absolute bottom-[-15px] left-1/2 -translate-x-1/2 max-h-[55px] object-contain mix-blend-multiply z-10 select-none pointer-events-none" style={{ minWidth: '100px' }} />
+                      )}
+                    </span>
+                    <span>ผู้รายงาน</span>
+                  </div>
+                  <div className="mt-0.5">
+                    ( {previewData.reporterName ? previewData.reporterName : '................................................'} )
+                  </div>
+                  <div className="mt-0.5">
+                    ตำแหน่ง {previewData.reporterPosition ? previewData.reporterPosition : '................................................'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Page 2: Appendix */}
+          {previewData.damageImages && previewData.damageImages.length > 0 && (
+            <div className="bg-white text-black shadow-2xl mx-auto p-[15mm] max-w-[210mm] min-h-[297mm] border border-neutral-300 relative rounded" style={{ fontSize: '15pt', lineHeight: '1.35' }}>
+              <div className="absolute top-4 right-4 text-xs text-neutral-400">หน้า ๒ (ภาคผนวกภาพถ่ายแนบ)</div>
+              
+              <div className="text-center font-bold text-[15pt] mb-6 pt-4">
+                <div>บ้าน{previewData.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
+                <div>บ้านเลขที่ {renderLine(previewData.location || '')}</div>
+              </div>
+
+              {/* Row 1 of up to 3 images */}
+              <div className={`grid gap-4 mt-6 ${previewData.damageImages.length >= 3 ? 'grid-cols-3' : `grid-cols-${previewData.damageImages.length}`}`}>
+                {previewData.damageImages.slice(0, 3).map((imgUrl, index) => (
+                  <div key={index} className="text-center">
+                    <img src={imgUrl} alt={`Damage ${index + 1}`} className="w-full h-[210px] object-cover mx-auto rounded border border-neutral-200" />
+                    <div className="text-sm font-bold text-neutral-700 mt-2">ภาพถ่ายความเสียหายประกอบรายงาน ที่ {toThaiNum(String(index + 1))}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Row 2 of up to 2 images */}
+              {previewData.damageImages.length > 3 && (
+                <div className="grid grid-cols-2 gap-4 mt-6 max-w-[70%] mx-auto">
+                  {previewData.damageImages.slice(3, 5).map((imgUrl, index) => (
+                    <div key={index} className="text-center">
+                      <img src={imgUrl} alt={`Damage ${index + 4}`} className="w-full h-[210px] object-cover mx-auto rounded border border-neutral-200" />
+                      <div className="text-sm font-bold text-neutral-700 mt-2">ภาพถ่ายความเสียหายประกอบรายงาน ที่ {toThaiNum(String(index + 4))}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </A4PaperPreview>
+    </div>
+    );
+  }
 
   if (viewMode === 'dashboard') {
     return (
       <div className="space-y-6 pb-20">
-        <div className="flex items-center gap-3 mb-6">
-          <button 
-            onClick={() => setViewMode('list')}
-            className="p-2 hover:bg-[var(--bg-elevated)] rounded-lg text-[var(--text-secondary)] transition-colors"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <h1 className="text-xl font-bold text-[var(--text-primary)]">
-            แดชบอร์ดสรุปรายงานเหตุด่วนสาธารณภัย
-          </h1>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setViewMode('list')}
+              className="p-2 hover:bg-[var(--bg-elevated)] rounded-lg text-[var(--text-secondary)] transition-colors"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-[var(--text-primary)]">
+                แดชบอร์ดสรุปรายงานเหตุด่วนสาธารณภัย
+              </h1>
+              <p className="text-xs text-[var(--text-secondary)] mt-0.5">ปีงบประมาณใช้งานปัจจุบัน: พ.ศ. {currentYear}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">ปีงบประมาณ:</span>
+            <select
+              value={yearFilter}
+              onChange={e => setYearFilter(e.target.value)}
+              className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--primary-color)] outline-none transition-all cursor-pointer shadow-sm"
+            >
+              <option value="all">แสดงทั้งหมด (ทุกปี)</option>
+              {availableYears.map(year => (
+                <option key={year} value={year.toString()}>พ.ศ. {year}</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <UrgentIncidentDashboard reports={reports} />
+        <UrgentIncidentDashboard reports={filteredReports} user={user} />
       </div>
     );
   }
@@ -450,22 +1474,24 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
           </div>
           <div className="flex flex-wrap gap-2">
             <button 
-              onClick={() => setViewMode('dashboard')}
+              onClick={handleViewDashboard}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
             >
               <BarChart2 className="w-4 h-4" /> แดชบอร์ดสรุปผล
             </button>
-            <button 
-              onClick={handleAddNew}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4" /> สร้างรายงานฉบับใหม่
-            </button>
+            {canEdit && (
+              <button 
+                onClick={handleAddNew}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" /> สร้างรายงานฉบับใหม่
+              </button>
+            )}
           </div>
         </div>
 
         <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl overflow-hidden shadow-sm">
-          <div className="p-4 border-b border-[var(--border-light)] flex gap-4">
+          <div className="p-4 border-b border-[var(--border-light)] flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -476,74 +1502,172 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
                 className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-primary)] text-sm rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-[var(--primary-color)] transition-colors"
               />
             </div>
+
+            <div className="flex items-center gap-2 min-w-[200px]">
+              <span className="text-xs font-semibold text-[var(--text-secondary)] whitespace-nowrap">ปีงบประมาณ:</span>
+              <select
+                value={yearFilter}
+                onChange={e => setYearFilter(e.target.value)}
+                className="bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-primary)] text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-[var(--primary-color)] transition-colors cursor-pointer w-full"
+              >
+                <option value="all">แสดงทั้งหมด (ทุกปี)</option>
+                {availableYears.map(year => (
+                  <option key={year} value={year.toString()}>พ.ศ. {year}</option>
+                ))}
+              </select>
+            </div>
           </div>
           
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm whitespace-nowrap min-w-[800px]">
-              <thead className="bg-[var(--bg-elevated)] text-[var(--text-secondary)] font-medium">
-                <tr>
-                  <th className="px-4 py-3">เลขที่/วันที่</th>
-                  <th className="px-4 py-3">สถานที่เกิดภัย</th>
-                  <th className="px-4 py-3">ประเภทภัย</th>
-                  <th className="px-4 py-3">ระดับความรุนแรง</th>
-                  <th className="px-4 py-3">ผู้รายงาน</th>
-                  <th className="px-4 py-3 text-right">จัดการ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border-light)]">
-                {loading ? (
-                  <tr><td colSpan={6} className="text-center py-8 text-[var(--text-muted)]">กำลังโหลดข้อมูล...</td></tr>
+          <div className="overflow-hidden">
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-sm whitespace-nowrap min-w-[800px]">
+                <thead className="bg-[var(--bg-elevated)] text-[var(--text-secondary)] font-medium">
+                  <tr>
+                    <th className="px-4 py-3 border-b border-[var(--border-light)]">เลขที่/วันที่</th>
+                    <th className="px-4 py-3 border-b border-[var(--border-light)]">สถานที่เกิดภัย</th>
+                    <th className="px-4 py-3 border-b border-[var(--border-light)]">ประเภทภัย</th>
+                    <th className="px-4 py-3 border-b border-[var(--border-light)]">ระดับความรุนแรง</th>
+                    <th className="px-4 py-3 border-b border-[var(--border-light)]">ผู้รายงาน</th>
+                    <th className="px-4 py-3 border-b border-[var(--border-light)] text-right">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-light)]">
+                  {loading ? (
+                    <tr><td colSpan={6} className="text-center py-10 text-[var(--text-muted)]"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />กำลังโหลดข้อมูล...</td></tr>
+                  ) : filteredReports.length === 0 ? (
+                    <tr><td colSpan={6} className="text-center py-10 text-[var(--text-muted)]">ไม่พบข้อมูลรายงานเหตุด่วน</td></tr>
+                  ) : (
+                    filteredReports.map(report => (
+                      <tr key={report.id} className="hover:bg-[var(--bg-elevated)] transition-colors">
+                        <td className="px-4 py-3 align-top">
+                          <div className="font-medium text-[var(--text-primary)]">{report.docNumber || '-'}</div>
+                          <div className="text-xs text-[var(--text-muted)] mt-0.5">{report.docDate || '-'}</div>
+                        </td>
+                        <td className="px-4 py-3 align-top">
+                          <div className="text-[var(--text-primary)] font-medium max-w-[200px] lg:max-w-xs truncate" title={report.location}>{report.location}</div>
+                          <div className="text-xs text-[var(--text-secondary)] mt-0.5">
+                             {report.amphoe && report.amphoe !== 'ไม่ระบุอำเภอ' ? report.amphoe : ''}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 align-top">
+                          <div className="flex flex-wrap gap-1">
+                            {report.incidentTypes.slice(0, 2).map((t, idx) => (
+                              <span key={idx} className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-[10px] px-2 py-0.5 rounded-full">{t}</span>
+                            ))}
+                            {report.incidentTypes.length > 2 && (
+                              <span className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 text-[10px] px-2 py-0.5 rounded-full">+{report.incidentTypes.length - 2}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 align-top">
+                          {report.severity === 'รุนแรง' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-800/50">รุนแรง</span>
+                          ) : report.severity === 'ปานกลาง' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-200 dark:border-orange-800/50">ปานกลาง</span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-800/50">เล็กน้อย</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 align-top">
+                          <div className="text-sm font-medium text-[var(--text-primary)]">{report.reporterName || '-'}</div>
+                          <div className="text-xs text-[var(--text-muted)] truncate max-w-[150px]">{report.reporterPosition || '-'}</div>
+                        </td>
+                        <td className="px-4 py-3 align-top text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button onClick={() => { handleViewPreview(report, 'list'); }} className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 rounded transition-colors" title="ดูตัวอย่างก่อนพิมพ์">
+                              <FileText className="w-4 h-4" />
+                            </button>
+                            {canEdit && (
+                              <>
+                                <button onClick={() => handleEdit(report)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 rounded transition-colors" title="แก้ไข">
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDelete(report.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded transition-colors" title="ลบ">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="md:hidden divide-y divide-[var(--border-light)]">
+               {loading ? (
+                  <div className="text-center py-10 text-[var(--text-muted)]"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />กำลังโหลดข้อมูล...</div>
                 ) : filteredReports.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-8 text-[var(--text-muted)]">ไม่พบข้อมูลรายงานเหตุด่วน</td></tr>
+                  <div className="text-center py-10 text-[var(--text-muted)]">ไม่พบข้อมูลรายงานเหตุด่วน</div>
                 ) : (
                   filteredReports.map(report => (
-                    <tr key={report.id} className="hover:bg-[var(--bg-elevated)] transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-[var(--text-primary)]">{report.docNumber || '-'}</div>
-                        <div className="text-xs text-[var(--text-muted)] mt-0.5">{report.docDate || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-[var(--text-primary)] max-w-xs truncate" title={report.location}>{report.location}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {report.incidentTypes.slice(0, 2).map((t, idx) => (
-                            <span key={idx} className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-[10px] px-2 py-0.5 rounded-full">{t}</span>
-                          ))}
-                          {report.incidentTypes.length > 2 && (
-                            <span className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 text-[10px] px-2 py-0.5 rounded-full">+{report.incidentTypes.length - 2}</span>
+                    <div key={report.id} className="p-4 hover:bg-[var(--bg-elevated)] transition-colors">
+                      <div className="flex justify-between items-start mb-3 gap-3">
+                        <div className="flex-1">
+                           <div className="font-semibold text-[var(--text-primary)] text-sm line-clamp-2 leading-snug">
+                             {report.location}
+                           </div>
+                           <div className="text-xs text-[var(--text-secondary)] mt-1.5 flex flex-wrap gap-2 items-center">
+                             <span className="font-medium text-[var(--primary-color)]">{report.docNumber || '-'}</span>
+                             <span className="w-1 h-1 bg-[var(--text-muted)] rounded-full"></span>
+                             <span>{report.docDate || '-'}</span>
+                           </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                           {report.severity === 'รุนแรง' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-800/50">รุนแรง</span>
+                          ) : report.severity === 'ปานกลาง' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-200 dark:border-orange-800/50">ปานกลาง</span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-800/50">เล็กน้อย</span>
                           )}
                         </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        {report.severity === 'รุนแรง' ? (
-                          <span className="text-red-600 dark:text-red-400 font-medium">รุนแรง</span>
-                        ) : report.severity === 'ปานกลาง' ? (
-                          <span className="text-orange-500 font-medium">ปานกลาง</span>
-                        ) : (
-                          <span className="text-green-600 dark:text-green-400">เล็กน้อย</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-[var(--text-primary)]">{report.reporterName || '-'}</div>
-                        <div className="text-xs text-[var(--text-muted)]">{report.reporterPosition || '-'}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => printDocument(report)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded" title="พิมพ์แบบรายงาน">
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                         {report.incidentTypes.slice(0, 3).map((t, idx) => (
+                            <span key={idx} className="bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] text-[10px] px-2 py-0.5 rounded-md">{t}</span>
+                         ))}
+                         {report.incidentTypes.length > 3 && (
+                            <span className="bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] text-[10px] px-2 py-0.5 rounded-md">+{report.incidentTypes.length - 3}</span>
+                         )}
+                      </div>
+
+                      <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border-lighter)]">
+                        <div className="flex items-center gap-2 max-w-[60%]">
+                           <div className="w-6 h-6 rounded-full bg-[var(--bg-overlay)] flex items-center justify-center text-[var(--text-secondary)] border border-[var(--border-light)] flex-shrink-0">
+                              <span className="text-[10px] font-bold">{report.reporterName ? report.reporterName.charAt(0) : '?'}</span>
+                           </div>
+                           <div className="truncate">
+                             <div className="text-[11px] font-medium text-[var(--text-primary)] truncate">{report.reporterName || '-'}</div>
+                             <div className="text-[9px] text-[var(--text-muted)] truncate">{report.reporterPosition || '-'}</div>
+                           </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button onClick={() => { handleViewPreview(report, 'list'); }} className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 rounded transition-colors" title="ดูตัวอย่างก่อนพิมพ์">
                             <FileText className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleEdit(report)} className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded" title="แก้ไข">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => handleDelete(report.id)} className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded" title="ลบ">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canEdit && (
+                            <>
+                              <button onClick={() => handleEdit(report)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 rounded transition-colors" title="แก้ไข">
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete(report.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded transition-colors" title="ลบ">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
                         </div>
-                      </td>
-                    </tr>
+                      </div>
+                    </div>
                   ))
                 )}
-              </tbody>
-            </table>
+            </div>
           </div>
         </div>
       </div>
@@ -565,20 +1689,35 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
           </h1>
         </div>
         <div className="flex flex-wrap gap-2">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept="image/*,application/pdf"
+            onChange={handleScanFile}
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isScanning}
+            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+          >
+            {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
+            {isScanning ? 'กำลังสแกน...' : 'สแกนเอกสารด้วย AI'}
+          </button>
           <button 
             onClick={handleSave}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+            disabled={isSaving}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
           >
-            <Save className="w-4 h-4" /> บันทึกข้อมูล
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {isSaving ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
           </button>
-          {editingId && (
-            <button 
-              onClick={() => printDocument(formData as UrgentIncident)}
-              className="bg-[var(--bg-elevated)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
-            >
-              <FileDown className="w-4 h-4" /> พิมพ์เอกสาร
-            </button>
-          )}
+          <button 
+            onClick={() => { handleViewPreview(formData as UrgentIncident, 'form'); }}
+            className="bg-[var(--bg-elevated)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <Printer className="w-4 h-4" /> ดูตัวอย่างก่อนพิมพ์
+          </button>
           <button 
             onClick={() => {
               const toThai = (str: string) => {
@@ -604,6 +1743,178 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
       </div>
 
       <div className="space-y-6">
+        {/* Banner แจ้งเตือน validationError */}
+        {validationError && (
+          <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3 text-amber-900 dark:text-amber-200 shadow-sm">
+            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 text-sm font-medium">
+              <p className="font-bold text-amber-950 dark:text-amber-100">ข้อมูลยังไม่สมบูรณ์</p>
+              <p className="mt-0.5 text-amber-800 dark:text-amber-300">{validationError}</p>
+            </div>
+            <button 
+              onClick={() => setValidationError(null)} 
+              className="text-amber-600 hover:text-amber-800 p-1 rounded-lg"
+            >
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
+        {/* Status Notification Box หลังจากกดบันทึกข้อมูล */}
+        {saveFeedback && saveFeedback.show && (
+          <div className={`rounded-2xl border p-5 sm:p-6 shadow-md transition-all ${
+            saveFeedback.status === 'success' 
+              ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800/80 text-emerald-950 dark:text-emerald-100' 
+              : 'bg-red-50/90 dark:bg-red-950/40 border-red-300 dark:border-red-800/80 text-red-950 dark:text-red-100'
+          }`}>
+            <div className="flex items-start gap-4">
+              <div className={`p-3 rounded-2xl flex-shrink-0 ${
+                saveFeedback.status === 'success' 
+                  ? 'bg-emerald-600 text-white shadow-sm' 
+                  : 'bg-red-600 text-white shadow-sm'
+              }`}>
+                {saveFeedback.status === 'success' ? (
+                  <CheckCircle2 className="w-8 h-8" />
+                ) : (
+                  <AlertCircle className="w-8 h-8" />
+                )}
+              </div>
+
+              <div className="flex-1 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wide uppercase ${
+                      saveFeedback.status === 'success' 
+                        ? 'bg-emerald-200/80 text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100' 
+                        : 'bg-red-200/80 text-red-900 dark:bg-red-800 dark:text-red-100'
+                    }`}>
+                      {saveFeedback.status === 'success' ? 'บันทึกสำเร็จ (SUCCESS)' : 'บันทึกไม่สำเร็จ (FAILED)'}
+                    </span>
+                    {saveFeedback.timestamp && (
+                      <span className="text-xs text-[var(--text-muted)] flex items-center gap-1">
+                        เวลา {saveFeedback.timestamp} น.
+                      </span>
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => setSaveFeedback(null)} 
+                    className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg transition-colors"
+                  >
+                    <XCircle className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-bold tracking-tight">
+                    {saveFeedback.message}
+                  </h3>
+                  {saveFeedback.status === 'success' && saveFeedback.report && (
+                    <p className="text-sm opacity-90 mt-1">
+                      ระบบได้ทำการจัดเก็บและบันทึกข้อมูลแบบรายงานเหตุด่วนสาธารณภัยเข้าสู่ระบบเรียบร้อยแล้ว
+                    </p>
+                  )}
+                </div>
+
+                {saveFeedback.status === 'success' && saveFeedback.report && (
+                  <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-xl p-4 border border-emerald-200/60 dark:border-emerald-800/50 text-xs sm:text-sm space-y-2 text-slate-800 dark:text-slate-200 shadow-inner">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">เลขที่หนังสือ:</span>{' '}
+                        <span className="font-bold text-emerald-700 dark:text-emerald-400">{saveFeedback.report.docNumber || 'ไม่ระบุ'}</span>
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">วันที่รายงาน:</span>{' '}
+                        <span>{saveFeedback.report.docDate || 'ไม่ระบุ'}</span>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">ชนิดของภัย:</span>{' '}
+                        <span className="font-medium bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                          {saveFeedback.report.incidentTypes?.join(', ') || 'ไม่ระบุ'}
+                        </span>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="font-semibold text-slate-500 dark:text-slate-400">สถานที่เกิดภัย:</span>{' '}
+                        <span>{saveFeedback.report.location || 'ไม่ระบุ'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Direct Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {saveFeedback.status === 'success' && saveFeedback.report ? (
+                    <>
+                      <button
+                        onClick={() => { handleViewPreview(saveFeedback.report!, 'form'); }}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-sm transition-all"
+                      >
+                        <Printer className="w-4 h-4" /> ดูตัวอย่าง/พิมพ์เอกสาร (A4)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSaveFeedback(null);
+                          setViewMode('list');
+                        }}
+                        className="bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-50 dark:hover:bg-slate-700 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-sm transition-all"
+                      >
+                        <ArrowRight className="w-4 h-4" /> ดูรายการรายงานทั้งหมด
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSaveFeedback(null);
+                          setEditingId(null);
+                          setFormData(initialFormState);
+                        }}
+                        className="bg-emerald-100 dark:bg-emerald-900/50 hover:bg-emerald-200 text-emerald-900 dark:text-emerald-200 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-all"
+                      >
+                        <Plus className="w-4 h-4" /> กรอกรายงานฉบับใหม่
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-sm transition-all"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isSaving ? 'animate-spin' : ''}`} /> ลองบันทึกใหม่อีกครั้ง
+                      </button>
+                      <button
+                        onClick={() => setSaveFeedback(null)}
+                        className="bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 text-slate-800 dark:text-slate-200 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all"
+                      >
+                        กลับไปแก้ไขแบบฟอร์ม
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {scanErrorMsg && (
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-900 dark:text-amber-200">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-semibold">ข้อความจากระบบ AI</p>
+                <p className="text-amber-800 dark:text-amber-300 mt-0.5">{scanErrorMsg}</p>
+              </div>
+            </div>
+            {lastScanDataRef.current && (
+              <button
+                type="button"
+                onClick={() => executeScan(lastScanDataRef.current!.fileBase64, lastScanDataRef.current!.mimeType)}
+                disabled={isScanning}
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shadow-sm self-end sm:self-center"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+                ลองสแกนใหม่อีกครั้ง
+              </button>
+            )}
+          </div>
+        )}
         
         {/* ส่วนหัวกระดาษ */}
         <section className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm p-4 sm:p-6 space-y-4 sm:space-y-5">
@@ -688,7 +1999,90 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
         {/* 3. สถานที่เกิดภัย */}
         <section className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm p-4 sm:p-6 space-y-4 sm:space-y-5">
           <h2 className="text-base font-bold text-[var(--text-primary)] border-b border-[var(--border-light)] pb-3">๓. สถานที่เกิดภัย <span className="text-red-500">*</span></h2>
-          <textarea value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} rows={2} className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent outline-none resize-none transition-all" placeholder="หมู่ที่ ตำบล อำเภอ จังหวัด..." />
+          
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs text-[var(--text-secondary)] font-medium mb-1">อำเภอ <span className="text-red-500">*</span></label>
+              <select
+                value={formData.amphoe || ''}
+                onChange={e => {
+                  const amp = e.target.value;
+                  setFormData(prev => {
+                    const updated = { ...prev, amphoe: amp, tambon: '' };
+                    const mubanStr = updated.muban ? `${updated.muban} ` : '';
+                    const tambonStr = updated.tambon ? `${updated.tambon} ` : '';
+                    const amphoeStr = updated.amphoe ? `${updated.amphoe} ` : '';
+                    updated.location = `${mubanStr}${tambonStr}${amphoeStr}จังหวัดระยอง`.trim();
+                    return updated;
+                  });
+                }}
+                className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent outline-none transition-all"
+              >
+                <option value="">-- เลือกอำเภอ --</option>
+                {EEC_PROVINCES.find(p => p.id === 'rayong')?.districts.map(d => (
+                  <option key={d.name} value={d.name}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-[var(--text-secondary)] font-medium mb-1">ตำบล <span className="text-red-500">*</span></label>
+              <select
+                value={formData.tambon || ''}
+                disabled={!formData.amphoe}
+                onChange={e => {
+                  const tam = e.target.value;
+                  setFormData(prev => {
+                    const updated = { ...prev, tambon: tam };
+                    const mubanStr = updated.muban ? `${updated.muban} ` : '';
+                    const tambonStr = updated.tambon ? `${updated.tambon} ` : '';
+                    const amphoeStr = updated.amphoe ? `${updated.amphoe} ` : '';
+                    updated.location = `${mubanStr}${tambonStr}${amphoeStr}จังหวัดระยอง`.trim();
+                    return updated;
+                  });
+                }}
+                className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent outline-none transition-all disabled:opacity-50"
+              >
+                <option value="">-- เลือกตำบล --</option>
+                {EEC_PROVINCES.find(p => p.id === 'rayong')?.districts
+                  .find(d => d.name === formData.amphoe)?.subdistricts.map(s => (
+                    <option key={s.name} value={s.name}>{s.name}</option>
+                  ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-[var(--text-secondary)] font-medium mb-1">หมู่บ้าน / หมู่ที่</label>
+              <input
+                type="text"
+                placeholder="เช่น หมู่ที่ 3 บ้านเนินพระ"
+                value={formData.muban || ''}
+                onChange={e => {
+                  const mub = e.target.value;
+                  setFormData(prev => {
+                    const updated = { ...prev, muban: mub };
+                    const mubanStr = updated.muban ? `${updated.muban} ` : '';
+                    const tambonStr = updated.tambon ? `${updated.tambon} ` : '';
+                    const amphoeStr = updated.amphoe ? `${updated.amphoe} ` : '';
+                    updated.location = `${mubanStr}${tambonStr}${amphoeStr}จังหวัดระยอง`.trim();
+                    return updated;
+                  });
+                }}
+                className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-[var(--text-secondary)] font-medium mb-1">รายละเอียดสถานที่เพิ่มเติม / ที่อยู่ที่ประกอบขึ้นอัตโนมัติ</label>
+            <textarea
+              value={formData.location}
+              onChange={e => setFormData({ ...formData, location: e.target.value })}
+              rows={2}
+              className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent outline-none resize-none transition-all"
+              placeholder="หมู่ที่ ตำบล อำเภอ จังหวัด..."
+            />
+          </div>
         </section>
 
         {/* 4. ราษฎรที่ประสบภัย */}
@@ -841,9 +2235,12 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
           </div>
         </section>
 
-        {/* Signatures */}
-        <section className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm p-4 sm:p-6 space-y-4 sm:space-y-5">
-          <h2 className="text-base font-bold text-[var(--text-primary)] border-b border-[var(--border-light)] pb-3">ผู้รายงาน</h2>
+        {/* ลายมือชื่อผู้รายงาน (Signatures) & รูปความเสียหาย (Damage Photos) */}
+        <section className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-sm p-4 sm:p-6 space-y-6">
+          <div className="border-b border-[var(--border-light)] pb-3">
+            <h2 className="text-base font-bold text-[var(--text-primary)]">ผู้รายงานและหลักฐานแนบ</h2>
+          </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs text-[var(--text-secondary)] font-medium mb-1">ชื่อผู้รายงาน</label>
@@ -852,6 +2249,151 @@ export default function UrgentIncidentReportView({ user }: { user: any }) {
             <div>
               <label className="block text-xs text-[var(--text-secondary)] font-medium mb-1">ตำแหน่ง</label>
               <input type="text" value={formData.reporterPosition} onChange={e => setFormData({...formData, reporterPosition: e.target.value})} className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent outline-none transition-all" placeholder="เช่น นายอำเภอเมือง" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-[var(--border-light)]">
+            {/* Signature Block */}
+            <div className="space-y-3">
+              <label className="block text-sm font-bold text-[var(--text-primary)]">ลายมือชื่อผู้รายงาน</label>
+              
+              {formData.signatureImage ? (
+                <div className="bg-[var(--bg-overlay)] p-4 rounded-lg border border-[var(--border-light)] flex flex-col items-center gap-3 relative group">
+                  <img src={formData.signatureImage} alt="Signature" className="max-h-28 object-contain mix-blend-multiply dark:mix-blend-normal bg-white p-2 rounded" />
+                  <button 
+                    onClick={() => setFormData(prev => ({ ...prev, signatureImage: '' }))}
+                    type="button"
+                    className="absolute top-2 right-2 p-1.5 bg-red-100 hover:bg-red-200 text-red-600 rounded-full transition-colors"
+                    title="ลบลายมือชื่อ"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <span className="text-xs text-[var(--text-secondary)]">ตรวจจับจากไฟล์สแกน หรืออัปโหลด/วาดด้วยตนเอง</span>
+                </div>
+              ) : (
+                <div className="bg-[var(--bg-overlay)] p-6 rounded-lg border border-dashed border-[var(--border-light)] flex flex-col items-center justify-center gap-4 text-center">
+                  <div className="text-xs text-[var(--text-secondary)]">ยังไม่มีภาพลายมือชื่อผู้รายงาน</div>
+                  
+                  {isDrawingSignature ? (
+                    <div className="w-full max-w-sm space-y-3">
+                      <div className="relative border border-gray-300 dark:border-neutral-700 rounded-lg bg-white overflow-hidden">
+                        <canvas
+                          ref={canvasRef}
+                          width={320}
+                          height={150}
+                          className="w-full h-[150px] cursor-crosshair touch-none bg-white"
+                          onMouseDown={startDrawing}
+                          onMouseMove={draw}
+                          onMouseUp={stopDrawing}
+                          onMouseLeave={stopDrawing}
+                          onTouchStart={startDrawing}
+                          onTouchMove={draw}
+                          onTouchEnd={stopDrawing}
+                        />
+                      </div>
+                      <div className="flex items-center justify-center gap-2">
+                        <button type="button" onClick={clearCanvas} className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-[var(--text-primary)] rounded">
+                          ล้างกระดาน
+                        </button>
+                        <button type="button" onClick={saveSignature} className="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded font-medium">
+                          บันทึกลายเซ็น
+                        </button>
+                        <button type="button" onClick={() => setIsDrawingSignature(false)} className="px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded">
+                          ยกเลิก
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                      <label className="bg-[var(--bg-elevated)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors">
+                        <Plus className="w-3.5 h-3.5" /> อัปโหลดรูปภาพลายเซ็น
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const r = new FileReader();
+                              r.onloadend = () => {
+                                setFormData(prev => ({ ...prev, signatureImage: r.result as string }));
+                              };
+                              r.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                      <button 
+                        type="button"
+                        onClick={() => setIsDrawingSignature(true)}
+                        className="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 dark:hover:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+                      >
+                        <Edit className="w-3.5 h-3.5" /> วาดด้วยนิ้ว/เมาส์
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Damage Photos Block */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-bold text-[var(--text-primary)]">ภาพถ่ายความเสียหายในพื้นที่</label>
+                <label className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-bold cursor-pointer flex items-center gap-1">
+                  <Plus className="w-3 h-3" /> เพิ่มรูปภาพ
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    multiple 
+                    className="hidden" 
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      files.forEach(file => {
+                        const r = new FileReader();
+                        r.onloadend = () => {
+                          setFormData(prev => ({
+                            ...prev,
+                            damageImages: [...(prev.damageImages || []), r.result as string]
+                          }));
+                        };
+                        r.readAsDataURL(file);
+                      });
+                    }}
+                  />
+                </label>
+              </div>
+
+              {formData.damageImages && formData.damageImages.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3 max-h-56 overflow-y-auto p-2 bg-[var(--bg-overlay)] rounded-lg border border-[var(--border-light)]">
+                  {formData.damageImages.map((imgUrl, index) => (
+                    <div key={index} className="relative group border border-[var(--border-light)] rounded-md overflow-hidden bg-black flex items-center justify-center aspect-video">
+                      <img src={imgUrl} alt={`Damage ${index + 1}`} className="max-h-full max-w-full object-contain" />
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            damageImages: (prev.damageImages || []).filter((_, i) => i !== index)
+                          }));
+                        }}
+                        className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-700 transition-opacity"
+                        title="ลบรูปภาพ"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                      <div className="absolute bottom-0 inset-x-0 bg-black/60 text-[10px] text-white py-0.5 text-center">
+                        ภาพที่ {index + 1}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-[var(--bg-overlay)] p-6 rounded-lg border border-dashed border-[var(--border-light)] flex flex-col items-center justify-center gap-2 text-center h-[130px]">
+                  <div className="text-xs text-[var(--text-secondary)]">ยังไม่มีภาพถ่ายภัยพิบัติแนบ</div>
+                  <span className="text-[10px] text-[var(--text-secondary)]">สกัดภาพอัตโนมัติเมื่อใช้ AI สแกน หรือกดปุ่ม "เพิ่มรูปภาพ" เพื่ออัปโหลดเอง</span>
+                </div>
+              )}
             </div>
           </div>
         </section>
