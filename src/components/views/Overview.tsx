@@ -134,19 +134,19 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 relative z-10">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 relative z-10">
             {showInbox && (
               <button
                 type="button"
                 onClick={() => onCreateDoc('inbox')}
-                className="flex items-center gap-5 p-5 rounded-3xl bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-light)] hover:border-[var(--primary-color)]/30 transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] text-xs font-semibold text-left group shadow-sm hover:shadow-lg hover:shadow-[var(--primary-color)]/10 active:scale-[0.98] cursor-pointer"
+                className="flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-light)] hover:border-blue-500/50 hover:shadow-lg transition-all duration-300 text-xs font-semibold text-left group shadow-sm active:scale-[0.98] cursor-pointer"
               >
-                <div className="w-14 h-14 rounded-3xl bg-gradient-to-br from-blue-500 to-blue-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-all duration-300">
+                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-110 transition-transform duration-300">
                   <Inbox className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="font-extrabold text-sm text-[var(--text-primary)] group-hover:text-[var(--primary-color)] transition-colors">รับหนังสือใหม่</div>
-                  <div className="text-xs text-[var(--text-secondary)] font-medium mt-1 leading-tight opacity-80">บันทึกและจำแนกเรื่องเข้าหน่วยงาน</div>
+                  <div className="font-extrabold text-sm text-[var(--text-primary)] group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">รับหนังสือใหม่</div>
+                  <div className="text-xs text-[var(--text-secondary)] font-medium mt-0.5 leading-tight opacity-80">บันทึกและจำแนกเรื่องเข้าหน่วยงาน</div>
                 </div>
               </button>
             )}
@@ -155,14 +155,14 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               <button
                 type="button"
                 onClick={() => onCreateDoc('outbox')}
-                className="flex items-center gap-4 p-4 rounded-2xl bg-white dark:bg-slate-800/50 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:border-emerald-500/50 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all duration-300 text-xs font-semibold text-left group shadow-sm hover:shadow-md hover:shadow-emerald-500/10 active:scale-[0.98] cursor-pointer"
+                className="flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-light)] hover:border-emerald-500/50 hover:shadow-lg transition-all duration-300 text-xs font-semibold text-left group shadow-sm active:scale-[0.98] cursor-pointer"
               >
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
-                  <Send className="w-5 h-5" />
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-110 transition-transform duration-300">
+                  <Send className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">ส่งหนังสือออก</div>
-                  <div className="text-[11px] text-[var(--text-secondary)] font-medium mt-1 leading-tight">จัดส่งเอกสารออก / ลงทะเบียนเวียน</div>
+                  <div className="font-extrabold text-sm text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">ส่งหนังสือออก</div>
+                  <div className="text-xs text-[var(--text-secondary)] font-medium mt-0.5 leading-tight opacity-80">จัดส่งเอกสารออก / ลงทะเบียนเวียน</div>
                 </div>
               </button>
             )}
@@ -171,14 +171,14 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
               <button
                 type="button"
                 onClick={() => onCreateDoc('admin')}
-                className="flex items-center gap-4 p-4 rounded-2xl bg-white dark:bg-slate-800/50 text-violet-600 dark:text-violet-400 border border-violet-500/20 hover:border-violet-500/50 hover:bg-violet-50 dark:hover:bg-violet-500/10 transition-all duration-300 text-xs font-semibold text-left group shadow-sm hover:shadow-md hover:shadow-violet-500/10 active:scale-[0.98] cursor-pointer"
+                className="flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-light)] hover:border-violet-500/50 hover:shadow-lg transition-all duration-300 text-xs font-semibold text-left group shadow-sm active:scale-[0.98] cursor-pointer"
               >
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/20 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
-                  <FileCheck className="w-5 h-5" />
+                <div className="w-12 h-12 rounded-2xl bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-110 transition-transform duration-300">
+                  <FileCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-[var(--text-primary)] group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">สร้างคำสั่ง / ประกาศ</div>
-                  <div className="text-[11px] text-[var(--text-secondary)] font-medium mt-1 leading-tight">ออกเลขรับรองและเอกสารธุรการ</div>
+                  <div className="font-extrabold text-sm text-[var(--text-primary)] group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">สร้างคำสั่ง / ประกาศ</div>
+                  <div className="text-xs text-[var(--text-secondary)] font-medium mt-0.5 leading-tight opacity-80">ออกเลขรับรองและเอกสารธุรการ</div>
                 </div>
               </button>
             )}

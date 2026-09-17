@@ -1,28 +1,28 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3 } from 'lucide-react';
-import WorkflowSlaView from './views/WorkflowSlaView';
 
 import { DocumentItem, DocType } from '../types';
 import Overview from './views/Overview';
-import DocumentList from './views/DocumentList';
-import Settings from './views/Settings';
-import LogsView from './views/LogsView';
 import DocumentFormModal from './DocumentModal';
 import DocumentDetailModal from './DocumentDetailModal';
-import AdminDocsView from './views/AdminDocsView';
-import FoldersView from './views/FoldersView';
-import DraftDocsView from './views/DraftDocsView';
-import SmartAiAssistantView from './views/SmartAiAssistantView';
-import NotificationsView from './views/NotificationsView';
-import DigitalSignatureView from './DigitalSignatureView';
-import RecycleBinView from './views/RecycleBinView';
-import QrGeneratorView from './views/QrGeneratorView';
-import UrgentIncidentReportView from './views/disaster/UrgentIncidentReportView';
 import ChangelogModal from './ChangelogModal';
 import VersionBadge from './VersionBadge';
 import { LoadingIndicator } from './LoadingIndicator';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 
+const DocumentList = lazyWithRetry(() => import('./views/DocumentList'));
+const Settings = lazyWithRetry(() => import('./views/Settings'));
+const LogsView = lazyWithRetry(() => import('./views/LogsView'));
+const AdminDocsView = lazyWithRetry(() => import('./views/AdminDocsView'));
+const FoldersView = lazyWithRetry(() => import('./views/FoldersView'));
+const DraftDocsView = lazyWithRetry(() => import('./views/DraftDocsView'));
+const SmartAiAssistantView = lazyWithRetry(() => import('./views/SmartAiAssistantView'));
+const NotificationsView = lazyWithRetry(() => import('./views/NotificationsView'));
+const DigitalSignatureView = lazyWithRetry(() => import('./DigitalSignatureView'));
+const RecycleBinView = lazyWithRetry(() => import('./views/RecycleBinView'));
+const QrGeneratorView = lazyWithRetry(() => import('./views/QrGeneratorView'));
+const UrgentIncidentReportView = lazyWithRetry(() => import('./views/disaster/UrgentIncidentReportView'));
+const WorkflowSlaView = lazyWithRetry(() => import('./views/WorkflowSlaView'));
 const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'));
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
@@ -43,6 +43,17 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   };
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set(['overview']));
+
+  useEffect(() => {
+    setVisitedTabs(prev => {
+      if (prev.has(activeTab)) return prev;
+      const next = new Set(prev);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
+
   const [disasterPrefillData, setDisasterPrefillData] = useState<any>(null);
   const [isChangelogModalOpen, setIsChangelogModalOpen] = useState(false);
 
@@ -812,8 +823,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     return viewComponent;
   };
 
-  const renderContent = () => {
-    switch(activeTab) {
+  const renderTabContent = (tabId: string) => {
+    switch(tabId) {
       case 'overview':
         return <Overview 
           documents={documents.filter(isDocForUserDepartment)} 
@@ -1425,12 +1436,20 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-8 scroll-smooth custom-scrollbar">
            <div className="max-w-[1600px] w-full mx-auto">
-             <div 
-               key={activeTab}
-               className="animate-fade-in"
-             >
-               {renderContent()}
-             </div>
+             <Suspense fallback={<div className="py-16 text-center"><LoadingIndicator message="กำลังโหลดโมดูลระบบ..." /></div>}>
+               {Array.from(visitedTabs).map(tabId => {
+                 const isSelected = activeTab === tabId;
+                 return (
+                   <div 
+                     key={tabId}
+                     className={isSelected ? "animate-fade-in block" : "hidden"}
+                     style={{ display: isSelected ? 'block' : 'none' }}
+                   >
+                     {renderTabContent(tabId)}
+                   </div>
+                 );
+               })}
+             </Suspense>
            </div>
         </div>
       </main>

@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { 
   FileText, Sparkles, Award, FileEdit, Volume2, Users, BarChart3, BookOpen
 } from 'lucide-react';
+import { lazyWithRetry } from '../../utils/lazyWithRetry';
+import { LoadingIndicator } from '../LoadingIndicator';
 
-import DraftLettersView from './drafts/DraftLettersView';
-import AiScanView from './drafts/AiScanView';
-import OrderTemplatesView from './drafts/OrderTemplatesView';
-import CustomOrderView from './drafts/CustomOrderView';
-import SpeechTemplatesView from './drafts/SpeechTemplatesView';
-import MeetingMinutesView from './drafts/MeetingMinutesView';
-import ProjectSummaryView from './drafts/ProjectSummaryView';
-import OfficialRuleCheckerTab from './drafts/OfficialRuleCheckerTab';
-import TorGeneratorView from './drafts/TorGeneratorView';
+const DraftLettersView = lazyWithRetry(() => import('./drafts/DraftLettersView'));
+const AiScanView = lazyWithRetry(() => import('./drafts/AiScanView'));
+const OrderTemplatesView = lazyWithRetry(() => import('./drafts/OrderTemplatesView'));
+const CustomOrderView = lazyWithRetry(() => import('./drafts/CustomOrderView'));
+const SpeechTemplatesView = lazyWithRetry(() => import('./drafts/SpeechTemplatesView'));
+const MeetingMinutesView = lazyWithRetry(() => import('./drafts/MeetingMinutesView'));
+const ProjectSummaryView = lazyWithRetry(() => import('./drafts/ProjectSummaryView'));
+const OfficialRuleCheckerTab = lazyWithRetry(() => import('./drafts/OfficialRuleCheckerTab'));
+const TorGeneratorView = lazyWithRetry(() => import('./drafts/TorGeneratorView'));
 
 interface Props {
   user: any;
@@ -62,9 +64,9 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
 
   return (
     <div className="space-y-6 lg:space-y-8 animate-fade-in pb-10">
-      {/* Navigation Sub-Pills */}
-      <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-3 shadow-sm relative z-10">
-        <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar p-1">
+      {/* Navigation Sub-Pills Menu Grid */}
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-3 shadow-sm relative z-10">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
           {filteredTabs.map(tab => {
             const Icon = tab.icon;
             const isActive = activeSubTab === tab.id;
@@ -72,17 +74,18 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
               <button
                 key={tab.id}
                 onClick={() => setActiveSubTab(tab.id)}
-                className={`flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-sm whitespace-nowrap transition-all duration-300 cursor-pointer ${
+                className={`relative flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border font-bold text-xs transition-all duration-300 cursor-pointer group ${
                   isActive
-                    ? 'bg-gradient-to-r from-[var(--primary-color)] to-[var(--primary-dark)] text-white shadow-md shadow-[var(--primary-color)]/20 hover:shadow-lg hover:shadow-[var(--primary-color)]/30 hover:-translate-y-0.5'
-                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] hover:shadow-sm'
+                    ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)] shadow-md shadow-[var(--primary-color)]/20'
+                    : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--primary-color)]/40 hover:bg-[var(--bg-elevated)] hover:shadow-sm'
                 }`}
+                title={tab.label}
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-[var(--text-muted)]'}`} />
-                <span>{tab.label}</span>
+                <Icon className={`w-5 h-5 shrink-0 transition-transform duration-300 group-hover:scale-110 ${isActive ? 'text-white' : 'text-[var(--text-muted)] group-hover:text-[var(--primary-color)]'}`} />
+                <span className="text-center truncate w-full text-[11px] leading-tight">{tab.label}</span>
                 {tab.badge && (
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider shadow-sm ${
-                    isActive ? 'bg-white/25 text-white' : 'bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20'
+                  <span className={`absolute top-1 right-1 px-1.5 py-0.2 rounded-full text-[9px] font-extrabold uppercase tracking-wider ${
+                    isActive ? 'bg-white/30 text-white' : 'bg-[var(--primary-color)]/10 text-[var(--primary-color)] border border-[var(--primary-color)]/20'
                   }`}>
                     {tab.badge}
                   </span>
@@ -95,67 +98,69 @@ export default function DraftDocsView({ user, initialSubTab = 'draft', onSendToS
 
       {/* Sub-Tab View Content */}
       <div className="min-h-[500px]">
-        {activeSubTab === 'draft' && (
-          <DraftLettersView
-            user={user}
-            onSendToSignQueue={onSendToSignQueue}
-            prefillData={aiPrefillData}
-          />
-        )}
+        <Suspense fallback={<div className="py-12"><LoadingIndicator message="กำลังโหลดแบบฟอร์ม..." /></div>}>
+          {activeSubTab === 'draft' && (
+            <DraftLettersView
+              user={user}
+              onSendToSignQueue={onSendToSignQueue}
+              prefillData={aiPrefillData}
+            />
+          )}
 
-        {activeSubTab === 'aiscan' && (
-          <AiScanView
-            user={user}
-            onSendToDraft={handleSendFromAiToDraft}
-            onSaveToRegistry={onSaveToRegistry}
-            onSendToDisasterReport={onSendToDisasterReport}
-          />
-        )}
+          {activeSubTab === 'aiscan' && (
+            <AiScanView
+              user={user}
+              onSendToDraft={handleSendFromAiToDraft}
+              onSaveToRegistry={onSaveToRegistry}
+              onSendToDisasterReport={onSendToDisasterReport}
+            />
+          )}
 
-        {activeSubTab === 'rulecheck' && (
-          <OfficialRuleCheckerTab
-            user={user}
-          />
-        )}
+          {activeSubTab === 'rulecheck' && (
+            <OfficialRuleCheckerTab
+              user={user}
+            />
+          )}
 
-        {activeSubTab === 'order' && (
-          <OrderTemplatesView
-            user={user}
-            onSendToSignQueue={onSendToSignQueue}
-          />
-        )}
+          {activeSubTab === 'order' && (
+            <OrderTemplatesView
+              user={user}
+              onSendToSignQueue={onSendToSignQueue}
+            />
+          )}
 
-        {activeSubTab === 'customorder' && (
-          <CustomOrderView
-            user={user}
-            onSendToSignQueue={onSendToSignQueue}
-          />
-        )}
+          {activeSubTab === 'customorder' && (
+            <CustomOrderView
+              user={user}
+              onSendToSignQueue={onSendToSignQueue}
+            />
+          )}
 
-        {activeSubTab === 'speech' && (
-          <SpeechTemplatesView
-            user={user}
-          />
-        )}
+          {activeSubTab === 'speech' && (
+            <SpeechTemplatesView
+              user={user}
+            />
+          )}
 
-        {activeSubTab === 'meeting' && (
-          <MeetingMinutesView
-            user={user}
-          />
-        )}
+          {activeSubTab === 'meeting' && (
+            <MeetingMinutesView
+              user={user}
+            />
+          )}
 
-        {activeSubTab === 'summary' && (
-          <ProjectSummaryView
-            user={user}
-          />
-        )}
-        
-        {activeSubTab === 'tor' && (
-          <TorGeneratorView
-            user={user}
-            onSendToSignQueue={onSendToSignQueue}
-          />
-        )}
+          {activeSubTab === 'summary' && (
+            <ProjectSummaryView
+              user={user}
+            />
+          )}
+          
+          {activeSubTab === 'tor' && (
+            <TorGeneratorView
+              user={user}
+              onSendToSignQueue={onSendToSignQueue}
+            />
+          )}
+        </Suspense>
       </div>
     </div>
   );

@@ -44,6 +44,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import A4PaperPreview from '../A4PaperPreview';
+import { getGarudaUrl } from './drafts/draftData';
 import { DocumentItem } from '../../types';
 
 interface Props {
@@ -639,33 +640,38 @@ export default function SmartAiAssistantView({
       {/* Category Tabs & Context Bar */}
       <div className="space-y-3 mb-4">
         
-        {/* Category Filters */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar text-xs font-medium">
-          <span className="text-[var(--text-muted)] text-[11px] font-bold px-1 shrink-0 flex items-center gap-1">
-            <Filter className="w-3 h-3" /> หมวดหมู่:
-          </span>
-          {[
-            { id: 'all', label: '🌟 ทั้งหมด' },
-            { id: 'disaster', label: '🚨 เหตุด่วนสาธารณภัย' },
-            { id: 'search', label: '🔍 ค้นหาเอกสาร' },
-            { id: 'summary', label: '📝 สรุปสาระสำคัญ' },
-            { id: 'draft', label: '✍️ ยกร่างหนังสือ' },
-            { id: 'pending', label: '⏱️ ติดตามงานค้าง' },
-            { id: 'rewrite', label: '✒️ ขัดเกลาภาษาราชการ' },
-            { id: 'regulation', label: '⚖️ ระเบียบสารบรรณ' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setSelectedCategory(tab.id as PromptCategory)}
-              className={`px-3 py-1.5 rounded-full shrink-0 transition-all cursor-pointer ${
-                selectedCategory === tab.id
-                  ? 'bg-indigo-600 text-white font-bold shadow-sm'
-                  : 'bg-[var(--bg-overlay)] hover:bg-[var(--border-light)] border border-[var(--border-light)] text-[var(--text-secondary)]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        {/* Category Filters Grid */}
+        <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-2.5 shadow-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+            {[
+              { id: 'all', label: 'ทั้งหมด', icon: Sparkles },
+              { id: 'disaster', label: 'เหตุด่วน', icon: ShieldAlert },
+              { id: 'search', label: 'ค้นหาเอกสาร', icon: Search },
+              { id: 'summary', label: 'สรุปสาระ', icon: FileText },
+              { id: 'draft', label: 'ยกร่างหนังสือ', icon: FileEdit },
+              { id: 'pending', label: 'งานค้าง SLA', icon: Clock },
+              { id: 'rewrite', label: 'ขัดเกลาภาษา', icon: Wand2 },
+              { id: 'regulation', label: 'ระเบียบ', icon: Scale }
+            ].map(tab => {
+              const Icon = tab.icon;
+              const isActive = selectedCategory === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setSelectedCategory(tab.id as PromptCategory)}
+                  className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all duration-300 cursor-pointer group ${
+                    isActive
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/20'
+                      : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-500/40 hover:bg-[var(--bg-elevated)] hover:shadow-xs'
+                  }`}
+                  title={tab.label}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 transition-transform duration-300 group-hover:scale-110 ${isActive ? 'text-white' : 'text-[var(--text-muted)] group-hover:text-indigo-600'}`} />
+                  <span className="truncate">{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Attached Document or Incident Banner */}
@@ -1319,11 +1325,9 @@ export default function SmartAiAssistantView({
                       {/* Official Formatted Thai Letter View */}
                       {(draftViewMode[msg.id] || 'official') === 'official' ? (
                         <div className="p-5 rounded-xl bg-white dark:bg-slate-900 border border-[var(--border-medium)] text-[var(--text-primary)] font-sans text-xs leading-relaxed space-y-3 shadow-inner">
-                          {/* Official Garuda Emblem Placeholder */}
+                          {/* Official Garuda Emblem */}
                           <div className="text-center">
-                            <div className="inline-block px-3 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 font-bold text-xs tracking-widest mb-1">
-                              [ ตราครุฑ ]
-                            </div>
+                            <img src={getGarudaUrl()} className="w-12 h-12 object-contain mx-auto mb-1" alt="ตราครุฑ" />
                             <div className="font-bold text-sm text-[var(--text-primary)]">
                               {msg.payload.draftLetter.departmentName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง'}
                             </div>

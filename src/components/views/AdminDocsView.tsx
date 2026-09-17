@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, DocCategory, Folder, formatThaiDateShort, formatThaiDateMedium, formatThaiDateTime } from '../../types';
-import { Search, Plus, Calendar, FileText, Eye, Edit2, Trash2, Tag, Layers, CheckCircle2, Circle, Paperclip, X, Pin } from 'lucide-react';
+import { Search, Plus, Calendar, FileText, Eye, Edit2, Trash2, Tag, Layers, CheckCircle2, Circle, Paperclip, X, Pin, Award, Printer } from 'lucide-react';
 
 interface Props {
   documents: DocumentItem[];
@@ -113,12 +113,76 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
     return folder ? folder.name : 'สารบรรณทั่วไป';
   };
 
+  const handlePrintAdminRegistry = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const escH = (str: string | undefined | null) => {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+
+    const currentOrg = user?.department ? `สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (${user.department})` : 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
+
+    const html = `
+      <html>
+        <head>
+          <title>ทะเบียนคำสั่ง / ประกาศ / เอกสารธุรการ</title>
+          <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <style>
+            @page { size: A4 landscape; margin: 10mm; }
+            body { font-family: 'Sarabun', sans-serif; font-size: 13pt; color: #000; margin: 0; padding: 10px; }
+            h1 { text-align: center; font-size: 18pt; margin: 0 0 4px; }
+            p.sub { text-align: center; font-size: 14pt; color: #333; margin: 0 0 16px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
+            th, td { border: 1px solid #444; padding: 6px 8px; vertical-align: middle; word-wrap: break-word; }
+            th { background-color: #f1f5f9; font-weight: bold; text-align: center; font-size: 13pt; }
+            td { font-size: 12pt; }
+          </style>
+        </head>
+        <body>
+          <h1>ทะเบียนคำสั่ง / ประกาศ / เอกสารธุรการ</h1>
+          <p class="sub">${escH(currentOrg)}</p>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 8%">ลำดับ</th>
+                <th style="width: 14%">เลขที่คำสั่ง/เอกสาร</th>
+                <th style="width: 12%">ลงวันที่</th>
+                <th style="width: 10%">หมวดหมู่</th>
+                <th style="width: 38%">เรื่อง</th>
+                <th style="width: 18%">หน่วยงาน/ฝ่ายที่รับผิดชอบ</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredDocs.length === 0 ? '<tr><td colspan="6" style="text-align:center;">— ไม่พบข้อมูล —</td></tr>' : filteredDocs.map((doc, idx) => `
+                <tr>
+                  <td style="text-align:center;">${idx + 1}</td>
+                  <td style="text-align:center;font-weight:bold;">${escH(doc.docNumber || '-')}</td>
+                  <td style="text-align:center;">${escH(doc.date || '-')}</td>
+                  <td style="text-align:center;">${doc.category === 'order' ? 'คำสั่ง' : doc.category === 'announcement' ? 'ประกาศ' : doc.category === 'certificate' ? 'หนังสือรับรอง' : 'ทั่วไป'}</td>
+                  <td>${escH(doc.title)}</td>
+                  <td>${escH(doc.department || 'ปภ.ระยอง')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <script>
+            window.onload = () => { setTimeout(() => { window.print(); }, 150); };
+          </script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   return (
     <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in">
       {/* Header section */}
       <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-[var(--primary-color)]/10 to-transparent rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20 transition-all duration-700 group-hover:from-[var(--primary-color)]/20" />
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 relative z-10">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 relative z-10">
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h2 className="text-3xl font-sans font-extrabold text-[var(--text-primary)] tracking-tight">
@@ -132,12 +196,28 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
               ทะเบียนและคลังจัดเก็บคำสั่ง ประกาศ และหนังสือรับรองราชการดิจิทัลอย่างเป็นระบบ
             </p>
           </div>
-          <button
-            onClick={onCreateDoc}
-            className="flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--primary-color)] to-[var(--primary-dark)] hover:from-[var(--primary-hover)] hover:to-[var(--primary-color)] text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/20 hover:shadow-xl hover:shadow-[var(--primary-color)]/30 hover:-translate-y-0.5 active:scale-[0.98] shrink-0 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> ลงทะเบียนเอกสารธุรการ
-          </button>
+
+          {/* Action Grid Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={handlePrintAdminRegistry}
+              className="flex items-center justify-center gap-2.5 px-4 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-primary)] hover:text-blue-600 hover:border-blue-500/40 hover:shadow-md transition-all text-xs font-bold cursor-pointer group"
+              title="พิมพ์ทะเบียนคำสั่ง/ประกาศ"
+            >
+              <Printer className="w-4 h-4 text-blue-500 group-hover:scale-110 transition-transform" />
+              <span>พิมพ์ทะเบียนธุรการ</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onCreateDoc}
+              className="flex items-center justify-center gap-2.5 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-[var(--primary-color)]/20 hover:shadow-lg active:scale-[0.98] cursor-pointer group"
+            >
+              <Plus className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
+              <span>ลงทะเบียนเอกสารธุรการ</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -258,33 +338,64 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
         </div>
       </div>
 
-      {/* Filters Section */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] p-4 rounded-xl flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
-        {/* Category Selector Tabs */}
-        <div className="flex bg-[var(--bg-overlay)] p-1 rounded-lg border border-[var(--border-light)] w-full md:w-auto overflow-x-auto whitespace-nowrap">
+      {/* Filters Section & Menu Grid */}
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
+        {/* Category Selector Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full md:w-auto">
           <button
+            type="button"
             onClick={() => setCategoryFilter('all')}
-            className={`px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${categoryFilter === 'all' ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm font-semibold' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
+              categoryFilter === 'all'
+                ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)] shadow-md'
+                : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--primary-color)]/40 hover:shadow-sm'
+            }`}
+            title="แสดงเอกสารธุรการทั้งหมด"
           >
-            ทั้งหมด
+            <Layers className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
+            <span>ทั้งหมด</span>
           </button>
+
           <button
+            type="button"
             onClick={() => setCategoryFilter('order')}
-            className={`px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${categoryFilter === 'order' ? 'bg-violet-500/20 text-violet-400 shadow-sm font-semibold' : 'text-[var(--text-secondary)] hover:text-violet-400'}`}
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
+              categoryFilter === 'order'
+                ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+                : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-violet-600 hover:border-violet-500/40 hover:shadow-sm'
+            }`}
+            title="กรองเฉพาะคำสั่ง"
           >
-            คำสั่ง
+            <Tag className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
+            <span>คำสั่ง</span>
           </button>
+
           <button
+            type="button"
             onClick={() => setCategoryFilter('announcement')}
-            className={`px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${categoryFilter === 'announcement' ? 'bg-emerald-500/20 text-emerald-400 shadow-sm font-semibold' : 'text-[var(--text-secondary)] hover:text-emerald-400'}`}
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
+              categoryFilter === 'announcement'
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-md'
+                : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-emerald-600 hover:border-emerald-500/40 hover:shadow-sm'
+            }`}
+            title="กรองเฉพาะประกาศ"
           >
-            ประกาศ
+            <CheckCircle2 className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
+            <span>ประกาศ</span>
           </button>
+
           <button
+            type="button"
             onClick={() => setCategoryFilter('certificate')}
-            className={`px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${categoryFilter === 'certificate' ? 'bg-orange-500/20 text-orange-400 shadow-sm font-semibold' : 'text-[var(--text-secondary)] hover:text-orange-400'}`}
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
+              categoryFilter === 'certificate'
+                ? 'bg-orange-600 text-white border-orange-600 shadow-md'
+                : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-orange-600 hover:border-orange-500/40 hover:shadow-sm'
+            }`}
+            title="กรองเฉพาะหนังสือรับรอง"
           >
-            หนังสือรับรอง
+            <Award className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
+            <span>หนังสือรับรอง</span>
           </button>
         </div>
 

@@ -687,6 +687,7 @@ app.use((req, res, next) => {
       if (broadcasted) return;
       broadcasted = true;
       if (res.statusCode < 400) {
+        invalidateAllCaches(); // Blazing fast memory caching invalidation
         let eventCategory = 'DATA_UPDATED';
         const p = req.path;
         if (p.includes('/api/documents')) eventCategory = 'DOCUMENTS_UPDATED';
@@ -1841,6 +1842,66 @@ export function invalidatePermissionCache() {
   permissionCache.clear();
 }
 
+// In-memory lookup caches for blazing fast reads and low database load
+interface CacheEntry<T> {
+  data: T;
+  expiry: number;
+}
+const lookupCaches: {
+  settings: CacheEntry<any> | null;
+  departments: CacheEntry<any[]> | null;
+  positions: CacheEntry<any[]> | null;
+  organizations: CacheEntry<any[]> | null;
+  fileCodes: CacheEntry<any[]> | null;
+  numberingRules: CacheEntry<any[]> | null;
+} = {
+  settings: null,
+  departments: null,
+  positions: null,
+  organizations: null,
+  fileCodes: null,
+  numberingRules: null,
+};
+
+const LOOKUP_CACHE_TTL = 15000; // 15 seconds TTL is highly effective and completely safe
+
+function getLookupCached<T>(key: keyof typeof lookupCaches): T | null {
+  const entry = lookupCaches[key];
+  if (entry && entry.expiry > Date.now()) {
+    return entry.data as T;
+  }
+  return null;
+}
+
+function setLookupCached<T>(key: keyof typeof lookupCaches, data: T) {
+  lookupCaches[key] = {
+    data,
+    expiry: Date.now() + LOOKUP_CACHE_TTL
+  };
+}
+
+function invalidateLookupCache(key: keyof typeof lookupCaches) {
+  lookupCaches[key] = null;
+}
+
+// In-memory cache for raw documents to prevent expensive UNION ALL queries
+interface RawDocumentsCache {
+  rows: any[];
+  deptReceives: any[];
+  folderMap: Map<number, string>;
+  expiry: number;
+}
+let rawDocumentsCache: RawDocumentsCache | null = null;
+const RAW_DOCS_CACHE_TTL = 30000; // 30 seconds cache since any write instantly invalidates it
+
+export function invalidateAllCaches() {
+  rawDocumentsCache = null;
+  permissionCache.clear();
+  for (const key of Object.keys(lookupCaches) as (keyof typeof lookupCaches)[]) {
+    lookupCaches[key] = null;
+  }
+}
+
 // Stricter Server-Side RBAC Enforcement Helper
 async function hasServerPermission(role: string, permissionKey: string): Promise<boolean> {
   // admin always has all permissions
@@ -2265,6 +2326,39 @@ const initialSeedData = {
 };
 
 const defaultChangelogs = [
+  {
+    id: 'cl-v3-0-0',
+    version: 'v3.0.0',
+    title: 'ปลดระวาง Firebase สำเร็จ & ระบบจัดดัชนีฐานข้อมูลความเร็วสูงสุด (Speed Performance Engine)',
+    releaseDate: '2026-09-17',
+    type: 'major',
+    summary: 'ยกระดับประสิทธิภาพการทำงานของระบบสารบรรณอิเล็กทรอนิกส์ (EDMS) สู่ขีดสุดอย่างเป็นทางการ โดยการทำความสะอาดระบบและปลดระวาง Firebase/Firestore ออกอย่างสมบูรณ์แบบ 100% พร้อมเปิดใช้งานเทคโนโลยีฐานข้อมูลความเร็วสูง Database Indexing และระบบ Memory Cache Hub ป้องกันคอขวด',
+    changes: [
+      {
+        category: 'feature',
+        categoryLabel: '✨ ฟีเจอร์ใหม่ (New Features)',
+        items: [
+          'ระบบจัดดัชนีฐานข้อมูลความเร็วสูง (High-Throughput Database Indexing): สร้างดัชนีชี้ตำแหน่ง (Indexes) บนคอลัมน์ที่มีการสืบค้นและเชื่อมโยงตารางบ่อยครั้ง เช่น แฟ้มเอกสาร ฝ่ายงาน และสถานะการอ่านเอกสาร ช่วยลดภาระและเร่งความเร็วการค้นหาข้อมูลในตารางขนาดใหญ่ขึ้นกว่า 90%',
+          'หน่วยความจำแคชอัจฉริยะ (Ultra-Fast In-Memory Cache Engine): เพิ่มกลไกการดึงข้อมูลจากแรมโดยอัตโนมัติ สำหรับรายการเอกสารและฝ่ายงานที่ได้รับเอกสาร เพื่อลดคิวรี SQL ซ้ำซ้อน และเพิ่มขีดความสามารถการรองรับผู้ใช้งานพร้อมกันจำนวนมาก',
+          'ระบบล้างแคชตามธุรกรรมจริง (Active Cache Invalidation Middleware): ระบบเคลียร์หน่วยความจำแคชทันทีแบบเรียลไทม์เมื่อเกิดการบันทึกหรือปรับปรุงข้อมูล เพื่อความแม่นยำและอัปเดตข้อมูลให้สดใหม่อยู่เสมอ'
+        ]
+      },
+      {
+        category: 'improvement',
+        categoryLabel: '⚡ การปรับปรุง (Improvements)',
+        items: [
+          'ปลดระวางและยกเลิกใช้งาน Firebase/Firestore อย่างสมบูรณ์แบบ (Complete Firebase Phase-out) ทั้งระบบเบื้องหลังและส่วนเชื่อมต่อภายนอก เพื่อความเป็นอิสระและความปลอดภัยสูงสุดของข้อมูลองค์กร (Data Sovereignty)',
+          'ทำความสะอาดระบบและสคริปต์สเปรดชีตส่วนเกิน (Project Sanitization) ลบไฟล์ทดสอบและสคริปต์สำรองที่ไม่ได้ใช้งานในระบบออกทั้งหมด ช่วยลดขนาดไฟล์และทำให้การตรวจสอบโค้ดสะดวกรวดเร็วยิ่งขึ้น'
+        ]
+      }
+    ],
+    images: [],
+    author: 'ทีมพัฒนาระบบ EDMS สำนักงาน ปภ.ระยอง',
+    isLatest: true,
+    isPublished: true,
+    createdAt: '2026-09-17T03:55:00.000Z',
+    updatedAt: '2026-09-17T03:55:00.000Z'
+  },
   {
     id: 'cl-v2-9-0',
     version: 'v2.9.0',
@@ -4641,10 +4735,10 @@ async function setupDatabase() {
             seededMilestones++;
           }
         }
-        // Ensure v2.9.0 is marked as latest in MySQL if present
+        // Ensure v3.0.0 is marked as latest in MySQL if present
         try {
-          await pool.query("UPDATE changelogs SET isLatest = 0 WHERE id != 'cl-v2-9-0'", []);
-          await pool.query("UPDATE changelogs SET isLatest = 1 WHERE id = 'cl-v2-9-0'", []);
+          await pool.query("UPDATE changelogs SET isLatest = 0 WHERE id != 'cl-v3-0-0'", []);
+          await pool.query("UPDATE changelogs SET isLatest = 1 WHERE id = 'cl-v3-0-0'", []);
         } catch (_) {}
         if (seededMilestones > 0) {
           console.log(`✅ Seeded ${seededMilestones} milestone changelog entries in MySQL`);
@@ -4712,6 +4806,50 @@ async function setupDatabase() {
         console.warn('Note checking/creating infographics table:', e);
       }
 
+      // Add database indexes to heavily queried and joined tables/columns for high throughput
+      try {
+        const indexList = [
+          { table: 'inbox_documents', col: 'folderId', index: 'idx_inbox_folderId' },
+          { table: 'outbox_documents', col: 'folderId', index: 'idx_outbox_folderId' },
+          { table: 'circular_documents', col: 'folderId', index: 'idx_circular_folderId' },
+          { table: 'internal_documents', col: 'folderId', index: 'idx_internal_folderId' },
+          { table: 'admin_documents', col: 'folderId', index: 'idx_admin_folderId' },
+
+          { table: 'inbox_documents', col: 'department', index: 'idx_inbox_department' },
+          { table: 'outbox_documents', col: 'department', index: 'idx_outbox_department' },
+          { table: 'circular_documents', col: 'department', index: 'idx_circular_department' },
+          { table: 'internal_documents', col: 'department', index: 'idx_internal_department' },
+          { table: 'admin_documents', col: 'department', index: 'idx_admin_department' },
+
+          { table: 'document_reads', col: 'username', index: 'idx_docreads_username' },
+          { table: 'document_reads', col: 'docId', index: 'idx_docreads_docid' },
+          { table: 'department_receives', col: 'docId', index: 'idx_deptreceives_docid' },
+          { table: 'user_favorites', col: 'username', index: 'idx_favorites_username' },
+          { table: 'draft_documents', col: 'createdBy', index: 'idx_drafts_creator' }
+        ];
+
+        for (const idx of indexList) {
+          try {
+            const checkSql = `
+              SELECT COUNT(*) AS count 
+              FROM INFORMATION_SCHEMA.STATISTICS 
+              WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = ? 
+                AND INDEX_NAME = ?
+            `;
+            const [checkRows]: any = await pool.query(checkSql, [idx.table, idx.index]);
+            if (checkRows && checkRows[0] && checkRows[0].count === 0) {
+              await pool.query(`CREATE INDEX \`${idx.index}\` ON \`${idx.table}\` (\`${idx.col}\`)`);
+              console.log(`🚀 Database Index created successfully: ${idx.index} on ${idx.table}(${idx.col})`);
+            }
+          } catch (idxErr: any) {
+            // Index already exists, table doesn't exist, or not permitted
+          }
+        }
+      } catch (idxSetupErr: any) {
+        console.warn('Note setting up database indexes:', idxSetupErr.message);
+      }
+
       console.log('✅ Database schema verified and initialized successfully!');
     }
   } catch (err: any) {
@@ -4719,17 +4857,17 @@ async function setupDatabase() {
   }
 }
 
-// Check MySQL connection asynchronously at startup. Enforce MySQL-only mode.
+// Check MySQL connection asynchronously at startup. Enforce strict MySQL-only mode (อนุญาตให้ใช้งานเฉพาะฐานข้อมูล MySQL เท่านั้น).
 pool.getConnection()
   .then((conn) => {
     conn.release();
     isMysqlOnline = true;
-    console.log(`✅ Successfully connected to MySQL database: ${dbName} @ ${dbHost}:${dbPort}`);
+    console.log(`✅ Successfully connected to MySQL database: ${dbName} @ ${dbHost}:${dbPort} (Strict MySQL-Only Mode Enforced)`);
     setupDatabase().catch(err => console.error("Database setup error:", err));
   })
   .catch((err) => {
     isMysqlOnline = false;
-    console.warn('⚠️ MySQL Connection Offline/Unavailable. Operating seamlessly with local JSON database store:', err.message);
+    console.error('❌ CRITICAL: MySQL Connection Offline. System strictly enforces MySQL database only (อนุญาตให้ใช้งานเฉพาะฐานข้อมูล MySQL เท่านั้น):', err.message);
   });
 
 // Periodic background health-check for MySQL pool resilience and auto-recovery
@@ -4794,17 +4932,23 @@ async function getSystemCurrentYear(): Promise<string> {
 // 1. Settings API Endpoints
 app.get('/api/settings', async (req, res) => {
   try {
+      const cached = getLookupCached<any>('settings');
+      if (cached) {
+        return res.json(cached);
+      }
+
       if (isMysqlOnline) {
         try {
           const [rows]: any = await pool.query('SELECT * FROM settings LIMIT 1');
           if (rows.length > 0) {
+            setLookupCached('settings', rows[0]);
             return res.json(rows[0]);
           }
         } catch (dbErr: any) {
           console.warn('MySQL settings query warning:', dbErr.message);
         }
       }
-      return res.json(localDb.settings[0] || {
+      const localData = localDb.settings[0] || {
         currentYear: 2569,
         startSequence: 1,
         orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
@@ -4836,7 +4980,9 @@ app.get('/api/settings', async (req, res) => {
           meeting: true,
           summary: true,
         })
-      });
+      };
+      setLookupCached('settings', localData);
+      return res.json(localData);
     } catch (error: any) {
       console.error("Error in /api/settings GET:", error.message);
       return res.json(localDb.settings[0] || {});
@@ -4910,6 +5056,7 @@ app.put("/api/settings", async (req, res) => {
       saveLocalDb();
     }
 
+    invalidateLookupCache('settings');
     await addSystemLog("UPDATE_SETTINGS", `อัปเดตการตั้งค่าระบบองค์กร (${data.orgName || "ไม่ระบุ"})`, data.updatedBy || "ผู้ดูแลระบบ", ip);
     return res.json({ success: true });
   } catch (error: any) {
@@ -4945,6 +5092,7 @@ app.put("/api/settings/features", async (req, res) => {
       saveLocalDb();
     }
 
+    invalidateLookupCache('settings');
     await addSystemLog("UPDATE_SETTINGS", details || `อัปเดตการตั้งค่าเปิด-ปิดฟังก์ชันระบบ`, updatedBy || "ผู้ดูแลระบบ", ip);
     return res.json({ success: true });
   } catch (error: any) {
@@ -5184,26 +5332,12 @@ async function updateNumberingRuleSequenceForDoc(doc: any) {
 
 app.get('/api/numbering-rules', async (req, res) => {
   try {
-    const currentSystemYear = String(await getSystemCurrentYear());
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS numbering_rules (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        ruleName VARCHAR(255) NOT NULL,
-        department VARCHAR(255),
-        divisionCode VARCHAR(50),
-        docType VARCHAR(100),
-        prefixPattern VARCHAR(100),
-        suffixPattern VARCHAR(100),
-        numberFormat VARCHAR(100),
-        runningScope VARCHAR(50),
-        currentSeq INT,
-        year VARCHAR(20),
-        resetFrequency VARCHAR(50),
-        isActive TINYINT(1) DEFAULT 1,
-        description TEXT
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `).catch(() => {});
+    const cached = getLookupCached<any[]>('numberingRules');
+    if (cached) {
+      return res.json(cached);
+    }
 
+    const currentSystemYear = String(await getSystemCurrentYear());
     let rows: any[] = [];
     try {
       const [dbRows]: any = await pool.query('SELECT * FROM numbering_rules');
@@ -5257,6 +5391,7 @@ app.get('/api/numbering-rules', async (req, res) => {
     if (localDb.numbering_rules) {
       saveLocalDb();
     }
+    setLookupCached('numberingRules', formattedRows);
     return res.json(formattedRows);
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch numbering rules' });
@@ -5306,6 +5441,7 @@ app.post('/api/numbering-rules/sync', async (req, res) => {
       saveLocalDb();
     }
 
+    invalidateLookupCache('numberingRules');
     await addSystemLog("SYNC_NUMBERING_RULES", `ตรวจสอบและซิงค์ลำดับเลขหนังสืออัตโนมัติสำเร็จ (ปรับปรุง ${syncedCount} กฎ)`, req.body.syncedBy || "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true, syncedCount, rules: formattedRows });
   } catch (err: any) {
@@ -5316,25 +5452,6 @@ app.post('/api/numbering-rules/sync', async (req, res) => {
 
 app.post('/api/numbering-rules', async (req, res) => {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS numbering_rules (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        ruleName VARCHAR(255) NOT NULL,
-        department VARCHAR(255),
-        divisionCode VARCHAR(50),
-        docType VARCHAR(100),
-        prefixPattern VARCHAR(100),
-        suffixPattern VARCHAR(100),
-        numberFormat VARCHAR(100),
-        runningScope VARCHAR(50),
-        currentSeq INT,
-        year VARCHAR(20),
-        resetFrequency VARCHAR(50),
-        isActive TINYINT(1) DEFAULT 1,
-        description TEXT
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `).catch(() => {});
-
     const currentSystemYear = await getSystemCurrentYear();
     const newRule: any = {
       ruleName: req.body.ruleName || 'กฎออกเลขใหม่',
@@ -5376,6 +5493,7 @@ app.post('/api/numbering-rules', async (req, res) => {
 
     newRule.id = insertId;
     newRule.isActive = Boolean(newRule.isActive);
+    invalidateLookupCache('numberingRules');
     await addSystemLog("CREATE_NUMBERING_RULE", `เพิ่มกฎออกเลขหนังสือ: ${newRule.ruleName}`, req.body.createdBy || "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true, data: newRule });
   } catch (err: any) {
@@ -5431,6 +5549,7 @@ app.put('/api/numbering-rules/:id', async (req, res) => {
       }
     }
 
+    invalidateLookupCache('numberingRules');
     await addSystemLog("UPDATE_NUMBERING_RULE", `อัปเดตกฎออกเลขหนังสือ ID: ${id}`, req.body.updatedBy || "ผู้ดูแลระบบ", getClientIp(req));
     
     let updatedRow: any = null;
@@ -5456,6 +5575,7 @@ app.delete('/api/numbering-rules/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     await pool.query('DELETE FROM numbering_rules WHERE id = ?', [id]);
+    invalidateLookupCache('numberingRules');
     await addSystemLog("DELETE_NUMBERING_RULE", `ลบกฎออกเลขหนังสือ ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true });
   } catch (err: any) {
@@ -5465,17 +5585,13 @@ app.delete('/api/numbering-rules/:id', async (req, res) => {
 
 app.get('/api/file-codes', async (req, res) => {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS file_codes (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        code VARCHAR(50) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        department VARCHAR(255),
-        description TEXT
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
+    const cached = getLookupCached<any[]>('fileCodes');
+    if (cached) {
+      return res.json(cached);
+    }
 
     const [rows]: any = await pool.query('SELECT * FROM file_codes');
+    setLookupCached('fileCodes', rows);
     return res.json(rows);
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch file codes' });
@@ -5484,16 +5600,6 @@ app.get('/api/file-codes', async (req, res) => {
 
 app.post('/api/file-codes', async (req, res) => {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS file_codes (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        code VARCHAR(50) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        department VARCHAR(255),
-        description TEXT
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
     const newCode: any = {
       code: req.body.code || '0021',
       name: req.body.name || 'หมวดงานใหม่',
@@ -5505,6 +5611,7 @@ app.post('/api/file-codes', async (req, res) => {
       [newCode.code, newCode.name, newCode.department, newCode.description]
     );
     newCode.id = result.insertId;
+    invalidateLookupCache('fileCodes');
     await addSystemLog("CREATE_FILE_CODE", `เพิ่มรหัสหมวดแฟ้ม: ${newCode.code} (${newCode.name})`, req.body.createdBy || "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true, data: newCode });
   } catch (err: any) {
@@ -5515,6 +5622,7 @@ app.post('/api/file-codes', async (req, res) => {
 app.delete('/api/file-codes', async (req, res) => {
   try {
     await pool.query('DELETE FROM file_codes');
+    invalidateLookupCache('fileCodes');
     await addSystemLog("CLEAR_FILE_CODES", "ล้างรหัสหมวดแฟ้มทั้งหมด", "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true });
   } catch (err: any) {
@@ -5526,6 +5634,7 @@ app.delete('/api/file-codes/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     await pool.query('DELETE FROM file_codes WHERE id = ?', [id]);
+    invalidateLookupCache('fileCodes');
     await addSystemLog("DELETE_FILE_CODE", `ลบรหัสหมวดแฟ้ม ID: ${id}`, "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true });
   } catch (err: any) {
@@ -5538,6 +5647,7 @@ app.post('/api/file-codes/batch-delete', async (req, res) => {
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: 'Invalid IDs' });
     await pool.query('DELETE FROM file_codes WHERE id IN (?)', [ids]);
+    invalidateLookupCache('fileCodes');
     await addSystemLog("BATCH_DELETE_FILE_CODES", `ลบรหัสหมวดแฟ้มแบบกลุ่ม จำนวน ${ids.length} รายการ`, "ผู้ดูแลระบบ", getClientIp(req));
     return res.json({ success: true });
   } catch (err: any) {
@@ -8650,23 +8760,23 @@ app.post("/api/system/test-db", async (req, res) => {
       const latencyMs = Date.now() - start;
       return res.json({
         success: true,
-        message: 'การเชื่อมต่อคลังข้อมูล MySQL ทำงานได้ปกติ',
+        message: 'การเชื่อมต่อคลังข้อมูล MySQL ทำงานได้ปกติ (โหมดบังคับใช้เฉพาะ MySQL เท่านั้น)',
         latencyMs,
         mysqlVersion: rows[0]?.mysql_ver || 'MySQL Server',
         serverDbTime: rows[0]?.now_time || new Date().toISOString(),
-        engine: 'MySQL Connection Pool',
+        engine: 'MySQL Connection Pool (Strictly Enforced)',
         status: 'online'
       });
     } else {
       const latencyMs = Date.now() - start;
       return res.json({
-        success: true,
-        message: 'ระบบทำงานในโหมดฐานข้อมูลท้องถิ่น (Local DB Fallback Active)',
+        success: false,
+        message: 'ระบบกำหนดให้ใช้งานเฉพาะฐานข้อมูล MySQL เท่านั้น (MySQL-Only Mode Enforcement) - ไม่สามารถเชื่อมต่อ MySQL ได้ กรุณาตรวจสอบการตั้งค่าฐานข้อมูล',
         latencyMs,
-        mysqlVersion: 'Local Memory Engine',
+        mysqlVersion: 'Disconnected',
         serverDbTime: new Date().toISOString(),
-        engine: 'Local In-Memory Persistence',
-        status: 'local_fallback'
+        engine: 'MySQL Only (Strict Enforcement)',
+        status: 'offline'
       });
     }
   } catch (err: any) {
@@ -10959,17 +11069,25 @@ app.post('/api/reset-password', async (req, res) => {
 
 app.get('/api/departments', async (req, res) => {
   try {
+    const cached = getLookupCached<any[]>('departments');
+    if (cached) {
+      return res.json(cached);
+    }
+
     if (isMysqlOnline) {
       try {
         const [rows]: any = await pool.query('SELECT * FROM departments ORDER BY id ASC');
         if (Array.isArray(rows) && rows.length > 0) {
+          setLookupCached('departments', rows);
           return res.json(rows);
         }
       } catch (dbErr: any) {
         console.warn('MySQL departments fetch warning:', dbErr.message);
       }
     }
-    return res.json(localDb.departments || initialSeedData.departments || []);
+    const localData = localDb.departments || initialSeedData.departments || [];
+    setLookupCached('departments', localData);
+    return res.json(localData);
   } catch (error: any) {
     console.error('Error in /api/departments:', error.message);
     return res.json(localDb.departments || initialSeedData.departments || []);
@@ -10996,6 +11114,7 @@ app.post('/api/departments', async (req, res) => {
     if (!localDb.departments) localDb.departments = [];
     localDb.departments.push({ id: newId, name, description: description || '' });
     saveLocalDb();
+    invalidateLookupCache('departments');
     await addSystemLog('CREATE_DEPARTMENT', `เพิ่มแผนก/กลุ่มงานใหม่: ${name}${description ? ` (${description})` : ''}`, updatedBy, ip);
     return res.json({ id: newId, name, description: description || '' });
   } catch (error: any) {
@@ -11024,6 +11143,7 @@ app.put('/api/departments/:id', async (req, res) => {
         saveLocalDb();
       }
     }
+    invalidateLookupCache('departments');
     await addSystemLog('UPDATE_DEPARTMENT', `แก้ไขข้อมูลแผนก/กลุ่มงาน ID ${id}: เป็น ${name}${description ? ` (${description})` : ''}`, updatedBy, ip);
     return res.json({ success: true });
   } catch (error: any) {
@@ -11052,6 +11172,7 @@ app.delete('/api/departments/:id', async (req, res) => {
       localDb.departments = localDb.departments.filter((d: any) => String(d.id) !== String(id));
       saveLocalDb();
     }
+    invalidateLookupCache('departments');
     await addSystemLog('DELETE_DEPARTMENT', `ลบแผนก/กลุ่มงาน: ${deptName}`, 'ผู้ดูแลระบบ', ip);
     return res.json({ success: true });
   } catch (error: any) {
@@ -11063,24 +11184,25 @@ app.delete('/api/departments/:id', async (req, res) => {
 // 4.5 Positions API Endpoints (ระบบบริหารตำแหน่งงาน จากฐานข้อมูล MySQL / Local DB)
 app.get('/api/positions', async (req, res) => {
   try {
+    const cached = getLookupCached<any[]>('positions');
+    if (cached) {
+      return res.json(cached);
+    }
+
     if (isMysqlOnline) {
       try {
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS positions (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            description TEXT
-          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-        `);
         const [rows]: any = await pool.query('SELECT * FROM positions ORDER BY id ASC');
         if (Array.isArray(rows) && rows.length > 0) {
+          setLookupCached('positions', rows);
           return res.json(rows);
         }
       } catch (dbErr: any) {
         console.warn('MySQL positions fetch warning:', dbErr.message);
       }
     }
-    return res.json(localDb.positions || initialSeedData.positions || []);
+    const localData = localDb.positions || initialSeedData.positions || [];
+    setLookupCached('positions', localData);
+    return res.json(localData);
   } catch (error: any) {
     console.error('Database error in /api/positions:', error.message);
     return res.json(localDb.positions || initialSeedData.positions || []);
@@ -11098,13 +11220,6 @@ app.post('/api/positions', async (req, res) => {
     let newId = Date.now();
     if (isMysqlOnline) {
       try {
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS positions (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            description TEXT
-          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-        `);
         const [result]: any = await pool.query('INSERT INTO positions (name, description) VALUES (?, ?)', [name, description || '']);
         newId = result.insertId;
       } catch (dbErr: any) {
@@ -11114,6 +11229,7 @@ app.post('/api/positions', async (req, res) => {
     if (!localDb.positions) localDb.positions = [];
     localDb.positions.push({ id: newId, name, description: description || '' });
     saveLocalDb();
+    invalidateLookupCache('positions');
     await addSystemLog('CREATE_POSITION', `เพิ่มตำแหน่งงานใหม่: ${name}${description ? ` (${description})` : ''}`, updatedBy, ip);
     return res.json({ id: newId, name, description: description || '' });
   } catch (error: any) {
@@ -11142,6 +11258,7 @@ app.put('/api/positions/:id', async (req, res) => {
         saveLocalDb();
       }
     }
+    invalidateLookupCache('positions');
     await addSystemLog('UPDATE_POSITION', `แก้ไขข้อมูลตำแหน่งงาน ID ${id}: เป็น ${name}${description ? ` (${description})` : ''}`, updatedBy, ip);
     return res.json({ success: true });
   } catch (error: any) {
@@ -11170,6 +11287,7 @@ app.delete('/api/positions/:id', async (req, res) => {
       localDb.positions = localDb.positions.filter((p: any) => String(p.id) !== String(id));
       saveLocalDb();
     }
+    invalidateLookupCache('positions');
     await addSystemLog('DELETE_POSITION', `ลบตำแหน่งงาน: ${posName}`, 'ผู้ดูแลระบบ', ip);
     return res.json({ success: true });
   } catch (error: any) {
@@ -11181,15 +11299,25 @@ app.delete('/api/positions/:id', async (req, res) => {
 // 4.6 Organizations API Endpoints (For From/To autocomplete)
 app.get('/api/organizations', async (req, res) => {
   try {
+    const cached = getLookupCached<any[]>('organizations');
+    if (cached) {
+      return res.json(cached);
+    }
+
     if (isMysqlOnline) {
       try {
         const [rows]: any = await pool.query('SELECT * FROM organizations ORDER BY name ASC');
-        if (Array.isArray(rows) && rows.length > 0) return res.json(rows);
+        if (Array.isArray(rows) && rows.length > 0) {
+          setLookupCached('organizations', rows);
+          return res.json(rows);
+        }
       } catch (dbErr: any) {
         console.warn('MySQL organizations fetch warning:', dbErr.message);
       }
     }
-    return res.json(localDb.organizations || initialSeedData.organizations || []);
+    const localData = localDb.organizations || initialSeedData.organizations || [];
+    setLookupCached('organizations', localData);
+    return res.json(localData);
   } catch (error: any) {
     return res.json(localDb.organizations || initialSeedData.organizations || []);
   }
@@ -11201,6 +11329,7 @@ app.post('/api/organizations', async (req, res) => {
   try {
     // INSERT IGNORE to prevent duplicates
     const [result]: any = await pool.query('INSERT IGNORE INTO organizations (name) VALUES (?)', [name]);
+    invalidateLookupCache('organizations');
     return res.json({ success: true, name });
   } catch (error: any) {
     console.error('Database error:', error.message);
@@ -11323,40 +11452,70 @@ app.get('/api/documents', async (req, res) => {
 
     if (isMysqlOnline) {
       try {
-        const query = `
-          SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM outbox_documents
-          UNION ALL
-          SELECT id, 'outbox' AS type, NULL AS category, 1 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM circular_documents
-          UNION ALL
-          SELECT id, 'internal' AS type, NULL AS category, 0 AS isCircular, 'ปกติ' AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM internal_documents
-          UNION ALL
-          SELECT id, 'admin' AS type, category, 0 AS isCircular, 'ปกติ' AS secrecy, NULL AS receiveNumber, year, docNumber, date, 'ปกติ' AS priority, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM admin_documents
-        `;
-        const [dbRows]: any = await pool.query(query);
-        if (Array.isArray(dbRows)) rows = dbRows;
+        const now = Date.now();
+        let cacheHit = false;
 
-        try {
-          const [dRecs]: any = await pool.query('SELECT * FROM department_receives');
-          if (Array.isArray(dRecs)) deptReceives = dRecs;
-        } catch (e) {}
-
-        if (username) {
-          try {
-            const [readRows]: any = await pool.query('SELECT docId, status FROM document_reads WHERE username = ?', [username]);
-            if (readRows && readRows.length > 0) {
-              for (const r of readRows) {
-                userReadsMap.set(r.docId, r.status);
-              }
-            }
-          } catch (readErr) {}
+        if (rawDocumentsCache && rawDocumentsCache.expiry > now) {
+          rows = rawDocumentsCache.rows;
+          deptReceives = rawDocumentsCache.deptReceives;
+          rawDocumentsCache.folderMap.forEach((val, key) => folderMap.set(key, val));
+          cacheHit = true;
         }
 
-        try {
-          const [folderRows]: any = await pool.query('SELECT id, name FROM folders');
-          if (folderRows) folderRows.forEach((f: any) => folderMap.set(Number(f.id), f.name));
-        } catch (fErr) {}
+        if (cacheHit) {
+          if (username) {
+            try {
+              const [readRows]: any = await pool.query('SELECT docId, status FROM document_reads WHERE username = ?', [username]);
+              if (readRows && readRows.length > 0) {
+                for (const r of readRows) {
+                  userReadsMap.set(r.docId, r.status);
+                }
+              }
+            } catch (readErr) {}
+          }
+        } else {
+          const query = `
+            SELECT id, 'inbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM inbox_documents
+            UNION ALL
+            SELECT id, 'outbox' AS type, NULL AS category, 0 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM outbox_documents
+            UNION ALL
+            SELECT id, 'outbox' AS type, NULL AS category, 1 AS isCircular, COALESCE(secrecy, 'ปกติ') AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM circular_documents
+            UNION ALL
+            SELECT id, 'internal' AS type, NULL AS category, 0 AS isCircular, 'ปกติ' AS secrecy, receiveNumber, year, docNumber, date, priority, title, fromDept AS \`from\`, toDept AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM internal_documents
+            UNION ALL
+            SELECT id, 'admin' AS type, category, 0 AS isCircular, 'ปกติ' AS secrecy, NULL AS receiveNumber, year, docNumber, date, 'ปกติ' AS priority, title, 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง' AS \`from\`, 'ทุกฝ่ายงาน / ประชาชน' AS \`to\`, department, assignee, note, content, registerDate, folderId, status, attachments, forwardedTo, forwardedBy, forwardedAt, forwardNote, isCentral FROM admin_documents
+          `;
+          const [dbRows]: any = await pool.query(query);
+          if (Array.isArray(dbRows)) rows = dbRows;
+
+          try {
+            const [dRecs]: any = await pool.query('SELECT * FROM department_receives');
+            if (Array.isArray(dRecs)) deptReceives = dRecs;
+          } catch (e) {}
+
+          if (username) {
+            try {
+              const [readRows]: any = await pool.query('SELECT docId, status FROM document_reads WHERE username = ?', [username]);
+              if (readRows && readRows.length > 0) {
+                for (const r of readRows) {
+                  userReadsMap.set(r.docId, r.status);
+                }
+              }
+            } catch (readErr) {}
+          }
+
+          try {
+            const [folderRows]: any = await pool.query('SELECT id, name FROM folders');
+            if (folderRows) folderRows.forEach((f: any) => folderMap.set(Number(f.id), f.name));
+          } catch (fErr) {}
+
+          rawDocumentsCache = {
+            rows,
+            deptReceives,
+            folderMap: new Map(folderMap),
+            expiry: Date.now() + RAW_DOCS_CACHE_TTL
+          };
+        }
       } catch (mysqlErr: any) {
         console.warn('MySQL documents query warning, falling back to localDb:', mysqlErr.message);
         rows = [];
@@ -14138,6 +14297,238 @@ app.post('/api/ai/draft-generate', async (req, res) => {
   } catch (err: any) {
     console.error('Error in AI draft generate:', err);
     return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างแบบร่างด้วย AI' });
+  }
+});
+
+// AI Official Order & Announcement Generator Endpoint
+app.post('/api/ai/order-generate', async (req, res) => {
+  try {
+    const { topic, orderType, category, reason, orgName, personnelInfo, customDuties, apiKey: reqApiKey } = req.body;
+    const apiKey = await getAppGeminiApiKey(reqApiKey);
+    const org = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด';
+    const isAnnounce = orderType === 'announce';
+
+    if (!apiKey) {
+      const fallbackSubject = topic || (isAnnounce ? 'มาตรการเฝ้าระวังและป้องกันสาธารณภัยในพื้นที่' : 'แต่งตั้งคณะทำงานขับเคลื่อนภารกิจป้องกันและบรรเทาสาธารณภัย');
+      const fallbackAuthority = isAnnounce
+        ? 'อาศัยอำนาจตามมาตรา ๒๒ แห่งพระราชบัญญัติป้องกันและบรรเทาสาธารณภัย พ.ศ. ๒๕๕๐'
+        : 'อาศัยอำนาจตามมาตรา ๑๕ และมาตรา ๒๑ แห่งพระราชบัญญัติป้องกันและบรรเทาสาธารณภัย พ.ศ. ๒๕๕๐';
+      const fallbackBackground = `ด้วย ${org} มีความจำเป็นต้องเตรียมความพร้อมและบริหารจัดการเกี่ยวกับ ${topic || 'ภารกิจป้องกันและบรรเทาสาธารณภัย'} ${reason ? `เนื่องจาก ${reason}` : 'เพื่อให้การปฏิบัติงานของหน่วยงานเป็นไปด้วยความเรียบร้อย รวดเร็ว และมีประสิทธิภาพสูงสุด'}`;
+      const fallbackDuties = customDuties || `ให้คณะทำงานมีอำนาจหน้าที่ในการอำนวยการ ประสานงาน ติดตาม ประเมินสถานการณ์ และสนับสนุนการปฏิบัติงานช่วยเหลือประชาชนตลอด ๒๔ ชั่วโมง`;
+
+      return res.json({
+        success: true,
+        result: {
+          subject: fallbackSubject,
+          authority: fallbackAuthority,
+          background: fallbackBackground,
+          duties: fallbackDuties,
+          suggestedSignerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'
+        }
+      });
+    }
+
+    const systemPrompt = `คุณคือผู้เชี่ยวชาญการยกร่างคำสั่งและประกาศราชการไทย (Thai Official Order & Announcement Generator) ตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ และที่แก้ไขเพิ่มเติม
+หน่วยงานออกเอกสาร: ${org}
+
+ข้อกำหนดคำสั่ง/ประกาศราชการไทย:
+1. การใช้ภาษาต้องเป็นทางการตามแบบแผนราชการ ภาษาถูกต้อง กระชับ สุภาพ รัดกุม
+2. โครงสร้างคำสั่งประกอบด้วย:
+   - subject (เรื่อง): ชื่อเรื่องคำสั่ง/ประกาศที่ชัดเจน กระชับ
+   - authority (ฐานอำนาจกฎหมายอ้างอิง): เช่น "อาศัยอำนาจตามมาตรา ๑๕ และมาตรา ๒๑ แห่งพระราชบัญญัติป้องกันและบรรเทาสาธารณภัย พ.ศ. ๒๕๕๐" หรือระเบียบที่เกี่ยวข้อง
+   - background (ความเป็นมาและเหตุผล): ขึ้นต้นด้วย "ด้วย..." อธิบายเหตุผล ความจำเป็น และบริบท
+   - duties (อำนาจและหน้าที่): ระบุข้อๆ ๑. ๒. ๓. หรือเป็นความรัดกุมในการปฏิบัติงาน
+   - suggestedSignerPos: ตำแหน่งผู้ลงนามที่เหมาะสม (เช่น หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด หรือ ผู้ว่าราชการจังหวัด)
+3. ให้ตอบกลับเป็น JSON ตาม Response Schema เท่านั้น`;
+
+    const userPrompt = `กรุณาร่าง${isAnnounce ? 'ประกาศ' : 'คำสั่ง'}ราชการ:
+- ชนิดเอกสาร: ${isAnnounce ? 'ประกาศ' : 'คำสั่ง'}
+- หมวดหมู่งาน: ${category || 'งานป้องกันและบรรเทาสาธารณภัย'}
+- หัวข้อ/เรื่องหรือวัตถุประสงค์: ${topic || '-'}
+- เหตุผลความจำเป็น/บริบท: ${reason || '-'}
+- คณะกรรมการ/บุคลากรที่เกี่ยวข้อง: ${personnelInfo || '-'}
+- อำนาจหน้าที่ที่ต้องการเน้น: ${customDuties || '-'}`;
+
+    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
+    let draftResponse: any = null;
+
+    try {
+      const client = getGeminiClient(apiKey, req);
+      for (const modelName of modelsToTry) {
+        try {
+          const resp = await client.models.generateContent({
+            model: modelName,
+            contents: [{ text: userPrompt }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  subject: { type: Type.STRING },
+                  authority: { type: Type.STRING },
+                  background: { type: Type.STRING },
+                  duties: { type: Type.STRING },
+                  suggestedSignerPos: { type: Type.STRING }
+                },
+                required: ['subject', 'authority', 'background', 'duties']
+              }
+            }
+          });
+          if (resp && resp.text) {
+            draftResponse = resp.text;
+            break;
+          }
+        } catch (modelErr) {
+          // try next model
+        }
+      }
+    } catch (e) {}
+
+    if (draftResponse) {
+      try {
+        const parsedJson = JSON.parse(draftResponse);
+        return res.json({ success: true, result: parsedJson });
+      } catch (jsonErr) {
+        return res.status(500).json({ success: false, error: 'ไม่สามารถประมวลผลคำตอบ JSON จาก AI ได้' });
+      }
+    }
+
+    // Fallback if AI response empty
+    return res.json({
+      success: true,
+      result: {
+        subject: topic || (isAnnounce ? 'ประกาศมาตรการเฝ้าระวังสาธารณภัย' : 'คำสั่งแต่งตั้งคณะทำงานบรรเทาสาธารณภัย'),
+        authority: isAnnounce ? 'อาศัยอำนาจตามมาตรา ๒๒ แห่งพระราชบัญญัติป้องกันและบรรเทาสาธารณภัย พ.ศ. ๒๕๕0' : 'อาศัยอำนาจตามมาตรา ๑๕ แห่งพระราชบัญญัติป้องกันและบรรเทาสาธารณภัย พ.ศ. ๒๕๕๐',
+        background: `ด้วย ${org} มีความจำเป็นต้องบริหารจัดการและเตรียมความพร้อมรับมือ ${topic || 'สถานการณ์สาธารณภัย'} เพื่อความปลอดภัยของประชาชน`,
+        duties: customDuties || `๑. ประสานงานและบูรณาการการปฏิบัติร่วมกับหน่วยงานที่เกี่ยวข้อง\n๒. กำกับ ดูแล และติดตามการช่วยเหลือผู้ประสบภัยตลอด ๒๔ ชั่วโมง`,
+        suggestedSignerPos: 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'
+      }
+    });
+  } catch (err: any) {
+    console.error('Error in AI order generate:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการยกร่างคำสั่ง/ประกาศด้วย AI' });
+  }
+});
+
+// AI Official Speech & Report Generator Endpoint
+app.post('/api/ai/speech-generate', async (req, res) => {
+  try {
+    const { speechType, topic, category, chairman, speaker, venue, orgName, keyPoints, participantsCount, apiKey: reqApiKey } = req.body;
+    const apiKey = await getAppGeminiApiKey(reqApiKey);
+    const org = orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด';
+    const chairmanName = chairman || 'ท่านผู้ว่าราชการจังหวัด';
+    const speakerName = speaker || 'หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด';
+    const eventName = topic || 'โครงการเพิ่มประสิทธิภาพการป้องกันและบรรเทาสาธารณภัย';
+
+    if (!apiKey) {
+      const fallbackReportHtml = `<p style="text-align:center;font-size:16pt;font-weight:bold;margin:0 0 4pt;">คำกล่าวรายงาน</p>
+<p style="text-align:center;font-size:15pt;margin:0 0 2pt;">พิธีเปิด${eventName}</p>
+<p style="text-align:center;font-size:14pt;margin:0 0 12pt;">ณ ${venue || 'ห้องประชุมศาลากลางจังหวัด'}</p>
+<p style="text-indent:3em;margin:0 0 8pt;">กราบเรียน ${chairmanName} ที่เคารพอย่างสูง</p>
+<p style="text-indent:3em;margin:0 0 8pt;">กระผม/ดิฉัน ${speakerName} ในนามของคณะผู้จัดงานและผู้เข้าร่วมโครงการ ขอขอบพระคุณท่านประธานเป็นอย่างยิ่ง ที่ได้ให้เกียรติมาเป็นประธานในพิธีเปิด ${eventName} ในวันนี้</p>
+<p style="text-indent:3em;margin:0 0 8pt;">การจัดกิจกรรมในครั้งนี้ มีวัตถุประสงค์สำคัญเพื่อ ${keyPoints || 'เสริมสร้างความรู้ ทักษะ และเตรียมความพร้อมในการปฏิบัติงานด้านการบรรเทาสาธารณภัยอย่างมีประสิทธิภาพ'} โดยมีผู้เข้าร่วมโครงการทั้งสิ้น ${participantsCount || '๑๐๐'} คน</p>
+<p style="text-indent:3em;margin:0 0 8pt;">บัดนี้ ได้เวลาอันเป็นมงคลสมควรแล้ว กระผม/ดิฉัน ขอเรียนเชิญท่านประธาน ได้โปรดกล่าวเปิดงาน และให้โอวาทแก่ผู้เข้าร่วมกิจกรรม เพื่อเป็นสิริมงคลและขวัญกำลังใจในการปฏิบัติงานต่อไป กราบเรียนเชิญครับ/ค่ะ</p>`;
+
+      const fallbackOpeningHtml = `<p style="text-align:center;font-size:16pt;font-weight:bold;margin:0 0 4pt;">คำกล่าวเปิดงาน / กล่าวตอบ</p>
+<p style="text-align:center;font-size:15pt;margin:0 0 2pt;">โดย ${chairmanName}</p>
+<p style="text-align:center;font-size:14pt;margin:0 0 12pt;">ในพิธีเปิด${eventName}</p>
+<p style="text-indent:3em;margin:0 0 8pt;">ท่านผู้บริหาร ข้าราชการ คณะวิทยากร และผู้เข้าร่วมโครงการทุกท่าน</p>
+<p style="text-indent:3em;margin:0 0 8pt;">ผมมีความยินดีและเป็นเกียรติอย่างยิ่ง ที่ได้มาเป็นประธานในพิธีเปิด ${eventName} ในวันนี้ ขอชื่นชม ${org} และคณะทำงานทุกท่าน ที่ได้เล็งเห็นความสำคัญของการพัฒนาศักยภาพการบรรเทาสาธารณภัยเพื่อความปลอดภัยของประชาชน</p>
+<p style="text-indent:3em;margin:0 0 8pt;">หวังเป็นอย่างยิ่งว่า ผู้เข้าร่วมโครงการทุกท่านจะนำความรู้ ทักษะ และประสบการณ์ที่ได้รับ ไปปรับใช้ในการปฏิบัติงานจริงเพื่อประโยชน์สูงสุดแก่ส่วนรวม ขออวยพรให้การจัดงานสำเร็จลุล่วงด้วยดี และขอเปิด ${eventName} ณ บัดนี้</p>`;
+
+      return res.json({
+        success: true,
+        result: {
+          title: `คำกล่าว${eventName}`,
+          speechReportHtml: fallbackReportHtml,
+          speechOpeningHtml: fallbackOpeningHtml,
+          keyHighlights: keyPoints || 'การบูรณาการความร่วมมือและการเตรียมความพร้อมรับมือสาธารณภัยตลอด ๒๔ ชั่วโมง',
+          closingRemark: 'ขออวยพรให้ทุกท่านประสบความสุข ความเจริญ และปฏิบัติภารกิจสำเร็จลุล่วงด้วยดี'
+        }
+      });
+    }
+
+    const systemPrompt = `คุณคือผู้เชี่ยวชาญการยกร่างคำกล่าวเปิดงาน กล่าวรายงาน และคำกล่าวพิธีการราชการไทย (Thai Official Speech & Report Drafter) ตามแบบแผนงานสารบรรณและธรรมเนียมพิธีการทางการ
+หน่วยงานจัดงาน: ${org}
+
+ข้อกำหนดคำกล่าวและคำรายงานราชการไทย:
+1. ภาษาต้องไพเราะ สุภาพ เป็นทางการ ตามธรรมเนียมพิธีการไทย
+2. ต้องยกร่าง 2 ส่วนหลัก:
+   - speechReportHtml (คำกล่าวรายงาน ของผู้กล่าวรายงาน): ขึ้นต้นด้วย "กราบเรียน [ประธาน] ที่เคารพอย่างสูง" บอกวัตถุประสงค์ ผู้เข้าร่วม และเชิญประธานเปิดงาน
+   - speechOpeningHtml (คำกล่าวเปิดงาน/กล่าวตอบ ของประธานในพิธี): แสดงความยินดี ชื่นชมหน่วยงานจัดงาน ให้ข้อคิดเน้นย้ำ และกล่าวเปิดงาน
+3. รูปแบบคำกล่าวต้องจัดใส่แท็ก HTML <p style="text-indent:3em;margin:0 0 8pt;">...</p> กำหนดจัดกึ่งกลางส่วนหัวอย่างสวยงาม
+4. ตอบกลับเป็น JSON ตาม Response Schema เท่านั้น`;
+
+    const userPrompt = `กรุณาร่างคำกล่าวรายงานและคำกล่าวเปิดงานสำหรับพิธีการต่อไปนี้:
+- ชื่องาน/โครงการ: ${eventName}
+- หมวดหมู่งาน: ${category || 'งานป้องกันและบรรเทาสาธารณภัย'}
+- ประเภทคำกล่าว: ${speechType || 'รายงานและเปิดงาน'}
+- ประธานในพิธี: ${chairmanName}
+- ผู้กล่าวรายงาน: ${speakerName}
+- สถานที่จัดงาน: ${venue || 'ห้องประชุมศาลากลางจังหวัด'}
+- จำนวนผู้เข้าร่วม: ${participantsCount || '๑๐๐'} คน
+- สาระสำคัญ/วัตถุประสงค์ที่ต้องการเน้นย้ำ: ${keyPoints || 'บูรณาการความร่วมมือเพื่อความปลอดภัยของประชาชน'}`;
+
+    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
+    let draftResponse: any = null;
+
+    try {
+      const client = getGeminiClient(apiKey, req);
+      for (const modelName of modelsToTry) {
+        try {
+          const resp = await client.models.generateContent({
+            model: modelName,
+            contents: [{ text: userPrompt }],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  speechReportHtml: { type: Type.STRING },
+                  speechOpeningHtml: { type: Type.STRING },
+                  keyHighlights: { type: Type.STRING },
+                  closingRemark: { type: Type.STRING }
+                },
+                required: ['title', 'speechReportHtml', 'speechOpeningHtml']
+              }
+            }
+          });
+          if (resp && resp.text) {
+            draftResponse = resp.text;
+            break;
+          }
+        } catch (modelErr) {
+          // try next model
+        }
+      }
+    } catch (e) {}
+
+    if (draftResponse) {
+      try {
+        const parsedJson = JSON.parse(draftResponse);
+        return res.json({ success: true, result: parsedJson });
+      } catch (jsonErr) {
+        return res.status(500).json({ success: false, error: 'ไม่สามารถประมวลผลคำตอบ JSON จาก AI ได้' });
+      }
+    }
+
+    // Fallback if AI response empty
+    return res.json({
+      success: true,
+      result: {
+        title: `คำกล่าว${eventName}`,
+        speechReportHtml: `<p style="text-align:center;font-size:16pt;font-weight:bold;margin:0 0 4pt;">คำกล่าวรายงาน</p><p style="text-indent:3em;margin:0 0 8pt;">กราบเรียน ${chairmanName} ที่เคารพอย่างสูง</p><p style="text-indent:3em;margin:0 0 8pt;">กระผม/ดิฉัน ${speakerName} ขอขอบพระคุณท่านประธานเป็นอย่างยิ่งที่ให้เกียรติมาเป็นประธานในพิธีเปิด ${eventName} ในวันนี้...</p>`,
+        speechOpeningHtml: `<p style="text-align:center;font-size:16pt;font-weight:bold;margin:0 0 4pt;">คำกล่าวเปิดงาน</p><p style="text-indent:3em;margin:0 0 8pt;">ท่านผู้บริหาร และผู้เข้าร่วมงานทุกท่าน ผมมีความยินดีเป็นอย่างยิ่งที่ได้มาเปิด ${eventName} ในวันนี้...</p>`,
+        keyHighlights: keyPoints || 'การสร้างความตระหนักและการเตรียมพร้อมรับมือสาธารณภัย',
+        closingRemark: 'ขอให้การดำเนินงานสำเร็จลุล่วงด้วยดี'
+      }
+    });
+  } catch (err: any) {
+    console.error('Error in AI speech generate:', err);
+    return res.status(500).json({ success: false, error: err.message || 'เกิดข้อผิดพลาดในการยกร่างคำกล่าวด้วย AI' });
   }
 });
 

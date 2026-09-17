@@ -455,33 +455,40 @@ export default function NotificationsView({
           </div>
         </div>
 
-        {/* Tab Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar text-xs font-medium border-t border-[var(--border-lighter)] pt-2.5">
+        {/* Grid Navigation Menu */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 border-t border-[var(--border-lighter)] pt-3">
           {[
-            { id: 'all', label: '🌟 ทั้งหมด', count: stats.total },
-            { id: 'unread', label: '🔴 ยังไม่อ่าน', count: stats.unread },
-            { id: 'urgent', label: '🚨 ด่วนที่สุด / ลับ', count: stats.urgent },
-            { id: 'sla', label: '⏳ แจ้งเตือนเวลา SLA', count: stats.sla },
-            { id: 'workflow', label: '🔄 เคลื่อนไหว & ส่งต่อ', count: activeNotifications.filter(n => n.category === 'workflow').length },
-            { id: 'assigned', label: '📌 มอบหมายถึงฉัน', count: activeNotifications.filter(n => n.assignee?.includes(user?.firstName || '')).length }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as TabCategory)}
-              className={`px-3 py-1.5 rounded-full shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
-                  : 'bg-[var(--bg-elevated)] hover:bg-[var(--border-light)] text-[var(--text-secondary)] border border-[var(--border-light)]'
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-muted)]'
-              }`}>
-                {tab.count}
-              </span>
-            </button>
-          ))}
+            { id: 'all', label: 'ทั้งหมด', count: stats.total, icon: Sparkles },
+            { id: 'unread', label: 'ยังไม่อ่าน', count: stats.unread, icon: AlertCircle },
+            { id: 'urgent', label: 'ด่วนที่สุด/ลับ', count: stats.urgent, icon: Flame },
+            { id: 'sla', label: 'เตือนเวลา SLA', count: stats.sla, icon: Clock },
+            { id: 'workflow', label: 'เคลื่อนไหว/ส่งต่อ', count: activeNotifications.filter(n => n.category === 'workflow').length, icon: RotateCcw },
+            { id: 'assigned', label: 'มอบหมายถึงฉัน', count: activeNotifications.filter(n => n.assignee?.includes(user?.firstName || '')).length, icon: User }
+          ].map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as TabCategory)}
+                className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer text-left ${
+                  isActive
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs font-bold'
+                    : 'bg-[var(--bg-elevated)] hover:bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-light)] hover:border-[var(--border-medium)]'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-[var(--primary-color)]'}`} />
+                  <span className="text-xs font-semibold tracking-tight truncate">{tab.label}</span>
+                </div>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ml-1 shrink-0 ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-[var(--bg-surface)] text-[var(--text-muted)] border border-[var(--border-light)]'
+                }`}>
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
       </div>

@@ -243,39 +243,15 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
           canvases.push(canvas);
         }
       } else {
-        // Fallback: capture entire paper container
+        // Fallback: capture entire paper container as a SINGLE page
         const fullCanvas = await html2canvas(rootEl, {
           ...commonCaptureOptions,
           height: rootEl.offsetHeight || baseHeight,
           windowHeight: rootEl.offsetHeight || baseHeight,
         });
 
-        const singlePageCanvasHeight = (fullCanvas.width * baseHeight) / baseWidth;
-        const totalPages = Math.max(1, Math.ceil((fullCanvas.height - 10) / singlePageCanvasHeight));
-
-        if (totalPages === 1) {
-          canvases.push(fullCanvas);
-        } else {
-          for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
-            const sourceY = pageIdx * singlePageCanvasHeight;
-            const sourceHeight = Math.min(singlePageCanvasHeight, fullCanvas.height - sourceY);
-
-            const pageCanvas = document.createElement('canvas');
-            pageCanvas.width = fullCanvas.width;
-            pageCanvas.height = singlePageCanvasHeight;
-            const ctx = pageCanvas.getContext('2d');
-            if (ctx) {
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-              ctx.drawImage(
-                fullCanvas,
-                0, sourceY, fullCanvas.width, sourceHeight,
-                0, 0, fullCanvas.width, sourceHeight
-              );
-              canvases.push(pageCanvas);
-            }
-          }
-        }
+        // Force exactly 1 page to prevent spilling over to page 2 (as requested: ไม่ให้ล้นลงไปหน้า 2)
+        canvases.push(fullCanvas);
       }
     } catch (err) {
       console.error('Failed to capture A4 canvases:', err);
@@ -453,45 +429,39 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
             <button
               onClick={handleExportPdf}
               disabled={isExporting !== null}
-              className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm hover:shadow transition-all cursor-pointer"
-              title="ดาวน์โหลดเป็นไฟล์ PDF ขนาด A4 (210 x 297 มม.) Layout ตรงกับแบบพิมพ์ 100%"
+              className="p-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-rose-600 hover:border-rose-400 dark:hover:border-rose-600 dark:hover:bg-rose-900/20 disabled:opacity-50 transition-all hover:shadow-md cursor-pointer group flex items-center justify-center"
+              title="ดาวน์โหลดเป็นไฟล์ PDF ขนาด A4"
             >
               {isExporting === 'pdf' ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-5 h-5 animate-spin text-rose-500" />
               ) : (
-                <FileDown className="w-3.5 h-3.5" />
+                <FileDown className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
               )}
-              <span>{isExporting === 'pdf' ? 'กำลังสร้าง PDF...' : 'ดาวน์โหลด PDF'}</span>
             </button>
           )}
 
           {/* Export Image Dropdown / Button */}
           {showExportImage && (
             <div className="relative">
-              <div className="flex items-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all overflow-hidden">
+              <div className="flex items-center rounded-xl bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-emerald-600 hover:border-emerald-400 dark:hover:border-emerald-600 dark:hover:bg-emerald-900/20 transition-all hover:shadow-md cursor-pointer group">
                 <button
                   onClick={() => handleExportImage('png')}
                   disabled={isExporting !== null}
-                  className="px-2.5 py-1.5 flex items-center gap-1.5 hover:bg-emerald-700 disabled:opacity-50 cursor-pointer"
-                  title="บันทึกรูปภาพความคมชัดสูง (PNG) Layout ตรงกับต้นฉบับ 100%"
+                  className="p-2.5 flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                  title="บันทึกรูปภาพความคมชัดสูง (PNG)"
                 >
                   {isExporting === 'png' || isExporting === 'jpeg' ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin text-emerald-500" />
                   ) : (
-                    <ImageIcon className="w-3.5 h-3.5" />
+                    <ImageIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
                   )}
-                  <span>
-                    {isExporting === 'png' || isExporting === 'jpeg'
-                      ? 'กำลังแปลงรูป...'
-                      : 'บันทึกรูปภาพ'}
-                  </span>
                 </button>
                 <button
                   onClick={() => setShowImageDropdown(!showImageDropdown)}
-                  className="px-1.5 py-1.5 hover:bg-emerald-800 border-l border-emerald-500/40 cursor-pointer"
+                  className="py-2.5 px-1.5 hover:bg-[var(--border-light)] border-l border-[var(--border-light)] cursor-pointer"
                   title="เลือกรูปแบบรูปภาพ"
                 >
-                  <ChevronDown className="w-3 h-3" />
+                  <ChevronDown className="w-4 h-4" />
                 </button>
               </div>
 
@@ -530,11 +500,10 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
           {/* Print Button */}
           <button
             onClick={handlePrintClick}
-            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm hover:shadow transition-all cursor-pointer"
+            className="p-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-blue-600 hover:border-blue-400 dark:hover:border-blue-600 dark:hover:bg-blue-900/20 transition-all hover:shadow-md cursor-pointer group flex items-center justify-center"
             title="สั่งพิมพ์เอกสาร"
           >
-            <Printer className="w-3.5 h-3.5" />
-            <span>พิมพ์</span>
+            <Printer className="w-5 h-5 group-hover:scale-110 transition-transform" />
           </button>
         </div>
       </div>

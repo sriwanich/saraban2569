@@ -368,13 +368,13 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
             </p>
           </div>
           
-          {/* Actions bar */}
-          <div className="flex flex-wrap items-center gap-3">
+          {/* Actions Grid Toolbar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 w-full md:w-auto">
             {/* Year Filter */}
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(e.target.value)}
-              className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-[var(--text-primary)] rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-[var(--primary-color)] cursor-pointer hover:border-[var(--primary-color)]/40 hover:shadow-sm transition-all"
+              className="bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-primary)] rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none focus:border-[var(--primary-color)] cursor-pointer hover:border-[var(--primary-color)]/40 hover:shadow-xs transition-all w-full"
             >
               <option value="all">ทุกปีงบประมาณ</option>
               {availableYears.map(y => (
@@ -383,14 +383,14 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
             </select>
 
             {/* Search Box */}
-            <div className="flex items-center gap-2 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] rounded-xl px-4 py-2.5 focus-within:border-[var(--primary-color)] transition-all hover:border-[var(--primary-color)]/40 hover:shadow-sm w-full sm:w-64">
+            <div className="flex items-center gap-2 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl px-3.5 py-2.5 focus-within:border-[var(--primary-color)] transition-all hover:border-[var(--primary-color)]/40 hover:shadow-xs w-full">
               <Search className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
               <input 
                 type="text" 
-                placeholder="ค้นหาเลขรับ, ที่, เรื่อง, จาก..." 
+                placeholder="ค้นหาเลขรับ, ที่, เรื่อง..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="bg-transparent border-none outline-none text-sm font-semibold text-[var(--text-primary)] placeholder-[var(--text-muted)] w-full" 
+                className="bg-transparent border-none outline-none text-xs font-semibold text-[var(--text-primary)] placeholder-[var(--text-muted)] w-full" 
               />
               {searchTerm && (
                 <button onClick={() => setSearchTerm('')} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
@@ -400,20 +400,22 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
             </div>
 
             <button 
+              type="button"
               onClick={handlePrint}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/50 dark:bg-slate-900/50 backdrop-blur-md border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--primary-color)]/40 transition-all text-sm font-bold shrink-0 cursor-pointer shadow-sm hover:shadow-md"
-              title="พิมพ์ทะเบียนหนังสือ"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-blue-600 hover:border-blue-500/50 hover:shadow-sm transition-all text-xs font-bold shrink-0 cursor-pointer group"
+              title="พิมพ์ทะเบียนหนังสือรับ/ส่ง"
             >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">พิมพ์ทะเบียน</span>
+              <Printer className="w-4 h-4 shrink-0 text-blue-500 group-hover:scale-110 transition-transform" />
+              <span>พิมพ์ทะเบียน</span>
             </button>
 
             {onCreateDoc && (
               <button 
+                type="button"
                 onClick={onCreateDoc}
-                className="flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--primary-color)] to-[var(--primary-dark)] hover:from-[var(--primary-hover)] hover:to-[var(--primary-color)] text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md shadow-[var(--primary-color)]/20 hover:shadow-xl hover:shadow-[var(--primary-color)]/30 hover:-translate-y-0.5 active:scale-[0.98] shrink-0 cursor-pointer"
+                className="flex items-center justify-center gap-2 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-[var(--primary-color)]/20 hover:shadow-lg active:scale-[0.98] shrink-0 cursor-pointer group"
               >
-                <Plus className="w-4 h-4 shrink-0" />
+                <Plus className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
                 <span>ลงทะเบียนหนังสือ</span>
               </button>
             )}

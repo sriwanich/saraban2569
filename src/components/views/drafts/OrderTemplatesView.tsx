@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Award, FileText, CheckSquare, Plus, Eye, Save, Printer, 
-  FileDown, UserCheck, X, Crown, Building, Layers
+  FileDown, UserCheck, X, Crown, Building, Layers, Sparkles, 
+  Wand2, Search, Filter, Loader2, ArrowRight, BookOpen, CheckCircle2
 } from 'lucide-react';
 import { 
   ORDER_DATA, ORDER_AUTHORITY, getOrderBackground, 
@@ -19,6 +20,10 @@ export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('appoint_disaster_center');
   const [selectedTemplateTitle, setSelectedTemplateTitle] = useState<string>('คำสั่งจัดตั้งศูนย์บัญชาการเหตุการณ์อุทกภัย วาตภัย และดินโคลนถล่ม');
   const [selectedTemplateType, setSelectedTemplateType] = useState<string>('order');
+
+  // Search & Category Filters
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterType, setFilterType] = useState<'all' | 'order' | 'announce'>('all');
 
   // Form State
   const [docNum, setDocNum] = useState<string>('๑๒๓/๒๕๖๙');
@@ -42,6 +47,19 @@ export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
   // Preview Modal
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
 
+  // AI Smart Order Draft Assistant State
+  const [showAiOrderModal, setShowAiOrderModal] = useState<boolean>(false);
+  const [aiTopic, setAiTopic] = useState<string>('');
+  const [aiType, setAiType] = useState<'order' | 'announce'>('order');
+  const [aiReason, setAiReason] = useState<string>('');
+  const [aiPersonnelInfo, setAiPersonnelInfo] = useState<string>('');
+  const [aiCustomDuties, setAiCustomDuties] = useState<string>('');
+  const [isGeneratingAi, setIsGeneratingAi] = useState<boolean>(false);
+  const [aiOrderResult, setAiOrderResult] = useState<any>(null);
+
+  // Field-level AI Generating loading flags
+  const [isAiFieldLoading, setIsAiFieldLoading] = useState<string | null>(null);
+
   useEffect(() => {
     const savedUsers = localStorage.getItem('moi_users');
     if (savedUsers) {
@@ -52,6 +70,9 @@ export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
       }
     }
   }, []);
+
+  // Total templates count across all groups
+  const totalTemplatesCount = ORDER_DATA.reduce((acc, cat) => acc + cat.items.length, 0);
 
   const handleTemplateChange = (tplId: string) => {
     let foundItem: any = null;
@@ -93,6 +114,99 @@ export default function OrderTemplatesView({ user, onSendToSignQueue }: Props) {
           committeePos: selectedPersonnel.length === 0 ? 'ประธานกรรมการ' : 'กรรมการ'
         }
       ]);
+    }
+  };
+
+  // AI Order Generator Call
+  const handleGenerateAiOrder = async () => {
+    if (!aiTopic.trim()) {
+      alert('กรุณาระบุวัตถุประสงค์หรือเรื่องที่ต้องการยกร่างคำสั่ง/ประกาศ');
+      return;
+    }
+
+    setIsGeneratingAi(true);
+    setAiOrderResult(null);
+
+    try {
+      const res = await fetch('/api/ai/order-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: aiTopic,
+          orderType: aiType,
+          category: selectedCategory,
+          reason: aiReason,
+          personnelInfo: aiPersonnelInfo,
+          customDuties: aiCustomDuties,
+          orgName: user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'
+        })
+      });
+
+      const data = await res.json();
+      if (data.success && data.result) {
+        setAiOrderResult(data.result);
+      } else {
+        alert(data.error || 'เกิดข้อผิดพลาดในการยกร่างด้วย AI');
+      }
+    } catch (err: any) {
+      console.error('Error generating AI order:', err);
+      alert('ไม่สามารถเชื่อมต่อระบบ AI ยกร่างคำสั่งได้');
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
+  const handleApplyAiOrderResult = () => {
+    if (!aiOrderResult) return;
+
+    if (aiOrderResult.subject) setSubject(aiOrderResult.subject);
+    if (aiOrderResult.authority) setAuthority(aiOrderResult.authority);
+    if (aiOrderResult.background) setBackground(aiOrderResult.background);
+    if (aiOrderResult.duties) setDuties(aiOrderResult.duties);
+    if (aiOrderResult.suggestedSignerPos) setSignerPos(aiOrderResult.suggestedSignerPos);
+
+    setSelectedTemplateType(aiType);
+    setShowAiOrderModal(false);
+    setAiOrderResult(null);
+    setAiTopic('');
+    setAiReason('');
+    setAiPersonnelInfo('');
+    setAiCustomDuties('');
+  };
+
+  // Field-level AI Helper functions
+  const handleAiRefineField = async (fieldKey: 'authority' | 'background' | 'duties') => {
+    setIsAiFieldLoading(fieldKey);
+    try {
+      const fieldNames: Record<string, string> = {
+        authority: 'ฐานอำนาจกฎหมายอ้างอิง',
+        background: 'ความเป็นมาและเหตุผล',
+        duties: 'อำนาจและหน้าที่การดำเนินงาน'
+      };
+
+      const res = await fetch('/api/ai/order-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: subject,
+          orderType: selectedTemplateType,
+          category: selectedCategory,
+          reason: background,
+          customDuties: duties,
+          orgName: user?.department || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัด'
+        })
+      });
+
+      const data = await res.json();
+      if (data.success && data.result) {
+        if (fieldKey === 'authority' && data.result.authority) setAuthority(data.result.authority);
+        if (fieldKey === 'background' && data.result.background) setBackground(data.result.background);
+        if (fieldKey === 'duties' && data.result.duties) setDuties(data.result.duties);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsAiFieldLoading(null);
     }
   };
 
@@ -202,54 +316,155 @@ ${committeeHTML}
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="border-b border-[var(--border-light)] pb-4">
-        <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)]">
-          คลังคำสั่งและประกาศมาตรฐาน (40+ แบบ)
-        </h2>
-        <p className="text-sm text-[var(--text-secondary)] mt-1">
-          เลือกเทมเพลตคำสั่งและประกาศตามภารกิจองค์กรปกครองส่วนท้องถิ่น พร้อมฐานข้อกฎหมายอ้างอิงอัตโนมัติ
-        </p>
+      {/* Header with AI Assistant Trigger */}
+      <div className="border-b border-[var(--border-light)] pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-sans font-bold text-[var(--text-primary)] flex items-center gap-2.5">
+            <BookOpen className="w-6 h-6 text-[var(--primary-color)]" />
+            คลังคำสั่งและประกาศมาตรฐาน ({totalTemplatesCount} แบบฟอร์ม)
+          </h2>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">
+            เลือกเทมเพลตคำสั่งและประกาศตามภารกิจองค์กรปกครองส่วนท้องถิ่นและ ปภ. พร้อมฐานข้อกฎหมายและระบบ AI ยกร่างเนื้อหาอัตโนมัติ
+          </p>
+        </div>
+        <button
+          onClick={() => setShowAiOrderModal(true)}
+          className="px-4 py-2.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer self-start md:self-auto shrink-0 transform hover:-translate-y-0.5 active:translate-y-0"
+        >
+          <Sparkles className="w-4 h-4 animate-pulse text-amber-100" />
+          ✨ AI ผู้ช่วยยกร่างคำสั่ง/ประกาศอัจฉริยะ
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Category & Template Selector */}
+        {/* Category & Template Selector with Search & Filter */}
         <div className="lg:col-span-4 space-y-4">
           <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-5 shadow-sm space-y-4">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">เลือกหมวดหมู่เทมเพลต</h3>
-            <div className="space-y-1">
-              {ORDER_DATA.map(cat => (
+            
+            {/* Search and Type Filter */}
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-[var(--text-muted)]" />
+                <input
+                  type="text"
+                  placeholder="ค้นหาชื่อคำสั่ง/ประกาศ..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg pl-8 pr-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-1.5 bg-[var(--bg-overlay)] p-1 rounded-lg border border-[var(--border-lighter)] text-[11px]">
                 <button
-                  key={cat.group}
-                  onClick={() => setSelectedCategory(cat.group)}
-                  className={`w-full text-left px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all flex items-center justify-between cursor-pointer ${
-                    selectedCategory === cat.group
-                      ? 'bg-[var(--primary-color)] text-white font-semibold'
-                      : 'bg-[var(--bg-overlay)] text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
+                  onClick={() => setFilterType('all')}
+                  className={`flex-1 py-1 rounded font-medium text-center transition-all cursor-pointer ${
+                    filterType === 'all' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-xs font-bold' : 'text-[var(--text-muted)]'
                   }`}
                 >
-                  <span>{cat.group}</span>
-                  <span className="text-[10px] opacity-80 font-mono">({cat.items.length})</span>
+                  ทั้งหมด
                 </button>
-              ))}
+                <button
+                  onClick={() => setFilterType('order')}
+                  className={`flex-1 py-1 rounded font-medium text-center transition-all cursor-pointer ${
+                    filterType === 'order' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-xs font-bold' : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  คำสั่ง
+                </button>
+                <button
+                  onClick={() => setFilterType('announce')}
+                  className={`flex-1 py-1 rounded font-medium text-center transition-all cursor-pointer ${
+                    filterType === 'announce' ? 'bg-[var(--bg-surface)] text-[var(--primary-color)] shadow-xs font-bold' : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  ประกาศ
+                </button>
+              </div>
             </div>
 
-            <div className="pt-3 border-t border-[var(--border-lighter)] space-y-2">
-              <label className="block text-xs font-semibold text-[var(--text-secondary)]">รายการแบบฟอร์ม</label>
-              <div className="max-h-72 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
-                {ORDER_DATA.find(c => c.group === selectedCategory)?.items.map(item => (
+            {/* Category selection list */}
+            {!searchQuery && (
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-[var(--text-secondary)] mb-1">หมวดหมู่ภารกิจ</h3>
+                {ORDER_DATA.map(cat => (
                   <button
-                    key={item.id}
-                    onClick={() => handleTemplateChange(item.id)}
-                    className={`w-full text-left p-2.5 rounded-lg text-xs transition-all cursor-pointer border ${
-                      selectedTemplateId === item.id
-                        ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/10 text-[var(--primary-color)] font-semibold'
-                        : 'border-[var(--border-light)] bg-[var(--bg-overlay)] hover:bg-[var(--bg-elevated)] text-[var(--text-primary)]'
+                    key={cat.group}
+                    onClick={() => setSelectedCategory(cat.group)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-between cursor-pointer ${
+                      selectedCategory === cat.group
+                        ? 'bg-[var(--primary-color)] text-white font-semibold'
+                        : 'bg-[var(--bg-overlay)] text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
                     }`}
                   >
-                    {item.title}
+                    <span className="truncate pr-1">{cat.group}</span>
+                    <span className="text-[10px] opacity-80 font-mono shrink-0">({cat.items.length})</span>
                   </button>
                 ))}
+              </div>
+            )}
+
+            {/* Template Items List */}
+            <div className="pt-2 border-t border-[var(--border-lighter)] space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)]">
+                  {searchQuery ? `ผลการค้นหา "${searchQuery}"` : 'รายการแบบฟอร์มในหมวดหมู่'}
+                </label>
+              </div>
+
+              <div className="max-h-80 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
+                {(() => {
+                  let itemsToRender: any[] = [];
+                  if (searchQuery) {
+                    ORDER_DATA.forEach(c => {
+                      c.items.forEach(i => {
+                        if (i.title.toLowerCase().includes(searchQuery.toLowerCase())) {
+                          itemsToRender.push(i);
+                        }
+                      });
+                    });
+                  } else {
+                    const currentCat = ORDER_DATA.find(c => c.group === selectedCategory);
+                    itemsToRender = currentCat ? currentCat.items : [];
+                  }
+
+                  if (filterType !== 'all') {
+                    itemsToRender = itemsToRender.filter(i => i.type === filterType);
+                  }
+
+                  if (itemsToRender.length === 0) {
+                    return (
+                      <p className="text-xs text-[var(--text-muted)] py-4 text-center">
+                        ไม่พบแบบฟอร์มคำสั่ง/ประกาศที่ตรงกับเงื่อนไข
+                      </p>
+                    );
+                  }
+
+                  return itemsToRender.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => handleTemplateChange(item.id)}
+                      className={`w-full text-left p-2.5 rounded-lg text-xs transition-all cursor-pointer border flex flex-col gap-1 ${
+                        selectedTemplateId === item.id
+                          ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/10 text-[var(--primary-color)] font-semibold'
+                          : 'border-[var(--border-light)] bg-[var(--bg-overlay)] hover:bg-[var(--bg-elevated)] text-[var(--text-primary)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium line-clamp-2">{item.title}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 ml-1.5 ${
+                          item.type === 'announce' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+                        }`}>
+                          {item.type === 'announce' ? 'ประกาศ' : 'คำสั่ง'}
+                        </span>
+                      </div>
+                    </button>
+                  ));
+                })()}
               </div>
             </div>
           </div>
@@ -258,13 +473,28 @@ ${committeeHTML}
         {/* Form Details */}
         <div className="lg:col-span-8 space-y-5">
           <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 shadow-sm space-y-5">
-            <div className="border-b border-[var(--border-lighter)] pb-3">
-              <span className="text-xs font-semibold text-[var(--primary-color)] uppercase tracking-wider block">
-                {selectedCategory}
-              </span>
-              <h3 className="text-lg font-bold text-[var(--text-primary)] mt-0.5">
-                {selectedTemplateTitle}
-              </h3>
+            <div className="border-b border-[var(--border-lighter)] pb-3 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-[var(--primary-color)] uppercase tracking-wider block">
+                  {selectedCategory}
+                </span>
+                <h3 className="text-lg font-bold text-[var(--text-primary)] mt-0.5">
+                  {selectedTemplateTitle}
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setAiTopic(selectedTemplateTitle);
+                  setAiType(selectedTemplateType as any);
+                  setAiReason(background);
+                  setAiCustomDuties(duties);
+                  setShowAiOrderModal(true);
+                }}
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                ให้ AI ช่วยเกลาหน้านี้
+              </button>
             </div>
 
             {/* Fields */}
@@ -298,8 +528,24 @@ ${committeeHTML}
                 />
               </div>
 
+              {/* Authority field with AI helper */}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">ฐานอำนาจกฎหมายอ้างอิง</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)]">ฐานอำนาจกฎหมายอ้างอิง</label>
+                  <button
+                    type="button"
+                    onClick={() => handleAiRefineField('authority')}
+                    disabled={isAiFieldLoading === 'authority'}
+                    className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    {isAiFieldLoading === 'authority' ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3 h-3" />
+                    )}
+                    ✨ AI เสนอข้อกฎหมาย
+                  </button>
+                </div>
                 <textarea
                   rows={2}
                   value={authority}
@@ -308,8 +554,24 @@ ${committeeHTML}
                 />
               </div>
 
+              {/* Background field with AI helper */}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">ความเป็นมาและเหตุผล</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)]">ความเป็นมาและเหตุผล</label>
+                  <button
+                    type="button"
+                    onClick={() => handleAiRefineField('background')}
+                    disabled={isAiFieldLoading === 'background'}
+                    className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    {isAiFieldLoading === 'background' ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3 h-3" />
+                    )}
+                    ✨ AI ยกร่างความเป็นมา
+                  </button>
+                </div>
                 <textarea
                   rows={3}
                   value={background}
@@ -318,8 +580,24 @@ ${committeeHTML}
                 />
               </div>
 
+              {/* Duties field with AI helper */}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">อำนาจและหน้าที่การดำเนินงาน</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)]">อำนาจและหน้าที่การดำเนินงาน</label>
+                  <button
+                    type="button"
+                    onClick={() => handleAiRefineField('duties')}
+                    disabled={isAiFieldLoading === 'duties'}
+                    className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    {isAiFieldLoading === 'duties' ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3 h-3" />
+                    )}
+                    ✨ AI ยกร่างอำนาจหน้าที่
+                  </button>
+                </div>
                 <textarea
                   rows={3}
                   value={duties}
@@ -421,6 +699,186 @@ ${committeeHTML}
           </div>
         </div>
       </div>
+
+      {/* AI Smart Order Assistant Modal */}
+      {showAiOrderModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-[var(--bg-surface)] border border-amber-500/40 rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-600/20 border-b border-amber-500/30 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500 text-white rounded-xl shadow-xs">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-[var(--text-primary)]">
+                    ✨ ผู้ช่วย AI ช่วยยกร่างคำสั่ง/ประกาศอัจฉริยะ
+                  </h3>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    ระบุวัตถุประสงค์และข้อมูลเบื้องต้น ระบบ AI จะยกร่างข้อความและฐานกฎหมายที่ถูกต้องตามมาตรฐานราชการ
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAiOrderModal(false)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-4 custom-scrollbar">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">ประเภทเอกสาร</label>
+                  <select
+                    value={aiType}
+                    onChange={e => setAiType(e.target.value as any)}
+                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none"
+                  >
+                    <option value="order">คำสั่ง</option>
+                    <option value="announce">ประกาศ</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">หมวดหมู่ภารกิจ</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={selectedCategory}
+                    className="w-full bg-[var(--bg-elevated)] border border-[var(--border-lighter)] rounded-lg px-3 py-2 text-xs text-[var(--text-muted)] outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">
+                  หัวข้อ / เรื่อง หรือวัตถุประสงค์ของการออกคำสั่ง/ประกาศ <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="เช่น แต่งตั้งศูนย์ปฏิบัติการป้องกันภัยแล้ง และ PM2.5 ประจำปี ๒๕๖๙"
+                  value={aiTopic}
+                  onChange={e => setAiTopic(e.target.value)}
+                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] focus:border-amber-500 outline-none font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">
+                  เหตุผล ความจำเป็น หรือบริบทพื้นที่
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="เช่น เนื่องจากเข้าสู่ช่วงฤดูแล้ง พื้นที่เสี่ยงขาดแคลนน้ำอุปโภคบริโภค และฝุ่นควันพิษสะสม..."
+                  value={aiReason}
+                  onChange={e => setAiReason(e.target.value)}
+                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg p-2.5 text-xs text-[var(--text-primary)] focus:border-amber-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">
+                  คณะกรรมการ / บุคลากร / ตำแหน่งที่แต่งตั้ง (ถ้ามี)
+                </label>
+                <input
+                  type="text"
+                  placeholder="เช่น ผู้ว่าราชการจังหวัด (ประธาน), ปภ.จังหวัด (กรรมการและเลขานุการ), นายอำเภอทุกอำเภอ..."
+                  value={aiPersonnelInfo}
+                  onChange={e => setAiPersonnelInfo(e.target.value)}
+                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] focus:border-amber-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">
+                  อำนาจหน้าที่เน้นย้ำ หรือเงื่อนไขเพิ่มเติม (ถ้ามี)
+                </label>
+                <input
+                  type="text"
+                  placeholder="เช่น ประสานงานแจกจ่ายน้ำช่วยเหลือประชาชนตลอด ๒๔ ชั่วโมง และรายงานผลทุกวัน..."
+                  value={aiCustomDuties}
+                  onChange={e => setAiCustomDuties(e.target.value)}
+                  className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] focus:border-amber-500 outline-none"
+                />
+              </div>
+
+              {/* Generate Trigger */}
+              <button
+                onClick={handleGenerateAiOrder}
+                disabled={isGeneratingAi || !aiTopic.trim()}
+                className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isGeneratingAi ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    AI กำลังค้นหาข้อกฎหมายและยกร่างเนื้อหาอย่างเป็นทางการ...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-200" />
+                    ประมวลผลและยกร่างคำสั่งด้วย AI
+                  </>
+                )}
+              </button>
+
+              {/* AI Generated Result Preview */}
+              {aiOrderResult && (
+                <div className="mt-4 p-4 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800 rounded-xl space-y-3 animate-fade-in">
+                  <div className="flex items-center justify-between border-b border-amber-200 dark:border-amber-800 pb-2">
+                    <span className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" /> ผลการยกร่างด้วย AI เรียบร้อย
+                    </span>
+                    <button
+                      onClick={handleApplyAiOrderResult}
+                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1 transition-all cursor-pointer"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" /> นำข้อมูลลงแบบฟอร์ม
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 text-xs text-[var(--text-primary)]">
+                    <div>
+                      <span className="font-bold text-[var(--text-secondary)]">เรื่อง:</span> {aiOrderResult.subject}
+                    </div>
+                    <div>
+                      <span className="font-bold text-[var(--text-secondary)]">ฐานอำนาจกฎหมาย:</span> {aiOrderResult.authority}
+                    </div>
+                    <div>
+                      <span className="font-bold text-[var(--text-secondary)]">ความเป็นมา:</span> {aiOrderResult.background}
+                    </div>
+                    <div>
+                      <span className="font-bold text-[var(--text-secondary)]">อำนาจหน้าที่:</span>
+                      <p className="mt-0.5 whitespace-pre-line text-[var(--text-secondary)] pl-2 border-l-2 border-amber-400">
+                        {aiOrderResult.duties}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-[var(--border-lighter)] bg-[var(--bg-elevated)] flex justify-end gap-2">
+              <button
+                onClick={() => setShowAiOrderModal(false)}
+                className="px-4 py-2 bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-primary)] text-xs font-medium rounded-xl hover:bg-[var(--border-lighter)] cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              {aiOrderResult && (
+                <button
+                  onClick={handleApplyAiOrderResult}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> ใช้แบบร่าง AI นี้
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Preview Modal */}
       {previewHtml && (

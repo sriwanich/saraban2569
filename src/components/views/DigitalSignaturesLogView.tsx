@@ -78,11 +78,26 @@ export default function DigitalSignaturesLogView({ user }: { user?: any }) {
           <ShieldCheck className="w-7 h-7 text-[var(--primary-color)]" />
           สมุดบันทึกหลักฐานความถูกต้อง (Digital TSA Logs)
         </h1>
-        <div className="flex gap-2">
-            <button onClick={fetchLogs} className="p-2 bg-[var(--bg-canvas)] border rounded-lg hover:bg-[var(--border-lighter)] cursor-pointer"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}/></button>
-            {(user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ') && (
-                <button onClick={clearAll} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-medium cursor-pointer">ลบทั้งหมด</button>
-            )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <button 
+            type="button"
+            onClick={fetchLogs} 
+            className="flex items-center justify-center gap-2 px-3.5 py-2 bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-xl text-xs font-bold cursor-pointer transition-all hover:shadow-xs group"
+            title="รีเฟรชประวัติการลงนาม"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[var(--primary-color)]' : 'text-[var(--primary-color)] group-hover:rotate-180 transition-transform duration-500'}`}/>
+            <span>รีเฟรชประวัติ</span>
+          </button>
+          {(user?.role === 'admin' || user?.role === 'ผู้ดูแลระบบ') && (
+            <button 
+              type="button"
+              onClick={clearAll} 
+              className="flex items-center justify-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs hover:shadow-sm"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>ล้างประวัติทั้งหมด</span>
+            </button>
+          )}
         </div>
       </div>
       

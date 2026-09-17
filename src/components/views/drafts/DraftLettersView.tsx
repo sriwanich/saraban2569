@@ -20,6 +20,8 @@ import {
   countArabicDigitsInHtml,
   convertDomElementToThaiNumerals,
   convertDomElementToArabicNumerals,
+  getGarudaUrl,
+  getLogoUrl,
   DraftItem,
   OFFICIAL_STANDARD_PHRASES,
   PRESET_OFFICIAL_TEMPLATES,
@@ -300,7 +302,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
 
   // Insert Garuda Seal
   const insertGaruda = () => {
-    const src = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
+    const src = getGarudaUrl();
     const alignStyle = garudaAlign === 'left' ? 'text-align:left;' : garudaAlign === 'right' ? 'text-align:right;' : 'text-align:center;';
     const html = `<div style="${alignStyle}margin:12px 0;"><img src="${src}" width="${garudaSize}" height="${garudaSize}" style="width:${garudaSize}px;height:${garudaSize}px;object-fit:contain;display:inline-block;" alt="ตราครุฑ" /></div>`;
     if (editorRef.current) {

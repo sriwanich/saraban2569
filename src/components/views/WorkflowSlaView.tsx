@@ -473,65 +473,74 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
       </div>
 
       {/* Tab Nav & Search */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-4 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[var(--border-lighter)] pb-4">
-          <div className="flex items-center space-x-2 bg-[var(--bg-canvas)] p-1 rounded-xl border border-[var(--border-lighter)]">
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[var(--border-light)] pb-4">
+          <div className="grid grid-cols-2 gap-2 bg-[var(--bg-overlay)] p-1.5 rounded-xl border border-[var(--border-light)] w-full sm:w-auto">
             <button
+              type="button"
               onClick={() => setActiveTab('instances')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer group ${
                 activeTab === 'instances' 
                   ? 'bg-[var(--primary-color)] text-white shadow-sm' 
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
               }`}
             >
-              รายการติดตามการเดินหนังสือ ({workflowInstances.length})
+              <Workflow className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
+              <span>รายการติดตามการเดินหนังสือ ({workflowInstances.length})</span>
             </button>
             <button
+              type="button"
               onClick={() => setActiveTab('designer')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer group ${
                 activeTab === 'designer' 
                   ? 'bg-[var(--primary-color)] text-white shadow-sm' 
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
               }`}
             >
-              แม่แบบเส้นทางหนังสือ ({workflowTemplates.length})
+              <FileCheck className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
+              <span>แม่แบบเส้นทางหนังสือ ({workflowTemplates.length})</span>
             </button>
           </div>
 
           <button
             onClick={fetchData}
-            className="p-2 text-xs text-[var(--text-muted)] hover:text-[var(--primary-color)] border border-[var(--border-lighter)] rounded-xl hover:bg-[var(--bg-canvas)] transition-colors flex items-center space-x-1 cursor-pointer"
+            className="p-2.5 text-xs text-[var(--text-secondary)] hover:text-[var(--primary-color)] border border-[var(--border-light)] rounded-xl hover:bg-[var(--bg-elevated)] transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs"
             title="รีเฟรชข้อมูล"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">รีเฟรชข้อมูล</span>
+            <span className="hidden sm:inline font-semibold">รีเฟรชข้อมูล</span>
           </button>
         </div>
 
         {/* Tab 1: Workflow Instances Monitor */}
         {activeTab === 'instances' && (
           <div className="space-y-4">
-            {/* Filter Tabs & Search Bar */}
+            {/* Filter Grid & Search Bar */}
             <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-              <div className="flex items-center space-x-1 overflow-x-auto pb-1 md:pb-0 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                 {[
-                  { id: 'all', label: `ทั้งหมด (${workflowInstances.length})` },
-                  { id: 'active', label: `กำลังดำเนินการ (${activeTasks.length})` },
-                  { id: 'overdue', label: `เกินกำหนดเวลา (${overdueTasks.length})` },
-                  { id: 'completed', label: `เสร็จสิ้นแล้ว (${completedTasks.length})` },
-                ].map(f => (
-                  <button
-                    key={f.id}
-                    onClick={() => setStatusFilter(f.id as any)}
-                    className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
-                      statusFilter === f.id
-                        ? 'bg-[var(--primary-color)]/10 text-[var(--primary-color)] font-bold border border-[var(--primary-color)]/30'
-                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ))}
+                  { id: 'all', label: `ทั้งหมด (${workflowInstances.length})`, icon: Workflow, color: 'hover:text-blue-500' },
+                  { id: 'active', label: `กำลังดำเนินการ (${activeTasks.length})`, icon: Clock, color: 'hover:text-amber-500' },
+                  { id: 'overdue', label: `เกินกำหนดเวลา (${overdueTasks.length})`, icon: AlertCircle, color: 'hover:text-red-500' },
+                  { id: 'completed', label: `เสร็จสิ้นแล้ว (${completedTasks.length})`, icon: CheckCircle2, color: 'hover:text-emerald-500' },
+                ].map(f => {
+                  const Icon = f.icon;
+                  const isActive = statusFilter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => setStatusFilter(f.id as any)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border font-bold transition-all cursor-pointer group ${
+                        isActive
+                          ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)] shadow-sm'
+                          : `bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] ${f.color} hover:border-[var(--primary-color)]/40 hover:bg-[var(--bg-elevated)]`
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 shrink-0 transition-transform duration-300 group-hover:scale-110 ${isActive ? 'text-white' : 'text-[var(--text-muted)]'}`} />
+                      <span className="truncate">{f.label}</span>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="relative min-w-[240px]">

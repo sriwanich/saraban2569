@@ -151,6 +151,17 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         isCentral: initialData.isCentral !== undefined ? Number(initialData.isCentral) : 1
       };
     }
+
+    try {
+      const saved = localStorage.getItem('edms_doc_modal_draft');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && (parsed.title || parsed.to || parsed.note || parsed.content || (parsed.attachments && parsed.attachments.length > 0))) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+
     const activeType = defaultType || 'inbox';
     const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
     const initIsCentral = isCentralPrivileged ? 1 : 0;
@@ -177,6 +188,17 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
       isCentral: initIsCentral
     };
   });
+
+  // Auto-save form draft to localStorage
+  useEffect(() => {
+    if (!initialData && formData) {
+      if (formData.title || formData.to || formData.note || formData.content || (formData.attachments && formData.attachments.length > 0)) {
+        try {
+          localStorage.setItem('edms_doc_modal_draft', JSON.stringify(formData));
+        } catch (e) {}
+      }
+    }
+  }, [formData, initialData]);
 
   // Fetch custom numbering rules & reserved numbers on mount
   useEffect(() => {
@@ -1194,6 +1216,9 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         console.error('Failed to initiate workflow on doc submit:', wfErr);
       }
     }
+
+    // Clear draft storage on save
+    try { localStorage.removeItem('edms_doc_modal_draft'); } catch (e) {}
 
     onSave(newDoc);
   };

@@ -482,58 +482,32 @@ export default function LogsView({ user }: { user?: any }) {
             )}
           </div>
 
-          {/* Filter Badges (Horizontal scrollable on small screens) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none w-full md:w-auto">
-            <button
-              onClick={() => setSelectedFilter('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition whitespace-nowrap cursor-pointer ${
-                selectedFilter === 'ALL'
-                  ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                  : 'bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] border border-[var(--border-light)]'
-              }`}
-            >
-              ทั้งหมด ({logs.length})
-            </button>
-            <button
-              onClick={() => setSelectedFilter('LOGIN')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition whitespace-nowrap cursor-pointer ${
-                selectedFilter === 'LOGIN'
-                  ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                  : 'bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] border border-[var(--border-light)]'
-              }`}
-            >
-              เข้าสู่ระบบ
-            </button>
-            <button
-              onClick={() => setSelectedFilter('DOCS')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition whitespace-nowrap cursor-pointer ${
-                selectedFilter === 'DOCS'
-                  ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                  : 'bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] border border-[var(--border-light)]'
-              }`}
-            >
-              งานเอกสาร
-            </button>
-            <button
-              onClick={() => setSelectedFilter('DRAFT')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition whitespace-nowrap cursor-pointer ${
-                selectedFilter === 'DRAFT'
-                  ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                  : 'bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] border border-[var(--border-light)]'
-              }`}
-            >
-              ร่างเอกสาร
-            </button>
-            <button
-              onClick={() => setSelectedFilter('SETTINGS')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition whitespace-nowrap cursor-pointer ${
-                selectedFilter === 'SETTINGS'
-                  ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                  : 'bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] border border-[var(--border-light)]'
-              }`}
-            >
-              ตั้งค่า/ผู้ใช้
-            </button>
+          {/* Filter Grid Menu */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 w-full md:w-auto shrink-0">
+            {[
+              { id: 'ALL', label: `ทั้งหมด (${logs.length})`, icon: Database },
+              { id: 'LOGIN', label: 'เข้าสู่ระบบ', icon: Key },
+              { id: 'DOCS', label: 'งานเอกสาร', icon: FileText },
+              { id: 'DRAFT', label: 'ร่างเอกสาร', icon: FileEdit },
+              { id: 'SETTINGS', label: 'ตั้งค่า/ผู้ใช้', icon: Settings }
+            ].map(f => {
+              const Icon = f.icon;
+              const isActive = selectedFilter === f.id;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setSelectedFilter(f.id)}
+                  className={`flex items-center justify-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                    isActive
+                      ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)] shadow-xs font-bold'
+                      : 'bg-white dark:bg-slate-900/50 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-lighter)] border-[var(--border-light)]'
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-[var(--primary-color)]'}`} />
+                  <span>{f.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
