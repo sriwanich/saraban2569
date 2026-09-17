@@ -841,8 +841,14 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                 margin: 0;
                 padding: 0;
                 background: #fff;
-                font-family: 'TH SarabunPSK', 'Sarabun', sans-serif;
+                font-family: 'TH SarabunPSK', 'TH Sarabun New', 'Sarabun', sans-serif;
+                font-size: 16pt;
+                line-height: 1.5;
                 color: #000;
+                -webkit-font-smoothing: antialiased;
+                text-rendering: optimizeLegibility;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
               }
             </style>
           </head>
@@ -1072,7 +1078,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
               <button
                 onClick={handlePrintDoc}
                 className="p-1.5 bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-lg transition-colors cursor-pointer"
-                title="สั่งพิมพ์ A4"
+                title="สั่งพิมพ์"
               >
                 <Printer className="w-4 h-4 text-violet-500" />
               </button>
@@ -1642,7 +1648,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                   subtitle="รองรับการปรับสัดส่วนอัตโนมัติบนหน้าจอมือถือและเดสก์ท็อป (Real-time)"
                   htmlContent={getCurrentDocHtml()}
                   onPrint={handlePrintDoc}
-                  paperClassName="p-8 sm:p-12"
+                  paperClassName="p-[20mm_20mm_20mm_25mm]"
                 />
               </div>
             )}

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { thDate, downloadAsDoc, getLogoHTML } from './draftData';
 import { useConfirm } from '../../../context/ConfirmContext';
+import A4PaperPreview from '../../A4PaperPreview';
 
 export interface ProjectSummaryItem {
   id?: number;
@@ -991,41 +992,41 @@ export default function ProjectSummaryView({ user }: Props) {
 
           {/* Generated Result Preview Card */}
           {generatedHtml && (
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-6 shadow-md space-y-4">
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-4 sm:p-6 shadow-md space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-lighter)] pb-3">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                  <span className="text-sm font-bold text-[var(--text-primary)]">ผลลัพธ์รายงานสรุปโครงการ</span>
+                  <span className="text-sm font-bold text-[var(--text-primary)]">ผลลัพธ์รายงานสรุปโครงการ (A4 Official Preview)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleSaveSummary}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm cursor-pointer transition-all"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>บันทึกสรุปโครงการ</span>
                   </button>
-                  <button
-                    onClick={handlePrint}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-lg shadow-sm cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>พิมพ์เอกสาร</span>
-                  </button>
-                  <button
-                    onClick={handleExportWord}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer"
-                  >
-                    <FileDown className="w-3.5 h-3.5" />
-                    <span>ส่งออก Word (.docx)</span>
-                  </button>
                 </div>
               </div>
 
-              <div 
-                className="bg-white text-slate-900 p-6 rounded-xl border border-slate-200 overflow-x-auto shadow-inner"
-                dangerouslySetInnerHTML={{ __html: generatedHtml }}
-              />
+              <div className="bg-slate-100 dark:bg-slate-900/60 p-2 sm:p-4 rounded-xl border border-[var(--border-lighter)]">
+                <A4PaperPreview
+                  title={`รายงานสรุปผลการดำเนินงานโครงการ: ${name || 'โครงการ'}`}
+                  subtitle={`แบบประเมินและสรุปโครงการตามกรอบยุทธศาสตร์ ประจำปีงบประมาณ พ.ศ. ${year}`}
+                  htmlContent={generatedHtml}
+                  onPrint={handlePrint}
+                  paperClassName="p-[25mm_20mm_20mm_25mm]"
+                  extraActions={
+                    <button
+                      onClick={handleExportWord}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm cursor-pointer transition-all"
+                    >
+                      <FileDown className="w-3.5 h-3.5" />
+                      <span>ส่งออก Word (.docx)</span>
+                    </button>
+                  }
+                />
+              </div>
             </div>
           )}
         </div>

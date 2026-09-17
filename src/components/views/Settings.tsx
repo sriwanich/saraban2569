@@ -192,8 +192,10 @@ export default function Settings(props: SettingsProps) {
     let timer: any = null;
     if (activeTab === 'system_health' && props.user?.role === 'admin' && isAutoRefreshHealth) {
       timer = setInterval(() => {
-        fetchSystemHealth();
-      }, 10000);
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          fetchSystemHealth();
+        }
+      }, 30000);
     }
     return () => {
       if (timer) clearInterval(timer);
@@ -2489,7 +2491,7 @@ export default function Settings(props: SettingsProps) {
                     Node.js {systemHealth?.server?.nodeVersion || 'v20'} ({systemHealth?.server?.platform || 'Linux'})
                   </span>
                   <span className="font-mono text-slate-600 dark:text-slate-400 text-[10px] bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-slate-700">
-                    RAYONG-EDMS v2.8.0-PROD-CONTAINER
+                    RAYONG-EDMS v2.9.0-PROD-CONTAINER
                   </span>
                 </div>
               </div>

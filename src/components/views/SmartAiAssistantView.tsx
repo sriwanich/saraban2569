@@ -43,6 +43,7 @@ import {
   RefreshCw,
   AlertTriangle
 } from 'lucide-react';
+import A4PaperPreview from '../A4PaperPreview';
 import { DocumentItem } from '../../types';
 
 interface Props {
@@ -50,6 +51,7 @@ interface Props {
   documents: DocumentItem[];
   onViewDoc: (doc: DocumentItem | string) => void;
   onNavigateToDrafts?: (draftData?: any) => void;
+  onNavigateToTab?: (tab: string) => void;
   isFloatingDrawer?: boolean;
   onCloseDrawer?: () => void;
 }
@@ -62,13 +64,14 @@ export interface ChatMessage {
   payload?: any;
 }
 
-type PromptCategory = 'all' | 'search' | 'summary' | 'draft' | 'pending' | 'rewrite' | 'regulation';
+type PromptCategory = 'all' | 'search' | 'disaster' | 'summary' | 'draft' | 'pending' | 'rewrite' | 'regulation';
 
 export default function SmartAiAssistantView({
   user,
   documents,
   onViewDoc,
   onNavigateToDrafts,
+  onNavigateToTab,
   isFloatingDrawer = false,
   onCloseDrawer
 }: Props) {
@@ -107,6 +110,10 @@ export default function SmartAiAssistantView({
   const [savedDraftSuccess, setSavedDraftSuccess] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<PromptCategory>('all');
   const [attachedDoc, setAttachedDoc] = useState<DocumentItem | null>(null);
+  const [attachedIncident, setAttachedIncident] = useState<any | null>(null);
+  const [urgentIncidents, setUrgentIncidents] = useState<any[]>([]);
+  const [selectedIncidentModal, setSelectedIncidentModal] = useState<any | null>(null);
+  const [selectorTab, setSelectorTab] = useState<'docs' | 'incidents'>('docs');
   const [isDocSelectorOpen, setIsDocSelectorOpen] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
@@ -116,8 +123,56 @@ export default function SmartAiAssistantView({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
 
+  // Load Urgent Incidents
+  useEffect(() => {
+    fetch('/api/urgent-incidents')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setUrgentIncidents(data);
+        } else if (data && data.success && Array.isArray(data.data)) {
+          setUrgentIncidents(data.data);
+        }
+      })
+      .catch(err => {
+        console.warn('Failed to fetch urgent incidents for AI assistant:', err);
+      });
+  }, []);
+
   // Preset Prompts categorized
   const presetPrompts = [
+    {
+      id: 'p-disaster-1',
+      icon: ShieldAlert,
+      label: 'ค้นหารายงานเหตุด่วนสาธารณภัยล่าสุดในจังหวัดระยอง',
+      category: 'disaster',
+      categoryName: 'เหตุด่วนสาธารณภัย',
+      color: 'from-red-500/10 to-orange-500/10 text-red-600 dark:text-red-400 border-red-500/20'
+    },
+    {
+      id: 'p-disaster-2',
+      icon: Flame,
+      label: 'สรุปรายงานเหตุด่วนอุทกภัยและวาตภัยในพื้นที่อำเภอเมืองระยอง',
+      category: 'disaster',
+      categoryName: 'เหตุด่วนสาธารณภัย',
+      color: 'from-orange-500/10 to-amber-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20'
+    },
+    {
+      id: 'p-disaster-3',
+      icon: AlertTriangle,
+      label: 'ค้นหาเหตุด่วนสารเคมีรั่วไหล/อัคคีภัยในนิคมอุตสาหกรรมปลวกแดง',
+      category: 'disaster',
+      categoryName: 'เหตุด่วนสาธารณภัย',
+      color: 'from-amber-500/10 to-red-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+    },
+    {
+      id: 'p-disaster-4',
+      icon: FileEdit,
+      label: 'ยกร่างหนังสือรายงานเหตุด่วนสาธารณภัยถึงผู้ว่าราชการจังหวัดระยอง',
+      category: 'disaster',
+      categoryName: 'เหตุด่วนสาธารณภัย',
+      color: 'from-rose-500/10 to-orange-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+    },
     {
       id: 'p-search-1',
       icon: Search,
@@ -292,13 +347,18 @@ export default function SmartAiAssistantView({
     if (!textToSend || !textToSend.trim() || isLoading) return;
 
     const currentAttached = attachedDoc;
+    const currentAttachedIncident = attachedIncident;
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       sender: 'user',
       timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
       text: textToSend.trim(),
-      payload: currentAttached ? { attachedDocInfo: { title: currentAttached.title, docNumber: currentAttached.docNumber || currentAttached.receiveNumber } } : undefined
+      payload: currentAttached 
+        ? { attachedDocInfo: { title: currentAttached.title, docNumber: currentAttached.docNumber || currentAttached.receiveNumber } }
+        : currentAttachedIncident 
+        ? { attachedIncidentInfo: { reportNumber: currentAttachedIncident.reportNumber || currentAttachedIncident.id, incidentTypes: currentAttachedIncident.incidentTypes, district: currentAttachedIncident.district } }
+        : undefined
     };
 
     setMessages(prev => [...prev, userMsg]);
@@ -320,6 +380,28 @@ export default function SmartAiAssistantView({
       note: (currentAttached.note || '').substring(0, 1000)
     } : null;
 
+    const sanitizedSelectedIncident = currentAttachedIncident ? {
+      id: currentAttachedIncident.id,
+      reportNumber: currentAttachedIncident.reportNumber || '',
+      incidentTypes: currentAttachedIncident.incidentTypes || [],
+      province: currentAttachedIncident.province || 'ระยอง',
+      district: currentAttachedIncident.district || '',
+      subdistrict: currentAttachedIncident.subdistrict || '',
+      village: currentAttachedIncident.village || '',
+      incidentDate: currentAttachedIncident.incidentDate || '',
+      incidentTime: currentAttachedIncident.incidentTime || '',
+      status: currentAttachedIncident.status || 'กำลังเผชิญเหตุ',
+      affectedPeople: currentAttachedIncident.affectedPeople || 0,
+      affectedHouseholds: currentAttachedIncident.affectedHouseholds || 0,
+      injuredCount: currentAttachedIncident.injuredCount || 0,
+      deceasedCount: currentAttachedIncident.deceasedCount || 0,
+      missingCount: currentAttachedIncident.missingCount || 0,
+      estimatedDamage: currentAttachedIncident.estimatedDamage || '',
+      circumstances: currentAttachedIncident.circumstances || '',
+      actionsTaken: currentAttachedIncident.actionsTaken || '',
+      proposals: currentAttachedIncident.proposals || []
+    } : null;
+
     const controller = new AbortController();
     const timeoutTimer = setTimeout(() => controller.abort(), 45000);
 
@@ -337,6 +419,7 @@ export default function SmartAiAssistantView({
             department: user.department
           } : undefined,
           selectedDoc: sanitizedSelectedDoc,
+          selectedIncident: sanitizedSelectedIncident,
           history: messages.slice(-6).map(m => ({ role: m.sender, text: m.text }))
         })
       });
@@ -563,6 +646,7 @@ export default function SmartAiAssistantView({
           </span>
           {[
             { id: 'all', label: '🌟 ทั้งหมด' },
+            { id: 'disaster', label: '🚨 เหตุด่วนสาธารณภัย' },
             { id: 'search', label: '🔍 ค้นหาเอกสาร' },
             { id: 'summary', label: '📝 สรุปสาระสำคัญ' },
             { id: 'draft', label: '✍️ ยกร่างหนังสือ' },
@@ -584,7 +668,7 @@ export default function SmartAiAssistantView({
           ))}
         </div>
 
-        {/* Attached Document Banner */}
+        {/* Attached Document or Incident Banner */}
         <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 px-3.5 rounded-2xl bg-[var(--bg-overlay)] border border-[var(--border-light)] text-xs">
           <div className="flex items-center gap-2">
             <Paperclip className="w-4 h-4 text-indigo-500 shrink-0" />
@@ -601,15 +685,34 @@ export default function SmartAiAssistantView({
                 </span>
                 <button
                   onClick={() => setAttachedDoc(null)}
-                  className="p-1 rounded-full hover:bg-red-500/10 text-red-500 hover:text-red-700 transition-colors"
+                  className="p-1 rounded-full hover:bg-red-500/10 text-red-500 hover:text-red-700 transition-colors cursor-pointer"
                   title="ปลดเอกสารที่แนบ"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : attachedIncident ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-red-600 dark:text-red-400">
+                  🚨 แนบรายงานเหตุด่วน:
+                </span>
+                <span className="font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-bold">
+                  {attachedIncident.reportNumber || attachedIncident.id}
+                </span>
+                <span className="text-[var(--text-primary)] font-medium max-w-xs sm:max-w-md truncate">
+                  "{Array.isArray(attachedIncident.incidentTypes) ? attachedIncident.incidentTypes.join(', ') : attachedIncident.incidentTypes || 'สาธารณภัย'}" (อ.{attachedIncident.district || 'เมืองระยอง'})
+                </span>
+                <button
+                  onClick={() => setAttachedIncident(null)}
+                  className="p-1 rounded-full hover:bg-red-500/10 text-red-500 hover:text-red-700 transition-colors cursor-pointer"
+                  title="ปลดรายงานที่แนบ"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             ) : (
               <span className="text-[var(--text-secondary)]">
-                ต้องการวิเคราะห์หนังสือฉบับเฉพาะเจาะจงหรือไม่?
+                ต้องการวิเคราะห์หนังสือราชการ หรือ รายงานเหตุด่วนสาธารณภัยเฉพาะเรื่องหรือไม่?
               </span>
             )}
           </div>
@@ -619,68 +722,156 @@ export default function SmartAiAssistantView({
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => handleSend(`สรุปสาระสำคัญของหนังสือ "${attachedDoc.title}" (${attachedDoc.docNumber || attachedDoc.receiveNumber})`)}
-                  className="px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 font-medium transition-colors"
+                  className="px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 font-medium transition-colors cursor-pointer"
                 >
                   📝 สรุปเรื่องนี้
                 </button>
                 <button
                   onClick={() => handleSend(`ยกร่างหนังสือตอบกลับเรื่อง "${attachedDoc.title}" (${attachedDoc.docNumber || attachedDoc.receiveNumber})`)}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-medium transition-colors"
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-medium transition-colors cursor-pointer"
                 >
                   ✍️ ร่างตอบกลับ
+                </button>
+              </div>
+            ) : attachedIncident ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => handleSend(`สรุปความเสียหายและมาตรการช่วยเหลือของรายงานเหตุด่วน ${attachedIncident.reportNumber || attachedIncident.id}`)}
+                  className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-medium transition-colors cursor-pointer"
+                >
+                  📝 สรุปความเสียหาย
+                </button>
+                <button
+                  onClick={() => handleSend(`ยกร่างหนังสือรายงานเหตุด่วนสาธารณภัยถึงผู้ว่าราชการจังหวัดระยอง จากรายงาน ${attachedIncident.reportNumber || attachedIncident.id} ${Array.isArray(attachedIncident.incidentTypes) ? attachedIncident.incidentTypes.join(', ') : ''} ที่ อ.${attachedIncident.district || 'เมืองระยอง'}`)}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-medium transition-colors cursor-pointer"
+                >
+                  ✍️ ยกร่างรายงาน ผวจ.
                 </button>
               </div>
             ) : (
               <button
                 onClick={() => setIsDocSelectorOpen(!isDocSelectorOpen)}
-                className="px-3 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 transition-colors"
+                className="px-3 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <Paperclip className="w-3.5 h-3.5" />
-                <span>{isDocSelectorOpen ? 'ปิดหน้าต่างเลือก' : 'เลือกเอกสารในระบบ'}</span>
+                <span>{isDocSelectorOpen ? 'ปิดหน้าต่างเลือก' : 'เลือกแนบเอกสาร / เหตุด่วน'}</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Collapsible Document Selector Dropdown */}
-        {isDocSelectorOpen && !attachedDoc && (
+        {/* Collapsible Document & Incident Selector Dropdown */}
+        {isDocSelectorOpen && !attachedDoc && !attachedIncident && (
           <div className="p-3 rounded-2xl bg-[var(--bg-elevated)] border border-indigo-500/30 shadow-lg space-y-2 animate-fade-in">
-            <div className="flex items-center justify-between text-xs font-bold text-[var(--text-primary)] pb-1 border-b border-[var(--border-light)]">
-              <span>เลือกหนังสือราชการล่าสุดในระบบเพื่อส่งให้ AI วิเคราะห์ ({documents.length} รายการ):</span>
+            {/* Tabs for choosing between Documents and Incidents */}
+            <div className="flex items-center justify-between border-b border-[var(--border-light)] pb-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectorTab('docs')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectorTab === 'docs'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-[var(--bg-overlay)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  📄 หนังสือราชการ ({documents.length})
+                </button>
+                <button
+                  onClick={() => setSelectorTab('incidents')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectorTab === 'incidents'
+                      ? 'bg-red-600 text-white shadow-xs'
+                      : 'bg-[var(--bg-overlay)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  🚨 แบบรายงานเหตุด่วนสาธารณภัย ({urgentIncidents.length})
+                </button>
+              </div>
               <button
                 onClick={() => setIsDocSelectorOpen(false)}
-                className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
-              {documents.slice(0, 15).map(doc => (
-                <div
-                  key={doc.id}
-                  onClick={() => {
-                    setAttachedDoc(doc);
-                    setIsDocSelectorOpen(false);
-                  }}
-                  className="p-2 rounded-xl bg-[var(--bg-overlay)] hover:bg-indigo-500/10 border border-[var(--border-light)] hover:border-indigo-500/40 cursor-pointer flex items-center justify-between gap-3 text-xs transition-all"
-                >
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                        {doc.docNumber || doc.receiveNumber || 'ไม่ระบุเลข'}
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[var(--border-light)] text-[var(--text-secondary)]">
-                        {doc.department || 'ฝ่ายงาน'}
-                      </span>
+
+            {/* Documents Tab */}
+            {selectorTab === 'docs' && (
+              <div className="max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
+                {documents.slice(0, 15).map(doc => (
+                  <div
+                    key={doc.id}
+                    onClick={() => {
+                      setAttachedDoc(doc);
+                      setAttachedIncident(null);
+                      setIsDocSelectorOpen(false);
+                    }}
+                    className="p-2 rounded-xl bg-[var(--bg-overlay)] hover:bg-indigo-500/10 border border-[var(--border-light)] hover:border-indigo-500/40 cursor-pointer flex items-center justify-between gap-3 text-xs transition-all"
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {doc.docNumber || doc.receiveNumber || 'ไม่ระบุเลข'}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[var(--border-light)] text-[var(--text-secondary)]">
+                          {doc.department || 'ฝ่ายงาน'}
+                        </span>
+                      </div>
+                      <p className="font-medium text-[var(--text-primary)] truncate">{doc.title}</p>
                     </div>
-                    <p className="font-medium text-[var(--text-primary)] truncate">{doc.title}</p>
+                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold shrink-0">
+                      แนบหนังสือนี้ ➔
+                    </span>
                   </div>
-                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold shrink-0">
-                    เลือกเอกสารนี้ ➔
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
+
+            {/* Incidents Tab */}
+            {selectorTab === 'incidents' && (
+              <div className="max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
+                {urgentIncidents.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-[var(--text-muted)]">
+                    ยังไม่มีข้อมูลรายงานเหตุด่วนสาธารณภัยในระบบ
+                  </div>
+                ) : (
+                  urgentIncidents.slice(0, 15).map((inc: any) => {
+                    const types = Array.isArray(inc.incidentTypes) ? inc.incidentTypes.join(', ') : inc.incidentTypes || 'สาธารณภัย';
+                    return (
+                      <div
+                        key={inc.id}
+                        onClick={() => {
+                          setAttachedIncident(inc);
+                          setAttachedDoc(null);
+                          setIsDocSelectorOpen(false);
+                        }}
+                        className="p-2 rounded-xl bg-[var(--bg-overlay)] hover:bg-red-500/10 border border-[var(--border-light)] hover:border-red-500/40 cursor-pointer flex items-center justify-between gap-3 text-xs transition-all"
+                      >
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-red-600 dark:text-red-400">
+                              {inc.reportNumber || inc.id}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-red-500/10 text-red-600 font-semibold">
+                              {types}
+                            </span>
+                            <span className="text-[10px] text-[var(--text-muted)]">
+                              📍 อ.{inc.district || '-'} ต.{inc.subdistrict || '-'}
+                            </span>
+                          </div>
+                          <p className="font-medium text-[var(--text-primary)] truncate">
+                            {inc.circumstances || `รายงานเหตุด่วนสาธารณภัย (${types})`}
+                          </p>
+                        </div>
+                        <span className="text-[10px] text-red-600 dark:text-red-400 font-bold shrink-0">
+                          แนบรายงานเหตุด่วนนี้ ➔
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -851,14 +1042,14 @@ export default function SmartAiAssistantView({
                                   const realDoc = documents.find(d => d.id === doc.id || d.docNumber === doc.docNumber);
                                   onViewDoc(realDoc || doc.id);
                                 }}
-                                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors"
+                                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
                                 <span>ดูเอกสาร</span>
                               </button>
                               <button
                                 onClick={() => handleSend(`สรุปสาระสำคัญของหนังสือ "${doc.title}" (${doc.docNumber || doc.receiveNumber})`)}
-                                className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-overlay)] hover:bg-[var(--border-light)] border border-[var(--border-light)] text-xs text-[var(--text-secondary)] font-medium transition-colors"
+                                className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-overlay)] hover:bg-[var(--border-light)] border border-[var(--border-light)] text-xs text-[var(--text-secondary)] font-medium transition-colors cursor-pointer"
                                 title="สั่ง AI สรุปหนังสือเรื่องนี้"
                               >
                                 📝 สรุป
@@ -866,6 +1057,150 @@ export default function SmartAiAssistantView({
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 1.5 MATCHED URGENT INCIDENTS (Disaster / Incident Reports) */}
+                  {msg.payload.matchedIncidents && msg.payload.matchedIncidents.length > 0 && (
+                    <div className="space-y-2 mt-3 p-3.5 rounded-2xl bg-gradient-to-br from-red-500/5 via-orange-500/5 to-transparent border border-red-500/30">
+                      <div className="flex items-center justify-between text-xs font-bold text-red-600 dark:text-red-400 pb-1.5 border-b border-red-500/20">
+                        <span className="flex items-center gap-1.5">
+                          <ShieldAlert className="w-4 h-4" />
+                          แบบรายงานเหตุด่วนสาธารณภัยที่เกี่ยวข้อง ({msg.payload.matchedIncidents.length} เหตุการณ์):
+                        </span>
+                        {onNavigateToTab && (
+                          <button
+                            onClick={() => onNavigateToTab('urgent_incidents')}
+                            className="text-[11px] hover:underline flex items-center gap-1 text-red-600 dark:text-red-400 font-semibold cursor-pointer"
+                          >
+                            <span>เปิดโมดูลรายงานเหตุด่วน</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 pt-1">
+                        {msg.payload.matchedIncidents.map((inc: any, incIdx: number) => {
+                          const types = Array.isArray(inc.incidentTypes) ? inc.incidentTypes : [inc.incidentTypes || 'สาธารณภัย'];
+                          return (
+                            <div
+                              key={inc.id || incIdx}
+                              className="p-3.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-medium)] hover:border-red-500/40 transition-all space-y-2.5 shadow-sm"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+                                    {inc.reportNumber || inc.id}
+                                  </span>
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 font-semibold">
+                                    {inc.status || 'กำลังเผชิญเหตุ'}
+                                  </span>
+                                  <span className="text-[11px] text-[var(--text-muted)] flex items-center gap-1">
+                                    <Calendar className="w-3 h-3" />
+                                    {inc.incidentDate || inc.reportDate || '-'} {inc.incidentTime ? `(${inc.incidentTime} น.)` : ''}
+                                  </span>
+                                </div>
+                                <span className="text-xs font-bold text-[var(--text-secondary)]">
+                                  📍 อ.{inc.district || '-'} ต.{inc.subdistrict || '-'} จ.{inc.province || 'ระยอง'}
+                                </span>
+                              </div>
+
+                              {/* Disaster Types Badges */}
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {types.map((t: string, tIdx: number) => (
+                                  <span
+                                    key={tIdx}
+                                    className="text-[11px] font-semibold px-2.5 py-0.5 rounded-md bg-red-600 text-white shadow-xs flex items-center gap-1"
+                                  >
+                                    <Flame className="w-3 h-3" />
+                                    {t}
+                                  </span>
+                                ))}
+                                {inc.village && (
+                                  <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-overlay)] border border-[var(--border-light)] text-[var(--text-secondary)]">
+                                    {inc.village}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Incident Circumstances */}
+                              {inc.circumstances && (
+                                <p className="text-xs text-[var(--text-primary)] bg-[var(--bg-overlay)] p-2 rounded-lg border border-[var(--border-light)] leading-relaxed">
+                                  <span className="font-bold text-red-600 dark:text-red-400">พฤติการณ์เหตุการณ์: </span>
+                                  {inc.circumstances}
+                                </p>
+                              )}
+
+                              {/* Impact Stats Grid */}
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                                <div className="p-2 rounded-lg bg-red-500/5 border border-red-500/10">
+                                  <span className="text-[10px] text-[var(--text-muted)] block">ผู้ประสบภัย</span>
+                                  <span className="font-bold text-red-600 dark:text-red-400">
+                                    {inc.affectedPeople || 0} คน / {inc.affectedHouseholds || 0} ครัวเรือน
+                                  </span>
+                                </div>
+                                <div className="p-2 rounded-lg bg-orange-500/5 border border-orange-500/10">
+                                  <span className="text-[10px] text-[var(--text-muted)] block">บาดเจ็บ</span>
+                                  <span className="font-bold text-orange-600 dark:text-orange-400">
+                                    {inc.injuredCount || 0} ราย
+                                  </span>
+                                </div>
+                                <div className="p-2 rounded-lg bg-rose-500/5 border border-rose-500/10">
+                                  <span className="text-[10px] text-[var(--text-muted)] block">เสียชีวิต/สูญหาย</span>
+                                  <span className="font-bold text-rose-700 dark:text-rose-400">
+                                    {inc.deceasedCount || 0} / {inc.missingCount || 0} ราย
+                                  </span>
+                                </div>
+                                <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                                  <span className="text-[10px] text-[var(--text-muted)] block">ประเมินความเสียหาย</span>
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400 truncate block">
+                                    {inc.estimatedDamage ? `${Number(inc.estimatedDamage).toLocaleString()} บ.` : 'อยู่ระหว่างสำรวจ'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Actions Taken */}
+                              {inc.actionsTaken && (
+                                <div className="text-[11px] text-[var(--text-secondary)] bg-emerald-500/5 p-2 rounded-lg border border-emerald-500/10">
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400">การให้ความช่วยเหลือเบื้องต้น: </span>
+                                  {inc.actionsTaken}
+                                </div>
+                              )}
+
+                              {/* Action Buttons */}
+                              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[var(--border-light)]">
+                                <button
+                                  onClick={() => setSelectedIncidentModal(inc)}
+                                  className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>เปิดดูแบบรายงานเต็ม (A4)</span>
+                                </button>
+                                <button
+                                  onClick={() => handleSend(`สรุปภาพรวมความเสียหายและข้อเสนอแนะในการช่วยเหลือของรายงานเหตุด่วน ${inc.reportNumber || inc.id}`)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 text-xs font-medium transition-colors cursor-pointer"
+                                >
+                                  📝 สรุปความเสียหาย
+                                </button>
+                                <button
+                                  onClick={() => handleSend(`ยกร่างหนังสือรายงานเหตุด่วนสาธารณภัยถึงผู้ว่าราชการจังหวัดระยอง จากเหตุ ${types.join(', ')} ในพื้นที่ ต.${inc.subdistrict || ''} อ.${inc.district || ''} เลขที่ ${inc.reportNumber || inc.id}`)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium transition-colors cursor-pointer"
+                                >
+                                  ✍️ ยกร่างรายงาน ผวจ.
+                                </button>
+                                {onNavigateToTab && (
+                                  <button
+                                    onClick={() => onNavigateToTab('urgent_incidents')}
+                                    className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-overlay)] hover:bg-[var(--border-light)] border border-[var(--border-light)] text-xs text-[var(--text-secondary)] font-medium transition-colors cursor-pointer ml-auto"
+                                  >
+                                    🚀 โมดูลเหตุด่วน
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1282,22 +1617,37 @@ export default function SmartAiAssistantView({
           }}
           className="relative rounded-2xl bg-[var(--bg-overlay)] border border-[var(--border-medium)] focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-md overflow-hidden"
         >
-          {attachedDoc && (
+          {attachedDoc ? (
             <div className="flex items-center justify-between px-3 py-1.5 bg-indigo-500/10 border-b border-indigo-500/20 text-xs">
               <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-semibold truncate">
                 <Paperclip className="w-3.5 h-3.5 shrink-0" />
-                กำลังสอบถามเกี่ยวกับ: {attachedDoc.docNumber || attachedDoc.receiveNumber} - {attachedDoc.title}
+                กำลังสอบถามเกี่ยวกับหนังสือ: {attachedDoc.docNumber || attachedDoc.receiveNumber} - {attachedDoc.title}
               </span>
               <button
                 type="button"
                 onClick={() => setAttachedDoc(null)}
-                className="text-red-500 hover:text-red-700 ml-2"
+                className="text-red-500 hover:text-red-700 ml-2 cursor-pointer"
                 title="ยกเลิกการแนบ"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-          )}
+          ) : attachedIncident ? (
+            <div className="flex items-center justify-between px-3 py-1.5 bg-red-500/10 border-b border-red-500/20 text-xs">
+              <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400 font-semibold truncate">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                กำลังสอบถามเกี่ยวกับเหตุด่วน: {attachedIncident.reportNumber || attachedIncident.id} - {Array.isArray(attachedIncident.incidentTypes) ? attachedIncident.incidentTypes.join(', ') : attachedIncident.incidentTypes} (อ.{attachedIncident.district || 'เมืองระยอง'})
+              </span>
+              <button
+                type="button"
+                onClick={() => setAttachedIncident(null)}
+                className="text-red-500 hover:text-red-700 ml-2 cursor-pointer"
+                title="ยกเลิกการแนบ"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : null}
 
           <div className="flex items-center gap-2 p-1.5 px-3">
             <textarea
@@ -1354,9 +1704,182 @@ export default function SmartAiAssistantView({
 
         <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)] px-1 mt-2">
           <span>💡 เคล็ดลับ: กด <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-light)] font-mono text-[10px]">Enter</kbd> เพื่อส่งคำสั่ง, <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-light)] font-mono text-[10px]">Shift + Enter</kbd> เพื่อขึ้นบรรทัดใหม่</span>
-          <span className="hidden sm:inline">รองรับระเบียบสำนักนายกฯ ๒๕๒๖</span>
+          <span className="hidden sm:inline">รองรับระเบียบสำนักนายกฯ ๒๕๒๖ และแบบรายงานเหตุด่วน ปภ.</span>
         </div>
       </div>
+
+      {/* A4 Incident Preview Modal */}
+      {selectedIncidentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-4xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-[var(--border-medium)] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-light)] bg-[var(--bg-overlay)]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-red-600 text-white">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[var(--text-primary)]">
+                    แบบรายงานเหตุด่วนสาธารณภัย (A4 Official Preview)
+                  </h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    เลขที่รายงาน: {selectedIncidentModal.reportNumber || selectedIncidentModal.id} | จังหวัดระยอง
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>พิมพ์รายงาน</span>
+                </button>
+                <button
+                  onClick={() => setSelectedIncidentModal(null)}
+                  className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body: A4 Paper Format */}
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-100 dark:bg-slate-950 custom-scrollbar">
+              <A4PaperPreview
+                title={`รายงานเหตุด่วนสาธารณภัย: ${selectedIncidentModal.reportNumber || selectedIncidentModal.id}`}
+                subtitle="แบบรายงานเหตุด่วนสาธารณภัย กรมป้องกันและบรรเทาสาธารณภัย กระทรวงมหาดไทย"
+                exportFileName={`รายงานเหตุด่วนสาธารณภัย_${selectedIncidentModal.reportNumber || selectedIncidentModal.id}`}
+                onPrint={() => window.print()}
+              >
+                {/* Garuda Crest */}
+                <div className="text-center space-y-1 pb-4 border-b border-slate-200">
+                  <div className="inline-block px-4 py-1 rounded bg-amber-100 text-amber-900 font-bold text-xs tracking-widest uppercase mb-1">
+                    [ ตราครุฑราชการ ]
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900 font-serif">
+                    แบบรายงานเหตุด่วนสาธารณภัย
+                  </h2>
+                  <p className="text-xs text-slate-600">
+                    สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง
+                  </p>
+                </div>
+
+                {/* Header Information */}
+                <div className="grid grid-cols-2 gap-4 text-xs pt-2">
+                  <div>
+                    <span className="font-bold">เลขที่รายงาน: </span>
+                    <span className="font-mono">{selectedIncidentModal.reportNumber || selectedIncidentModal.id}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold">วันที่รายงาน: </span>
+                    <span>{selectedIncidentModal.reportDate || selectedIncidentModal.incidentDate || '-'}</span>
+                  </div>
+                  <div>
+                    <span className="font-bold">เรียน: </span>
+                    <span>ผู้ว่าราชการจังหวัดระยอง / อธิบดีกรมป้องกันและบรรเทาสาธารณภัย</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold">สถานะเหตุการณ์: </span>
+                    <span className="font-bold text-red-600">{selectedIncidentModal.status || 'กำลังเผชิญเหตุ'}</span>
+                  </div>
+                </div>
+
+                {/* Section 1: Incident Summary */}
+                <div className="space-y-2 pt-2">
+                  <h4 className="font-bold text-slate-900 border-b border-slate-300 pb-1 text-sm">
+                    ๑. ข้อมูลเหตุการณ์และสถานที่เกิดเหตุ
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pl-2">
+                    <div>
+                      <span className="font-semibold text-slate-700">ประเภทสาธารณภัย: </span>
+                      <span className="font-bold text-red-600">
+                        {Array.isArray(selectedIncidentModal.incidentTypes) ? selectedIncidentModal.incidentTypes.join(', ') : selectedIncidentModal.incidentTypes || 'สาธารณภัย'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-semibold text-slate-700">วันเวลาเกิดเหตุ: </span>
+                      <span>{selectedIncidentModal.incidentDate || '-'} เวลา {selectedIncidentModal.incidentTime || '-'} น.</span>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <span className="font-semibold text-slate-700">สถานที่เกิดเหตุ: </span>
+                      <span>{selectedIncidentModal.village || ''} ตำบล{selectedIncidentModal.subdistrict || '-'} อำเภอ{selectedIncidentModal.district || '-'} จังหวัด{selectedIncidentModal.province || 'ระยอง'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Circumstances */}
+                <div className="space-y-2">
+                  <h4 className="font-bold text-slate-900 border-b border-slate-300 pb-1 text-sm">
+                    ๒. พฤติการณ์และสภาพความเสียหาย
+                  </h4>
+                  <p className="text-xs text-slate-800 leading-relaxed pl-2 whitespace-pre-line">
+                    {selectedIncidentModal.circumstances || 'อยู่ระหว่างการรวบรวมรายละเอียดพฤติการณ์เหตุการณ์'}
+                  </p>
+                </div>
+
+                {/* Section 3: Casualties and Impact Table */}
+                <div className="space-y-2">
+                  <h4 className="font-bold text-slate-900 border-b border-slate-300 pb-1 text-sm">
+                    ๓. ข้อมูลผู้ประสบภัยและความเสียหายเบื้องต้น
+                  </h4>
+                  <table className="w-full border-collapse border border-slate-300 text-xs text-center">
+                    <thead className="bg-slate-100 font-bold">
+                      <tr>
+                        <th className="border border-slate-300 p-2">ผู้ประสบภัย (คน)</th>
+                        <th className="border border-slate-300 p-2">ครัวเรือน</th>
+                        <th className="border border-slate-300 p-2">บาดเจ็บ (ราย)</th>
+                        <th className="border border-slate-300 p-2">เสียชีวิต (ราย)</th>
+                        <th className="border border-slate-300 p-2">สูญหาย (ราย)</th>
+                        <th className="border border-slate-300 p-2">มูลค่าความเสียหาย (บาท)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="border border-slate-300 p-2">{selectedIncidentModal.affectedPeople || 0}</td>
+                        <td className="border border-slate-300 p-2">{selectedIncidentModal.affectedHouseholds || 0}</td>
+                        <td className="border border-slate-300 p-2 text-orange-600 font-bold">{selectedIncidentModal.injuredCount || 0}</td>
+                        <td className="border border-slate-300 p-2 text-red-600 font-bold">{selectedIncidentModal.deceasedCount || 0}</td>
+                        <td className="border border-slate-300 p-2">{selectedIncidentModal.missingCount || 0}</td>
+                        <td className="border border-slate-300 p-2 font-bold">{selectedIncidentModal.estimatedDamage ? Number(selectedIncidentModal.estimatedDamage).toLocaleString() : 'อยู่ระหว่างสำรวจ'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Section 4: Actions Taken */}
+                <div className="space-y-2">
+                  <h4 className="font-bold text-slate-900 border-b border-slate-300 pb-1 text-sm">
+                    ๔. การให้ความช่วยเหลือและการดำเนินการของหน่วยงาน
+                  </h4>
+                  <p className="text-xs text-slate-800 leading-relaxed pl-2 whitespace-pre-line">
+                    {selectedIncidentModal.actionsTaken || 'สำนักงาน ปภ. จังหวัดระยอง และองค์กรปกครองส่วนท้องถิ่นในพื้นที่ได้ระดมกำลังเจ้าหน้าที่และเครื่องจักรกลสาธารณภัยเข้าช่วยเหลือทันที'}
+                  </p>
+                </div>
+
+                {/* Signature Block */}
+                <div className="pt-8 text-right pr-8 space-y-1 text-xs">
+                  <p>รายงานโดย: สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง</p>
+                  <p>สายด่วนสาธารณภัย ๑๗๘๔ / โทร ๐-๓๘๖๙-๔๑๐๙</p>
+                </div>
+              </A4PaperPreview>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-6 py-3 border-t border-[var(--border-light)] bg-[var(--bg-overlay)] text-xs">
+              <span className="text-[var(--text-muted)]">
+                ข้อมูลเชื่อมโยงตรงกับฐานข้อมูลศูนย์บัญชาการเหตุการณ์จังหวัดระยอง (EOC)
+              </span>
+              <button
+                onClick={() => setSelectedIncidentModal(null)}
+                className="px-4 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-light)] border border-[var(--border-medium)] text-[var(--text-primary)] font-medium cursor-pointer"
+              >
+                ปิดหน้าต่าง
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

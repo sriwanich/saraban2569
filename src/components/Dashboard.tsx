@@ -663,9 +663,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     refreshData();
     fetchSettings();
     const interval = setInterval(() => {
-      fetchNotifications();
-      fetchSettings();
-    }, 10000); // 10s fallback interval
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchNotifications();
+        fetchSettings();
+      }
+    }, 60000); // 60s resilient fallback interval, real-time SSE handles instant updates
     return () => clearInterval(interval);
   }, [currentUser]);
 
@@ -835,6 +837,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             documents={documents.filter(isDocForUserDepartment)} 
             onViewDoc={handleViewDoc} 
             onNavigateToDrafts={() => setActiveTab('draft_docs')}
+            onNavigateToTab={(tab) => setActiveTab(tab)}
           />
         ));
       case 'inbox':

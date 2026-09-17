@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Bot, CheckCircle, Copy, Download, FileText, Loader2, Sparkles, Building2, Package, Truck, Receipt, Plus, Trash2 } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmContext';
 import { downloadAsDoc } from './draftData';
+import A4PaperPreview from '../../A4PaperPreview';
 
 export default function TorGeneratorView({ user, onSendToSignQueue }: { user: any; onSendToSignQueue?: (item: any) => void }) {
   const { confirm } = useConfirm();
@@ -215,52 +216,48 @@ export default function TorGeneratorView({ user, onSendToSignQueue }: { user: an
       </div>
 
       {/* Preview Section */}
-      <div className="bg-gray-100 rounded-3xl p-2 shadow-inner border border-gray-200 flex flex-col h-[calc(100vh-140px)]">
-        <div className="flex items-center justify-between px-4 py-3 bg-white rounded-2xl shadow-sm mb-2 shrink-0">
-          <div className="flex items-center gap-2">
-            <FileText className="w-5 h-5 text-gray-500" />
-            <h3 className="font-bold text-gray-700">ตัวอย่างเอกสาร TOR</h3>
-          </div>
-          {generatedHtml && (
-            <div className="flex gap-2">
-              <button 
-                onClick={() => {
-                  navigator.clipboard.writeText(generatedHtml.replace(/<[^>]+>/g, ''));
-                }}
-                className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                title="คัดลอกข้อความ"
-              >
-                <Copy className="w-4 h-4" />
-              </button>
-              <button
-                onClick={handleDownload}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 rounded-lg text-xs font-bold transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                ดาวน์โหลด (Word)
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="flex-1 bg-white rounded-2xl shadow-sm overflow-hidden relative">
+      <div className="bg-[var(--bg-elevated)]/50 rounded-3xl p-3 shadow-inner border border-[var(--border-light)] flex flex-col h-[calc(100vh-140px)]">
+        <div className="flex-1 overflow-hidden relative rounded-2xl">
           {!generatedHtml && !loading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 p-8 text-center">
-              <Bot className="w-16 h-16 mb-4 text-gray-300" />
-              <p className="font-medium text-gray-500 mb-1">ยังไม่มีเอกสาร TOR</p>
-              <p className="text-sm">กรอกข้อมูลด้านซ้ายและกดปุ่มสร้างเพื่อดูตัวอย่าง</p>
+            <div className="absolute inset-0 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl flex flex-col items-center justify-center text-gray-400 p-8 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-[var(--bg-elevated)] flex items-center justify-center mb-4 text-[var(--text-muted)] border border-[var(--border-lighter)]">
+                <FileText className="w-8 h-8" />
+              </div>
+              <p className="font-bold text-[var(--text-primary)] mb-1 text-sm">ยังไม่มีเอกสาร TOR</p>
+              <p className="text-xs text-[var(--text-muted)] max-w-sm">กรอกข้อมูลรายละเอียดการจัดซื้อ/จัดจ้างด้านซ้าย แล้วคลิก &quot;สร้างร่าง TOR ด้วย AI&quot; เพื่อดูตัวอย่างเอกสารขนาดมาตรฐาน A4</p>
             </div>
           ) : loading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-blue-500 p-8 text-center bg-white/80 backdrop-blur-sm z-10">
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-blue-500 p-8 text-center bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm z-10 rounded-2xl">
               <Loader2 className="w-12 h-12 mb-4 animate-spin text-blue-600" />
-              <p className="font-bold">AI กำลังร่างเอกสาร TOR...</p>
-              <p className="text-sm text-gray-500 mt-2">อาจใช้เวลาสักครู่</p>
+              <p className="font-bold text-sm text-[var(--text-primary)]">AI กำลังร่างเอกสาร TOR ตามระเบียบพัสดุฯ...</p>
+              <p className="text-xs text-[var(--text-muted)] mt-2">อาจใช้เวลาสักครู่</p>
             </div>
           ) : (
-            <div className="w-full h-full overflow-y-auto custom-scrollbar p-8">
-              <div 
-                className="document-preview-content prose max-w-none text-black"
-                dangerouslySetInnerHTML={{ __html: generatedHtml }}
+            <div className="w-full h-full overflow-y-auto custom-scrollbar">
+              <A4PaperPreview
+                title={`ร่างขอบเขตของงาน (TOR): ${formData.projectName || 'โครงการ'}`}
+                subtitle="แบบร่างมาตรฐาน A4 ตาม พ.ร.บ. การจัดซื้อจัดจ้างและการบริหารพัสดุภาครัฐ พ.ศ. ๒๕๖๐"
+                htmlContent={generatedHtml}
+                extraActions={
+                  <div className="flex items-center gap-1.5">
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(generatedHtml.replace(/<[^>]+>/g, ''));
+                      }}
+                      className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--bg-surface)] rounded-lg transition-colors border border-transparent hover:border-[var(--border-light)]"
+                      title="คัดลอกข้อความ"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={handleDownload}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      ส่งออก Word
+                    </button>
+                  </div>
+                }
               />
             </div>
           )}

@@ -5,6 +5,7 @@ import UrgentIncidentDashboard from './UrgentIncidentDashboard';
 import { BarChart2 } from 'lucide-react';
 import { EEC_PROVINCES } from '../../../data/eecLocations';
 import { parseLocationString } from '../../../utils/locationParser';
+import { getFiscalYearFromDocDate, getCalendarYearFromDocDate } from '../../../utils/thaiDateUtils';
 import A4PaperPreview from '../../A4PaperPreview';
 
 export interface UrgentIncident {
@@ -765,13 +766,16 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
       const targetYearStr = String(targetYear);
       const targetThaiYearStr = targetYearStr.replace(/[0-9]/g, match => '๐๑๒๓๔๕๖๗๘๙'[parseInt(match)]);
 
+      // คำนวณปีงบประมาณและปีปฏิทินจากวันที่ในเอกสาร (docDate) โดยตรง (ไม่ใช้วันที่ลงทะเบียน createdAt)
+      const docFiscalYear = getFiscalYearFromDocDate(r.docDate, r.startDate);
+      const docCalendarYear = getCalendarYearFromDocDate(r.docDate, r.startDate);
+
       let matchesYear = false;
-      if (r.createdAt) {
-        const dateObj = new Date(r.createdAt);
-        if (!isNaN(dateObj.getTime())) {
-          const reportThaiYear = dateObj.getFullYear() + 543;
-          if (reportThaiYear === targetYear) matchesYear = true;
-        }
+      if (docFiscalYear && docFiscalYear === targetYear) {
+        matchesYear = true;
+      }
+      if (docCalendarYear && docCalendarYear === targetYear) {
+        matchesYear = true;
       }
       if (r.docDate && (r.docDate.includes(targetYearStr) || r.docDate.includes(targetThaiYearStr))) {
         matchesYear = true;
@@ -787,32 +791,23 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
   const availableYears = useMemo(() => {
     const years = new Set<number>();
     reports.forEach(r => {
-      let foundYear = false;
-      if (r.createdAt) {
-        const d = new Date(r.createdAt);
-        if (!isNaN(d.getTime())) {
-          years.add(d.getFullYear() + 543);
-          foundYear = true;
-        }
+      // ดึงปีงบประมาณและปีจากวันที่ในเอกสารเท่านั้น (ไม่ใช้วันที่ลงทะเบียน)
+      const fy = getFiscalYearFromDocDate(r.docDate, r.startDate);
+      if (fy) {
+        years.add(fy);
       }
-      if (r.docDate) {
-        const match = r.docDate.match(/25\d{2}/) || r.docDate.match(/๒๕[๐-๙]{2}/);
-        if (match) {
-          const y = match[0].replace(/[๐-๙]/g, m => '๐๑๒๓๔๕๖๗๘๙'.indexOf(m).toString());
-          years.add(parseInt(y, 10));
-          foundYear = true;
-        }
-      }
-      if (r.startDate && !foundYear) {
-         const match = r.startDate.match(/25\d{2}/) || r.startDate.match(/๒๕[๐-๙]{2}/);
-         if (match) {
-           const y = match[0].replace(/[๐-๙]/g, m => '๐๑๒๓๔๕๖๗๘๙'.indexOf(m).toString());
-           years.add(parseInt(y, 10));
-         }
+      const cy = getCalendarYearFromDocDate(r.docDate, r.startDate);
+      if (cy) {
+        years.add(cy);
       }
     });
+    
+    // หากยังไม่มีข้อมูล ให้แสดงปีงบประมาณปัจจุบันเป็นค่าเริ่มต้น
+    if (years.size === 0 && currentYear) {
+      years.add(currentYear);
+    }
     return Array.from(years).sort((a, b) => b - a);
-  }, [reports]);
+  }, [reports, currentYear]);
 
   
   const printDocument = (report: UrgentIncident) => {
@@ -839,9 +834,9 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
     // Helper function to format dotted lines
     const fill = (text, length = 20) => {
       if (!text || String(text).trim() === '') {
-        return '<span class="dotted-line" style="width: ' + length + 'px; display: inline-block; border-bottom: 1px dotted #000; height: 16px; vertical-align: bottom;"></span>';
+        return '<span class="dotted-line" style="width: ' + length + 'px; display: inline-block; border-bottom: 1px dotted #000; height: 1.2em; vertical-align: baseline;"></span>';
       }
-      return '<span class="filled-text" style="border-bottom: 1px dotted #000; font-weight: bold; padding: 0 4px; color: #000;">' + text + '</span>';
+      return '<span class="filled-text" style="border-bottom: 1px dotted #000; font-weight: normal; padding: 0 2px 1px 2px; color: #000; display: inline-block; vertical-align: baseline; line-height: 1.15;">' + text + '</span>';
     };
 
     const html = `
@@ -850,12 +845,40 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           <title>แบบรายงานเหตุด่วนสาธารณภัย</title>
           <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
           <style>
+            @font-face {
+              font-family: 'TH Sarabun New';
+              src: local('TH Sarabun New'), local('THSarabunNew'),
+                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew-webfont.woff') format('woff');
+              font-weight: 400;
+              font-style: normal;
+            }
+            @font-face {
+              font-family: 'TH Sarabun New';
+              src: local('TH Sarabun New Bold'), local('THSarabunNew-Bold'),
+                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew_bold-webfont.woff') format('woff');
+              font-weight: 700;
+              font-style: normal;
+            }
+            @font-face {
+              font-family: 'TH SarabunPSK';
+              src: local('TH SarabunPSK'), local('THSarabunPSK'), local('TH Sarabun New'),
+                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew-webfont.woff') format('woff');
+              font-weight: 400;
+              font-style: normal;
+            }
+            @font-face {
+              font-family: 'TH SarabunPSK';
+              src: local('TH SarabunPSK Bold'), local('THSarabunPSK-Bold'), local('TH Sarabun New Bold'),
+                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew_bold-webfont.woff') format('woff');
+              font-weight: 700;
+              font-style: normal;
+            }
             @page { 
               size: A4; 
               margin: 8mm 15mm 8mm 15mm; 
             }
             body { 
-              font-family: 'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif; 
+              font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif; 
               font-size: 13pt; 
               line-height: 1.20; 
               color: #000; 
@@ -864,7 +887,7 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               padding: 0;
             }
             * { box-sizing: border-box; }
-            .urgent-stamp { color: red; font-size: 26pt; font-weight: bold; line-height: 1; display: inline-block; font-family: 'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif; }
+            .urgent-stamp { color: red; font-size: 22pt; font-weight: bold; line-height: 1; display: inline-block; font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif; }
             .mb-1 { margin-bottom: 2px; }
             .mb-2 { margin-bottom: 4px; }
             .indent-1 { padding-left: 2.5em; }
@@ -898,7 +921,7 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
             }
             
             .row { display: flex; flex-wrap: wrap; align-items: baseline; }
-            .item { margin-right: 12px; white-space: nowrap; }
+            .item { margin-right: 12px; white-space: nowrap; font-weight: normal; }
             .signature-box { margin-top: 8px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px; }
             .text-center { text-align: center; }
           </style>
@@ -907,7 +930,7 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           <table style="width: 100%; border: none; border-collapse: collapse; margin-bottom: 6px;">
             <tr>
               <td style="width: 35%; vertical-align: bottom; text-align: left; padding: 0;">
-                <span>ความเร่งด่วน </span><span class="urgent-stamp">ด่วนที่สุด</span>
+                <span style="font-weight: normal; font-size: 13pt;">ความเร่งด่วน </span><span class="urgent-stamp">ด่วนที่สุด</span>
               </td>
               <td style="width: 40%; vertical-align: bottom; text-align: center; padding: 0;">
                 <div style="font-size: 16pt; font-weight: bold;">แบบรายงานเหตุด่วนสาธารณภัย</div>
@@ -919,7 +942,7 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           </table>
           
           <div class="row mb-1">
-            <div style="width: 50%;">ที่ สส ${fill(toThai(report.docNumber), 200)}</div>
+            <div style="width: 50%;">ที่ ${fill(toThai(report.docNumber?.replace(/^ที่\s*/, '')), 200)}</div>
           </div>
           <div class="row mb-1">
             จาก ${fill(report.fromPerson, 450)}
@@ -961,22 +984,22 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           <div class="mb-1"><strong>๔. ราษฎรที่ประสบภัย</strong></div>
           <div class="indent-1 mb-2" style="line-height: 1.25;">
             <div class="row">
-              <span class="item">๔.๑ ราษฎรได้รับความเดือดร้อน ${fill(toThai(report.affectedPeople), 70)} คน ${fill(toThai(report.affectedHouseholds), 70)} ครัวเรือน</span>
-              <span class="item">๔.๒ บาดเจ็บ (เล็กน้อย) ${fill(toThai(report.injured), 60)} คน</span>
+              <span class="item"><strong>๔.๑</strong> ราษฎรได้รับความเดือดร้อน ${fill(toThai(report.affectedPeople), 70)} คน ${fill(toThai(report.affectedHouseholds), 70)} ครัวเรือน</span>
+              <span class="item"><strong>๔.๒</strong> บาดเจ็บ (เล็กน้อย) ${fill(toThai(report.injured), 60)} คน</span>
             </div>
             <div class="row">
-              <span class="item">๔.๓ เสียชีวิต ${fill(toThai(report.dead), 70)} คน</span>
-              <span class="item">๔.๔ สูญหาย ${fill(toThai(report.missing), 70)} คน (ให้ระบุรายละเอียด) ${fill('', 150)}</span>
+              <span class="item"><strong>๔.๓</strong> เสียชีวิต ${fill(toThai(report.dead), 70)} คน</span>
+              <span class="item"><strong>๔.๔</strong> สูญหาย ${fill(toThai(report.missing), 70)} คน (ให้ระบุรายละเอียด) ${fill('', 150)}</span>
             </div>
             <div class="row">
-              <span class="item">๔.๕ อพยพไปที่ปลอดภัย ${fill(toThai(report.evacuatedPeople), 70)} คน ${fill(toThai(report.evacuatedHouseholds), 70)} ครัวเรือน</span>
+              <span class="item"><strong>๔.๕</strong> อพยพไปที่ปลอดภัย ${fill(toThai(report.evacuatedPeople), 70)} คน ${fill(toThai(report.evacuatedHouseholds), 70)} ครัวเรือน</span>
             </div>
           </div>
 
           <div class="mb-1"><strong>๕. พื้นที่ประสบภัยและความเสียหาย</strong></div>
           <div class="indent-1 mb-2" style="line-height: 1.25;">
             <div class="row">
-              <span class="item">๕.๑ อาคารก่อสร้าง - บ้านพักอาศัยเสียหายทั้งหลัง ${fill('', 50)} หลัง</span>
+              <span class="item"><strong>๕.๑ อาคารก่อสร้าง -</strong> บ้านพักอาศัยเสียหายทั้งหลัง ${fill('', 50)} หลัง</span>
               <span class="item">บ้านพักอาศัยเสียหายบางส่วน ${fill(toThai(report.damageHouses), 50)} หลัง</span>
             </div>
             <div class="row">
@@ -991,7 +1014,7 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
             </div>
             
             <div class="row" style="margin-top: 4px;">
-              <span class="item">๕.๒ พื้นที่และทรัพย์สินทางการเกษตร พืชไร่ ${fill(toThai(report.damageAgricultureCrops), 50)} ไร่</span>
+              <span class="item"><strong>๕.๒ พื้นที่และทรัพย์สินทางการเกษตร</strong> พืชไร่ ${fill(toThai(report.damageAgricultureCrops), 50)} ไร่</span>
               <span class="item">นาข้าว ${fill(toThai(report.damageAgricultureRice), 50)} ไร่</span>
               <span class="item">พืชสวน ${fill(toThai(report.damageAgricultureOrchard), 50)} ไร่</span>
               <span class="item">บ่อปลา ${fill(toThai(report.damageAgricultureFish), 50)} บ่อ</span>
@@ -1001,14 +1024,14 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               <span class="item">สัตว์เลี้ยง (โค/กระบือ ${fill(toThai(report.damageLivestockCow), 50)} ตัว</span>
               <span class="item">สุกร ${fill(toThai(report.damageLivestockPig), 50)} ตัว</span>
               <span class="item">เป็ด/ไก่ ${fill(toThai(report.damageLivestockPoultry), 50)} ตัว)</span>
-              <span class="item">อื่นๆ ${fill(toThai(report.damageLivestockOther), 90)}</span>
+              <span class="item">อื่นๆ (ระบุ) ${fill(toThai(report.damageLivestockOther), 90)}</span>
             </div>
             <div class="row" style="padding-left: 2.5em;">
               <span class="item">มูลค่าความเสียหายประมาณ ${fill(toThai(report.damageAgricultureCost), 130)} บาท</span>
             </div>
 
             <div class="row" style="margin-top: 4px;">
-              <span class="item">๕.๓ สิ่งสาธารณประโยชน์ ถนน ${fill(toThai(report.damagePublicRoads), 50)} สาย</span>
+              <span class="item"><strong>๕.๓ สิ่งสาธารณประโยชน์</strong> ถนน ${fill(toThai(report.damagePublicRoads), 50)} สาย</span>
               <span class="item">สะพาน ${fill(toThai(report.damagePublicBridges), 50)} แห่ง</span>
               <span class="item">คอสะพาน ${fill(toThai(report.damagePublicBridgeApproaches), 50)} แห่ง</span>
               <span class="item">ฝาย ${fill(toThai(report.damagePublicWeirs), 50)} แห่ง (อื่นๆ) ${fill(toThai(report.damagePublicOther), 90)}</span>
@@ -1016,8 +1039,8 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
             <div class="row" style="padding-left: 2.5em;">
               <span class="item">ความเสียหายประมาณ ${fill(toThai(report.damagePublicCost), 130)} บาท</span>
             </div>
-            <div class="row" style="margin-top: 4px; font-weight: bold;">
-              <span class="item">๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ ${fill(toThai(report.totalDamageCost), 160)} บาท</span>
+            <div class="row" style="margin-top: 4px;">
+              <span class="item"><strong>๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ</strong> ${fill(toThai(report.totalDamageCost), 160)} บาท</span>
             </div>
           </div>
 
@@ -1027,13 +1050,13 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
           
           <div class="mb-1"><strong>๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong></div>
           <div class="indent-1 mb-2 row" style="line-height: 1.25;">
-            <span class="item">รถปฏิบัติการกู้ชีพ ${fill('', 50)} คัน</span>
+            <span class="item">- รถปฏิบัติการกู้ชีพ ${fill('', 50)} คัน</span>
             <span class="item">รถดับเพลิง จำนวน ${fill(toThai(report.toolsFireTrucks), 50)} คัน</span>
             <span class="item">รถยนต์บรรทุกน้ำ ${fill(toThai(report.toolsWaterTrucks), 50)} คัน</span>
             <span class="item">รถกู้ภัย ${fill(toThai(report.toolsRescueTrucks), 50)} คัน</span>
             <span class="item">เรือ ${fill(toThai(report.toolsFireBoats), 50)} ลำ</span>
             <span class="item">เครื่องสูบน้ำ ${fill(toThai(report.toolsWaterPumps), 50)} เครื่อง</span>
-            <span class="item">อื่นๆ ${fill(toThai(report.toolsOther), 100)}</span>
+            <span class="item">(อื่นๆ) ${fill(toThai(report.toolsOther), 100)}</span>
           </div>
           <div class="indent-1 mb-2 row" style="line-height: 1.25;">
             <span class="item">๗.๑ ส่วนราชการ ${fill(toThai(report.opsGovAgencies), 80)} หน่วยงาน</span>
@@ -1064,11 +1087,11 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
             </div>
             <div class="row" style="display: inline-flex; align-items: flex-start;">
               <span class="checkbox ${report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? 'checked' : ''}" style="margin-top: 4px; margin-right: 8px; flex-shrink: 0;"></span> 
-              <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหต่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
+              <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
             </div>
           </div>
 
-          <div class="signature-box" style="margin-top: 16px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px;">
+          <div class="signature-box" style="margin-top: 36px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px;">
             <div class="text-center" style="position: relative; width: 350px;">
               <div style="margin-top: 4px; display: flex; justify-content: center; align-items: baseline;">
                 <span>(ลงชื่อ)</span>
@@ -1079,45 +1102,45 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                 </span>
                 <span>ผู้รายงาน</span>
               </div>
-              <div style="margin-top: 3px;">
-                ( ${report.reporterName ? report.reporterName : fill('', 180)} )
+              <div style="margin-top: 5px;">
+                ( ${report.reporterName || ''} )
               </div>
-              <div style="margin-top: 3px;">
-                ตำแหน่ง ${report.reporterPosition ? report.reporterPosition : fill('', 200)}
+              <div style="margin-top: 5px;">
+                ตำแหน่ง ${report.reporterPosition || ''}
               </div>
             </div>
           </div>
 
-          ${report.damageImages && report.damageImages.length > 0 ? `
-            <div style="page-break-before: always; margin-top: 15mm; padding-top: 10px; font-family: 'TH Saraban New', 'TH Saraban PSK', 'Sarabun', sans-serif;">
-              <div style="text-align: center; font-size: 15pt; font-weight: bold; margin-bottom: 25px; line-height: 1.4;">
-                <div>บ้าน${report.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
-                <div>บ้านเลขที่ ${toThai(report.location || '')}</div>
-              </div>
-              
-              <!-- First row of up to 3 photos -->
-              <div style="display: grid; grid-template-columns: repeat(${report.damageImages.length >= 3 ? 3 : report.damageImages.length}, 1fr); gap: 15px; justify-content: center; margin-top: 15px;">
-                ${report.damageImages.slice(0, 3).map((imgUrl, index) => `
-                  <div style="text-align: center;">
-                    <img src="${imgUrl}" style="width: 100%; height: 210px; object-fit: cover; border-radius: 4px;" />
-                    <div style="font-size: 13pt; color: #333; margin-top: 8px; font-weight: bold;">ภาพถ่ายความเสียหายประกอบรายงาน ที่ ${toThai(String(index + 1))}</div>
-                  </div>
-                `).join('')}
-              </div>
-
-              <!-- Second row of up to 2 photos -->
-              ${report.damageImages.length > 3 ? `
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; justify-content: center; margin-top: 20px; max-width: 70%; margin-left: auto; margin-right: auto;">
-                  ${report.damageImages.slice(3, 5).map((imgUrl, index) => `
-                    <div style="text-align: center;">
-                      <img src="${imgUrl}" style="width: 100%; height: 210px; object-fit: cover; border-radius: 4px;" />
-                      <div style="font-size: 13pt; color: #333; margin-top: 8px; font-weight: bold;">ภาพถ่ายความเสียหายประกอบรายงาน ที่ ${toThai(String(index + 4))}</div>
-                    </div>
-                  `).join('')}
+          ${report.damageImages && report.damageImages.length > 0 ? (() => {
+            const pages: string[][] = [];
+            for (let i = 0; i < report.damageImages.length; i += 2) {
+              pages.push(report.damageImages.slice(i, i + 2));
+            }
+            return pages.map((pair, pageIdx) => `
+              <div style="page-break-before: always; margin-top: 10mm; padding-top: 10px; font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif;">
+                <div style="text-align: right; font-size: 11pt; color: #666; margin-bottom: 6px;">หน้า ${toThai(pageIdx + 2)} (ภาคผนวกภาพถ่ายแนบ)</div>
+                <div style="text-align: center; font-size: 16pt; font-weight: bold; margin-bottom: 20px; line-height: 1.35;">
+                  <div>ภาพถ่ายความเสียหายในพื้นที่</div>
+                  <div style="font-size: 15pt; margin-top: 2px;">บ้าน${report.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
+                  <div style="font-size: 15pt;">บ้านเลขที่ ${toThai(report.location || '')}</div>
                 </div>
-              ` : ''}
-            </div>
-          ` : ''}
+                
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 24px; margin-top: 10px;">
+                  ${pair.map((imgUrl, imgIdx) => {
+                    const globalIdx = pageIdx * 2 + imgIdx + 1;
+                    return `
+                      <div style="text-align: center; width: 100%; max-width: 580px; page-break-inside: avoid;">
+                        <img src="${imgUrl}" style="width: 100%; height: 310px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; display: block; margin: 0 auto;" />
+                        <div style="font-size: 14pt; font-weight: bold; margin-top: 6px; color: #111;">
+                          ภาพถ่ายความเสียหาย ที่ ${toThai(globalIdx)}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            `).join('');
+          })() : ''}
         </body>
       </html>
     `;
@@ -1134,11 +1157,40 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
       return s.replace(/[0-9]/g, match => thaiNumerals[parseInt(match)]);
     };
 
-    const renderLine = (text: string, placeholder: string = '........................................................') => {
-      if (!text || String(text).trim() === '') {
-        return <span className="text-zinc-400 font-normal">{placeholder}</span>;
+    const renderLine = (text: string | number | undefined | null, placeholder: string = '........................................................', defaultWidth?: number) => {
+      const val = text !== undefined && text !== null ? String(text).trim() : '';
+      if (!val) {
+        const width = defaultWidth || Math.max(36, Math.min(550, placeholder.length * 6));
+        return (
+          <span 
+            className="doc-empty-line" 
+            style={{ 
+              display: 'inline-block', 
+              width: `${width}px`, 
+              borderBottom: '1px dotted #000', 
+              height: '1.2em', 
+              verticalAlign: 'baseline', 
+              margin: '0 2px' 
+            }} 
+          />
+        );
       }
-      return <span className="border-b border-dotted border-black px-2 font-bold text-black">{toThaiNum(text)}</span>;
+      return (
+        <span 
+          className="doc-fill-line" 
+          style={{ 
+            display: 'inline-block', 
+            borderBottom: '1px dotted #000', 
+            padding: '0 3px 1px 3px', 
+            verticalAlign: 'baseline', 
+            color: '#000', 
+            fontWeight: 'normal', 
+            lineHeight: '1.15' 
+          }}
+        >
+          {toThaiNum(val)}
+        </span>
+      );
     };
 
     const incidentTypeChoices = [
@@ -1149,277 +1201,413 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
 
     return (
       <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950 -mx-4 sm:-mx-6 lg:-mx-8 p-4 sm:p-6 md:p-8 space-y-6">
-        <div className="max-w-5xl mx-auto flex items-center justify-between mb-4">
+        <div className="w-full max-w-5xl flex items-center justify-between mb-4">
           <button 
             onClick={() => setViewMode(previousMode)}
             className="flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors px-3 py-2 rounded-xl border border-[var(--border-light)] hover:bg-[var(--bg-elevated)] cursor-pointer font-bold"
           >
-            <ChevronLeft className="w-4 h-4" /> ย้อนกลับไปแก้ไข
+            <ChevronLeft className="w-4 h-4" /> ย้อนกลับ
           </button>
         </div>
 
         <A4PaperPreview
-          title="แบบรายงานเหตุด่วนสาธารณภัย (A4 Print Preview)"
-          subtitle={`เลขที่หนังสือ: สส ${previewData.docNumber || '-'} | ลงวันที่: ${previewData.docDate || '-'}`}
+          title="แบบรายงานเหตุด่วนสาธารณภัย"
+          subtitle={`เลขที่หนังสือ: ${previewData.docNumber || '-'} | ลงวันที่: ${previewData.docDate || '-'}`}
+          exportFileName={`แบบรายงานเหตุด่วนสาธารณภัย_${previewData.docNumber?.replace(/\//g, '_') || 'ฉบับด่วน'}`}
           onPrint={() => printDocument(previewData)}
+          paperClassName="p-0 bg-transparent shadow-none"
         >
-          {/* Paper Container */}
-          <div className="space-y-8 select-none font-serif w-full h-full p-[8mm_15mm_8mm_15mm]" style={{ fontFamily: "'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif" }}>
+          {/* Multi-Page Container */}
+          <div className="flex flex-col items-center gap-8 select-none w-full" style={{ fontFamily: "'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif" }}>
             {/* Page 1 */}
-            <div className="bg-white text-black min-h-[297mm] relative" style={{ fontSize: '13pt', lineHeight: '1.20' }}>
-              <div className="absolute top-2 right-2 text-xs text-neutral-400">หน้า ๑ (เอกสารแบบรายงาน)</div>
+            <div 
+              className="a4-page-sheet bg-white text-black w-full min-h-[297mm] p-[8mm_15mm_8mm_15mm] relative box-border shadow-md" 
+              style={{ fontSize: '13pt', lineHeight: '1.20', fontFamily: "'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif" }}
+            >
+              <div className="absolute top-2 right-4 text-xs text-neutral-400">หน้า ๑ (เอกสารแบบรายงาน)</div>
             
-            {/* Header section */}
-            <div className="grid grid-cols-3 items-end mb-1.5">
-              <div className="text-left">
-                <span className="text-red-600 font-extrabold text-[26pt] leading-none">ด่วนที่สุด</span>
+              {/* Header section */}
+              <div className="grid grid-cols-3 items-end mb-1.5">
+                <div className="text-left flex items-baseline">
+                  <span className="font-normal text-[13pt] mr-1 text-black">ความเร่งด่วน</span>
+                  <span className="text-red-600 font-bold text-[22pt] leading-none tracking-tight">ด่วนที่สุด</span>
+                </div>
+                <div className="text-center">
+                  <h1 className="text-[16pt] font-bold text-black" style={{ fontFamily: "'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif" }}>แบบรายงานเหตุด่วนสาธารณภัย</h1>
+                </div>
+                <div className="text-right font-normal">
+                  วันที่ {renderLine(previewData.docDate, '.....................................')}
+                </div>
               </div>
-              <div className="text-center">
-                <h1 className="text-[16pt] font-bold text-black" style={{ fontFamily: "'TH Sarabun New', 'Sarabun', sans-serif" }}>แบบรายงานเหตุด่วนสาธารณภัย</h1>
-              </div>
-              <div className="text-right">
-                วันที่ {renderLine(previewData.docDate, '.....................................')}
-              </div>
-            </div>
 
-            <div className="space-y-0.5 text-black">
-              <div className="flex justify-between">
-                <div>ที่ สส {renderLine(previewData.docNumber, '.....................................')}</div>
-              </div>
-              <div>จาก {renderLine(previewData.fromPerson, '.................................................................................................')}</div>
-              <div className="pb-0">ถึง {renderLine(previewData.toPerson, '.................................................................................................')}</div>
+              <div className="space-y-0.5 text-black font-normal">
+                <div className="flex justify-between">
+                  <div>ที่ {renderLine(previewData.docNumber?.replace(/^ที่\s*/, ''), '.....................................')}</div>
+                </div>
+                <div>จาก {renderLine(previewData.fromPerson, '.................................................................................................')}</div>
+                <div className="pb-0">ถึง {renderLine(previewData.toPerson, '.................................................................................................')}</div>
 
-              {/* 1. ชนิดของภัย */}
-              <div>
-                <strong className="font-bold">๑. ชนิดของภัย</strong>
-                <div className="pl-[2.5em] pt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 leading-normal">
-                  {incidentTypeChoices.map((t, idx) => {
-                    const isChecked = previewData.incidentTypes.includes(t) || (t === 'แผ่นดินไหวและอาคารถล่ม' && previewData.incidentTypes.includes('แผ่นดินไหว'));
-                    return (
-                      <div key={idx} className="flex items-center gap-1.5 whitespace-nowrap">
-                        <span className="w-3 border border-black flex items-center justify-center text-xs font-bold relative" style={{ height: '12px', width: '12px' }}>
-                          {isChecked ? '✓' : ''}
+                {/* 1. ชนิดของภัย */}
+                <div>
+                  <strong className="font-bold">๑. ชนิดของภัย</strong>
+                  <div className="pl-[2.5em] pt-0.5 font-normal" style={{ lineHeight: '1.4' }}>
+                    {incidentTypeChoices.map((t, idx) => {
+                      const isChecked = previewData.incidentTypes.includes(t) || (t === 'แผ่นดินไหวและอาคารถล่ม' && previewData.incidentTypes.includes('แผ่นดินไหว'));
+                      return (
+                        <span key={idx} className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginRight: '14px', marginBottom: '2px' }}>
+                          <span 
+                            className="doc-checkbox"
+                            style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '12px', 
+                              height: '12px', 
+                              border: '1px solid #000', 
+                              marginRight: '5px', 
+                              position: 'relative',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              flexShrink: 0
+                            }}
+                          >
+                            {isChecked ? '✓' : ''}
+                          </span>
+                          <span>{t}</span>
                         </span>
-                        <span>{t}</span>
-                      </div>
-                    );
-                  })}
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 border border-black flex items-center justify-center text-xs font-bold relative" style={{ height: '12px', width: '12px' }}>
-                      {previewData.incidentTypes.includes('อื่นๆ') || previewData.incidentTypeOther ? '✓' : ''}
+                      );
+                    })}
+                    <span className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginBottom: '2px' }}>
+                      <span 
+                        className="doc-checkbox"
+                        style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '12px', 
+                          height: '12px', 
+                          border: '1px solid #000', 
+                          marginRight: '5px', 
+                          position: 'relative',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          flexShrink: 0
+                        }}
+                      >
+                        {previewData.incidentTypes.includes('อื่นๆ') || previewData.incidentTypeOther ? '✓' : ''}
+                      </span>
+                      <span>อื่นๆ {renderLine(previewData.incidentTypeOther, '.............................................', 240)}</span>
                     </span>
-                    <span>อื่นๆ: {renderLine(previewData.incidentTypeOther, '.............................................')}</span>
                   </div>
                 </div>
-              </div>
 
-              <div className="pl-[2.5em] flex flex-wrap items-center gap-3">
-                <span>ความรุนแรงและลักษณะของภัย:</span>
-                {['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map((sev, idx) => (
-                  <div key={idx} className="flex items-center gap-1.5">
-                    <span className="w-3 border border-black flex items-center justify-center text-xs font-bold relative" style={{ height: '12px', width: '12px' }}>
-                      {previewData.severity === sev ? '✓' : ''}
+                <div className="pl-[2.5em] font-normal flex flex-wrap items-center" style={{ lineHeight: '1.4' }}>
+                  <span className="font-normal" style={{ marginRight: '10px' }}>ความรุนแรงและลักษณะของภัย</span>
+                  {['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map((sev, idx) => (
+                    <span key={idx} className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginRight: '14px' }}>
+                      <span 
+                        className="doc-checkbox"
+                        style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '12px', 
+                          height: '12px', 
+                          border: '1px solid #000', 
+                          marginRight: '5px', 
+                          position: 'relative',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          flexShrink: 0
+                        }}
+                      >
+                        {previewData.severity === sev ? '✓' : ''}
+                      </span>
+                      <span>{sev}</span>
                     </span>
-                    <span>{sev}</span>
-                  </div>
-                ))}
-                <span className="ml-2">ลักษณะของภัย {renderLine(previewData.incidentTypeOther || previewData.mitigation ? (previewData.incidentTypeOther + ' ' + previewData.mitigation).slice(0, 40) : '', '....................................')}</span>
-              </div>
-
-              {/* 2. วันเวลาที่เกิดภัย */}
-              <div>
-                <strong className="font-bold">๒. ภัยเกิดเมื่อ</strong> - วันที่ {renderLine(previewData.startDate, '........................')} เวลา {renderLine(previewData.startTime, '................')} น.
-                <span className="ml-3"><strong>ภัยสิ้นสุด</strong> วันที่ {renderLine(previewData.endDate, '........................')} เวลา {renderLine(previewData.endTime, '................')} น.</span>
-              </div>
-
-              {/* 3. สถานที่เกิดภัย */}
-              <div>
-                <strong className="font-bold">๓. สถานที่เกิดภัย</strong> - {renderLine(previewData.location, '............................................................................................................................................................')}
-              </div>
-
-              {/* 4. ราษฎรที่ประสบภัย */}
-              <div>
-                <strong className="font-bold">๔. ราษฎรที่ประสบภัย</strong>
-                <div className="pl-[2.5em] space-y-0.5">
-                  <div className="flex flex-wrap gap-x-4">
-                    <span>๔.๑ ราษฎรได้รับความเดือดร้อน {renderLine(previewData.affectedPeople, '........')} คน</span>
-                    <span>{renderLine(previewData.affectedHouseholds, '........')} ครัวเรือน</span>
-                    <span>๔.๒ บาดเจ็บ (เล็กน้อย) {renderLine(previewData.injured, '........')} คน</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-4">
-                    <span>๔.๓ เสียชีวิต {renderLine(previewData.dead, '........')} คน</span>
-                    <span>๔.๔ สูญหาย {renderLine(previewData.missing, '........')} คน (ให้ระบุรายละเอียด) {renderLine('', '............................')}</span>
-                  </div>
-                  <div>๔.๕ อพยพไปที่ปลอดภัย {renderLine(previewData.evacuatedPeople, '........')} คน {renderLine(previewData.evacuatedHouseholds, '........')} ครัวเรือน</div>
-                </div>
-              </div>
-
-              {/* 5. พื้นที่ประสบภัยและความเสียหาย */}
-              <div>
-                <strong className="font-bold">๕. พื้นที่ประสบภัยและความเสียหาย</strong>
-                <div className="pl-[2.5em] space-y-0.5">
-                  <div className="flex flex-wrap gap-x-4">
-                    <span>๕.๑ อาคารก่อสร้าง - บ้านพักอาศัยเสียหายทั้งหลัง {renderLine('', '........')} หลัง</span>
-                    <span>บ้านพักอาศัยเสียหายบางส่วน {renderLine(previewData.damageHouses, '........')} หลัง</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-4">
-                    <span>อาคารสูงตั้งแต่ ๒๓ เมตรขึ้นไป {renderLine(previewData.damageHighRises, '........')} อาคาร</span>
-                    <span>โรงเรียน {renderLine('', '........')} แห่ง</span>
-                    <span>วัด {renderLine(previewData.damageTemples, '........')} แห่ง</span>
-                    <span>สถานที่ราชการ {renderLine(previewData.damageGovBuildings, '........')} แห่ง</span>
-                    <span>อื่นๆ {renderLine(previewData.damageOtherBuildings, '........................')}</span>
-                  </div>
-                  <div>มูลค่าความเสียหายประมาณ {renderLine(previewData.damageBuildingCost, '................')} บาท</div>
-                  
-                  <div className="flex flex-wrap gap-x-4">
-                    <span>๕.๒ พื้นที่เกษตร พืชไร่ {renderLine(previewData.damageAgricultureCrops, '........')} ไร่</span>
-                    <span>นาข้าว {renderLine(previewData.damageAgricultureRice, '........')} ไร่</span>
-                    <span>พืชสวน {renderLine(previewData.damageAgricultureOrchard, '........')} ไร่</span>
-                    <span>บ่อปลา {renderLine(previewData.damageAgricultureFish, '........')} บ่อ</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-4">
-                    <span>บ่อกุ้ง {renderLine(previewData.damageAgricultureShrimp, '........')} บ่อ</span>
-                    <span>สัตว์เลี้ยง (โค/กระบือ {renderLine(previewData.damageLivestockCow, '........')} ตัว</span>
-                    <span>สุกร {renderLine(previewData.damageLivestockPig, '........')} ตัว</span>
-                    <span>เป็ด/ไก่ {renderLine(previewData.damageLivestockPoultry, '........')} ตัว)</span>
-                    <span>อื่นๆ {renderLine(previewData.damageLivestockOther, '........................')}</span>
-                  </div>
-                  <div>มูลค่าความเสียหายประมาณ {renderLine(previewData.damageAgricultureCost, '................')} บาท</div>
-
-                  <div>
-                    ๕.๓ สิ่งสาธารณประโยชน์ ถนน {renderLine(previewData.damagePublicRoads, '........')} สาย
-                    สะพาน {renderLine(previewData.damagePublicBridges, '........')} แห่ง
-                    คอสะพาน {renderLine(previewData.damagePublicBridgeApproaches, '........')} แห่ง
-                    ฝาย {renderLine(previewData.damagePublicWeirs, '........')} แห่ง
-                    (อื่นๆ) {renderLine(previewData.damagePublicOther, '........................')}
-                  </div>
-                  <div>มูลค่าความเสียหายเบื้องต้น {renderLine(previewData.damagePublicCost, '................')} บาท</div>
-                  <div className="font-bold">๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ {renderLine(previewData.totalDamageCost, '........................')} บาท</div>
-                </div>
-              </div>
-
-              {/* 6. การบรรเทาภัย */}
-              <div>
-                <strong className="font-bold">๖. การบรรเทาภัย</strong> - {renderLine(previewData.mitigation, '......................................................................................................................................')}
-              </div>
-
-              {/* 7. เครื่องมือ/อุปกรณ์ที่ใช้ */}
-              <div>
-                <strong className="font-bold">๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong>
-                <div className="pl-[2.5em] flex flex-wrap gap-x-3 gap-y-0.5">
-                  <span>รถปฏิบัติการกู้ชีพ {renderLine('', '......')} คัน</span>
-                  <span>รถดับเพลิง จำนวน {renderLine(previewData.toolsFireTrucks, '......')} คัน</span>
-                  <span>รถยนต์บรรทุกน้ำ {renderLine(previewData.toolsWaterTrucks, '......')} คัน</span>
-                  <span>รถกู้ภัย {renderLine(previewData.toolsRescueTrucks, '......')} คัน</span>
-                  <span>เรือ {renderLine(previewData.toolsFireBoats, '......')} ลำ</span>
-                  <span>เครื่องสูบน้ำ {renderLine(previewData.toolsWaterPumps, '......')} เครื่อง</span>
-                  <span>อื่นๆ {renderLine(previewData.toolsOther, '........................')}</span>
-                </div>
-                <div className="pl-[2.5em] flex gap-x-8 pt-0.5">
-                  <span>๗.๑ ส่วนราชการ {renderLine(previewData.opsGovAgencies, '........')} หน่วยงาน</span>
-                  <span>๗.๒ เอกชน/ประชาชน {renderLine(previewData.opsPrivateSector, '........')} กลุ่ม/คน</span>
-                </div>
-              </div>
-
-              {/* 8. ดำเนินงาน */}
-              <div>
-                <strong className="font-bold">๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong>
-                <div className="pl-[2.5em] flex gap-8">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3.5 h-3.5 border border-black flex items-center justify-center text-[10px]"></span>
-                    <span>ส่วนราชการอื่น {renderLine('', '........................')}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3.5 h-3.5 border border-black flex items-center justify-center text-[10px]"></span>
-                    <span>ภาคเอกชน (ชื่อ) {renderLine('', '........................')}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* 9. ข้อเสนอ / คำลงท้ายรับรอง */}
-              <div>
-                <strong className="font-bold">๙. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติ ซึ่งเกิดความเสียหายจริง โดยมีความประสงค์</strong>
-                <div className="pl-[2.5em] space-y-0.5 mt-0.5">
-                  <div className="flex items-start gap-2">
-                    <span className="w-3.5 h-3.5 border border-black mt-1 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
-                      {previewData.proposals.includes('เพื่อโปรดทราบ') ? '✓' : ''}
-                    </span>
-                    <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <span className="w-3.5 h-3.5 border border-black mt-1 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
-                      {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย') ? '✓' : ''}
-                    </span>
-                    <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <span className="w-3.5 h-3.5 border border-black mt-1 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
-                      {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? '✓' : ''}
-                    </span>
-                    <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Signatures Area */}
-              <div className="flex flex-col items-end pr-8 pt-3" style={{ minHeight: '65px' }}>
-                <div className="w-[300px] text-center">
-                  <div className="flex items-baseline justify-center gap-1">
-                    <span>(ลงชื่อ)</span>
-                    <span className="inline-block w-40 border-b border-dotted border-black relative">
-                      {previewData.signatureImage && (
-                        <img src={previewData.signatureImage} alt="Signature Preview" className="absolute bottom-[-15px] left-1/2 -translate-x-1/2 max-h-[55px] object-contain mix-blend-multiply z-10 select-none pointer-events-none" style={{ minWidth: '100px' }} />
-                      )}
-                    </span>
-                    <span>ผู้รายงาน</span>
-                  </div>
-                  <div className="mt-0.5">
-                    ( {previewData.reporterName ? previewData.reporterName : '................................................'} )
-                  </div>
-                  <div className="mt-0.5">
-                    ตำแหน่ง {previewData.reporterPosition ? previewData.reporterPosition : '................................................'}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Page 2: Appendix */}
-          {previewData.damageImages && previewData.damageImages.length > 0 && (
-            <div className="bg-white text-black shadow-2xl mx-auto p-[15mm] max-w-[210mm] min-h-[297mm] border border-neutral-300 relative rounded" style={{ fontSize: '15pt', lineHeight: '1.35' }}>
-              <div className="absolute top-4 right-4 text-xs text-neutral-400">หน้า ๒ (ภาคผนวกภาพถ่ายแนบ)</div>
-              
-              <div className="text-center font-bold text-[15pt] mb-6 pt-4">
-                <div>บ้าน{previewData.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
-                <div>บ้านเลขที่ {renderLine(previewData.location || '')}</div>
-              </div>
-
-              {/* Row 1 of up to 3 images */}
-              <div className={`grid gap-4 mt-6 ${previewData.damageImages.length >= 3 ? 'grid-cols-3' : `grid-cols-${previewData.damageImages.length}`}`}>
-                {previewData.damageImages.slice(0, 3).map((imgUrl, index) => (
-                  <div key={index} className="text-center">
-                    <img src={imgUrl} alt={`Damage ${index + 1}`} className="w-full h-[210px] object-cover mx-auto rounded border border-neutral-200" />
-                    <div className="text-sm font-bold text-neutral-700 mt-2">ภาพถ่ายความเสียหายประกอบรายงาน ที่ {toThaiNum(String(index + 1))}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Row 2 of up to 2 images */}
-              {previewData.damageImages.length > 3 && (
-                <div className="grid grid-cols-2 gap-4 mt-6 max-w-[70%] mx-auto">
-                  {previewData.damageImages.slice(3, 5).map((imgUrl, index) => (
-                    <div key={index} className="text-center">
-                      <img src={imgUrl} alt={`Damage ${index + 4}`} className="w-full h-[210px] object-cover mx-auto rounded border border-neutral-200" />
-                      <div className="text-sm font-bold text-neutral-700 mt-2">ภาพถ่ายความเสียหายประกอบรายงาน ที่ {toThaiNum(String(index + 4))}</div>
-                    </div>
                   ))}
+                  <span className="font-normal" style={{ marginLeft: '10px' }}>
+                    ลักษณะของภัย {renderLine(previewData.incidentTypeOther || previewData.mitigation ? (previewData.incidentTypeOther + ' ' + previewData.mitigation).slice(0, 40) : '', '....................................', 220)}
+                  </span>
                 </div>
-              )}
+
+                {/* 2. วันเวลาที่เกิดภัย */}
+                <div className="font-normal">
+                  <strong className="font-bold">๒. ภัยเกิดเมื่อ</strong> - วันที่ {renderLine(previewData.startDate, '........................')} เวลา {renderLine(previewData.startTime, '................')} น.
+                  <span className="ml-3"><strong className="font-bold">ภัยสิ้นสุด</strong> วันที่ {renderLine(previewData.endDate, '........................')} เวลา {renderLine(previewData.endTime, '................')} น.</span>
+                </div>
+
+                {/* 3. สถานที่เกิดภัย */}
+                <div className="font-normal">
+                  <strong className="font-bold">๓. สถานที่เกิดภัย</strong> - {renderLine(previewData.location, '............................................................................................................................................................')}
+                </div>
+
+                {/* 4. ราษฎรที่ประสบภัย */}
+                <div>
+                  <strong className="font-bold">๔. ราษฎรที่ประสบภัย</strong>
+                  <div className="pl-[2.5em] space-y-0.5 font-normal">
+                    <div className="flex flex-wrap gap-x-4">
+                      <span><strong className="font-bold">๔.๑</strong> ราษฎรได้รับความเดือดร้อน {renderLine(previewData.affectedPeople, '........')} คน</span>
+                      <span>{renderLine(previewData.affectedHouseholds, '........')} ครัวเรือน</span>
+                      <span><strong className="font-bold">๔.๒</strong> บาดเจ็บ (เล็กน้อย) {renderLine(previewData.injured, '........')} คน</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4">
+                      <span><strong className="font-bold">๔.๓</strong> เสียชีวิต {renderLine(previewData.dead, '........')} คน</span>
+                      <span><strong className="font-bold">๔.๔</strong> สูญหาย {renderLine(previewData.missing, '........')} คน (ให้ระบุรายละเอียด) {renderLine('', '............................')}</span>
+                    </div>
+                    <div><strong className="font-bold">๔.๕</strong> อพยพไปที่ปลอดภัย {renderLine(previewData.evacuatedPeople, '........')} คน {renderLine(previewData.evacuatedHouseholds, '........')} ครัวเรือน</div>
+                  </div>
+                </div>
+
+                {/* 5. พื้นที่ประสบภัยและความเสียหาย */}
+                <div>
+                  <strong className="font-bold">๕. พื้นที่ประสบภัยและความเสียหาย</strong>
+                  <div className="pl-[2.5em] space-y-0.5 font-normal">
+                    <div className="flex flex-wrap gap-x-4">
+                      <span><strong className="font-bold">๕.๑ อาคารก่อสร้าง -</strong> บ้านพักอาศัยเสียหายทั้งหลัง {renderLine('', '........')} หลัง</span>
+                      <span>บ้านพักอาศัยเสียหายบางส่วน {renderLine(previewData.damageHouses, '........')} หลัง</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4">
+                      <span>อาคารสูงตั้งแต่ ๒๓ เมตรขึ้นไป {renderLine(previewData.damageHighRises, '........')} อาคาร</span>
+                      <span>โรงเรียน {renderLine('', '........')} แห่ง</span>
+                      <span>วัด {renderLine(previewData.damageTemples, '........')} แห่ง</span>
+                      <span>สถานที่ราชการ {renderLine(previewData.damageGovBuildings, '........')} แห่ง</span>
+                      <span>อื่นๆ {renderLine(previewData.damageOtherBuildings, '........................')}</span>
+                    </div>
+                    <div>มูลค่าความเสียหายประมาณ {renderLine(previewData.damageBuildingCost, '................')} บาท</div>
+                    
+                    <div className="flex flex-wrap gap-x-4">
+                      <span><strong className="font-bold">๕.๒ พื้นที่และทรัพย์สินทางการเกษตร</strong> พืชไร่ {renderLine(previewData.damageAgricultureCrops, '........')} ไร่</span>
+                      <span>นาข้าว {renderLine(previewData.damageAgricultureRice, '........')} ไร่</span>
+                      <span>พืชสวน {renderLine(previewData.damageAgricultureOrchard, '........')} ไร่</span>
+                      <span>บ่อปลา {renderLine(previewData.damageAgricultureFish, '........')} บ่อ</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4">
+                      <span>บ่อกุ้ง {renderLine(previewData.damageAgricultureShrimp, '........')} บ่อ</span>
+                      <span>สัตว์เลี้ยง (โค/กระบือ {renderLine(previewData.damageLivestockCow, '........')} ตัว</span>
+                      <span>สุกร {renderLine(previewData.damageLivestockPig, '........')} ตัว</span>
+                      <span>เป็ด/ไก่ {renderLine(previewData.damageLivestockPoultry, '........')} ตัว)</span>
+                      <span>อื่นๆ (ระบุ) {renderLine(previewData.damageLivestockOther, '........................')}</span>
+                    </div>
+                    <div>มูลค่าความเสียหายประมาณ {renderLine(previewData.damageAgricultureCost, '................')} บาท</div>
+
+                    <div>
+                      <strong className="font-bold">๕.๓ สิ่งสาธารณประโยชน์</strong> ถนน {renderLine(previewData.damagePublicRoads, '........')} สาย
+                      สะพาน {renderLine(previewData.damagePublicBridges, '........')} แห่ง
+                      คอสะพาน {renderLine(previewData.damagePublicBridgeApproaches, '........')} แห่ง
+                      ฝาย {renderLine(previewData.damagePublicWeirs, '........')} แห่ง
+                      (อื่นๆ) {renderLine(previewData.damagePublicOther, '........................')}
+                    </div>
+                    <div>ความเสียหายประมาณ {renderLine(previewData.damagePublicCost, '................')} บาท</div>
+                    <div><strong className="font-bold">๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ</strong> {renderLine(previewData.totalDamageCost, '........................')} บาท</div>
+                  </div>
+                </div>
+
+                {/* 6. การบรรเทาภัย */}
+                <div className="font-normal">
+                  <strong className="font-bold">๖. การบรรเทาภัย</strong> - {renderLine(previewData.mitigation, '......................................................................................................................................')}
+                </div>
+
+                {/* 7. เครื่องมือ/อุปกรณ์ที่ใช้ */}
+                <div>
+                  <strong className="font-bold">๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong>
+                  <div className="pl-[2.5em] flex flex-wrap gap-x-3 gap-y-0.5 font-normal">
+                    <span>- รถปฏิบัติการกู้ชีพ {renderLine('', '......')} คัน</span>
+                    <span>รถดับเพลิง จำนวน {renderLine(previewData.toolsFireTrucks, '......')} คัน</span>
+                    <span>รถยนต์บรรทุกน้ำ {renderLine(previewData.toolsWaterTrucks, '......')} คัน</span>
+                    <span>รถกู้ภัย {renderLine(previewData.toolsRescueTrucks, '......')} คัน</span>
+                    <span>เรือ {renderLine(previewData.toolsFireBoats, '......')} ลำ</span>
+                    <span>เครื่องสูบน้ำ {renderLine(previewData.toolsWaterPumps, '......')} เครื่อง</span>
+                    <span>(อื่นๆ) {renderLine(previewData.toolsOther, '........................')}</span>
+                  </div>
+                  <div className="pl-[2.5em] flex gap-x-8 pt-0.5 font-normal">
+                    <span>๗.๑ ส่วนราชการ {renderLine(previewData.opsGovAgencies, '........')} หน่วยงาน</span>
+                    <span>๗.๒ เอกชน/ประชาชน {renderLine(previewData.opsPrivateSector, '........')} กลุ่ม/คน</span>
+                  </div>
+                </div>
+
+                {/* 8. ดำเนินงาน */}
+                <div>
+                  <strong className="font-bold">๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong>
+                  <div className="pl-[2.5em] font-normal" style={{ lineHeight: '1.3' }}>
+                    <span className="doc-item" style={{ display: 'inline-block', marginRight: '28px', verticalAlign: 'middle' }}>
+                      <span 
+                        className="doc-checkbox"
+                        style={{ 
+                          display: 'inline-block', 
+                          width: '12px', 
+                          height: '12px', 
+                          border: '1px solid #000', 
+                          marginRight: '6px', 
+                          verticalAlign: 'middle' 
+                        }} 
+                      />
+                      <span style={{ verticalAlign: 'middle' }}>ส่วนราชการอื่น {renderLine('', '........................................', 240)}</span>
+                    </span>
+                    <span className="doc-item" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+                      <span 
+                        className="doc-checkbox"
+                        style={{ 
+                          display: 'inline-block', 
+                          width: '12px', 
+                          height: '12px', 
+                          border: '1px solid #000', 
+                          marginRight: '6px', 
+                          verticalAlign: 'middle' 
+                        }} 
+                      />
+                      <span style={{ verticalAlign: 'middle' }}>ภาคเอกชน (ชื่อ) {renderLine('', '........................................', 240)}</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 9. ข้อเสนอ / คำลงท้ายรับรอง */}
+                <div>
+                  <strong className="font-bold">๙. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติ ซึ่งเกิดความเสียหายจริง โดยมีความประสงค์</strong>
+                  <div className="pl-[2.5em] mt-1 font-normal">
+                    <div style={{ display: 'table', width: '100%', marginBottom: '3px', lineHeight: '1.25' }}>
+                      <div style={{ display: 'table-cell', width: '22px', verticalAlign: 'top', paddingTop: '2px' }}>
+                        <span 
+                          className="doc-checkbox"
+                          style={{ 
+                            display: 'inline-block', 
+                            width: '12px', 
+                            height: '12px', 
+                            border: '1px solid #000', 
+                            position: 'relative', 
+                            textAlign: 'center', 
+                            lineHeight: '10px', 
+                            fontSize: '11px', 
+                            fontWeight: 'bold' 
+                          }}
+                        >
+                          {previewData.proposals.includes('เพื่อโปรดทราบ') ? '✓' : ''}
+                        </span>
+                      </div>
+                      <div style={{ display: 'table-cell', verticalAlign: 'top' }}>
+                        <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'table', width: '100%', marginBottom: '3px', lineHeight: '1.25' }}>
+                      <div style={{ display: 'table-cell', width: '22px', verticalAlign: 'top', paddingTop: '2px' }}>
+                        <span 
+                          className="doc-checkbox"
+                          style={{ 
+                            display: 'inline-block', 
+                            width: '12px', 
+                            height: '12px', 
+                            border: '1px solid #000', 
+                            position: 'relative', 
+                            textAlign: 'center', 
+                            lineHeight: '10px', 
+                            fontSize: '11px', 
+                            fontWeight: 'bold' 
+                          }}
+                        >
+                          {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย') ? '✓' : ''}
+                        </span>
+                      </div>
+                      <div style={{ display: 'table-cell', verticalAlign: 'top' }}>
+                        <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'table', width: '100%', marginBottom: '3px', lineHeight: '1.25' }}>
+                      <div style={{ display: 'table-cell', width: '22px', verticalAlign: 'top', paddingTop: '2px' }}>
+                        <span 
+                          className="doc-checkbox"
+                          style={{ 
+                            display: 'inline-block', 
+                            width: '12px', 
+                            height: '12px', 
+                            border: '1px solid #000', 
+                            position: 'relative', 
+                            textAlign: 'center', 
+                            lineHeight: '10px', 
+                            fontSize: '11px', 
+                            fontWeight: 'bold' 
+                          }}
+                        >
+                          {previewData.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? '✓' : ''}
+                        </span>
+                      </div>
+                      <div style={{ display: 'table-cell', verticalAlign: 'top' }}>
+                        <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Signatures Area */}
+                <div className="flex flex-col items-end pr-8 pt-9 font-normal">
+                  <div className="w-[320px] text-center font-normal space-y-1">
+                    <div className="flex items-baseline justify-center gap-1 font-normal">
+                      <span>(ลงชื่อ)</span>
+                      <span className="inline-block w-40 border-b border-dotted border-black relative" style={{ height: '16px', verticalAlign: 'bottom' }}>
+                        {previewData.signatureImage && (
+                          <img src={previewData.signatureImage} alt="Signature Preview" className="absolute bottom-[-15px] left-1/2 -translate-x-1/2 max-h-[55px] object-contain mix-blend-multiply z-10 select-none pointer-events-none" style={{ minWidth: '100px' }} />
+                        )}
+                      </span>
+                      <span>ผู้รายงาน</span>
+                    </div>
+                    <div className="font-normal" style={{ marginTop: '5px' }}>
+                      (&nbsp;{previewData.reporterName || ''}&nbsp;)
+                    </div>
+                    <div className="font-normal" style={{ marginTop: '5px' }}>
+                      ตำแหน่ง&nbsp;{previewData.reporterPosition || ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-      </A4PaperPreview>
-    </div>
+
+            {/* Page 2 onwards: Appendix Images (2 images per page) */}
+            {previewData.damageImages && previewData.damageImages.length > 0 && (() => {
+              const pages: string[][] = [];
+              for (let i = 0; i < previewData.damageImages.length; i += 2) {
+                pages.push(previewData.damageImages.slice(i, i + 2));
+              }
+              return pages.map((pair, pageIdx) => (
+                <div 
+                  key={pageIdx}
+                  className="a4-page-sheet bg-white text-black shadow-md mx-auto p-[15mm] w-full min-h-[297mm] relative box-border flex flex-col items-center" 
+                  style={{ fontSize: '15pt', lineHeight: '1.4', fontFamily: "'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif" }}
+                >
+                  <div className="absolute top-4 right-4 text-xs text-neutral-400">
+                    หน้า {toThaiNum(pageIdx + 2)} (ภาคผนวกภาพถ่ายแนบ)
+                  </div>
+                  
+                  <div className="text-center font-bold text-[16pt] mb-6 pt-2 leading-snug">
+                    <div>ภาพถ่ายความเสียหายในพื้นที่</div>
+                    <div className="text-[15pt] mt-0.5 font-bold">บ้าน{previewData.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
+                    <div className="text-[15pt] font-bold">บ้านเลขที่ {toThaiNum(previewData.location || '')}</div>
+                  </div>
+
+                  {/* 2 Photos per page */}
+                  <div className="flex flex-col items-center gap-6 w-full max-w-[580px]">
+                    {pair.map((imgUrl, imgIdx) => {
+                      const globalIdx = pageIdx * 2 + imgIdx + 1;
+                      return (
+                        <div key={imgIdx} className="text-center w-full">
+                          <img 
+                            src={imgUrl} 
+                            alt={`Damage ${globalIdx}`} 
+                            className="w-full h-[310px] object-cover mx-auto rounded border border-neutral-300 shadow-sm bg-neutral-100" 
+                          />
+                          <div className="text-[14pt] font-bold text-neutral-800 mt-2">
+                            ภาพถ่ายความเสียหาย ที่ {toThaiNum(globalIdx)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        </A4PaperPreview>
+      </div>
     );
   }
 
@@ -1438,12 +1626,12 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               <h1 className="text-xl font-bold text-[var(--text-primary)]">
                 แดชบอร์ดสรุปรายงานเหตุด่วนสาธารณภัย
               </h1>
-              <p className="text-xs text-[var(--text-secondary)] mt-0.5">ปีงบประมาณใช้งานปัจจุบัน: พ.ศ. {currentYear}</p>
+              <p className="text-xs text-[var(--text-secondary)] mt-0.5">ปีปัจจุบัน: พ.ศ. {currentYear}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">ปีงบประมาณ:</span>
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">ปี:</span>
             <select
               value={yearFilter}
               onChange={e => setYearFilter(e.target.value)}
@@ -1504,7 +1692,7 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
             </div>
 
             <div className="flex items-center gap-2 min-w-[200px]">
-              <span className="text-xs font-semibold text-[var(--text-secondary)] whitespace-nowrap">ปีงบประมาณ:</span>
+              <span className="text-xs font-semibold text-[var(--text-secondary)] whitespace-nowrap">ปี:</span>
               <select
                 value={yearFilter}
                 onChange={e => setYearFilter(e.target.value)}

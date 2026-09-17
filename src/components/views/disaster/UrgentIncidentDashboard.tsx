@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { UrgentIncident } from './UrgentIncidentReportView';
 import { Activity, Users, Home, AlertCircle, Skull, HeartPulse, ShieldAlert, BarChart3, PieChart as PieIcon, TrendingUp, MapPin, Navigation, Landmark, Building, Map, Printer, X, Filter, Calendar } from 'lucide-react';
 import { parseLocationString } from '../../../utils/locationParser';
+import { parseDateFromDocString } from '../../../utils/thaiDateUtils';
 
 interface Props {
   reports: UrgentIncident[];
@@ -81,7 +82,10 @@ export default function UrgentIncidentDashboard({ reports, user }: Props) {
         severityCount[r.severity] += 1;
       }
 
-      const dateStr = r.createdAt ? new Date(r.createdAt).toLocaleString('th-TH', { month: 'short', year: '2-digit' }) : 'ไม่ระบุ';
+      const docDateObj = parseDateFromDocString(r.docDate, r.startDate);
+      const dateStr = docDateObj 
+        ? docDateObj.toLocaleString('th-TH', { month: 'short', year: '2-digit' }) 
+        : (r.docDate || (r.createdAt ? new Date(r.createdAt).toLocaleString('th-TH', { month: 'short', year: '2-digit' }) : 'ไม่ระบุ'));
       monthlyTrend[dateStr] = (monthlyTrend[dateStr] || 0) + 1;
     });
 
@@ -299,11 +303,11 @@ export default function UrgentIncidentDashboard({ reports, user }: Props) {
   const executePrint = () => {
     const filtered = reportsWithGeo.filter(r => {
       if (printFilters.startDate) {
-        const rDate = r.createdAt ? new Date(r.createdAt) : null;
+        const rDate = parseDateFromDocString(r.docDate, r.startDate) || (r.createdAt ? new Date(r.createdAt) : null);
         if (rDate && rDate < new Date(printFilters.startDate)) return false;
       }
       if (printFilters.endDate) {
-        const rDate = r.createdAt ? new Date(r.createdAt) : null;
+        const rDate = parseDateFromDocString(r.docDate, r.startDate) || (r.createdAt ? new Date(r.createdAt) : null);
         const eDate = new Date(printFilters.endDate);
         eDate.setHours(23, 59, 59, 999);
         if (rDate && rDate > eDate) return false;
@@ -398,8 +402,7 @@ export default function UrgentIncidentDashboard({ reports, user }: Props) {
           <tbody>
             ${filtered.length > 0 ? filtered.map((r, idx) => {
               const types = Array.isArray(r.incidentTypes) ? r.incidentTypes.join(', ') : (r.incidentTypes || '-');
-              const dateObj = r.createdAt ? new Date(r.createdAt) : null;
-              const dateStr = dateObj ? dateObj.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }) : (r.docDate || '-');
+              const dateStr = r.docDate || (r.createdAt ? new Date(r.createdAt).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }) : '-');
               
               const affected = `${r.affectedPeople || '0'} คน<br>${r.affectedHouseholds || '0'} ครัวเรือน`;
               const casualties = `เจ็บ: ${r.injured || '0'}<br>ตาย: ${r.dead || '0'}<br>สูญหาย: ${r.missing || '0'}`;
