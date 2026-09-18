@@ -34,6 +34,12 @@ class RealtimeSyncManager {
     }
   }
 
+  private lastOnlineUsers: number = 0;
+
+  public getOnlineUsers(): number {
+    return this.lastOnlineUsers;
+  }
+
   private init() {
     if (typeof window === 'undefined' || !window.EventSource) return;
     if (this.eventSource && this.eventSource.readyState !== EventSource.CLOSED) return;
@@ -49,10 +55,28 @@ class RealtimeSyncManager {
         this.notify('REALTIME_CONNECTED', { time: Date.now() });
       };
 
+      this.eventSource.addEventListener('connected', (event: any) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.onlineUsers !== undefined || payload?.count !== undefined) {
+            const count = Number(payload.onlineUsers !== undefined ? payload.onlineUsers : payload.count);
+            this.lastOnlineUsers = isNaN(count) ? 0 : Math.max(0, count);
+            this.notify('ONLINE_USERS_COUNT', { count: this.lastOnlineUsers });
+          }
+          this.notify('REALTIME_CONNECTED', payload);
+        } catch (e) {
+          // ignore
+        }
+      });
+
       this.eventSource.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
           const eventType = payload.event || 'DATA_UPDATED';
+          if (eventType === 'ONLINE_USERS_COUNT' && payload.data?.count !== undefined) {
+            const count = Number(payload.data.count);
+            this.lastOnlineUsers = isNaN(count) ? 0 : Math.max(0, count);
+          }
           this.notify(eventType, payload.data || payload);
           this.notify('*', payload);
         } catch (e) {
@@ -159,7 +183,7 @@ export const realtimeSync = new RealtimeSyncManager();
  */
 export function useRealtimeSync(
   eventNames: string | string[],
-  callback: () => void | Promise<void>,
+  callback: (data?: any) => void | Promise<void>,
   deps: any[] = []
 ) {
   const callbackRef = useRef(callback);
@@ -167,11 +191,11 @@ export function useRealtimeSync(
 
   useEffect(() => {
     let timeoutId: any = null;
-    const debouncedCallback = () => {
+    const debouncedCallback = (payload?: any) => {
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         if (callbackRef.current) {
-          callbackRef.current();
+          callbackRef.current(payload);
         }
       }, 150); // slight debounce to avoid multiple rapid queries
     };

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu, Sparkles, AlertTriangle, HelpCircle, Activity, Apple, Monitor, Smartphone, Tablet, Terminal } from 'lucide-react';
+import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu, Sparkles, AlertTriangle, HelpCircle, Activity, Apple, Monitor, Smartphone, Tablet, Terminal, Users } from 'lucide-react';
 import ChangelogModal from './ChangelogModal';
 import VersionBadge from './VersionBadge';
 import HostTroubleshootingModal from './HostTroubleshootingModal';
+import { realtimeSync } from '../utils/realtimeSync';
 
 interface LoginProps {
   onLogin: (user: any, rememberMe: boolean) => void;
@@ -241,6 +242,9 @@ export default function Login({ onLogin }: LoginProps) {
   const [isHostHelpOpen, setIsHostHelpOpen] = useState(false);
   const [serverHealth, setServerHealth] = useState<'checking' | 'online' | 'fallback' | 'offline'>('checking');
   const [serverDetails, setServerDetails] = useState<any>(null);
+  const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
+    return typeof window !== 'undefined' ? realtimeSync.getOnlineUsers() : 0;
+  });
   
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -346,9 +350,43 @@ export default function Login({ onLogin }: LoginProps) {
         console.error('Failed to load org settings:', err);
       }
     };
+
+    const fetchOnlineUsers = async () => {
+      try {
+        const apiBase = getApiBase();
+        const res = await fetch(`${apiBase}/api/online-users`);
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data.count === 'number') {
+            setOnlineUsersCount(Math.max(0, data.count));
+          }
+        }
+      } catch (err) {
+        // keep current count
+      }
+    };
+
     fetchSettings();
     checkServerHealth();
-    return () => clearInterval(timer);
+    fetchOnlineUsers();
+
+    const onlineInterval = setInterval(fetchOnlineUsers, 15000);
+
+    const unsubscribeOnline = realtimeSync.subscribe(['ONLINE_USERS_COUNT', 'REALTIME_CONNECTED'], (data) => {
+      if (data?.count !== undefined) {
+        const c = Number(data.count);
+        setOnlineUsersCount(isNaN(c) ? 0 : Math.max(0, c));
+      } else if (data?.onlineUsers !== undefined) {
+        const c = Number(data.onlineUsers);
+        setOnlineUsersCount(isNaN(c) ? 0 : Math.max(0, c));
+      }
+    });
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(onlineInterval);
+      unsubscribeOnline();
+    };
   }, []);
 
   const toggleTheme = () => {
@@ -960,79 +998,106 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
             
             {/* Footer status bar inside card */}
-            <div className="bg-[var(--bg-elevated)]/80 backdrop-blur-xl px-6 py-4 border-t border-[var(--border-light)] flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] font-medium text-[var(--text-secondary)] font-mono transition-colors duration-500">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1.5 bg-[var(--bg-surface)] px-2 py-1 rounded-md border border-[var(--border-light)] shadow-sm">
-                  <Clock className="w-3.5 h-3.5 text-[var(--primary-color)]" />
-                  <span>{time}</span>
-                </div>
-                <div className="flex items-center gap-1.5 bg-[var(--bg-surface)] px-2 py-1 rounded-md border border-[var(--border-light)] shadow-sm text-[var(--success)]">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>SECURE</span>
-                </div>
+            <div className="bg-[var(--bg-elevated)]/80 backdrop-blur-xl px-2.5 py-2.5 sm:px-3 sm:py-3 border-t border-[var(--border-light)] flex flex-nowrap items-center justify-between gap-1.5 overflow-x-auto no-scrollbar transition-colors duration-500">
+              {/* 1. Clock Badge */}
+              <div className="h-7.5 px-2.5 flex items-center gap-1 bg-[var(--bg-surface)] rounded-full border border-[var(--border-light)] shadow-sm font-mono text-[9.5px] text-[var(--text-secondary)] shrink-0">
+                <Clock className="w-3 h-3 text-[var(--primary-color)] shrink-0" />
+                <span className="whitespace-nowrap">{time}</span>
               </div>
-              <div className="flex items-center gap-2">
-                {/* Client Badge (as a pure Brand SVG Icon & Version) */}
-                {(() => {
-                  const brand = getDeviceBrandIcon(navigator.userAgent);
-                  return (
-                    <div
-                      className="h-8 px-2.5 flex items-center gap-1.5 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 transition-all hover:scale-105 shadow-sm relative cursor-help text-[10px] font-sans font-bold whitespace-nowrap"
-                      title={`${brand.name} (${os})`}
-                    >
-                      {brand.icon}
-                      <span className="opacity-95 text-[9px] tracking-wide font-semibold">{brand.version}</span>
-                      <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500" />
-                      </span>
-                    </div>
-                  );
-                })()}
 
-                {/* Backend Badge (as a matching Brand SVG Icon & Status) */}
-                <div
-                  className={`h-8 px-2.5 flex items-center gap-1.5 rounded-full border shadow-sm relative text-[10px] font-sans font-bold whitespace-nowrap ${
-                    serverHealth === 'online'
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                      : serverHealth === 'fallback'
-                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
-                      : serverHealth === 'checking'
-                      ? 'bg-slate-500/10 border-slate-500/30 text-slate-400'
-                      : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 font-bold'
-                  }`}
-                  title={
-                    serverHealth === 'online' ? 'Backend: ออนไลน์ (เชื่อมต่อสำเร็จ)' :
-                    serverHealth === 'fallback' ? 'Backend: โหมดสำรอง (Local DB)' :
-                    serverHealth === 'checking' ? 'กำลังตรวจสอบการเชื่อมต่อ...' :
-                    'Backend: ออฟไลน์'
-                  }
-                >
-                  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current shrink-0">
-                    <path d="M12 1L2 6.8v10.4L12 23l10-5.8V6.8L12 1zm8.2 15.2L12 21l-8.2-4.8V7.8L12 3l8.2 4.8v8.4zM10.8 7.3L7 9.5v5l3.8 2.2V14.5l-2.2-1.3V10.8l2.2 1.3V7.3zm2.4 0v4.8l2.2-1.3v-2.4l-2.2 1.3V7.3z"/>
-                  </svg>
-                  <span className="opacity-95 text-[9px] tracking-wide font-semibold">
-                    {serverHealth === 'online' && 'NodeJS'}
-                    {serverHealth === 'fallback' && 'Local DB'}
-                    {serverHealth === 'checking' && 'Checking'}
-                    {serverHealth === 'offline' && 'Offline'}
-                  </span>
-                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                    {serverHealth !== 'checking' && (
-                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                        serverHealth === 'online' ? 'bg-emerald-400' :
-                        serverHealth === 'fallback' ? 'bg-amber-400' :
-                        'bg-rose-400'
-                      }`} />
-                    )}
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                      serverHealth === 'online' ? 'bg-emerald-500' :
-                      serverHealth === 'fallback' ? 'bg-amber-500' :
-                      serverHealth === 'checking' ? 'bg-slate-400 animate-pulse' :
-                      'bg-rose-500'
+              {/* 2. Secure Badge */}
+              <div className="h-7.5 px-2.5 flex items-center gap-1 bg-[var(--bg-surface)] rounded-full border border-[var(--border-light)] shadow-sm text-[var(--success)] text-[9.5px] font-bold shrink-0">
+                <ShieldCheck className="w-3 h-3 text-emerald-500 shrink-0" />
+                <span className="whitespace-nowrap tracking-wider">SECURE</span>
+              </div>
+
+              {/* 3. Client Badge */}
+              {(() => {
+                const brand = getDeviceBrandIcon(navigator.userAgent);
+                return (
+                  <div
+                    className="h-7.5 px-2.5 flex items-center gap-1 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 transition-all hover:scale-105 shadow-sm relative cursor-help text-[9.5px] font-sans font-bold whitespace-nowrap shrink-0"
+                    title={`${brand.name} (${os})`}
+                  >
+                    {brand.icon}
+                    <span className="opacity-95 text-[9px] font-semibold">{brand.version}</span>
+                    <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500" />
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* 4. Backend Badge */}
+              <div
+                className={`h-7.5 px-2.5 flex items-center gap-1 rounded-full border shadow-sm relative text-[9.5px] font-sans font-bold whitespace-nowrap shrink-0 ${
+                  serverHealth === 'online'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                    : serverHealth === 'fallback'
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                    : serverHealth === 'checking'
+                    ? 'bg-slate-500/10 border-slate-500/30 text-slate-400'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 font-bold'
+                }`}
+                title={
+                  serverHealth === 'online' ? 'Backend: ออนไลน์ (เชื่อมต่อสำเร็จ)' :
+                  serverHealth === 'fallback' ? 'Backend: โหมดสำรอง (Local DB)' :
+                  serverHealth === 'checking' ? 'กำลังตรวจสอบการเชื่อมต่อ...' :
+                  'Backend: ออฟไลน์'
+                }
+              >
+                <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current shrink-0">
+                  <path d="M12 1L2 6.8v10.4L12 23l10-5.8V6.8L12 1zm8.2 15.2L12 21l-8.2-4.8V7.8L12 3l8.2 4.8v8.4zM10.8 7.3L7 9.5v5l3.8 2.2V14.5l-2.2-1.3V10.8l2.2 1.3V7.3zm2.4 0v4.8l2.2-1.3v-2.4l-2.2 1.3V7.3z"/>
+                </svg>
+                <span className="opacity-95 text-[9px] font-semibold">
+                  {serverHealth === 'online' && 'NodeJS'}
+                  {serverHealth === 'fallback' && 'Local DB'}
+                  {serverHealth === 'checking' && 'Checking'}
+                  {serverHealth === 'offline' && 'Offline'}
+                </span>
+                <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                  {serverHealth !== 'checking' && (
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      serverHealth === 'online' ? 'bg-emerald-400' :
+                      serverHealth === 'fallback' ? 'bg-amber-400' :
+                      'bg-rose-400'
                     }`} />
-                  </span>
-                </div>
+                  )}
+                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+                    serverHealth === 'online' ? 'bg-emerald-500' :
+                    serverHealth === 'fallback' ? 'bg-amber-500' :
+                    serverHealth === 'checking' ? 'bg-slate-400 animate-pulse' :
+                    'bg-rose-500'
+                  }`} />
+                </span>
+              </div>
+
+              {/* 5. Online Users Badge */}
+              <div
+                className={`h-7.5 px-2.5 flex items-center gap-1 rounded-full border transition-all hover:scale-105 shadow-sm relative cursor-help text-[9.5px] font-sans font-bold whitespace-nowrap shrink-0 ${
+                  onlineUsersCount > 0
+                    ? 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400'
+                    : 'border-slate-300/40 dark:border-slate-700/40 bg-slate-500/5 text-slate-500 dark:text-slate-400'
+                }`}
+                title={
+                  onlineUsersCount > 0
+                    ? `จำนวนผู้ใช้งานที่เข้าสู่ระบบขณะนี้: ${onlineUsersCount} คน (Real-time Authenticated Users)`
+                    : `ไม่มีผู้ใช้งานที่ล็อกอินอยู่ในระบบขณะนี้ (ระบบพร้อมให้บริการ)`
+                }
+              >
+                <Users className="w-3 h-3 shrink-0" />
+                <span className="opacity-95 text-[9px] font-semibold">
+                  {onlineUsersCount} ออนไลน์
+                </span>
+                <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                  {onlineUsersCount > 0 && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                  )}
+                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+                    onlineUsersCount > 0 ? 'bg-sky-500' : 'bg-slate-400 dark:bg-slate-500'
+                  }`} />
+                </span>
               </div>
             </div>
           </div>

@@ -473,3 +473,78 @@ CREATE TABLE IF NOT EXISTS urgent_incidents (
   updatedAt VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
+CREATE TABLE IF NOT EXISTS document_versions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  docId VARCHAR(255) NOT NULL,
+  versionNumber INT NOT NULL,
+  content LONGTEXT,
+  changeSummary TEXT,
+  modifiedBy VARCHAR(255),
+  modifiedAt VARCHAR(100),
+  isCurrent TINYINT(1) DEFAULT 0,
+  INDEX idx_dv_docId (docId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(500) NOT NULL,
+  content LONGTEXT,
+  author VARCHAR(255),
+  priority VARCHAR(50) DEFAULT 'normal',
+  isActive TINYINT(1) DEFAULT 1,
+  createdAt VARCHAR(100),
+  updatedAt VARCHAR(100)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_activity (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(255) NOT NULL,
+  action VARCHAR(255) NOT NULL,
+  details TEXT,
+  module VARCHAR(100),
+  ipAddress VARCHAR(100),
+  createdAt VARCHAR(100),
+  INDEX idx_ua_username (username),
+  INDEX idx_ua_action (action)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS custom_doc_numbers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  docId VARCHAR(255) NOT NULL,
+  customNumber VARCHAR(255),
+  year VARCHAR(50),
+  department VARCHAR(255),
+  createdAt VARCHAR(100),
+  UNIQUE KEY unique_custom_doc (docId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS system_backups (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  fileName VARCHAR(255) NOT NULL,
+  fileSize BIGINT NOT NULL,
+  backupType VARCHAR(50) NOT NULL,
+  createdAt VARCHAR(50) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+CREATE TABLE IF NOT EXISTS scheduled_backups (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  scheduleType VARCHAR(50) DEFAULT 'daily',
+  scheduledTime VARCHAR(20) DEFAULT '00:00',
+  weeklyDay VARCHAR(20) DEFAULT 'monday',
+  intervalHours INT DEFAULT 24,
+  backupScope VARCHAR(50) DEFAULT 'full',
+  retentionDays INT DEFAULT 7,
+  isActive TINYINT(1) DEFAULT 1,
+  lastRunAt VARCHAR(50),
+  lastStatus VARCHAR(50) DEFAULT 'idle',
+  lastFilename VARCHAR(255),
+  lastFileSize BIGINT DEFAULT 0,
+  description TEXT,
+  createdBy VARCHAR(255) DEFAULT 'ผู้ดูแลระบบ',
+  createdAt VARCHAR(50),
+  nextRunAt VARCHAR(50)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

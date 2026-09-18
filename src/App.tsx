@@ -135,7 +135,81 @@ export default function App() {
     localStorage.setItem('theme', theme);
   }, [theme, isActualDark]);
 
+  // Real-time authenticated user presence heartbeat
+  useEffect(() => {
+    if (!isLoggedIn || !user) return;
+
+    const sendPresence = async (action: 'ping' | 'logout' = 'ping') => {
+      try {
+        const payload = {
+          action,
+          userId: user.id || user.username,
+          username: user.username,
+          fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+          role: user.role,
+          departmentId: user.departmentId
+        };
+        await fetch('/api/user-presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (_) {
+        // ignore network error
+      }
+    };
+
+    // Send immediate presence heartbeat on login/mount
+    sendPresence('ping');
+
+    // Send presence heartbeat every 15 seconds
+    const interval = setInterval(() => {
+      sendPresence('ping');
+    }, 15000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        sendPresence('ping');
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      try {
+        const payload = JSON.stringify({
+          action: 'logout',
+          userId: user.id || user.username,
+          username: user.username
+        });
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon('/api/user-presence', new Blob([payload], { type: 'application/json' }));
+        }
+      } catch (_) {}
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isLoggedIn, user]);
+
   const handleLogout = async () => {
+    if (user) {
+      try {
+        await fetch('/api/user-presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'logout',
+            userId: user.id || user.username,
+            username: user.username
+          })
+        });
+      } catch (_) {}
+    }
     localStorage.removeItem('edms_user_data');
     sessionStorage.removeItem('edms_user_data');
     setUser(null);

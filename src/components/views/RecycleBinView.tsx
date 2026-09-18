@@ -192,7 +192,7 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
             <div className="p-2.5 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/20">
               <Trash2 className="w-6 h-6" />
             </div>
-            <span>ถังขยะเอกสาร <span className="text-rose-500 font-normal">Recycle Bin</span></span>
+            <span>คลังกู้คืนเอกสาร <span className="text-rose-500 font-normal">Recycle Bin</span></span>
           </h1>
           <p className="text-sm text-[var(--text-secondary)] mt-2 font-medium">
             กู้คืนเอกสารที่ถูกลบชั่วคราว หรือลบออกถาวรจากระบบอย่างปลอดภัย
@@ -214,7 +214,7 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
         <div>
           <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-400">เงื่อนไขการกู้คืนเอกสาร</h3>
           <p className="text-xs text-amber-700/90 dark:text-amber-500/90 mt-1 leading-relaxed">
-            ระบบจะเก็บรักษาเอกสารที่ถูกลบไว้ในถังขยะเป็นเวลา <strong>30 วัน</strong> เพื่อความปลอดภัย หลังจากนั้นระบบจะลบข้อมูลออกจากเซิร์ฟเวอร์โดยอัตโนมัติอย่างถาวรและไม่สามารถกู้คืนได้อีก
+            ระบบจะเก็บรักษาเอกสารที่ถูกลบไว้ในคลังกู้คืนเป็นเวลา <strong>30 วัน</strong> เพื่อความปลอดภัย หลังจากนั้นระบบจะลบข้อมูลออกจากเซิร์ฟเวอร์โดยอัตโนมัติอย่างถาวรและไม่สามารถกู้คืนได้อีก
           </p>
         </div>
       </div>
@@ -252,7 +252,7 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
         {loading && items.length === 0 ? (
           <div className="p-12 text-center text-sm text-[var(--text-muted)]">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto text-[var(--primary-color)]/70 mb-3" />
-            <span>กำลังโหลดรายการถังขยะ...</span>
+            <span>กำลังโหลดรายการคลังกู้คืน...</span>
           </div>
         ) : paginatedItems.length > 0 ? (
           <div className="overflow-x-auto">
@@ -335,7 +335,7 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
             <div className="w-16 h-16 rounded-full bg-slate-50 dark:bg-slate-900/40 flex items-center justify-center border border-dashed border-[var(--border-light)] mb-4">
               <Trash2 className="w-8 h-8 text-slate-300 dark:text-slate-600" />
             </div>
-            <h3 className="font-bold text-sm text-[var(--text-primary)]">ไม่มีเอกสารในถังขยะ</h3>
+            <h3 className="font-bold text-sm text-[var(--text-primary)]">ไม่มีเอกสารในคลังกู้คืน</h3>
             <p className="text-xs text-[var(--text-secondary)] mt-1.5 max-w-xs leading-relaxed">
               เมื่อมีการลบหนังสือราชการหรือเอกสารจากทะเบียน ระบบจะย้ายเอกสารเหล่านั้นมาไว้ที่นี่ชั่วคราว
             </p>

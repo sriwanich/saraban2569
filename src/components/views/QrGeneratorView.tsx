@@ -7,10 +7,13 @@ import {
   Layers, CheckCircle2, AlertCircle, Building2, Sliders, Eye, Share2, 
   FolderOpen, Bookmark, Save, Trash2, ArrowRight, ExternalLink, Hash, Calendar, Send,
   Plus, Edit, Pause, Play, CheckSquare, Square, BarChart2, MapPin, Laptop, Smartphone, HelpCircle, LayoutGrid,
-  Star, Upload, FileDown, CopyPlus, CheckCheck, Search, Tag, SlidersHorizontal, RotateCcw, Info
+  Star, Upload, FileDown, CopyPlus, CheckCheck, Search, Tag, SlidersHorizontal, RotateCcw, Info,
+  X, AlertTriangle, Megaphone, Briefcase, Clock, Lock, Landmark, Shield, ArrowUpRight, Scissors,
+  Wand2, Scan
 } from 'lucide-react';
 import { DocumentItem } from '../../types';
 import { useConfirm } from '../../context/ConfirmContext';
+import AiDocumentStamperModal from '../AiDocumentStamperModal';
 
 interface QrGeneratorViewProps {
   user?: any;
@@ -23,6 +26,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const { confirm } = useConfirm();
   // Navigation tabs inside Enterprise QR Studio
   const [activeTab, setActiveTab] = useState<'create' | 'analytics' | 'bulk' | 'templates' | 'sticker' | 'test'>('create');
+
+  // AI Document Stamper Modal state
+  const [isAiStamperOpen, setIsAiStamperOpen] = useState(false);
 
   // System settings state & Drag-and-Drop state
   const [sysSettings, setSysSettings] = useState<any>(null);
@@ -128,8 +134,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const [logoScale, setLogoScale] = useState(0.22); // 22% of QR size
 
   // Frame Banner State
-  const [frameType, setFrameType] = useState<'none' | 'top-bottom' | 'card' | 'badge'>('top-bottom');
+  const [frameType, setFrameType] = useState<'none' | 'top-bottom' | 'card' | 'badge' | 'official-garuda' | 'modern-border' | 'label-side'>('top-bottom');
   const [frameText, setFrameText] = useState('สแกนเพื่อตรวจสอบเอกสาร EDMS');
+  const [frameTextBottom, setFrameTextBottom] = useState('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
   const [frameColor, setFrameColor] = useState('#0f172a');
   const [frameTextColor, setFrameTextColor] = useState('#ffffff');
 
@@ -202,6 +209,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const [modalTplDefaultQrType, setModalTplDefaultQrType] = useState('edms');
   const [modalTplIsDefault, setModalTplIsDefault] = useState(false);
   const jsonImportInputRef = useRef<HTMLInputElement>(null);
+
+  // Sticker A4 Sheet Studio State
+  const [stickerLayout, setStickerLayout] = useState<'6' | '12' | '24'>('12');
+  const [stickerShowOrg, setStickerShowOrg] = useState(true);
+  const [stickerShowDoc, setStickerShowDoc] = useState(true);
+  const [stickerShowDate, setStickerShowDate] = useState(true);
+  const [stickerCustomTitle, setStickerCustomTitle] = useState('สำนักงาน ปภ. จังหวัดระยอง');
+  const [stickerBorder, setStickerBorder] = useState(true);
 
   // Classic history
   const [history, setHistory] = useState<any[]>(() => {
@@ -337,6 +352,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         customLogoUrl: customLogoUrl && customLogoUrl.length > 50000 ? '' : customLogoUrl,
         frameType,
         frameText,
+        frameTextBottom,
         frameColor,
         frameTextColor
       };
@@ -746,6 +762,17 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       } else if (frameType === 'badge') {
         finalHeight = size + 80;
         qrOffsetY = 0;
+      } else if (frameType === 'official-garuda') {
+        finalHeight = size + 180;
+        qrOffsetY = 110;
+      } else if (frameType === 'modern-border') {
+        finalWidth = size + 40;
+        finalHeight = size + 40;
+        qrOffsetX = 20;
+        qrOffsetY = 20;
+      } else if (frameType === 'label-side') {
+        finalWidth = size + 220;
+        qrOffsetX = 10;
       }
 
       targetCanvas.width = finalWidth;
@@ -758,7 +785,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         ctx.fillRect(0, 0, finalWidth, finalHeight);
       }
 
-      // Draw Card border
+      // Draw Frames
       if (frameType === 'card') {
         ctx.strokeStyle = frameColor;
         ctx.lineWidth = 6;
@@ -767,12 +794,31 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         ctx.roundRect(10, 10, finalWidth - 20, finalHeight - 20, 24);
         ctx.fill();
         ctx.stroke();
+      } else if (frameType === 'modern-border') {
+        ctx.strokeStyle = frameColor;
+        ctx.lineWidth = 12;
+        ctx.strokeRect(6, 6, finalWidth - 12, finalHeight - 12);
+        
+        // Accent corners
+        ctx.fillStyle = frameColor;
+        const cLen = 60;
+        ctx.fillRect(0, 0, cLen, 12);
+        ctx.fillRect(0, 0, 12, cLen);
+        ctx.fillRect(finalWidth - cLen, 0, cLen, 12);
+        ctx.fillRect(finalWidth - 12, 0, 12, cLen);
+        ctx.fillRect(0, finalHeight - 12, cLen, 12);
+        ctx.fillRect(0, finalHeight - cLen, 12, cLen);
+        ctx.fillRect(finalWidth - cLen, finalHeight - 12, cLen, 12);
+        ctx.fillRect(finalWidth - 12, finalHeight - cLen, 12, cLen);
+      } else if (frameType === 'label-side') {
+        ctx.fillStyle = frameColor;
+        ctx.fillRect(size + 20, 0, 200, finalHeight);
       }
 
       // Draw Colored QR
       ctx.drawImage(coloredCanvas, qrOffsetX, qrOffsetY, size, size);
 
-      // 4. Logo Overlay
+      // 4. Logo Overlay (Moved after frame drawing but before text)
       let logoSrc = '';
       if (logoType === 'garuda') logoSrc = GARUDA_LOGO_URL;
       else if (logoType === 'province' || logoType === 'ddpm') logoSrc = DDPM_LOGO_URL;
@@ -828,7 +874,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
           ctx.fillRect(0, finalHeight - 50, finalWidth, 50);
           ctx.fillStyle = frameTextColor;
           ctx.font = 'bold 18px Sarabun, sans-serif';
-          ctx.fillText('ระบบสารบรรณอิเล็กทรอนิกส์ EDMS', finalWidth / 2, finalHeight - 18);
+          ctx.fillText(frameTextBottom, finalWidth / 2, finalHeight - 18);
         } else if (frameType === 'card') {
           ctx.fillStyle = frameColor;
           ctx.font = 'bold 24px Sarabun, sans-serif';
@@ -836,7 +882,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
           ctx.font = '16px Sarabun, sans-serif';
           ctx.fillStyle = '#64748b';
-          ctx.fillText('สแกนด้วยกล้องมือถือเพื่อตรวจสอบข้อมูลจริง', finalWidth / 2, finalHeight - 25);
+          ctx.fillText(frameTextBottom, finalWidth / 2, finalHeight - 25);
         } else if (frameType === 'badge') {
           ctx.fillStyle = frameColor;
           ctx.beginPath();
@@ -845,6 +891,41 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
           ctx.fillStyle = frameTextColor;
           ctx.font = 'bold 20px Sarabun, sans-serif';
           ctx.fillText(frameText, finalWidth / 2, finalHeight - 32);
+        } else if (frameType === 'official-garuda') {
+          // Draw Large Garuda at top
+          try {
+            const garudaImg = new Image();
+            garudaImg.src = GARUDA_LOGO_URL;
+            await new Promise(r => garudaImg.onload = r);
+            ctx.drawImage(garudaImg, (finalWidth - 80) / 2, 15, 80, 80);
+          } catch(e){}
+          
+          ctx.fillStyle = frameColor;
+          ctx.font = 'bold 22px Sarabun, sans-serif';
+          ctx.fillText(frameText, finalWidth / 2, 115);
+          
+          ctx.font = '16px Sarabun, sans-serif';
+          ctx.fillStyle = '#475569';
+          ctx.fillText(frameTextBottom, finalWidth / 2, finalHeight - 35);
+          ctx.font = 'bold 14px Sarabun, sans-serif';
+          ctx.fillText('EDMS VERIFIED DOCUMENT', finalWidth / 2, finalHeight - 15);
+        } else if (frameType === 'modern-border') {
+           // Text inside the frame (top or bottom)
+           ctx.fillStyle = frameColor;
+           ctx.fillRect(40, finalHeight - 40, finalWidth - 80, 30);
+           ctx.fillStyle = frameTextColor;
+           ctx.font = 'bold 16px Sarabun, sans-serif';
+           ctx.fillText(frameText, finalWidth / 2, finalHeight - 20);
+        } else if (frameType === 'label-side') {
+          ctx.save();
+          ctx.translate(size + 120, finalHeight / 2);
+          ctx.rotate(Math.PI / 2);
+          ctx.fillStyle = frameTextColor;
+          ctx.font = 'bold 28px Sarabun, sans-serif';
+          ctx.fillText(frameText, 0, 0);
+          ctx.font = '16px Sarabun, sans-serif';
+          ctx.fillText(frameTextBottom, 0, 30);
+          ctx.restore();
         }
       }
 
@@ -1078,6 +1159,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         logoScale,
         frameType,
         frameText,
+        frameTextBottom,
         frameColor,
         frameTextColor,
         previewDataUrl: generatedDataUrl || '',
@@ -1114,6 +1196,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     setLogoScale(t.logoScale !== undefined ? Number(t.logoScale) : 0.22);
     setFrameType(t.frameType || 'none');
     setFrameText(t.frameText || '');
+    setFrameTextBottom(t.frameTextBottom || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
     setFrameColor(t.frameColor || '#0f172a');
     setFrameTextColor(t.frameTextColor || '#ffffff');
 
@@ -1289,6 +1372,145 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     localStorage.setItem('edms_qr_history', JSON.stringify(updated));
   };
 
+  // Print Standard A4 Sticker Sheet
+  const handlePrintStickerSheet = () => {
+    if (!generatedDataUrl) {
+      showToast('error', 'กรุณารอระบบสร้างภาพ QR Code ให้พร้อมก่อนพิมพ์');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showToast('error', 'เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาตป๊อปอัพ');
+      return;
+    }
+
+    const count = stickerLayout === '6' ? 6 : stickerLayout === '12' ? 12 : 24;
+    const gridCols = stickerLayout === '6' ? 'repeat(2, 1fr)' : stickerLayout === '12' ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)';
+    const stickerHeight = stickerLayout === '6' ? '86mm' : stickerLayout === '12' ? '64mm' : '44mm';
+    const qrSize = stickerLayout === '6' ? '92px' : stickerLayout === '12' ? '70px' : '52px';
+    const titleText = stickerCustomTitle || 'สำนักงาน ปภ. จังหวัดระยอง';
+    const docNoText = selectedDoc ? (selectedDoc.docNumber || selectedDoc.id) : (frameType !== 'none' && frameText ? frameText : 'เอกสารราชการทั่วไป');
+    const dateText = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
+
+    let stickersHtml = '';
+    for (let i = 0; i < count; i++) {
+      stickersHtml += `
+        <div class="sticker">
+          ${stickerShowOrg ? `<div class="sticker-org">${titleText}</div>` : ''}
+          <div class="sticker-body">
+            <img src="${generatedDataUrl}" class="sticker-qr" alt="QR Code" />
+            <div class="sticker-info">
+              ${stickerShowDoc ? `<div class="sticker-docno">${docNoText}</div>` : ''}
+              <div class="sticker-tag">สแกนตรวจสอบเอกสาร</div>
+              ${stickerShowDate ? `<div class="sticker-date">วันที่: ${dateText}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>พิมพ์สติ๊กเกอร์ A4 - ${docNoText}</title>
+        <meta charset="utf-8" />
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 8mm;
+          }
+          * {
+            box-sizing: border-box;
+            font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+          }
+          body {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            color: #0f172a;
+          }
+          .sheet-grid {
+            display: grid;
+            grid-template-columns: ${gridCols};
+            gap: ${stickerLayout === '6' ? '6mm' : stickerLayout === '12' ? '4mm' : '3mm'};
+            width: 100%;
+          }
+          .sticker {
+            border: ${stickerBorder ? '1px dashed #94a3b8' : '1px solid #e2e8f0'};
+            border-radius: 6px;
+            padding: ${stickerLayout === '6' ? '12px' : stickerLayout === '12' ? '8px' : '6px'};
+            min-height: ${stickerHeight};
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            page-break-inside: avoid;
+            background: #fff;
+          }
+          .sticker-org {
+            font-size: ${stickerLayout === '6' ? '12px' : stickerLayout === '12' ? '10px' : '8px'};
+            font-weight: bold;
+            color: #0f294a;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 3px;
+            margin-bottom: 4px;
+            text-align: center;
+          }
+          .sticker-body {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+          }
+          .sticker-qr {
+            width: ${qrSize};
+            height: ${qrSize};
+            object-fit: contain;
+            flex-shrink: 0;
+          }
+          .sticker-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-size: ${stickerLayout === '6' ? '11px' : stickerLayout === '12' ? '9px' : '7.5px'};
+            line-height: 1.25;
+            text-align: left;
+            flex: 1;
+            min-width: 0;
+          }
+          .sticker-docno {
+            font-weight: bold;
+            color: #1e293b;
+            word-break: break-word;
+          }
+          .sticker-tag {
+            color: #2563eb;
+            font-weight: 600;
+          }
+          .sticker-date {
+            color: #64748b;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="sheet-grid">
+          ${stickersHtml}
+        </div>
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+    saveToHistory(`พิมพ์สติ๊กเกอร์ A4 (${count} ดวง)`);
+  };
+
   // Downloads PNG
   const downloadPNG = () => {
     if (!canvasRef.current) return;
@@ -1460,7 +1682,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     }
   };
 
-  // Stamp current generated QR onto selected document
+  // Stamp current generated QR onto selected document (Quick Standard Stamp)
   const handleStampToDocument = async () => {
     if (!selectedDocId) return;
     setIsSavingToDoc(true);
@@ -1497,6 +1719,76 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     }
   };
 
+  // Quick 1-Click AI Auto Stamp (วิเคราะห์พื้นที่ว่าง ปรับขนาด และประทับตราทันที)
+  const handleQuickAiStamp = async () => {
+    if (!selectedDocId) {
+      showToast('error', 'กรุณาเลือกหนังสือราชการก่อนประทับตรา');
+      return;
+    }
+    if (!generatedDataUrl) {
+      showToast('error', 'กำลังรอการเรนเดอร์ QR Code กรุณารอสักครู่');
+      return;
+    }
+
+    setIsSavingToDoc(true);
+    setStampSuccess(false);
+
+    try {
+      showToast('info', '🤖 AI กำลังสแกนพื้นที่ว่างและคำนวณขนาดที่เหมาะสม...');
+      
+      // Step 1: AI Layout Analysis
+      const layoutRes = await fetch(`/api/documents/${selectedDocId}/ai-stamp-layout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const layoutData = await layoutRes.json().catch(() => ({}));
+
+      const recSpot = layoutData?.spots?.find((s: any) => s.id === layoutData?.recommendedSpotId) || layoutData?.spots?.[0];
+      const stampW = recSpot?.width || layoutData?.optimalSize || 85;
+      const stampH = recSpot?.height || layoutData?.optimalSize || 85;
+      const pw = layoutData?.pageSize?.width || 595.28;
+      const ph = layoutData?.pageSize?.height || 841.89;
+
+      const clientX = recSpot ? (recSpot.xPercent / 100) * pw : 65;
+      const clientY = recSpot ? (recSpot.yPercent / 100) * ph : 520;
+
+      // Step 2: Stamp with AI calculated parameters
+      const response = await fetch(`/api/documents/${selectedDocId}/stamp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          qrCodeImage: generatedDataUrl,
+          stampedBy: user?.username || user?.firstName || 'ผู้ดูแลระบบ',
+          x: clientX,
+          y: clientY,
+          width: stampW,
+          height: stampH,
+          coordinateOrigin: 'top-left',
+          addVerificationCaption: true,
+          aiSpotName: recSpot?.name || 'ท้ายหนังสือฝั่งซ้าย (AI Auto-Fit)'
+        })
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok && data.success) {
+        setStampSuccess(true);
+        setTimeout(() => setStampSuccess(false), 5000);
+        const docLabel = selectedDoc?.docNumber || selectedDoc?.title || 'EDMS';
+        showToast('success', `⚡ AI ประทับตราลงหนังสือ [${docLabel}] ในพื้นที่ว่างปลอดภัย (${Math.round(stampW)}x${Math.round(stampH)} pt) เรียบร้อยแล้ว!`);
+      } else {
+        const errorMsg = data?.error || 'ไม่สามารถบันทึกตราลงเอกสารได้';
+        showToast('error', errorMsg);
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast('error', 'เกิดข้อผิดพลาดในการประทับตราอัตโนมัติด้วย AI');
+    } finally {
+      setIsSavingToDoc(false);
+    }
+  };
+
   // Pre-designed templates list
   const docPresets = [
     { name: 'สติกเกอร์แฟ้มทางการ', frame: 'card', text: 'สแกนตรวจสอบ แฟ้มเอกสารกองการ', fg: '#0f172a', bg: '#ffffff', logo: 'garuda' },
@@ -1526,72 +1818,73 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
           {toast.type === 'error' && <AlertCircle className="w-5 h-5 shrink-0 text-rose-200" />}
           {toast.type === 'info' && <Sparkles className="w-5 h-5 shrink-0 text-blue-200" />}
           <span className="flex-1 break-words">{toast.message}</span>
-          <button onClick={() => setToast(null)} className="ml-2 text-white/80 hover:text-white font-bold text-sm">✕</button>
+          <button 
+            type="button"
+            onClick={() => setToast(null)} 
+            className="ml-2 p-1 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+            title="ปิดการแจ้งเตือน"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
       {/* Upper header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-[var(--bg-overlay)] backdrop-blur-2xl p-6 rounded-3xl border border-[var(--border-light)] shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5 bg-[var(--bg-overlay)] backdrop-blur-2xl p-5 sm:p-6 rounded-3xl border border-[var(--border-light)] shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-blue-500/10 to-transparent rounded-full blur-[80px] pointer-events-none -mr-10 -mt-10 transition-all duration-700 group-hover:from-blue-500/20" />
         
-        <div className="space-y-2 relative z-10">
-          <h1 className="text-2xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/20">
-              <QrCode className="w-6 h-6" />
+        <div className="space-y-1.5 relative z-10">
+          <h1 className="text-xl sm:text-2xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25 shrink-0">
+              <QrCode className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <span className="tracking-tight">ระบบสร้าง QR Code <span className="text-blue-500 text-lg">v2.0</span></span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="tracking-tight">ระบบสร้าง QR Code</span>
+            </div>
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium max-w-xl leading-relaxed">
-            ระบบศูนย์กลางการสร้าง QR Code ยืนยันตัวตนเอกสาร สร้างลิงก์ย่ออัจฉริยะ ติดตามสถิติแบบเรียลไทม์ และออกสติ๊กเกอร์สารบรรณ
+            ศูนย์กลางการสร้าง QR Code ทางการ งานสารบรรณ EDMS เชื่อมโยงระบบตรวจรับรอง ติดตามสถิติเรียลไทม์ และพิมพ์สติ๊กเกอร์ A4
           </p>
         </div>
 
-        {/* Tab Selection */}
-        <div className="flex flex-wrap gap-1 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md p-1.5 rounded-2xl border border-[var(--border-light)] shadow-sm relative z-10">
-          <button
-            onClick={() => setActiveTab('create')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'create' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
-          >
-            สร้าง & ดีไซน์ QR
-          </button>
-          <button
-            onClick={() => setActiveTab('analytics')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'analytics' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
-          >
-            วิเคราะห์สถิติ
-          </button>
-          <button
-            onClick={() => setActiveTab('bulk')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'bulk' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
-          >
-            สร้างกลุ่ม (Bulk)
-          </button>
-          <button
-            onClick={() => setActiveTab('templates')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'templates' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
-          >
-            แม่แบบ (Templates)
-          </button>
-          <button
-            onClick={() => setActiveTab('sticker')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'sticker' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
-          >
-            พิมพ์ตรา A4
-          </button>
-          <button
-            onClick={() => setActiveTab('test')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'test' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}`}
-          >
-            จำลองสแกน
-          </button>
+        {/* Responsive Tab Selection Bar with SVG Icons */}
+        <div className="w-full lg:w-auto overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 sm:mx-0 sm:px-0">
+          <div className="flex items-center gap-1 bg-slate-100/90 dark:bg-slate-900/80 backdrop-blur-md p-1.5 rounded-2xl border border-[var(--border-light)] shadow-sm min-w-max">
+            {[
+              { id: 'create', label: 'สร้าง & ดีไซน์ QR', icon: QrCode },
+              { id: 'analytics', label: 'วิเคราะห์สถิติ', icon: BarChart2 },
+              { id: 'bulk', label: 'สร้างกลุ่ม (Bulk)', icon: CopyPlus },
+              { id: 'templates', label: 'แม่แบบ (Templates)', icon: Bookmark },
+              { id: 'sticker', label: 'พิมพ์ตรา A4', icon: Printer },
+              { id: 'test', label: 'จำลองสแกน', icon: Smartphone },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 whitespace-nowrap ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 ring-1 ring-blue-500/40'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400'}`} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       {/* Tab 1: Design & Create Studio */}
       {activeTab === 'create' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Design Controls Panel */}
-          <div className="lg:col-span-7 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 overflow-y-auto max-h-[85vh] custom-scrollbar">
+          <div className="lg:col-span-7 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 overflow-y-auto max-h-[88vh] lg:max-h-[calc(100vh-200px)] custom-scrollbar pb-16">
             
             {/* Generation Mode Select */}
             <div className="space-y-2">
@@ -1603,10 +1896,10 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 <button
                   type="button"
                   onClick={() => { setGenerationMode('static'); setRegisteredSlug(''); }}
-                  className={`p-3.5 rounded-xl border text-left transition-all flex flex-col justify-between ${generationMode === 'static' ? 'border-blue-600 bg-blue-50/10 dark:bg-blue-900/10' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50'}`}
+                  className={`p-3.5 rounded-xl border text-left transition-all flex flex-col justify-between ${generationMode === 'static' ? 'border-amber-500 bg-amber-50/10 dark:bg-amber-900/10' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50'}`}
                 >
-                  <span className="font-bold text-xs text-slate-800 dark:text-slate-200">Static QR Code</span>
-                  <span className="text-[10px] text-slate-500 mt-1">ข้อมูลฝังอยู่ในภาพโดยตรง ไม่สามารถเปลี่ยนปลายทางภายหลังได้หลังพิมพ์</span>
+                  <span className="font-bold text-xs text-slate-800 dark:text-slate-200">Static QR Code (แบบดั้งเดิม)</span>
+                  <span className="text-[10px] text-slate-500 mt-1">ข้อมูลฝังลงภาพโดยตรง สแกนแล้วเข้าลิงก์ทันที (ไม่ผ่านหน้า Verify Page ของระบบ)</span>
                 </button>
                 <button
                   type="button"
@@ -1616,13 +1909,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                       await registerDynamicQr();
                     }
                   }}
-                  className={`p-3.5 rounded-xl border text-left transition-all flex flex-col justify-between ${generationMode === 'dynamic' ? 'border-blue-600 bg-blue-50/10 dark:bg-blue-900/10' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50'}`}
+                  className={`p-3.5 rounded-xl border text-left transition-all flex flex-col justify-between ${generationMode === 'dynamic' ? 'border-blue-600 bg-blue-50/10 dark:bg-blue-900/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50'}`}
                 >
                   <span className="font-bold text-xs text-blue-600 flex items-center gap-1">
                     <Sparkles className={`w-3.5 h-3.5 ${isRegisteringDynamic ? 'animate-spin' : ''}`} />
-                    <span>Dynamic Routing (แนะนำ) {isRegisteringDynamic && '(กำลังลงทะเบียน...)'}</span>
+                    <span>Dynamic QR + Verify Page (แนะนำ)</span>
                   </span>
-                  <span className="text-[10px] text-slate-500 mt-1">สร้างลิงก์สั้นวิเคราะห์ข้อมูลสแกน เปลี่ยนลิงก์ปลายทางเมื่อใดก็ได้ ไม่ต้องปริ้นต์กระดาษใหม่</span>
+                  <span className="text-[10px] text-slate-500 mt-1">ใช้ URL สั้นของ ปภ. เพื่อแสดงหน้าตรวจสอบความปลอดภัยก่อน Redirect และเก็บสถิติได้</span>
                 </button>
               </div>
 
@@ -1761,8 +2054,8 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             </div>
 
             {/* Main Tabs for QR Type */}
-            <div className="border-b border-slate-200 dark:border-slate-800 pb-2">
-              <div className="flex flex-wrap gap-1">
+            <div className="border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
                 {[
                   { id: 'edms', label: 'เอกสาร EDMS', icon: FileText },
                   { id: 'url', label: 'เว็บไซต์ (URL)', icon: Globe },
@@ -1772,14 +2065,20 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   { id: 'promptpay', label: 'พร้อมเพย์ ปภ.', icon: CreditCard }
                 ].map((tab) => {
                   const Icon = tab.icon;
+                  const isSelected = qrType === tab.id;
                   return (
                     <button
                       key={tab.id}
+                      type="button"
                       onClick={() => setQrType(tab.id as any)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${qrType === tab.id ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900'}`}
+                      className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center sm:justify-start gap-2 transition-all ${
+                        isSelected 
+                          ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500/30' 
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+                      }`}
                     >
-                      <Icon className="w-3.5 h-3.5" />
-                      <span>{tab.label}</span>
+                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : 'text-blue-500'}`} />
+                      <span className="truncate">{tab.label}</span>
                     </button>
                   );
                 })}
@@ -1795,14 +2094,15 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     เลือกหนังสือราชการ หรือเอกสารในสารบรรณ:
                   </label>
                   
-                  {/* Search Document Input */}
+                  {/* Search Document Input with SVG Search Icon */}
                   <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                     <input
                       type="text"
                       placeholder="ค้นหาตามเลขที่หนังสือ หรือเรื่อง..."
                       value={docSearchQuery}
                       onChange={(e) => setDocSearchQuery(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
                     />
                   </div>
 
@@ -1816,13 +2116,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                       .map((doc) => (
                         <button
                           key={doc.id}
+                          type="button"
                           onClick={() => {
                             setSelectedDocId(doc.id);
                             if (doc.title) {
                               setFrameText(`ตรวจเลขหนังสือ: ${doc.docNumber || doc.id}`);
                             }
                           }}
-                          className={`w-full text-left p-2 rounded transition-all flex flex-col gap-0.5 ${selectedDocId === doc.id ? 'bg-blue-500/10 border-l-4 border-blue-500' : 'hover:bg-slate-50'}`}
+                          className={`w-full text-left p-2 rounded-lg transition-all flex flex-col gap-0.5 ${selectedDocId === doc.id ? 'bg-blue-500/10 border-l-4 border-blue-500' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                         >
                           <span className="font-bold text-slate-800 dark:text-slate-200">{doc.docNumber || 'ไม่มีเลขหนังสือ'}</span>
                           <span className="text-[10px] text-slate-500 truncate">{doc.title}</span>
@@ -1831,9 +2132,38 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   </div>
 
                   {selectedDoc && (
-                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-1">
-                      <div className="font-bold text-emerald-700 dark:text-emerald-400">✓ ลิงก์ตรวจสอบเอกสารถูกสร้างขึ้นเรียบร้อย:</div>
-                      <div className="text-[10px] text-slate-600 dark:text-slate-400 break-all">{getComputedPayload()}</div>
+                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-2.5">
+                      <div className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span>เลือกหนังสือสำเร็จ พร้อมประทับตรา AI:</span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold">
+                          AI Auto-Fit
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-600 dark:text-slate-400 break-all font-mono">{getComputedPayload()}</div>
+
+                      {/* Quick AI Stamping Actions inside EDMS tab */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleQuickAiStamp}
+                          disabled={isSavingToDoc}
+                          className="py-2 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 active:scale-98 disabled:opacity-40"
+                        >
+                          <Wand2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>⚡ ประทับตราอัตโนมัติด้วย AI</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsAiStamperOpen(true)}
+                          className="py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs"
+                        >
+                          <Scan className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          <span>ปรับขนาด & เลือกตำแหน่ง</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1846,7 +2176,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     type="url"
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border rounded-lg"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="https://example.com"
                   />
                 </div>
@@ -1859,7 +2189,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     rows={3}
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border rounded-lg font-sans"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-sans outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="พิมพ์ประกาศหรือรายละเอียดข้อความ..."
                   />
                 </div>
@@ -1868,24 +2198,24 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               {qrType === 'vcard' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="block font-bold text-slate-500">ชื่อ-นามสกุล:</label>
-                    <input type="text" value={vcard.name} onChange={(e) => setVcard({...vcard, name: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">ชื่อ-นามสกุล:</label>
+                    <input type="text" value={vcard.name} onChange={(e) => setVcard({...vcard, name: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-1">
-                    <label className="block font-bold text-slate-500">ตำแหน่งงาน:</label>
-                    <input type="text" value={vcard.title} onChange={(e) => setVcard({...vcard, title: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">ตำแหน่งงาน:</label>
+                    <input type="text" value={vcard.title} onChange={(e) => setVcard({...vcard, title: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-1 col-span-2">
-                    <label className="block font-bold text-slate-500">สังกัดองค์กร:</label>
-                    <input type="text" value={vcard.org} onChange={(e) => setVcard({...vcard, org: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">สังกัดองค์กร:</label>
+                    <input type="text" value={vcard.org} onChange={(e) => setVcard({...vcard, org: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-1">
-                    <label className="block font-bold text-slate-500">เบอร์โทรติดต่อ:</label>
-                    <input type="text" value={vcard.phone} onChange={(e) => setVcard({...vcard, phone: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">เบอร์โทรติดต่อ:</label>
+                    <input type="text" value={vcard.phone} onChange={(e) => setVcard({...vcard, phone: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-1">
-                    <label className="block font-bold text-slate-500">อีเมล:</label>
-                    <input type="email" value={vcard.email} onChange={(e) => setVcard({...vcard, email: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">อีเมล:</label>
+                    <input type="email" value={vcard.email} onChange={(e) => setVcard({...vcard, email: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
               )}
@@ -1893,20 +2223,20 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               {qrType === 'wifi' && (
                 <div className="grid grid-cols-3 gap-3">
                   <div className="col-span-2 space-y-1">
-                    <label className="block font-bold text-slate-500">ชื่อเครือข่าย Wi-Fi (SSID):</label>
-                    <input type="text" value={wifi.ssid} onChange={(e) => setWifi({...wifi, ssid: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">ชื่อเครือข่าย Wi-Fi (SSID):</label>
+                    <input type="text" value={wifi.ssid} onChange={(e) => setWifi({...wifi, ssid: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-1">
-                    <label className="block font-bold text-slate-500">ประเภทการเข้ารหัส:</label>
-                    <select value={wifi.encryption} onChange={(e) => setWifi({...wifi, encryption: e.target.value as any})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg">
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">ประเภทการเข้ารหัส:</label>
+                    <select value={wifi.encryption} onChange={(e) => setWifi({...wifi, encryption: e.target.value as any})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="WPA">WPA/WPA2</option>
                       <option value="WEP">WEP</option>
                       <option value="nopass">No Password</option>
                     </select>
                   </div>
                   <div className="col-span-3 space-y-1">
-                    <label className="block font-bold text-slate-500">รหัสผ่านอินเทอร์เน็ต:</label>
-                    <input type="password" value={wifi.password} onChange={(e) => setWifi({...wifi, password: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">รหัสผ่านอินเทอร์เน็ต:</label>
+                    <input type="password" value={wifi.password} onChange={(e) => setWifi({...wifi, password: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
               )}
@@ -1914,12 +2244,12 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               {qrType === 'promptpay' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1 col-span-2">
-                    <label className="block font-bold text-slate-500">เลขบัตร/เบอร์โทรศัพท์ (PromptPay ID):</label>
-                    <input type="text" value={promptPay.id} onChange={(e) => setPromptPay({...promptPay, id: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">เลขบัตร/เบอร์โทรศัพท์ (PromptPay ID):</label>
+                    <input type="text" value={promptPay.id} onChange={(e) => setPromptPay({...promptPay, id: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-1 col-span-2">
-                    <label className="block font-bold text-slate-500">ระบุจำนวนเงินฝาก (บาท):</label>
-                    <input type="number" value={promptPay.amount} onChange={(e) => setPromptPay({...promptPay, amount: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg" />
+                    <label className="block font-bold text-slate-600 dark:text-slate-400">ระบุจำนวนเงินฝาก (บาท):</label>
+                    <input type="number" value={promptPay.amount} onChange={(e) => setPromptPay({...promptPay, amount: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
               )}
@@ -1950,14 +2280,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                           setGradientType(p.gradType as any);
                           setGradientColor2(p.col2);
                         }}
-                        className="p-1 border border-slate-200 rounded text-[9px] hover:bg-slate-100 flex flex-col items-center gap-1 font-semibold"
+                        className="p-1 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded text-[9px] hover:bg-slate-100 dark:hover:bg-slate-800 flex flex-col items-center gap-1 font-semibold transition-colors"
                       >
                         <div className="flex gap-0.5 w-full h-3.5 rounded overflow-hidden">
                           <div className="flex-1" style={{ backgroundColor: p.fg }} />
                           <div className="flex-1" style={{ backgroundColor: p.col2 }} />
                           <div className="flex-1" style={{ backgroundColor: p.bg }} />
                         </div>
-                        <span className="truncate max-w-full text-slate-700">{p.name}</span>
+                        <span className="truncate max-w-full text-slate-700 dark:text-slate-300">{p.name}</span>
                       </button>
                     ))}
                   </div>
@@ -1969,7 +2299,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   <select
                     value={gradientType}
                     onChange={(e) => setGradientType(e.target.value as any)}
-                    className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg"
+                    className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="solid">สีเดี่ยว (Solid Color)</option>
                     <option value="linear">ไล่เฉดสีตรง (Linear Gradient)</option>
@@ -1978,19 +2308,19 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-600">สีหลัก (Foreground):</label>
+                  <label className="font-semibold text-slate-600 dark:text-slate-400">สีหลัก (Foreground):</label>
                   <div className="flex gap-2">
-                    <input type="color" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="w-10 h-8 border rounded cursor-pointer" />
-                    <input type="text" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="w-full px-2 border rounded font-mono text-xs" />
+                    <input type="color" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="w-10 h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
+                    <input type="text" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="w-full px-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded font-mono text-xs outline-none focus:ring-1 focus:ring-blue-500" />
                   </div>
                 </div>
 
                 {gradientType !== 'solid' && (
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-600">สีเฉดเฉลี่ย (Gradient Color):</label>
+                    <label className="font-semibold text-slate-600 dark:text-slate-400">สีเฉดเฉลี่ย (Gradient Color):</label>
                     <div className="flex gap-2">
-                      <input type="color" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="w-10 h-8 border rounded cursor-pointer" />
-                      <input type="text" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="w-full px-2 border rounded font-mono text-xs" />
+                      <input type="color" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="w-10 h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
+                      <input type="text" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="w-full px-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded font-mono text-xs outline-none focus:ring-1 focus:ring-blue-500" />
                     </div>
                   </div>
                 )}
@@ -2000,7 +2330,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               {/* Gradient angle */}
               {gradientType === 'linear' && (
                 <div className="space-y-1.5 text-xs text-left">
-                  <label className="font-semibold text-slate-600">ทิศทางไล่สีคิวอาร์:</label>
+                  <label className="font-semibold text-slate-600 dark:text-slate-400">ทิศทางไล่สีคิวอาร์:</label>
                   <div className="flex gap-2">
                     {[
                       { l: 'ซ้ายไปขวา (0°)', v: 0 },
@@ -2011,7 +2341,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                       <button
                         key={ang.v}
                         onClick={() => setGradientAngle(ang.v)}
-                        className={`px-2 py-1 rounded border text-[10px] font-semibold ${gradientAngle === ang.v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                        className={`px-2 py-1 rounded border text-[10px] font-semibold transition-colors ${gradientAngle === ang.v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
                       >
                         {ang.l}
                       </button>
@@ -2058,14 +2388,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     <button
                       type="button"
                       onClick={() => setLogoType('none')}
-                      className={`p-2 border rounded-xl text-center font-bold ${logoType === 'none' ? 'border-indigo-600 bg-indigo-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                      className={`p-2 border rounded-xl text-center font-bold transition-colors ${logoType === 'none' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
                     >
                       ไม่มีโลโก้
                     </button>
                     <button
                       type="button"
                       onClick={() => setLogoType('garuda')}
-                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 ${logoType === 'garuda' ? 'border-indigo-600 bg-indigo-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 transition-colors ${logoType === 'garuda' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
                     >
                       <img src={GARUDA_LOGO_URL} className="w-5 h-5 object-contain" alt="ครุฑ" />
                       <span>ตราครุฑสารบรรณ</span>
@@ -2073,7 +2403,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     <button
                       type="button"
                       onClick={() => setLogoType('ddpm')}
-                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 ${logoType === 'ddpm' ? 'border-indigo-600 bg-indigo-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 transition-colors ${logoType === 'ddpm' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
                     >
                       <img src={DDPM_LOGO_URL} className="w-5 h-5 object-contain" alt="ปภ" />
                       <span>ตราสัญลักษณ์ ปภ.</span>
@@ -2086,7 +2416,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                           setCustomLogoUrl('https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png');
                         }
                       }}
-                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 ${logoType === 'custom' ? 'border-indigo-600 bg-indigo-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 transition-colors ${logoType === 'custom' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
                     >
                       <img src={customLogoUrl || 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png'} className="w-5 h-5 object-contain" alt="จังหวัด" />
                       <span>ตราโลโก้อื่นๆ</span>
@@ -2125,9 +2455,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                           <img 
                             src={customLogoUrl} 
                             alt="Custom Logo Preview" 
-                            className="w-16 h-16 object-contain rounded-lg border border-slate-100 p-1 bg-white"
+                            className="w-16 h-16 object-contain rounded-lg border border-slate-100 dark:border-slate-700 p-1 bg-white"
                           />
-                          <span className="text-xs text-slate-500 font-medium">ลากไฟล์ใหม่มาวางที่นี่ หรือคลิกเพื่อเปลี่ยนรูป</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">ลากไฟล์ใหม่มาวางที่นี่ หรือคลิกเพื่อเปลี่ยนรูป</span>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center gap-1">
@@ -2138,7 +2468,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                       )}
                     </div>
                     
-                    <p className="text-[10px] text-slate-500">รองรับนามสกุล PNG, JPG หรือ SVG และปรับขนาดให้พอดีอัตโนมัติ</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">รองรับนามสกุล PNG, JPG หรือ SVG และปรับขนาดให้พอดีอัตโนมัติ</p>
                   </div>
                 )}
               </div>
@@ -2157,37 +2487,52 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   <select
                     value={frameType}
                     onChange={(e) => setFrameType(e.target.value as any)}
-                    className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg"
+                    className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="none">ไม่มีกรอบ (เฉพาะภาพ QR)</option>
                     <option value="top-bottom">หัวกระดาษแถบสีและสโลแกนใต้ (Official Corporate Banner)</option>
                     <option value="card">กรอบรูปการ์ดสวยงาม (Document Card Mode)</option>
                     <option value="badge">ริบบอนโค้งเน้นข้อความใต้ (Badge Ribbon Overlay)</option>
+                    <option value="official-garuda">สไตล์ตราครุฑทางการ (Official Garuda Frame)</option>
+                    <option value="modern-border">ขอบโมเดิร์นเน้นมุม (Modern Corner Border)</option>
+                    <option value="label-side">ฉลากแนวตั้งด้านข้าง (Vertical Side Label)</option>
                   </select>
                 </div>
 
                 {frameType !== 'none' && (
-                  <div className="space-y-1">
-                    <label className="font-semibold text-slate-600">ข้อความหลักแสดงบนเฟรม:</label>
-                    <input
-                      type="text"
-                      value={frameText}
-                      onChange={(e) => setFrameText(e.target.value)}
-                      className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg font-bold text-xs"
-                      placeholder="เช่น สแกนเพื่อตรวจสอบความสมบูรณ์"
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-1">
+                      <label className="font-semibold text-slate-600 dark:text-slate-400">ข้อความหลักแสดงด้านบนเฟรม:</label>
+                      <input
+                        type="text"
+                        value={frameText}
+                        onChange={(e) => setFrameText(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-bold text-xs outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder="เช่น สแกนเพื่อตรวจสอบความสมบูรณ์"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-semibold text-slate-600 dark:text-slate-400">ข้อความเสริมแสดงด้านล่างเฟรม:</label>
+                      <input
+                        type="text"
+                        value={frameTextBottom}
+                        onChange={(e) => setFrameTextBottom(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-medium text-xs outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder="เช่น สำนักงาน ปภ. จังหวัดระยอง"
+                      />
+                    </div>
+                  </>
                 )}
 
                 {frameType !== 'none' && (
                   <>
                     <div className="space-y-1">
-                      <label className="font-semibold text-slate-600">สีแบคกราวด์แถบเฟรม (Frame Color):</label>
-                      <input type="color" value={frameColor} onChange={(e) => setFrameColor(e.target.value)} className="w-full h-8 border rounded cursor-pointer" />
+                      <label className="font-semibold text-slate-600 dark:text-slate-400">สีแบคกราวด์แถบเฟรม (Frame Color):</label>
+                      <input type="color" value={frameColor} onChange={(e) => setFrameColor(e.target.value)} className="w-full h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
                     </div>
                     <div className="space-y-1">
-                      <label className="font-semibold text-slate-600">สีฟอนต์ตัวหนังสือเฟรม (Text Color):</label>
-                      <input type="color" value={frameTextColor} onChange={(e) => setFrameTextColor(e.target.value)} className="w-full h-8 border rounded cursor-pointer" />
+                      <label className="font-semibold text-slate-600 dark:text-slate-400">สีฟอนต์ตัวหนังสือเฟรม (Text Color):</label>
+                      <input type="color" value={frameTextColor} onChange={(e) => setFrameTextColor(e.target.value)} className="w-full h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
                     </div>
                   </>
                 )}
@@ -2197,23 +2542,28 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
           </div>
 
           {/* Right Side: QR Real-time Render Result */}
-          <div className="lg:col-span-5 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm flex flex-col items-center justify-between min-h-[400px]">
-            <div className="space-y-2 text-center w-full">
-              <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">ผลงานการออกตราประทับคิวอาร์สด (Real-time Studio Preview)</h2>
-              <p className="text-[10px] text-slate-500">การเปลี่ยนแปลงสไตล์ สี และตราจะปรับปรุงบนแบบจำลองจริงด้านล่างทันที</p>
+          <div className="lg:col-span-5 lg:sticky lg:top-4 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col items-center justify-between min-h-[400px]">
+            <div className="space-y-1.5 text-center w-full">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[11px] font-semibold">
+                <Eye className="w-3.5 h-3.5" />
+                <span>ตัวอย่างตราประทับสด (Live Preview)</span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                การปรับสไตล์ สี กรอบ และตราสัญลักษณ์จะอัปเดตแบบเรียลไทม์ทันที
+              </p>
             </div>
 
             {/* Main Canvas Display */}
-            <div className="relative my-6 max-w-full overflow-hidden p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-inner flex items-center justify-center">
+            <div className="relative my-5 max-w-full overflow-hidden p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-inner flex items-center justify-center">
               <canvas
                 ref={canvasRef}
-                style={{ width: '100%', maxWidth: '320px', height: 'auto' }}
-                className="rounded-lg shadow-md bg-white"
+                style={{ width: '100%', maxWidth: '300px', height: 'auto' }}
+                className="rounded-lg shadow-sm bg-white"
               />
               {isGenerating && (
-                <div className="absolute inset-0 bg-white/70 dark:bg-slate-950/70 flex flex-col items-center justify-center gap-2 text-xs font-bold text-blue-600">
+                <div className="absolute inset-0 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-xs font-bold text-blue-600">
                   <RefreshCw className="w-8 h-8 animate-spin" />
-                  <span>กำลังเรนเดอร์คุณภาพสูง...</span>
+                  <span>กำลังประมวลผลความละเอียดสูง...</span>
                 </div>
               )}
             </div>
@@ -2222,36 +2572,39 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             <div className="w-full space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <button
+                  type="button"
                   onClick={downloadPNG}
-                  className="flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow transition-all"
+                  className="flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
                 >
                   <Download className="w-4 h-4" />
-                  <span>บันทึกภาพ PNG (300DPI)</span>
+                  <span>บันทึก PNG (300DPI)</span>
                 </button>
                 <button
+                  type="button"
                   onClick={downloadSVG}
-                  className="flex items-center justify-center gap-2 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold shadow transition-all"
+                  className="flex items-center justify-center gap-2 py-3 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold shadow-sm transition-all"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>ดาวน์โหลดไฟล์ SVG</span>
+                  <FileDown className="w-4 h-4 text-slate-500" />
+                  <span>ดาวน์โหลด SVG</span>
                 </button>
               </div>
 
               {generationMode === 'dynamic' && registeredSlug && (
                 <div className="p-3 bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800/60 rounded-xl flex items-center gap-3">
-                  <div className="bg-blue-500 text-white p-1.5 rounded-lg shrink-0">
+                  <div className="bg-blue-600 text-white p-2 rounded-lg shrink-0">
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div className="flex-1 text-left min-w-0">
                     <div className="font-bold text-xs text-blue-800 dark:text-blue-300">Dynamic QR พร้อมใช้งาน</div>
-                    <div className="text-[10px] text-blue-600 dark:text-blue-400 truncate">URL สั้น: /qr/{registeredSlug}</div>
+                    <div className="text-[11px] text-blue-600 dark:text-blue-400 font-mono truncate">/qr/{registeredSlug}</div>
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
                       navigator.clipboard.writeText(`${window.location.origin}/qr/${registeredSlug}`);
                       showToast('success', 'คัดลอกลิงก์สั้นสแกนสำเร็จ!');
                     }}
-                    className="p-1.5 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 rounded transition-colors shrink-0"
+                    className="p-2 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/50 rounded-lg transition-colors shrink-0"
                     title="คัดลอก URL สั้น"
                   >
                     <Copy className="w-4 h-4" />
@@ -2259,27 +2612,114 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 </div>
               )}
 
-              {/* Stamp on EDMS Doc and Printer */}
+              {/* AI Document Stamping Section */}
+              <div className="p-3.5 bg-gradient-to-br from-indigo-50/70 via-blue-50/40 to-slate-50 dark:from-slate-800/90 dark:via-indigo-950/25 dark:to-slate-900 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-lg shadow-xs">
+                      <Wand2 className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                        <span>ประทับลงหนังสือ EDMS ด้วย AI</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
+                          Auto-Fit
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                        ค้นหาพื้นที่ว่างปลอดภัย ไม่ทับตัวหนังสือหรือตราทางการ
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedDoc ? (
+                  <div className="p-2 bg-white dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-750 flex items-center justify-between text-xs">
+                    <div className="min-w-0 pr-2">
+                      <div className="font-bold text-[11px] text-slate-800 dark:text-slate-200 truncate">
+                        {selectedDoc.docNumber || 'ไม่มีเลขที่หนังสือ'}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {selectedDoc.title}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAiStamperOpen(true)}
+                      className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                    >
+                      เลือกจุดประทับ
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl text-[11px] text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>กรุณาเลือกหนังสือในแถบ 'หนังสือ EDMS' ก่อนประทับ</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleQuickAiStamp}
+                    disabled={!selectedDocId || isSavingToDoc}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all disabled:opacity-40"
+                  >
+                    {isSavingToDoc ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    ) : stampSuccess ? (
+                      <Check className="w-3.5 h-3.5 text-white shrink-0" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>{stampSuccess ? 'ประทับสำเร็จ!' : '⚡ ประทับตราทันทีด้วย AI'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedDocId) {
+                        showToast('info', 'กรุณาเลือกหนังสือราชการก่อน');
+                        setQrType('edms');
+                        return;
+                      }
+                      setIsAiStamperOpen(true);
+                    }}
+                    disabled={!selectedDocId}
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
+                  >
+                    <Scan className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span>ตรวจพื้นที่ & ปรับขนาด</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Print and Action buttons */}
               <div className="grid grid-cols-2 gap-2">
                 <button
+                  type="button"
                   onClick={handleStampToDocument}
                   disabled={!selectedDocId || isSavingToDoc}
-                  className="flex items-center justify-center gap-2 p-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 rounded-xl text-xs text-amber-800 dark:text-amber-400 font-bold transition-all disabled:opacity-40"
+                  className="flex items-center justify-center gap-2 p-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-xs text-amber-800 dark:text-amber-400 font-bold transition-all disabled:opacity-40"
                 >
-                  <Bookmark className="w-4 h-4 text-amber-500" />
-                  <span>{stampSuccess ? '✓ สำเร็จ!' : 'ประทับลงหนังสือ EDMS'}</span>
+                  <Bookmark className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>ประทับมาตรฐาน (เดิม)</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
-                    const win = window.open();
-                    if(win) {
-                      win.document.write(`<iframe src="${generatedDataUrl}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
-                      win.print();
+                    if (!generatedDataUrl) {
+                      showToast('error', 'กรุณารอภาพ QR Code ให้พร้อม');
+                      return;
+                    }
+                    const win = window.open('', '_blank');
+                    if (win) {
+                      win.document.write(`<!DOCTYPE html><html><head><title>พิมพ์ QR Code</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:320px;height:auto;}</style></head><body><img src="${generatedDataUrl}" onload="window.print();" /></body></html>`);
+                      win.document.close();
                     }
                   }}
-                  className="flex items-center justify-center gap-2 p-2.5 bg-slate-100 hover:bg-slate-200 border rounded-xl text-xs text-slate-700 font-bold"
+                  className="flex items-center justify-center gap-2 p-2.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-300 font-bold transition-all"
                 >
-                  <Printer className="w-4 h-4" />
+                  <Printer className="w-4 h-4 text-slate-500 shrink-0" />
                   <span>สั่งพิมพ์ด่วน (Print)</span>
                 </button>
               </div>
@@ -2304,18 +2744,18 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             
             {/* Left Column: Registered Dynamic QRs List */}
             <div className="lg:col-span-4 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="border-b pb-3">
+              <div className="border-b border-slate-200 dark:border-slate-800 pb-3">
                 <h3 className="font-bold text-slate-800 dark:text-slate-200 text-sm">รายการคิวอาร์แบบไดนามิก ({dynamicQrs.length})</h3>
-                <p className="text-[10px] text-slate-500">คลิกที่รายการด้านล่างเพื่อตรวจสอบสถิติการสแกน และพฤติกรรมผู้ใช้</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">คลิกที่รายการด้านล่างเพื่อตรวจสอบสถิติการสแกน และพฤติกรรมผู้ใช้</p>
               </div>
 
               {isLoadingQrs ? (
-                <div className="flex items-center justify-center p-8 text-xs font-bold text-slate-500 gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin" />
+                <div className="flex items-center justify-center p-8 text-xs font-bold text-slate-500 dark:text-slate-400 gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
                   <span>กำลังอัปเดตสล็อตข้อมูล...</span>
                 </div>
               ) : dynamicQrs.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-500 italic">
+                <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400 italic">
                   ยังไม่มีการลงทะเบียน Dynamic QR โค้ดในระบบสารบรรณ
                 </div>
               ) : (
@@ -2323,32 +2763,32 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   {dynamicQrs.map((qr) => (
                     <div
                       key={qr.slug}
-                      className={`p-3 border rounded-xl text-left transition-all space-y-2 cursor-pointer ${analyticsSlug === qr.slug ? 'border-blue-600 bg-blue-50/10' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 bg-slate-50/50'}`}
+                      className={`p-3 border rounded-xl text-left transition-all space-y-2 cursor-pointer ${analyticsSlug === qr.slug ? 'border-blue-600 bg-blue-50/10 dark:bg-blue-900/20' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40'}`}
                       onClick={() => loadAnalytics(qr.slug)}
                     >
                       <div className="flex justify-between items-start gap-1">
-                        <span className="font-bold text-xs text-slate-800 truncate block flex-1">{qr.title}</span>
+                        <span className="font-bold text-xs text-slate-800 dark:text-slate-200 truncate block flex-1">{qr.title}</span>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleToggleStatus(qr);
                           }}
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${qr.status === 'active' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600'}`}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${qr.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}
                           title="คลิกเพื่อเปลี่ยนสถานะเปิด/ระงับชั่วคราว"
                         >
                           {qr.status === 'active' ? 'Active' : 'Paused'}
                         </button>
                       </div>
 
-                      <div className="text-[10px] text-slate-500 space-y-0.5">
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 space-y-0.5">
                         <div className="flex items-center justify-between">
                           <span>รหัสเป้าหมาย:</span>
-                          <span className="font-mono text-slate-700 bg-white dark:bg-slate-800 px-1 rounded truncate max-w-[120px]">{qr.slug}</span>
+                          <span className="font-mono text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 px-1 rounded truncate max-w-[120px]">{qr.slug}</span>
                         </div>
-                        <div className="truncate text-blue-600">ปลายทาง: {qr.originalUrl}</div>
+                        <div className="truncate text-blue-600 dark:text-blue-400">ปลายทาง: {qr.originalUrl}</div>
                       </div>
 
-                      <div className="flex justify-end gap-1.5 pt-1 border-t border-slate-100">
+                      <div className="flex justify-end gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -2357,7 +2797,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                             setEditingUrl(qr.originalUrl);
                             setEditingStatus(qr.status);
                           }}
-                          className="px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 hover:bg-blue-50 rounded border border-blue-200"
+                          className="px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-800 transition-colors"
                         >
                           <Edit className="w-3 h-3 inline mr-0.5" />แก้ไขลิงก์
                         </button>
@@ -2366,7 +2806,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                             e.stopPropagation();
                             handleDeleteDynamicQr(qr.slug);
                           }}
-                          className="px-1.5 py-0.5 text-[10px] font-semibold text-red-600 hover:bg-red-50 rounded border border-red-100"
+                          className="px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded border border-red-100 dark:border-red-900/50 transition-colors"
                         >
                           ลบ
                         </button>
@@ -2381,12 +2821,12 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             <div className="lg:col-span-8 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-8">
               {!analyticsSlug ? (
                 <div className="flex flex-col items-center justify-center p-16 text-center space-y-3">
-                  <BarChart2 className="w-16 h-16 text-slate-300 animate-pulse" />
-                  <div className="font-bold text-slate-600">กรุณาเลือกช่องรายการ Dynamic QR ทางด้านซ้าย</div>
-                  <p className="text-xs text-slate-500 max-w-sm">ข้อมูลสถิติมุมมองระดับองค์กร เช่น แทร็กเวลากิจกรรม, ระบบปฏิบัติการ, เบราว์เซอร์ และประเทศที่ใช้งานจะรายงานทันที</p>
+                  <BarChart2 className="w-16 h-16 text-slate-300 dark:text-slate-600 animate-pulse" />
+                  <div className="font-bold text-slate-600 dark:text-slate-300">กรุณาเลือกช่องรายการ Dynamic QR ทางด้านซ้าย</div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm">ข้อมูลสถิติมุมมองระดับองค์กร เช่น แทร็กเวลากิจกรรม, ระบบปฏิบัติการ, เบราว์เซอร์ และประเทศที่ใช้งานจะรายงานทันที</p>
                 </div>
               ) : isLoadingAnalytics ? (
-                <div className="flex flex-col items-center justify-center p-16 space-y-3 text-xs font-bold text-slate-500">
+                <div className="flex flex-col items-center justify-center p-16 space-y-3 text-xs font-bold text-slate-500 dark:text-slate-400">
                   <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
                   <span>กำลังดึงข้อมูลสถิติจากเซิร์ฟเวอร์...</span>
                 </div>
@@ -2394,10 +2834,10 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 <div className="space-y-6 text-left">
                   
                   {/* Title & Simulator Header */}
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 gap-2">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 dark:border-slate-800 pb-4 gap-2">
                     <div>
-                      <h3 className="font-bold text-slate-800 text-lg">รายงานและสถิติ: {editingSlug === analyticsSlug ? 'กำลังแก้ไข...' : dynamicQrs.find(q=>q.slug===analyticsSlug)?.title || analyticsSlug}</h3>
-                      <p className="text-[10px] text-slate-500">สแกนจริงเพื่อตรวจสอบเอกสารสำนักนายกรัฐมนตรี ปภ. และประมวลสถิติส่งตรงคลาวด์</p>
+                      <h3 className="font-bold text-slate-800 dark:text-slate-100 text-lg">รายงานและสถิติ: {editingSlug === analyticsSlug ? 'กำลังแก้ไข...' : dynamicQrs.find(q=>q.slug===analyticsSlug)?.title || analyticsSlug}</h3>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">สแกนจริงเพื่อตรวจสอบเอกสารสำนักนายกรัฐมนตรี ปภ. และประมวลสถิติส่งตรงคลาวด์</p>
                     </div>
 
                     <div className="flex items-center gap-1.5 self-end">
@@ -2411,7 +2851,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                       </button>
                       <button
                         onClick={() => loadAnalytics(analyticsSlug)}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border rounded-lg text-[11px] font-semibold flex items-center gap-1"
+                        className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         <span>โหลดใหม่</span>
@@ -2421,26 +2861,26 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
                   {/* Top Stats Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                    <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-2xl space-y-1">
-                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">สแกนสะสมทั้งหมด (Total)</span>
-                      <span className="text-3xl font-extrabold text-blue-600">{analyticsData.totalScans}</span>
-                      <span className="text-[9px] text-emerald-500 block">สติกเกอร์ยังพร้อมทำงาน</span>
+                    <div className="p-4 bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/20 rounded-2xl space-y-1">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">สแกนสะสมทั้งหมด (Total)</span>
+                      <span className="text-3xl font-extrabold text-blue-600 dark:text-blue-400">{analyticsData.totalScans}</span>
+                      <span className="text-[9px] text-emerald-500 dark:text-emerald-400 block">สติกเกอร์ยังพร้อมทำงาน</span>
                     </div>
-                    <div className="p-4 bg-slate-500/5 border border-slate-500/20 rounded-2xl space-y-1">
-                      <span className="text-[10px] text-slate-500 font-bold uppercase block">พิกัดสแกนสูงสุด (Top City)</span>
-                      <span className="text-lg font-bold text-slate-800 truncate block">ระยอง, TH</span>
-                      <span className="text-[9px] text-slate-400 block">จังหวัดที่สแกนสูงสุด</span>
+                    <div className="p-4 bg-slate-500/5 dark:bg-slate-800/40 border border-slate-500/20 dark:border-slate-700/60 rounded-2xl space-y-1">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase block">พิกัดสแกนสูงสุด (Top City)</span>
+                      <span className="text-lg font-bold text-slate-800 dark:text-slate-200 truncate block">ระยอง, TH</span>
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 block">จังหวัดที่สแกนสูงสุด</span>
                     </div>
-                    <div className="p-4 bg-slate-500/5 border border-slate-500/20 rounded-2xl space-y-1">
-                      <span className="text-[10px] text-slate-500 font-bold uppercase block">อุปกรณ์หลัก (Main Dev)</span>
-                      <span className="text-lg font-bold text-slate-800 flex items-center gap-1">
-                        <Smartphone className="w-4 h-4 text-slate-500" />
+                    <div className="p-4 bg-slate-500/5 dark:bg-slate-800/40 border border-slate-500/20 dark:border-slate-700/60 rounded-2xl space-y-1">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase block">อุปกรณ์หลัก (Main Dev)</span>
+                      <span className="text-lg font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                        <Smartphone className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                         <span>Mobile ({analyticsData.deviceBreakdown?.find((d:any)=>d.name==='Mobile')?.value || 0} ครั้ง)</span>
                       </span>
                     </div>
-                    <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-2xl space-y-1">
-                      <span className="text-[10px] text-slate-500 font-bold uppercase block">สถานะลิงก์ (Status)</span>
-                      <span className="text-sm font-extrabold text-amber-600 flex items-center gap-1 mt-1">
+                    <div className="p-4 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-1">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase block">สถานะลิงก์ (Status)</span>
+                      <span className="text-sm font-extrabold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1">
                         <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping" />
                         <span>กำลังติดตาม</span>
                       </span>
@@ -2449,29 +2889,29 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
                   {/* Inline edit forms */}
                   {editingSlug === analyticsSlug && (
-                    <div className="p-4 bg-amber-50 dark:bg-slate-900 border border-amber-300 rounded-2xl space-y-3">
-                      <div className="font-bold text-xs text-amber-800">เครื่องมืออัปเดตเส้นทางสแกน:</div>
+                    <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700/60 rounded-2xl space-y-3">
+                      <div className="font-bold text-xs text-amber-800 dark:text-amber-300">เครื่องมืออัปเดตเส้นทางสแกน:</div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                         <div>
-                          <label className="font-semibold block mb-1">ชื่อคำอธิบายคิวอาร์:</label>
-                          <input type="text" value={editingTitle} onChange={(e)=>setEditingTitle(e.target.value)} className="w-full p-2 bg-white border rounded" />
+                          <label className="font-semibold block mb-1 text-slate-700 dark:text-slate-300">ชื่อคำอธิบายคิวอาร์:</label>
+                          <input type="text" value={editingTitle} onChange={(e)=>setEditingTitle(e.target.value)} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded outline-none focus:ring-1 focus:ring-amber-500" />
                         </div>
                         <div>
-                          <label className="font-semibold block mb-1">จุดหมายลิงก์ปลายทาง (Redirect URL):</label>
-                          <input type="text" value={editingUrl} onChange={(e)=>setEditingUrl(e.target.value)} className="w-full p-2 bg-white border rounded" />
+                          <label className="font-semibold block mb-1 text-slate-700 dark:text-slate-300">จุดหมายลิงก์ปลายทาง (Redirect URL):</label>
+                          <input type="text" value={editingUrl} onChange={(e)=>setEditingUrl(e.target.value)} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded outline-none focus:ring-1 focus:ring-amber-500" />
                         </div>
                       </div>
                       <div className="flex justify-end gap-2 pt-2">
-                        <button onClick={()=>setEditingSlug(null)} className="px-3 py-1.5 bg-slate-200 rounded text-[11px] font-semibold">ยกเลิก</button>
-                        <button onClick={()=>handleUpdateDynamicQr(analyticsSlug)} className="px-3 py-1.5 bg-amber-500 text-white rounded text-[11px] font-bold">บันทึกอัปเดต</button>
+                        <button onClick={()=>setEditingSlug(null)} className="px-3 py-1.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded text-[11px] font-semibold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">ยกเลิก</button>
+                        <button onClick={()=>handleUpdateDynamicQr(analyticsSlug)} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-[11px] font-bold shadow-sm transition-colors">บันทึกอัปเดต</button>
                       </div>
                     </div>
                   )}
 
                   {/* Timeline Custom Chart */}
                   <div className="space-y-2">
-                    <span className="text-xs font-bold text-slate-700">ลำดับกิจกรรมการสแกน (Daily Scans History)</span>
-                    <div className="h-64 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50/50 flex flex-col justify-between">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">ลำดับกิจกรรมการสแกน (Daily Scans History)</span>
+                    <div className="h-64 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50/50 dark:bg-slate-900/40 flex flex-col justify-between">
                       {analyticsData.timeline?.length === 0 ? (
                         <div className="flex items-center justify-center h-full text-xs text-slate-400 italic">ยังไม่มีประวัติสแกนรายวัน ให้กดปุ่ม "จำลองสแกนทดสอบ" เพื่อสร้างข้อมูล</div>
                       ) : (
@@ -2494,9 +2934,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                                   style={{ height: `${Math.max(heightPercent, 4)}%` }}
                                 />
                                 {/* Value Label */}
-                                <span className="text-[9px] font-bold text-slate-500 mt-1">{item.count}</span>
+                                <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 mt-1">{item.count}</span>
                                 {/* Date Label */}
-                                <span className="text-[9px] text-slate-400 mt-1 hidden sm:block">
+                                <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-1 hidden sm:block">
                                   {new Date(item.date).toLocaleDateString('th-TH', { day: 'numeric' })}
                                 </span>
                               </div>
@@ -2510,8 +2950,8 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   {/* Device and Browser Breakdown */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Device Chart */}
-                    <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50/50">
-                      <span className="text-xs font-bold text-slate-700">สัดส่วนตามช่องทางอุปกรณ์ (Devices Used)</span>
+                    <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50/50 dark:bg-slate-900/40">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">สัดส่วนตามช่องทางอุปกรณ์ (Devices Used)</span>
                       <div className="h-44 flex flex-col justify-center">
                         {analyticsData.deviceBreakdown?.length === 0 ? (
                           <span className="text-xs text-slate-400 italic text-center">ไม่มีข้อมูลแสดงผล</span>
@@ -2523,11 +2963,11 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                               return (
                                 <div key={idx} className="space-y-1">
                                   <div className="flex justify-between items-center text-xs">
-                                    <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+                                    <span className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
                                       {item.name === 'Mobile' ? <Smartphone className="w-3.5 h-3.5 text-blue-500" /> : <Laptop className="w-3.5 h-3.5 text-slate-500" />}
                                       <span>{item.name === 'Mobile' ? 'มือถือ (Mobile)' : item.name === 'Tablet' ? 'แท็บเล็ต (Tablet)' : 'เดสก์ท็อป (Desktop)'}</span>
                                     </span>
-                                    <span className="font-bold text-slate-600">{item.value} ครั้ง ({percentage}%)</span>
+                                    <span className="font-bold text-slate-600 dark:text-slate-400">{item.value} ครั้ง ({percentage}%)</span>
                                   </div>
                                   <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                                     <div 
@@ -2544,19 +2984,19 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     </div>
 
                     {/* Location Breakdown list */}
-                    <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50/50">
-                      <span className="text-xs font-bold text-slate-700">เมืองและพิกัดผู้สแกน (Top Scan Locations)</span>
+                    <div className="space-y-2 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-slate-50/50 dark:bg-slate-900/40">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">เมืองและพิกัดผู้สแกน (Top Scan Locations)</span>
                       <div className="h-44 overflow-y-auto space-y-1 text-xs">
                         {analyticsData.locationBreakdown?.length === 0 ? (
                           <div className="text-slate-400 italic py-8 text-center">ไม่มีข้อมูลสถานที่</div>
                         ) : (
                           analyticsData.locationBreakdown.map((loc:any, idx:number) => (
-                            <div key={idx} className="flex justify-between items-center p-2 bg-white rounded-lg border border-slate-100">
-                              <span className="flex items-center gap-1 font-semibold text-slate-700">
+                            <div key={idx} className="flex justify-between items-center p-2 bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
+                              <span className="flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-300">
                                 <MapPin className="w-3.5 h-3.5 text-red-500" />
                                 <span>{loc.name}</span>
                               </span>
-                              <span className="font-mono bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold">{loc.value} สแกน</span>
+                              <span className="font-mono bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-bold">{loc.value} สแกน</span>
                             </div>
                           ))
                         )}
@@ -2566,10 +3006,10 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
                   {/* Recent Logs List */}
                   <div className="space-y-2">
-                    <span className="text-xs font-bold text-slate-700">บันทึกรายการตรวจสอบสดล่าสุด (Real-Time Scan Logs Stream)</span>
-                    <div className="border rounded-2xl overflow-hidden bg-white max-h-56 overflow-y-auto">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">บันทึกรายการตรวจสอบสดล่าสุด (Real-Time Scan Logs Stream)</span>
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 max-h-56 overflow-y-auto">
                       <table className="w-full text-xs text-left">
-                        <thead className="bg-slate-50 border-b">
+                        <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300">
                           <tr>
                             <th className="p-2.5 font-bold">เวลาสแกน</th>
                             <th className="p-2.5 font-bold">ที่อยู่ IP</th>
@@ -2578,23 +3018,23 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                             <th className="p-2.5 font-bold">พิกัดสแกน</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {analyticsData.scans?.length === 0 ? (
                             <tr>
                               <td colSpan={5} className="p-4 text-center text-slate-400 italic">ยังไม่มีการบันทึกรายการเข้าสแกนจากผู้สแกนหนังสือราชการ</td>
                             </tr>
                           ) : (
                             analyticsData.scans.map((scan:any) => (
-                              <tr key={scan.id} className="hover:bg-slate-50/80">
-                                <td className="p-2.5 font-mono text-slate-500">{new Date(scan.scannedAt).toLocaleTimeString('th-TH')}</td>
-                                <td className="p-2.5 font-mono text-slate-700 font-bold">{scan.ipAddress}</td>
-                                <td className="p-2.5">{scan.browser} / {scan.platform}</td>
+                              <tr key={scan.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50">
+                                <td className="p-2.5 font-mono text-slate-500 dark:text-slate-400">{new Date(scan.scannedAt).toLocaleTimeString('th-TH')}</td>
+                                <td className="p-2.5 font-mono text-slate-700 dark:text-slate-300 font-bold">{scan.ipAddress}</td>
+                                <td className="p-2.5 text-slate-700 dark:text-slate-300">{scan.browser} / {scan.platform}</td>
                                 <td className="p-2.5">
-                                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${scan.deviceType === 'Mobile' ? 'bg-blue-500/10 text-blue-600' : 'bg-slate-500/10 text-slate-600'}`}>
+                                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${scan.deviceType === 'Mobile' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400'}`}>
                                     {scan.deviceType}
                                   </span>
                                 </td>
-                                <td className="p-2.5">{scan.location}</td>
+                                <td className="p-2.5 text-slate-700 dark:text-slate-300">{scan.location}</td>
                               </tr>
                             ))
                           )}
@@ -2614,12 +3054,12 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       {/* Tab 3: Bulk Generator */}
       {activeTab === 'bulk' && (
         <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-4 gap-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 dark:border-slate-800 pb-4 gap-4">
             <div>
-              <h2 className="text-xl font-bold font-sans text-slate-800">
-                ระบบสร้างคิวอาร์โค้ดคราวละจำนวนมาก (Enterprise Bulk Generator)
+              <h2 className="text-xl font-bold font-sans text-slate-800 dark:text-slate-100">
+                ระบบสร้างคิวอาร์โค้ดคราวละจำนวนมาก (Bulk Generator)
               </h2>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 เหมาะสำหรับการออกแฟ้มเอกสารสารบรรณประจำสัปดาห์ หรือส่งลิงก์ตรวจหลายหน่วยงานพร้อมกันทีเดียว
               </p>
             </div>
@@ -2628,14 +3068,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               <button
                 onClick={handleGenerateBulk}
                 disabled={isGeneratingBulk}
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow disabled:opacity-40"
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow disabled:opacity-40 transition-colors"
               >
                 {isGeneratingBulk ? 'กำลังประมวลผล...' : 'เริ่มกระบวนการสร้างแบบกลุ่ม'}
               </button>
               <button
                 onClick={handleDownloadBulkPDF}
                 disabled={bulkGeneratedItems.length === 0}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow disabled:opacity-40"
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-xs font-bold shadow disabled:opacity-40 transition-colors"
               >
                 <Download className="w-4 h-4 inline mr-1" />
                 <span>พิมพ์แผ่นสติ๊กเกอร์ A4</span>
@@ -2648,17 +3088,17 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             {/* Left Controls */}
             <div className="md:col-span-5 space-y-4 text-xs text-left">
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">แหล่งนำเข้าข้อมูล (Data Source Selection):</label>
+                <label className="font-bold text-slate-700 dark:text-slate-300">แหล่งนำเข้าข้อมูล (Data Source Selection):</label>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setBulkInputMode('text')}
-                    className={`flex-1 p-2 border rounded-xl text-center font-bold ${bulkInputMode === 'text' ? 'border-blue-600 bg-blue-50/10' : 'bg-white'}`}
+                    className={`flex-1 p-2 border rounded-xl text-center font-bold transition-colors ${bulkInputMode === 'text' ? 'border-blue-600 bg-blue-50/10 text-blue-600 dark:text-blue-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
                   >
                     ระบุลิงก์เป็นรายแถว (Lines of Text)
                   </button>
                   <button
                     onClick={() => setBulkInputMode('docs')}
-                    className={`flex-1 p-2 border rounded-xl text-center font-bold ${bulkInputMode === 'docs' ? 'border-blue-600 bg-blue-50/10' : 'bg-white'}`}
+                    className={`flex-1 p-2 border rounded-xl text-center font-bold transition-colors ${bulkInputMode === 'docs' ? 'border-blue-600 bg-blue-50/10 text-blue-600 dark:text-blue-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
                   >
                     เลือกจากหนังสือในระบบ (EDMS Docs)
                   </button>
@@ -2667,23 +3107,23 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
               {bulkInputMode === 'text' ? (
                 <div className="space-y-1.5">
-                  <label className="font-semibold text-slate-600">ระบุลิงก์หรือหัวข้อ (1 ลิงก์ต่อ 1 บรรทัด):</label>
+                  <label className="font-semibold text-slate-600 dark:text-slate-400">ระบุลิงก์หรือหัวข้อ (1 ลิงก์ต่อ 1 บรรทัด):</label>
                   <textarea
                     rows={8}
                     value={bulkTextInput}
                     onChange={(e) => setBulkTextInput(e.target.value)}
-                    className="w-full p-2.5 border rounded-xl font-mono text-xs bg-slate-50"
+                    className="w-full p-2.5 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-blue-500"
                     placeholder="https://rayong.popt.go.th/page1&#10;https://rayong.popt.go.th/page2"
                   />
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <label className="font-semibold text-slate-600">ทำเครื่องหมายหน้าเอกสารที่ต้องการสร้าง QR พร้อมกัน:</label>
-                  <div className="border rounded-xl p-3 max-h-56 overflow-y-auto space-y-1.5 bg-slate-50">
+                  <label className="font-semibold text-slate-600 dark:text-slate-400">ทำเครื่องหมายหน้าเอกสารที่ต้องการสร้าง QR พร้อมกัน:</label>
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-3 max-h-56 overflow-y-auto space-y-1.5 bg-slate-50 dark:bg-slate-900/50">
                     {documents.map((doc) => {
                       const checked = bulkSelectedDocIds.includes(doc.id);
                       return (
-                        <label key={doc.id} className="flex items-start gap-2.5 p-2 bg-white border rounded hover:border-slate-300 cursor-pointer">
+                        <label key={doc.id} className="flex items-start gap-2.5 p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer transition-colors">
                           <input
                             type="checkbox"
                             checked={checked}
@@ -2697,8 +3137,8 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                             className="rounded mt-0.5 text-blue-600"
                           />
                           <div className="min-w-0">
-                            <div className="font-bold text-slate-800">{doc.docNumber || 'ไม่มีเลข'}</div>
-                            <div className="text-[10px] text-slate-500 truncate">{doc.title}</div>
+                            <div className="font-bold text-slate-800 dark:text-slate-200">{doc.docNumber || 'ไม่มีเลข'}</div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{doc.title}</div>
                           </div>
                         </label>
                       );
@@ -2710,19 +3150,19 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
             {/* Right Output list preview */}
             <div className="md:col-span-7 space-y-3">
-              <div className="font-bold text-slate-800 text-xs text-left">รายการภาพผลผลิตคิวอาร์ ({bulkGeneratedItems.length} รายการที่สร้างขึ้น):</div>
+              <div className="font-bold text-slate-800 dark:text-slate-200 text-xs text-left">รายการภาพผลผลิตคิวอาร์ ({bulkGeneratedItems.length} รายการที่สร้างขึ้น):</div>
               {bulkGeneratedItems.length === 0 ? (
-                <div className="p-12 border border-dashed rounded-2xl text-center text-xs text-slate-400 italic">
+                <div className="p-12 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl text-center text-xs text-slate-400 dark:text-slate-500 italic">
                   กดปุ่ม "เริ่มกระบวนการสร้างแบบกลุ่ม" เพื่อพรีวิวแกลอรี่คิวอาร์โค้ด
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto p-1">
                   {bulkGeneratedItems.map((item) => (
-                    <div key={item.id} className="p-3 border border-slate-200 rounded-xl bg-slate-50 text-left space-y-2 flex flex-col items-center">
-                      <img src={item.dataUrl} className="w-24 h-24 bg-white p-1 rounded-lg border shadow-sm" alt="QR" />
+                    <div key={item.id} className="p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-800/60 text-left space-y-2 flex flex-col items-center">
+                      <img src={item.dataUrl} className="w-24 h-24 bg-white p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm" alt="QR" />
                       <div className="w-full text-center">
-                        <div className="font-bold text-[10px] text-slate-800 truncate">{item.title}</div>
-                        <div className="text-[8px] text-slate-400 truncate">{item.payload}</div>
+                        <div className="font-bold text-[10px] text-slate-800 dark:text-slate-200 truncate">{item.title}</div>
+                        <div className="text-[8px] text-slate-400 dark:text-slate-500 truncate">{item.payload}</div>
                       </div>
                     </div>
                   ))}
@@ -2803,18 +3243,19 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
           {/* Filters and Search Bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs text-left">
-            {/* Category Chips */}
+            {/* Category Chips with SVG Icons */}
             <div className="flex flex-wrap items-center gap-1.5">
               {[
-                { id: 'all', label: 'ทั้งหมด', icon: null },
-                { id: 'official', label: '🏛️ ทางการ/สารบรรณ', icon: null },
-                { id: 'urgent', label: '🚨 ด่วนที่สุด', icon: null },
-                { id: 'public', label: '📢 ประชาสัมพันธ์', icon: null },
-                { id: 'vcard', label: '💼 นามบัตร/ติดต่อ', icon: null },
-                { id: 'wifi', label: '📶 Wi-Fi องค์กร', icon: null },
-                { id: 'finance', label: '💳 การเงิน/พร้อมเพย์', icon: null },
-                { id: 'custom', label: '⭐ กำหนดเอง', icon: null },
+                { id: 'all', label: 'ทั้งหมด', icon: LayoutGrid },
+                { id: 'official', label: 'ทางการ/สารบรรณ', icon: Landmark },
+                { id: 'urgent', label: 'ด่วนที่สุด', icon: AlertTriangle },
+                { id: 'public', label: 'ประชาสัมพันธ์', icon: Megaphone },
+                { id: 'vcard', label: 'นามบัตร/ติดต่อ', icon: Briefcase },
+                { id: 'wifi', label: 'Wi-Fi องค์กร', icon: Wifi },
+                { id: 'finance', label: 'การเงิน/พร้อมเพย์', icon: CreditCard },
+                { id: 'custom', label: 'กำหนดเอง', icon: Star },
               ].map((cat) => {
+                const Icon = cat.icon;
                 const count = cat.id === 'all' 
                   ? savedTemplates.length 
                   : savedTemplates.filter((t: any) => t.category === cat.id).length;
@@ -2827,14 +3268,15 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     onClick={() => setTemplateCategoryFilter(cat.id)}
                     className={`px-3 py-1.5 rounded-xl font-semibold transition-all flex items-center gap-1.5 ${
                       isSelected
-                        ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                        ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500/30'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
+                    <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-slate-500 dark:text-slate-400'}`} />
                     <span>{cat.label}</span>
                     <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
                       isSelected
-                        ? 'bg-white/20 text-white dark:bg-black/20 dark:text-slate-900'
+                        ? 'bg-white/25 text-white'
                         : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
                     }`}>
                       {count}
@@ -2846,21 +3288,22 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
             {/* Search Input */}
             <div className="relative min-w-[240px]">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
                 value={templateSearch}
                 onChange={(e) => setTemplateSearch(e.target.value)}
                 placeholder="ค้นหาแม่แบบด้วยชื่อหรือรายละเอียด..."
-                className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full pl-9 pr-8 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none"
               />
               {templateSearch && (
                 <button
                   type="button"
                   onClick={() => setTemplateSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                  title="ล้างข้อความค้นหา"
                 >
-                  ✕
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
@@ -2907,16 +3350,17 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                   {filtered.map((t: any) => {
                     const isSelected = selectedTemplateId === t.id;
-                    const catLabels: Record<string, { label: string; color: string }> = {
-                      official: { label: '🏛️ ทางการ/สารบรรณ', color: 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300' },
-                      urgent: { label: '🚨 ด่วนที่สุด', color: 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300' },
-                      public: { label: '📢 ประชาสัมพันธ์', color: 'bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300' },
-                      vcard: { label: '💼 นามบัตร/ติดต่อ', color: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' },
-                      wifi: { label: '📶 Wi-Fi องค์กร', color: 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300' },
-                      finance: { label: '💳 การเงิน/พร้อมเพย์', color: 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300' },
-                      custom: { label: '⭐ กำหนดเอง', color: 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300' },
+                    const catLabels: Record<string, { label: string; icon: any; color: string }> = {
+                      official: { label: 'ทางการ/สารบรรณ', icon: Landmark, color: 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300' },
+                      urgent: { label: 'ด่วนที่สุด', icon: AlertTriangle, color: 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300' },
+                      public: { label: 'ประชาสัมพันธ์', icon: Megaphone, color: 'bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300' },
+                      vcard: { label: 'นามบัตร/ติดต่อ', icon: Briefcase, color: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' },
+                      wifi: { label: 'Wi-Fi องค์กร', icon: Wifi, color: 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300' },
+                      finance: { label: 'การเงิน/พร้อมเพย์', icon: CreditCard, color: 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300' },
+                      custom: { label: 'กำหนดเอง', icon: Star, color: 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300' },
                     };
                     const catInfo = catLabels[t.category || 'official'] || catLabels.official;
+                    const CatIcon = catInfo.icon;
 
                     return (
                       <div
@@ -2930,8 +3374,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                         {/* Top Header & Badges */}
                         <div className="p-4 space-y-3 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${catInfo.color}`}>
-                              {catInfo.label}
+                            <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 ${catInfo.color}`}>
+                              <CatIcon className="w-3 h-3 shrink-0" />
+                              <span>{catInfo.label}</span>
                             </span>
                             <div className="flex items-center gap-1">
                               {t.isDefault && (
@@ -3007,7 +3452,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                           {/* Design Spec Parameter Pills */}
                           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-1.5 text-[10px]">
                             {/* Color Swatch */}
-                            <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                            <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 font-mono">
                               <span
                                 className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0"
                                 style={{ backgroundColor: t.fgColor || '#0f172a' }}
@@ -3016,22 +3461,57 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                             </div>
 
                             {/* Gradient mode */}
-                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
-                              {t.gradientType === 'linear' ? '🌈 ไล่สี Linear' : t.gradientType === 'radial' ? '⭕ ไล่สีวงกลม' : '⬛ สีเดี่ยว'}
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              <Palette className="w-2.5 h-2.5 text-blue-500" />
+                              <span>{t.gradientType === 'linear' ? 'ไล่สีเส้นตรง' : t.gradientType === 'radial' ? 'ไล่สีวงกลม' : 'สีเดี่ยว'}</span>
                             </span>
 
                             {/* Logo Type */}
-                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
-                              {t.logoType === 'garuda' ? '🦅 ตราครุฑ' : t.logoType === 'ddpm' || t.logoType === 'province' ? '🏢 ตรา ปภ./จังหวัด' : t.logoType === 'custom' ? '🖼️ โลโก้กำหนดเอง' : 'ไร้โลโก้'}
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              {t.logoType === 'garuda' ? (
+                                <>
+                                  <Shield className="w-2.5 h-2.5 text-amber-500" />
+                                  <span>ตราครุฑ</span>
+                                </>
+                              ) : t.logoType === 'ddpm' || t.logoType === 'province' ? (
+                                <>
+                                  <Building2 className="w-2.5 h-2.5 text-indigo-500" />
+                                  <span>ตรา ปภ./จังหวัด</span>
+                                </>
+                              ) : t.logoType === 'custom' ? (
+                                <>
+                                  <ImageIcon className="w-2.5 h-2.5 text-emerald-500" />
+                                  <span>โลโก้กำหนดเอง</span>
+                                </>
+                              ) : (
+                                <span>ไร้โลโก้</span>
+                              )}
                             </span>
 
                             {/* Frame Type */}
-                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
-                              {t.frameType === 'top-bottom' ? '📑 กรอบ บน-ล่าง' : t.frameType === 'card' ? '📇 กรอบการ์ด' : t.frameType === 'badge' ? '🏷️ ป้าย Badge' : 'ไร้กรอบ'}
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                              {t.frameType === 'top-bottom' ? (
+                                <>
+                                  <Layers className="w-2.5 h-2.5 text-blue-500" />
+                                  <span>กรอบบน-ล่าง</span>
+                                </>
+                              ) : t.frameType === 'card' ? (
+                                <>
+                                  <Layers className="w-2.5 h-2.5 text-purple-500" />
+                                  <span>กรอบการ์ด</span>
+                                </>
+                              ) : t.frameType === 'badge' ? (
+                                <>
+                                  <Tag className="w-2.5 h-2.5 text-amber-500" />
+                                  <span>ป้าย Badge</span>
+                                </>
+                              ) : (
+                                <span>ไร้กรอบ</span>
+                              )}
                             </span>
 
                             {/* Error Correction */}
-                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300">
+                            <span className="px-2 py-0.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 font-medium">
                               ระดับ {t.errorCorrection || 'H'}
                             </span>
                           </div>
@@ -3082,39 +3562,245 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         </div>
       )}
 
-      {/* Tab 5: PDF Stickers Printable (Traditional) */}
+      {/* Tab 5: A4 Sticker & Label Printing Studio */}
       {activeTab === 'sticker' && (
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-6 shadow-sm space-y-6">
-          <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-4 text-left">
-            <div>
-              <h2 className="text-xl font-bold font-sans text-slate-800">
-                ระบบพิมพ์สติ๊กเกอร์ และสลิปตรวจสอบเอกสาร (Official Document Labels)
+        <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-3xl p-6 sm:p-8 shadow-sm space-y-8 text-left">
+          {/* Header */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-[var(--border-lighter)] pb-6 gap-4">
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
+                  <Printer className="w-5 h-5" />
+                </div>
+                <span>สตูดิโอพิมพ์สติ๊กเกอร์สารบรรณ A4 (Official Labels Studio)</span>
               </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                สร้างสติ๊กเกอร์ขนาดมาตรฐานสำหรับติดบนปกหนังสือราชการ แฟ้มเอกสาร หรือซองจดหมาย
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                จัดเรียง QR Code เป็นแผ่นสติ๊กเกอร์ขนาดมาตรฐาน A4 สำหรับติดปกหนังสือ แฟ้มประวัติ หรือซองเอกสารราชการ
               </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={downloadPNG}
+                className="px-4 py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2"
+              >
+                <Download className="w-4 h-4 text-slate-500" />
+                <span>บันทึกภาพ QR</span>
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintStickerSheet}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/25 flex items-center gap-2"
+              >
+                <Printer className="w-4 h-4" />
+                <span>สั่งพิมพ์แผ่น A4 ทันที (Print Sheet)</span>
+              </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
-            <div className="p-5 border border-blue-500/30 bg-blue-500/5 rounded-2xl space-y-3 text-xs">
-              <div className="flex items-center gap-2 font-bold text-sm text-blue-600 dark:text-blue-400">
-                <CheckCircle2 className="w-5 h-5" />
-                <span>ตัวอย่างสเปกสติ๊กเกอร์สารบรรณ (Standard Sticker Spec)</span>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* Left Controls Column */}
+            <div className="lg:col-span-5 space-y-6">
+              {/* Layout Picker */}
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <LayoutGrid className="w-4 h-4 text-blue-500" />
+                  <span>เลือกจำนวนดวงต่อแผ่น A4 (Layout Density):</span>
+                </label>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {[
+                    { id: '6', title: '6 ดวง/แผ่น', desc: '2 x 3 (ดวงใหญ่ 8.6 ซม.)', sub: 'แฟ้ม / ซองใหญ่' },
+                    { id: '12', title: '12 ดวง/แผ่น', desc: '3 x 4 (ดวงกลาง 6.4 ซม.)', sub: 'ปกหนังสือราชการ' },
+                    { id: '24', title: '24 ดวง/แผ่น', desc: '4 x 6 (ดวงเล็ก 4.4 ซม.)', sub: 'หนังสือเวียน/การ์ด' }
+                  ].map(layout => {
+                    const isSelected = stickerLayout === layout.id;
+                    return (
+                      <button
+                        key={layout.id}
+                        type="button"
+                        onClick={() => setStickerLayout(layout.id as any)}
+                        className={`p-3 rounded-2xl border text-left transition-all flex flex-col justify-between gap-1.5 ${
+                          isSelected
+                            ? 'border-blue-600 bg-blue-50/20 dark:bg-blue-900/20 ring-2 ring-blue-500/20'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-xs font-bold ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                            {layout.title}
+                          </span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />}
+                        </div>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                          {layout.desc}
+                        </span>
+                        <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 w-fit">
+                          {layout.sub}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <ul className="space-y-2 text-slate-600 list-disc list-inside">
-                <li>ขนาดสติ๊กเกอร์แต่ละดวง: 4.0 x 4.0 ซม. (วางเรียง 6 ดวงต่อหน้า A4)</li>
-                <li>พิมพ์ตราครุฑ / โลโก้หน่วยงานกำกับพร้อมรหัสหนังสือราชการ</li>
-                <li>ความคมชัดระดับ 300 DPI เหมาะสำหรับเครื่องพิมพ์สติ๊กเกอร์ความร้อน และ Laser Printer</li>
-                <li>สแกนง่ายแม้อยู่ในซองพลาสติกถนอมเอกสาร</li>
-              </ul>
+
+              {/* Title Input */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Building2 className="w-4 h-4 text-blue-500" />
+                  <span>ชื่อหน่วยงาน / หัวกระดาษสติ๊กเกอร์:</span>
+                </label>
+                <input
+                  type="text"
+                  value={stickerCustomTitle}
+                  onChange={(e) => setStickerCustomTitle(e.target.value)}
+                  placeholder="เช่น สำนักงาน ปภ. จังหวัดระยอง"
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {/* Toggle Options */}
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-2">
+                  ตัวเลือกการแสดงผลบนดวงสติ๊กเกอร์:
+                </span>
+                
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">แสดงชื่อหน่วยงานหัวสติ๊กเกอร์</span>
+                  <input
+                    type="checkbox"
+                    checked={stickerShowOrg}
+                    onChange={(e) => setStickerShowOrg(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">แสดงเลขที่หนังสือ / ข้อมูลกำกับ</span>
+                  <input
+                    type="checkbox"
+                    checked={stickerShowDoc}
+                    onChange={(e) => setStickerShowDoc(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">แสดงวันที่ออกสติ๊กเกอร์ (วัน/เดือน/ปี)</span>
+                  <input
+                    type="checkbox"
+                    checked={stickerShowDate}
+                    onChange={(e) => setStickerShowDate(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Scissors className="w-3.5 h-3.5 text-slate-400" />
+                    <span>แสดงเส้นประนำทางรอยตัด (Cut Guides)</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={stickerBorder}
+                    onChange={(e) => setStickerBorder(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                </label>
+              </div>
+
+              {/* Status Notice */}
+              <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+                <div className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300">
+                  <Info className="w-4 h-4 text-blue-500" />
+                  <span>คำแนะนำการพิมพ์ราชการ</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  ตั้งค่ากระดาษในไดอะล็อกพิมพ์เป็น <strong>A4</strong> และปรับระยะขอบ (Margins) เป็น <strong>ขั้นต่ำ (Minimum)</strong> เพื่อให้ดวงสติ๊กเกอร์ตรงกับแบบฟอร์มสติ๊กเกอร์ไดคัทมาตรฐาน
+                </p>
+              </div>
             </div>
 
-            <div className="p-5 border border-slate-200 bg-slate-50/50 rounded-2xl flex flex-col justify-center items-center text-center space-y-3">
-              <QrCode className="w-16 h-16 text-blue-500" />
-              <p className="text-xs font-semibold text-slate-700">
-                พร้อมพิมพ์สติ๊กเกอร์ประจำเอกสาร: <span className="text-blue-500 font-bold">{selectedDoc ? selectedDoc.docNumber || selectedDoc.title : 'เอกสารทั่วไป'}</span>
-              </p>
+            {/* Right Preview Column: Simulated A4 Sheet */}
+            <div className="lg:col-span-7 bg-slate-200/70 dark:bg-slate-950/70 p-4 sm:p-6 rounded-3xl border border-slate-300 dark:border-slate-800 flex flex-col items-center">
+              <div className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-3 flex items-center gap-1.5 self-start">
+                <Eye className="w-4 h-4 text-blue-500" />
+                <span>จำลองการจัดวางหน้ากระดาษ A4 ({stickerLayout} ดวงต่อแผ่น):</span>
+              </div>
+
+              {/* A4 Paper Canvas */}
+              <div className="w-full max-w-lg bg-white text-slate-900 rounded-xl shadow-xl border border-slate-300 p-4 sm:p-5 overflow-hidden">
+                <div className="border-b border-slate-100 pb-2 mb-3 text-center">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                    A4 Official Sheet Layout &bull; {stickerLayout} Labels
+                  </div>
+                </div>
+
+                <div 
+                  className="grid gap-2"
+                  style={{
+                    gridTemplateColumns: stickerLayout === '6' ? 'repeat(2, minmax(0, 1fr))' : stickerLayout === '12' ? 'repeat(3, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))'
+                  }}
+                >
+                  {Array.from({ length: stickerLayout === '6' ? 6 : stickerLayout === '12' ? 12 : 24 }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-2 rounded-lg bg-white flex flex-col justify-between transition-all ${
+                        stickerBorder ? 'border border-dashed border-slate-300' : 'border border-slate-100'
+                      }`}
+                      style={{
+                        minHeight: stickerLayout === '6' ? '120px' : stickerLayout === '12' ? '86px' : '62px'
+                      }}
+                    >
+                      {stickerShowOrg && (
+                        <div className="text-[9px] font-bold text-slate-800 truncate text-center border-b border-slate-100 pb-1 mb-1">
+                          {stickerCustomTitle || 'สำนักงาน ปภ. จังหวัดระยอง'}
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        {generatedDataUrl ? (
+                          <img
+                            src={generatedDataUrl}
+                            alt="QR"
+                            className="object-contain shrink-0"
+                            style={{
+                              width: stickerLayout === '6' ? '50px' : stickerLayout === '12' ? '36px' : '26px',
+                              height: stickerLayout === '6' ? '50px' : stickerLayout === '12' ? '36px' : '26px'
+                            }}
+                          />
+                        ) : (
+                          <div 
+                            className="bg-slate-100 rounded flex items-center justify-center shrink-0"
+                            style={{
+                              width: stickerLayout === '6' ? '50px' : stickerLayout === '12' ? '36px' : '26px',
+                              height: stickerLayout === '6' ? '50px' : stickerLayout === '12' ? '36px' : '26px'
+                            }}
+                          >
+                            <QrCode className="w-4 h-4 text-slate-400" />
+                          </div>
+                        )}
+
+                        <div className="min-w-0 flex-1 space-y-0.5 text-left">
+                          {stickerShowDoc && (
+                            <div className="text-[8px] font-bold text-slate-800 truncate">
+                              {selectedDoc ? (selectedDoc.docNumber || selectedDoc.id) : (frameType !== 'none' && frameText ? frameText : 'รย 0021/ว 1234')}
+                            </div>
+                          )}
+                          <div className="text-[7.5px] text-blue-600 font-semibold truncate">
+                            ตรวจรับรองเอกสาร
+                          </div>
+                          {stickerShowDate && (
+                            <div className="text-[7px] text-slate-400">
+                              {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3127,7 +3813,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             <div>
               <h2 className="text-xl font-bold font-sans text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 <Eye className="w-6 h-6 text-emerald-500" />
-                เครื่องจำลองสแกนและถอดรหัส QR Code (Scanner Simulator v3.0)
+                เครื่องจำลองสแกนและถอดรหัส QR Code (Scanner Simulator)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 ระบบถอดรหัสและประมวลผลข้อมูลจริงจาก QR Code ด้วย Cloud Engine เพื่อจำลองการแสดงผลบนอุปกรณ์มือถือแบบเรียลไทม์
@@ -3187,11 +3873,17 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 </p>
                 <div className="grid grid-cols-2 gap-3 pt-2 text-slate-500">
                   <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-                    <span className="font-bold text-slate-700 dark:text-slate-300 block mb-0.5">⏱️ Real-time Tracking</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-0.5">
+                      <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span>Real-time Tracking</span>
+                    </span>
                     บันทึกพิกัด เวลา และอุปกรณ์ที่ใช้สแกนลงบล็อกเกอร์ระบบ
                   </div>
                   <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-                    <span className="font-bold text-slate-700 dark:text-slate-300 block mb-0.5">🔒 No Cache Directs</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-0.5">
+                      <Lock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <span>No Cache Directs</span>
+                    </span>
                     บังคับอัปเดตเส้นทางและข้อมูลแบบ Dynamic ทันทีไม่มีค้างในเครื่อง
                   </div>
                 </div>
@@ -3266,7 +3958,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   ) : null}
 
                   {decodeError ? (
-                    <div className="p-4 rounded-2xl bg-rose-50 text-rose-800 border border-rose-100 space-y-2 text-center my-4">
+                    <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border border-rose-100 dark:border-rose-900/50 space-y-2 text-center my-4">
                       <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
                       <p className="font-bold">ตรวจสอบผิดพลาด</p>
                       <p className="text-[10px] leading-relaxed">{decodeError}</p>
@@ -3376,36 +4068,64 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                           <h4 className="font-bold text-rose-600 dark:text-rose-400 text-sm">ไม่พบเอกสารราชการในระบบ</h4>
                           <p className="text-[9px] text-slate-400">Document ID: "{decodedResult.docId}"</p>
                         </div>
-                        <div className="bg-rose-50 dark:bg-rose-950/20 text-rose-800 dark:text-rose-300 text-[9px] p-3 rounded-xl border border-rose-100 dark:border-rose-950/40 leading-relaxed font-semibold">
-                          ⚠️ คำเตือนสากล: ไม่พบรหัสลงทะเบียนนี้ในระบบ ปภ.จังหวัดระยอง 
-                          หากเป็นเอกสารราชการแผ่นกระดาษที่มี QR Code นี้กำกับอยู่ มีความเสี่ยงสูงที่จะเป็นเอกสารปลอมแปลงหรือข้อมูลไม่ถูกต้อง กรุณาติดต่อกองสารบรรณเพื่อทำการตรวจสอบจริงทันที
+                        <div className="bg-rose-50 dark:bg-rose-950/20 text-rose-800 dark:text-rose-300 text-[9px] p-3 rounded-xl border border-rose-100 dark:border-rose-950/40 leading-relaxed font-semibold flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                          <span>คำเตือนสากล: ไม่พบรหัสลงทะเบียนนี้ในระบบ ปภ.จังหวัดระยอง หากเป็นเอกสารราชการแผ่นกระดาษที่มี QR Code นี้กำกับอยู่ มีความเสี่ยงสูงที่จะเป็นเอกสารปลอมแปลงหรือข้อมูลไม่ถูกต้อง กรุณาติดต่อกองสารบรรณเพื่อทำการตรวจสอบจริงทันที</span>
                         </div>
                       </div>
                     ) : decodedResult.type === 'url' ? (
-                      /* URL Preview layout */
-                      <div className="space-y-4 text-left py-4">
-                        <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-950 rounded-full flex items-center justify-center mx-auto text-indigo-600 dark:text-indigo-400">
-                          <Globe className="w-7 h-7" />
+                      /* URL Preview layout - Updated to match v2.0 Verification Landing Page */
+                      <div className="space-y-5 text-center py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="relative w-20 h-20 mx-auto">
+                          <div className="absolute inset-0 bg-emerald-500/20 rounded-full animate-ping"></div>
+                          <div className="relative w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40">
+                            <Check className="w-10 h-10 text-white stroke-[3]" />
+                          </div>
                         </div>
-                        <div className="space-y-1 text-center">
-                          <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs">ระบบพบลิงก์ภายนอก</h4>
-                          <p className="text-[9px] text-slate-400">External Web Connection</p>
+
+                        <div className="space-y-1">
+                          <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">ผ่านการตรวจสอบความถูกต้อง</h4>
+                          <div className="flex items-center justify-center gap-1.5 text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>QR Code Verified & Secure</span>
+                          </div>
                         </div>
-                        <div className="p-3 bg-white dark:bg-slate-900 border rounded-xl space-y-2">
-                          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">เป้าหมายเชื่อมต่อ:</p>
-                          <p className="font-mono text-[9px] text-indigo-600 dark:text-indigo-400 break-all leading-snug">{decodedResult.resolvedUrl}</p>
+
+                        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl text-left space-y-3 shadow-sm">
+                          <div>
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">เนื้อหา / ชื่อเรื่อง:</span>
+                            <p className="text-[10px] font-bold text-slate-700 dark:text-slate-300 leading-tight">
+                              {frameType !== 'none' && frameText ? frameText : 'ลิงก์ภายนอกที่ตรวจสอบแล้ว'}
+                            </p>
+                          </div>
+                          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-1">ลิงก์ปลายทาง:</span>
+                            <div className="p-2 bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-900 rounded-lg">
+                              <p className="font-mono text-[8px] text-slate-500 break-all leading-relaxed">
+                                {decodedResult.resolvedUrl}
+                              </p>
+                            </div>
+                          </div>
                         </div>
-                        <a 
-                          href={decodedResult.resolvedUrl} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-xl shadow-md"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>เชื่อมต่อเข้าชมเว็บไซต์ต้นทาง</span>
-                        </a>
+
+                        <div className="space-y-3 pt-2">
+                          <a 
+                            href={decodedResult.resolvedUrl} 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="w-full h-12 bg-slate-900 dark:bg-slate-800 hover:bg-black dark:hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-slate-900/20 text-xs"
+                          >
+                            <span>เข้าสู่ลิงก์ที่ระบุ</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                          <p className="text-[7px] text-slate-400 leading-relaxed text-center w-full block">
+                            * นี่คือภาพจำลองหน้าต่างตรวจสอบ (Verify Page) <br/>
+                            ที่ประชาชนจะเห็นเมื่อสแกน QR Code และจะนำทางอัตโนมัติใน 3 วินาที
+                          </p>
+                        </div>
                       </div>
-                    ) : decodedResult.type === 'wifi' ? (
+                    ) :
+ decodedResult.type === 'wifi' ? (
                       /* WiFi Config Layout */
                       <div className="space-y-4 text-left py-4">
                         <div className="w-12 h-12 bg-blue-100 dark:bg-blue-950 rounded-full flex items-center justify-center mx-auto text-blue-600 dark:text-blue-400">
@@ -3415,7 +4135,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                           <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs">เชื่อมต่อ Wi-Fi อัตโนมัติ</h4>
                           <p className="text-[9px] text-slate-400">Wireless Network Config</p>
                         </div>
-                        <div className="p-3 bg-white dark:bg-slate-900 border rounded-xl space-y-2.5 text-[9px]">
+                        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2.5 text-[9px]">
                           <div>
                             <span className="text-slate-400 font-semibold block">ชื่อเครือข่าย (SSID):</span>
                             <span className="text-slate-800 dark:text-slate-200 font-bold font-mono text-[11px]">{decodedResult.wifi.ssid}</span>
@@ -3429,7 +4149,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                             <span className="text-slate-800 dark:text-slate-200 font-bold">{decodedResult.wifi.encryption}</span>
                           </div>
                         </div>
-                        <button className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white text-[10px] font-bold rounded-xl shadow-md">
+                        <button className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded-xl shadow-md transition-colors">
                           <Wifi className="w-3.5 h-3.5" />
                           <span>สแกนเข้าใช้เครือข่ายทันที</span>
                         </button>
@@ -3442,20 +4162,21 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                         </div>
                         <div className="space-y-1 text-center">
                           <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs">ข้อมูลโอนเงินผ่านพร้อมเพย์</h4>
-                          <p className="text-[9px] text-slate-400">PromptPay Electronic Payment</p>
+                          <p className="text-[9px] text-slate-400 dark:text-slate-500">PromptPay Electronic Payment</p>
                         </div>
-                        <div className="p-3 bg-white dark:bg-slate-900 border rounded-xl space-y-2.5 text-[9px]">
+                        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2.5 text-[9px]">
                           <div>
                             <span className="text-slate-400 font-semibold block">เบอร์โทรศัพท์/เลขบัตรประชาชน:</span>
                             <span className="text-slate-800 dark:text-slate-200 font-bold font-mono text-[12px]">{decodedResult.promptpay.id}</span>
                           </div>
                           <div>
                             <span className="text-slate-400 font-semibold block">จำนวนเงินโอน:</span>
-                            <span className="text-emerald-600 font-bold font-mono text-[14px]">{parseFloat(decodedResult.promptpay.amount || '0').toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono text-[14px]">{parseFloat(decodedResult.promptpay.amount || '0').toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท</span>
                           </div>
                         </div>
-                        <p className="text-[8px] text-slate-400 text-center leading-relaxed">
-                          🛡️ ตรวจสอบปลายทางของเลขพร้อมเพย์ให้ถูกต้องกับผู้รับเงินก่อนกดยืนยันผ่านแอพธนาคาร
+                        <p className="text-[8px] text-slate-400 dark:text-slate-500 text-center leading-relaxed flex items-center justify-center gap-1">
+                          <Shield className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                          <span>ตรวจสอบปลายทางของเลขพร้อมเพย์ให้ถูกต้องกับผู้รับเงินก่อนกดยืนยันผ่านแอพธนาคาร</span>
                         </p>
                       </div>
                     ) : decodedResult.type === 'vcard' ? (
@@ -3466,9 +4187,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                         </div>
                         <div className="space-y-1 text-center">
                           <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs">ข้อมูลนามบัตรอิเล็กทรอนิกส์</h4>
-                          <p className="text-[9px] text-slate-400">VCard Contact Card</p>
+                          <p className="text-[9px] text-slate-400 dark:text-slate-500">VCard Contact Card</p>
                         </div>
-                        <div className="p-3 bg-white dark:bg-slate-900 border rounded-xl space-y-2 text-[9px]">
+                        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2 text-[9px]">
                           <div>
                             <span className="text-slate-400 font-semibold block">ชื่อผู้ติดต่อ (Name):</span>
                             <span className="text-slate-800 dark:text-slate-200 font-bold">{decodedResult.vcard.name}</span>
@@ -3486,7 +4207,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                             <span className="text-slate-800 dark:text-slate-200 font-mono font-semibold">{decodedResult.vcard.email}</span>
                           </div>
                         </div>
-                        <button className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 bg-amber-600 text-white text-[10px] font-bold rounded-xl shadow-md">
+                        <button className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded-xl shadow-md transition-colors">
                           <User className="w-3.5 h-3.5" />
                           <span>บันทึกชื่อลงโทรศัพท์</span>
                         </button>
@@ -3494,14 +4215,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     ) : (
                       /* General plain text */
                       <div className="space-y-3 text-left py-4">
-                        <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-600">
+                        <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-600 dark:text-slate-300">
                           <FileText className="w-7 h-7" />
                         </div>
                         <div className="space-y-1 text-center">
                           <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs">ข้อมูลข้อความทั่วไป</h4>
-                          <p className="text-[9px] text-slate-400">Plain Text Payload</p>
+                          <p className="text-[9px] text-slate-400 dark:text-slate-500">Plain Text Payload</p>
                         </div>
-                        <div className="p-3 bg-white dark:bg-slate-900 border rounded-xl font-mono text-[10px] break-all leading-normal whitespace-pre-wrap">
+                        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-mono text-[10px] text-slate-800 dark:text-slate-200 break-all leading-normal whitespace-pre-wrap">
                           {decodedResult.payload}
                         </div>
                       </div>
@@ -3511,8 +4232,8 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     /* Initial No Result Box */
                     <div className="flex flex-col items-center justify-center h-full text-center p-6 text-slate-400 space-y-2">
                       <QrCode className="w-12 h-12 text-slate-300 dark:text-slate-700 animate-pulse" />
-                      <p className="font-bold text-xs text-slate-500">รอจำลองถอดรหัส QR</p>
-                      <p className="text-[10px]">กรุณากดปุ่ม Sync Data เพื่อโหลดการจำลองสแกนสด</p>
+                      <p className="font-bold text-xs text-slate-500 dark:text-slate-400">รอจำลองถอดรหัส QR</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500">กรุณากดปุ่ม Sync Data เพื่อโหลดการจำลองสแกนสด</p>
                     </div>
                   )}
 
@@ -3546,8 +4267,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 type="button"
                 onClick={() => setShowSaveTemplateModal(false)}
                 className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+                title="ปิดหน้าต่าง"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -3596,13 +4318,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   onChange={(e) => setModalTplCategory(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                 >
-                  <option value="official">🏛️ ทางการ / งานสารบรรณ</option>
-                  <option value="urgent">🚨 ด่วนที่สุด / ตรวจสอบเร่งด่วน</option>
-                  <option value="public">📢 สื่อประชาสัมพันธ์ / ดาวน์โหลด</option>
-                  <option value="vcard">💼 นามบัตรข้าราชการ / ผู้บริหาร</option>
-                  <option value="wifi">📶 Wi-Fi องค์กร / ห้องประชุม</option>
-                  <option value="finance">💳 การเงิน / พร้อมเพย์</option>
-                  <option value="custom">⭐ แม่แบบกำหนดเอง (Custom)</option>
+                  <option value="official">ทางการ / งานสารบรรณ (Official)</option>
+                  <option value="urgent">ด่วนที่สุด / ตรวจสอบเร่งด่วน (Urgent)</option>
+                  <option value="public">สื่อประชาสัมพันธ์ / ดาวน์โหลด (Public)</option>
+                  <option value="vcard">นามบัตรข้าราชการ / ผู้บริหาร (vCard)</option>
+                  <option value="wifi">Wi-Fi องค์กร / ห้องประชุม (Wi-Fi)</option>
+                  <option value="finance">การเงิน / พร้อมเพย์ (PromptPay)</option>
+                  <option value="custom">แม่แบบกำหนดเอง (Custom)</option>
                 </select>
               </div>
 
@@ -3696,8 +4418,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                 type="button"
                 onClick={() => setShowEditTemplateModal(false)}
                 className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+                title="ปิดหน้าต่าง"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -3724,13 +4447,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   onChange={(e) => setModalTplCategory(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                 >
-                  <option value="official">🏛️ ทางการ / งานสารบรรณ</option>
-                  <option value="urgent">🚨 ด่วนที่สุด / ตรวจสอบเร่งด่วน</option>
-                  <option value="public">📢 สื่อประชาสัมพันธ์ / ดาวน์โหลด</option>
-                  <option value="vcard">💼 นามบัตรข้าราชการ / ผู้บริหาร</option>
-                  <option value="wifi">📶 Wi-Fi องค์กร / ห้องประชุม</option>
-                  <option value="finance">💳 การเงิน / พร้อมเพย์</option>
-                  <option value="custom">⭐ แม่แบบกำหนดเอง (Custom)</option>
+                  <option value="official">ทางการ / งานสารบรรณ (Official)</option>
+                  <option value="urgent">ด่วนที่สุด / ตรวจสอบเร่งด่วน (Urgent)</option>
+                  <option value="public">สื่อประชาสัมพันธ์ / ดาวน์โหลด (Public)</option>
+                  <option value="vcard">นามบัตรข้าราชการ / ผู้บริหาร (vCard)</option>
+                  <option value="wifi">Wi-Fi องค์กร / ห้องประชุม (Wi-Fi)</option>
+                  <option value="finance">การเงิน / พร้อมเพย์ (PromptPay)</option>
+                  <option value="custom">แม่แบบกำหนดเอง (Custom)</option>
                 </select>
               </div>
 
@@ -3797,6 +4520,22 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Document Stamper Modal */}
+      {isAiStamperOpen && selectedDoc && (
+        <AiDocumentStamperModal
+          isOpen={isAiStamperOpen}
+          onClose={() => setIsAiStamperOpen(false)}
+          document={selectedDoc}
+          qrDataUrl={generatedDataUrl}
+          currentUser={user}
+          onStampSuccess={(result) => {
+            setStampSuccess(true);
+            setTimeout(() => setStampSuccess(false), 5000);
+          }}
+          showToast={showToast}
+        />
       )}
 
     </div>

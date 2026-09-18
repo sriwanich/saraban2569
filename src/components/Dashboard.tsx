@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
-import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3 } from 'lucide-react';
+import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle } from 'lucide-react';
 
 import { DocumentItem, DocType } from '../types';
 import Overview from './views/Overview';
@@ -24,6 +24,7 @@ const QrGeneratorView = lazyWithRetry(() => import('./views/QrGeneratorView'));
 const UrgentIncidentReportView = lazyWithRetry(() => import('./views/disaster/UrgentIncidentReportView'));
 const WorkflowSlaView = lazyWithRetry(() => import('./views/WorkflowSlaView'));
 const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'));
+const UserManualView = lazyWithRetry(() => import('./views/UserManualView'));
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 import { useRealtimeSync } from '../utils/realtimeSync';
@@ -329,6 +330,139 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       return [];
     }
   });
+
+  // Real-time active user presence reporting with current page, view title, and activity details
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const computeActivityInfo = () => {
+      let viewTitle = 'ภาพรวมระบบ (Overview)';
+      let activeDetails = 'กำลังดูแดชบอร์ดภาพรวมและสถิติเอกสาร';
+
+      switch (activeTab) {
+        case 'overview':
+          viewTitle = 'ภาพรวมระบบ (Overview)';
+          activeDetails = 'กำลังดูสถิติและสถานะเอกสารภาพรวม';
+          break;
+        case 'inbox':
+          viewTitle = 'ทะเบียนหนังสือรับ (Inbox)';
+          activeDetails = selectedDoc 
+            ? `กำลังเปิดอ่านหนังสือรับ: ${selectedDoc.docNumber || selectedDoc.title || 'เอกสาร'}`
+            : isCreateModalOpen 
+              ? 'กำลังลงทะเบียนหนังสือรับเข้าใหม่' 
+              : 'กำลังตรวจสอบรายการหนังสือรับเข้า';
+          break;
+        case 'outbox':
+          viewTitle = 'ทะเบียนหนังสือส่ง (Outbox)';
+          activeDetails = selectedDoc 
+            ? `กำลังเปิดอ่านหนังสือส่ง: ${selectedDoc.docNumber || selectedDoc.title || 'เอกสาร'}`
+            : isCreateModalOpen 
+              ? 'กำลังออกเลขหนังสือส่งออกใหม่' 
+              : 'กำลังตรวจสอบรายการหนังสือส่งออก';
+          break;
+        case 'admin_docs':
+          viewTitle = 'ระบบงานธุรการ (Admin Docs)';
+          activeDetails = selectedDoc
+            ? `กำลังดูเอกสารธุรการ: ${selectedDoc.docNumber || selectedDoc.title || 'เอกสาร'}`
+            : 'กำลังจัดการงานสารบรรณกลางและงานธุรการ';
+          break;
+        case 'draft_docs':
+          viewTitle = 'ร่างเอกสารราชการ (Drafts)';
+          activeDetails = 'กำลังเขียนและแก้ไขร่างหนังสือราชการ / คำสั่ง';
+          break;
+        case 'infographics':
+          viewTitle = 'ออกแบบ Infographics';
+          activeDetails = 'กำลังออกแบบและจัดทำสื่อประชาสัมพันธ์ ปภ.';
+          break;
+        case 'favorites':
+          viewTitle = 'เอกสารสำคัญปักหมุด (Favorites)';
+          activeDetails = 'กำลังดูรายการเอกสารสำคัญที่ติดดาว';
+          break;
+        case 'folders':
+          viewTitle = 'แฟ้มเอกสารดิจิทัล (Folders)';
+          activeDetails = 'กำลังเปิดดูและสืบค้นแฟ้มจัดเก็บเอกสาร';
+          break;
+        case 'workflow_sla':
+          viewTitle = 'ผังการเดินเอกสาร & SLA';
+          activeDetails = 'กำลังติดตามเส้นทางหนังสือและระยะเวลา SLA';
+          break;
+        case 'digital_signatures':
+          viewTitle = 'ศูนย์ลงนามดิจิทัล (ETDA)';
+          activeDetails = 'กำลังตรวจสอบเอกสารและลงลายมือชื่อดิจิทัล';
+          break;
+        case 'qr_generator':
+          viewTitle = 'สร้าง QR Code สารบรรณ';
+          activeDetails = 'กำลังสร้างรหัส QR Code สำหรับเอกสารราชการ';
+          break;
+        case 'urgent_incidents':
+          viewTitle = 'แบบรายงานเหตุด่วนสาธารณภัย';
+          activeDetails = 'กำลังบันทึกและติดตามสถานการณ์สาธารณภัยเร่งด่วน';
+          break;
+        case 'ai_assistant':
+          viewTitle = 'ผู้ช่วย AI Smart Assistant';
+          activeDetails = 'กำลังปรึกษาผู้ช่วย AI และประมวลผลข้อความ';
+          break;
+        case 'user_manual':
+          viewTitle = 'คู่มือการใช้งานระบบ (Manual)';
+          activeDetails = 'กำลังเปิดอ่านคู่มือและขั้นตอนการปฏิบัติงาน';
+          break;
+        case 'logs':
+          viewTitle = 'บันทึกประวัติระบบ (System Logs)';
+          activeDetails = 'กำลังตรวจสอบบันทึกการใช้งานและ Audit Trail';
+          break;
+        case 'settings':
+          viewTitle = 'ตั้งค่าระบบและผู้ดูแล';
+          activeDetails = 'กำลังจัดการข้อมูลระบบ บุคลากร และสิทธิ์ใช้งาน';
+          break;
+        default:
+          viewTitle = activeTab;
+          activeDetails = 'กำลังใช้งานระบบ';
+      }
+
+      return { viewTitle, activeDetails };
+    };
+
+    const sendPresenceUpdate = async () => {
+      try {
+        const { viewTitle, activeDetails } = computeActivityInfo();
+        const payload = {
+          userId: currentUser.id || currentUser.username,
+          username: currentUser.username,
+          fullName: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(),
+          position: currentUser.position || '',
+          department: currentUser.department || '',
+          departmentId: currentUser.departmentId,
+          role: currentUser.role || 'user',
+          avatar: currentUser.avatar || '',
+          currentView: activeTab,
+          viewTitle,
+          activeDetails,
+          documentId: selectedDoc?.id || undefined,
+          status: (document.visibilityState === 'visible') ? 'active' : 'idle'
+        };
+        await fetch('/api/user-presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (_) {}
+    };
+
+    sendPresenceUpdate();
+
+    const interval = setInterval(sendPresenceUpdate, 15000);
+
+    const handleVisibility = () => {
+      sendPresenceUpdate();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [currentUser, activeTab, selectedDoc, isCreateModalOpen]);
 
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -760,6 +894,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
     { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
     { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents' },
+    { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin' },
+    { id: 'user_manual', icon: HelpCircle, label: 'คู่มือการใช้งาน' },
   ];
 
   const navItems = baseNavItems.filter(item => {
@@ -968,9 +1104,15 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             onClearPrefillData={() => setDisasterPrefillData(null)}
           />
         ));
+      case 'user_manual':
+        return (
+          <Suspense fallback={<LoadingIndicator fullScreen={false} message="กำลังโหลดคู่มือการใช้งานระบบ..." />}>
+            <UserManualView user={currentUser} onNavigateToTab={(tab) => setActiveTab(tab)} />
+          </Suspense>
+        );
 
       case 'recycle_bin':
-        return renderGuardedView('recycle_bin', 'ถังขยะเอกสารและการกู้คืน', (
+        return renderGuardedView('recycle_bin', 'คลังกู้คืนเอกสาร', (
           <RecycleBinView 
             user={currentUser} 
             onRefreshMainData={refreshData} 
@@ -981,7 +1123,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           <LogsView user={currentUser} />
         ));
       case 'settings':
-        return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} />;
+        return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} onNavigateTab={(tab: string) => setActiveTab(tab)} />;
       case 'notifications':
         return (
           <NotificationsView

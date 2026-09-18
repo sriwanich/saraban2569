@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark, Sliders, ChevronLeft, ChevronRight, ChevronDown, Check, Cpu, Server, Gauge, FileText } from 'lucide-react';
+import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark, Sliders, ChevronLeft, ChevronRight, ChevronDown, Check, Cpu, Server, Gauge, FileText, Radio, Globe, Laptop, Smartphone, Tablet, Clock } from 'lucide-react';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../../utils/featureFlags';
 import CustomNumberingSettings from '../CustomNumberingSettings';
 import { useConfirm } from '../../context/ConfirmContext';
+import ActiveUsersRealtimeView from './ActiveUsersRealtimeView';
+import { useRealtimeSync, realtimeSync } from '../../utils/realtimeSync';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
@@ -10,12 +12,25 @@ interface SettingsProps {
   setEnabledFeatures?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   user?: any;
   hasPermission?: (key: string) => boolean;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export default function Settings(props: SettingsProps) {
   const { confirm } = useConfirm();
   const { onSettingsUpdated } = props;
-  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
+  const [userSubTab, setUserSubTab] = useState<'list' | 'realtime'>('list');
+  const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
+    return typeof window !== 'undefined' ? realtimeSync.getOnlineUsers() : 0;
+  });
+
+  useRealtimeSync(['ONLINE_USERS_COUNT', 'ACTIVE_USERS_UPDATED'], (data) => {
+    if (data?.count !== undefined) {
+      setOnlineUsersCount(Number(data.count) || 0);
+    } else if (data?.users && Array.isArray(data.users)) {
+      setOnlineUsersCount(data.users.length);
+    }
+  });
 
   useEffect(() => {
     if (!props.hasPermission) return;
@@ -442,23 +457,72 @@ export default function Settings(props: SettingsProps) {
   const [backupStatusMsg, setBackupStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Automated Backup History States
+  // Automated Daily Backups Daemon State
+  const [backupSubTab, setBackupSubTab] = useState<'schedules' | 'files'>('schedules');
+  const [scheduledBackups, setScheduledBackups] = useState<any[]>([]);
+  const [isLoadingScheduledBackups, setIsLoadingScheduledBackups] = useState(false);
+  const [runningBackupScheduleId, setRunningBackupScheduleId] = useState<number | null>(null);
+  const [isManualRunningBackup, setIsManualRunningBackup] = useState(false);
+  const [showBackupScheduleModal, setShowBackupScheduleModal] = useState(false);
+  const [editingBackupSchedule, setEditingBackupSchedule] = useState<any | null>(null);
+  const [backupDaemonStats, setBackupDaemonStats] = useState<{ enabled: boolean; activeSchedulesCount: number; totalSchedulesCount: number }>({
+    enabled: true,
+    activeSchedulesCount: 0,
+    totalSchedulesCount: 0
+  });
+  const [backupScheduleFormData, setBackupScheduleFormData] = useState({
+    name: 'สำรองข้อมูลระบบฉบับเต็มประจำวัน (รอบเที่ยงคืน 00:00 น.)',
+    scheduleType: 'daily',
+    scheduledTime: '00:00',
+    weeklyDay: 'monday',
+    intervalHours: 24,
+    backupScope: 'full',
+    retentionDays: 7,
+    description: 'สำรองตารางฐานข้อมูลและสารบรรณระบบทั้งหมดทุกคืนอัตโนมัติ พร้อมระบบหมุนเวียนลบไฟล์เก่า',
+    isActive: true
+  });
+
   const [automatedBackups, setAutomatedBackups] = useState<any[]>([]);
   const [isLoadingAutomatedBackups, setIsLoadingAutomatedBackups] = useState(false);
   const [isRestoringAutomated, setIsRestoringAutomated] = useState(false);
   const [automatedBackupMsg, setAutomatedBackupMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isAutomatedBackupEnabled, setIsAutomatedBackupEnabled] = useState(true);
 
+  const fetchScheduledBackups = async () => {
+    setIsLoadingScheduledBackups(true);
+    try {
+      const res = await fetch(`/api/scheduled-backups?role=${props.user?.role || 'admin'}&t=${Date.now()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setScheduledBackups(data.schedules || []);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching scheduled backups:', e);
+    } finally {
+      setIsLoadingScheduledBackups(false);
+    }
+  };
+
   const fetchAutomatedBackups = async () => {
     setIsLoadingAutomatedBackups(true);
     setAutomatedBackupMsg(null);
     try {
-      const statusRes = await fetch(`/api/automated-backups/status?role=${props.user?.role || 'admin'}`);
+      const statusRes = await fetch(`/api/automated-backups/status?role=${props.user?.role || 'admin'}&t=${Date.now()}`);
       if (statusRes.ok) {
         const statusData = await statusRes.json();
-        if (statusData.success) setIsAutomatedBackupEnabled(statusData.enabled);
+        if (statusData.success) {
+          setIsAutomatedBackupEnabled(statusData.enabled);
+          setBackupDaemonStats({
+            enabled: statusData.enabled,
+            activeSchedulesCount: statusData.activeSchedulesCount || 0,
+            totalSchedulesCount: statusData.totalSchedulesCount || 0
+          });
+        }
       }
 
-      const res = await fetch(`/api/automated-backups?role=${props.user?.role || 'admin'}`);
+      const res = await fetch(`/api/automated-backups?role=${props.user?.role || 'admin'}&t=${Date.now()}`);
       if (!res.ok) throw new Error('ไม่สามารถดึงข้อมูลประวัติสำรองข้อมูลได้');
       const data = await res.json();
       if (data.success) {
@@ -470,6 +534,150 @@ export default function Settings(props: SettingsProps) {
       console.error(err);
     } finally {
       setIsLoadingAutomatedBackups(false);
+    }
+  };
+
+  const handleSaveBackupSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const url = editingBackupSchedule ? `/api/scheduled-backups/${editingBackupSchedule.id}` : '/api/scheduled-backups';
+      const method = editingBackupSchedule ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...backupScheduleFormData,
+          role: props.user?.role || 'admin',
+          username: props.user?.firstName || 'ผู้ดูแลระบบ'
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackupMsg({
+          type: 'success',
+          text: editingBackupSchedule ? 'บันทึกการแก้ไขคิวตั้งเวลาสำรองข้อมูลสำเร็จ' : 'เพิ่มคิวตั้งเวลาสำรองข้อมูลใหม่สำเร็จแล้ว'
+        });
+        setShowBackupScheduleModal(false);
+        setEditingBackupSchedule(null);
+        fetchScheduledBackups();
+        fetchAutomatedBackups();
+      } else {
+        throw new Error(data.error || 'เกิดข้อผิดพลาดในการบันทึก');
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleToggleBackupSchedule = async (id: number) => {
+    try {
+      const res = await fetch(`/api/scheduled-backups/${id}/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: props.user?.role || 'admin',
+          username: props.user?.firstName || 'ผู้ดูแลระบบ'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScheduledBackups(prev => prev.map(s => s.id === id ? { ...s, isActive: data.isActive } : s));
+        fetchAutomatedBackups();
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleDeleteBackupSchedule = async (id: number, name: string) => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบคิวตั้งเวลา',
+      message: `คุณต้องการลบคิวตั้งเวลาสำรองข้อมูล "${name}" ใช่หรือไม่?`,
+      type: 'delete',
+      confirmText: 'ยืนยันการลบ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/scheduled-backups/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: props.user?.role || 'admin',
+          username: props.user?.firstName || 'ผู้ดูแลระบบ'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackupMsg({ type: 'success', text: `ลบคิวตั้งเวลา "${name}" เรียบร้อยแล้ว` });
+        fetchScheduledBackups();
+        fetchAutomatedBackups();
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleRunBackupScheduleNow = async (id: number, name: string) => {
+    setRunningBackupScheduleId(id);
+    setAutomatedBackupMsg(null);
+    try {
+      const res = await fetch(`/api/scheduled-backups/${id}/run-now`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: props.user?.role || 'admin',
+          username: props.user?.firstName || 'ผู้ดูแลระบบ'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackupMsg({
+          type: 'success',
+          text: `สั่งรันคิวสำรองข้อมูล "${name}" สำเร็จแล้ว! ไฟล์: ${data.filename} (${((data.fileSize || 0) / 1024).toFixed(1)} KB)`
+        });
+        fetchScheduledBackups();
+        fetchAutomatedBackups();
+      } else {
+        throw new Error(data.error || 'เกิดข้อผิดพลาดในการรัน');
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
+    } finally {
+      setRunningBackupScheduleId(null);
+    }
+  };
+
+  const handleManualRunBackup = async () => {
+    setIsManualRunningBackup(true);
+    setAutomatedBackupMsg(null);
+    try {
+      const res = await fetch('/api/automated-backups/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: props.user?.role || 'admin',
+          username: props.user?.firstName || 'ผู้ดูแลระบบ'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutomatedBackupMsg({
+          type: 'success',
+          text: `สั่งสำรองข้อมูลระบบทันทีสำเร็จ! ไฟล์: ${data.filename}`
+        });
+        fetchAutomatedBackups();
+        fetchScheduledBackups();
+      } else {
+        throw new Error(data.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch (err: any) {
+      setAutomatedBackupMsg({ type: 'error', text: err.message });
+    } finally {
+      setIsManualRunningBackup(false);
     }
   };
 
@@ -487,7 +695,8 @@ export default function Settings(props: SettingsProps) {
       const data = await res.json();
       if (data.success) {
         setIsAutomatedBackupEnabled(enabled);
-        setAutomatedBackupMsg({ type: 'success', text: `ตั้งค่าการสำรองข้อมูลอัตโนมัติเป็น "${enabled ? 'เปิดการใช้งาน' : 'ปิดการใช้งาน'}" เรียบร้อยแล้ว` });
+        setBackupDaemonStats(prev => ({ ...prev, enabled }));
+        setAutomatedBackupMsg({ type: 'success', text: `ตั้งค่าสวิตช์หลักของระบบสำรองข้อมูลอัตโนมัติเป็น "${enabled ? 'เปิดการทำงาน' : 'ปิดการทำงาน'}" เรียบร้อยแล้ว` });
       } else {
         throw new Error(data.error || 'เกิดข้อผิดพลาดในการตั้งค่า');
       }
@@ -553,13 +762,19 @@ export default function Settings(props: SettingsProps) {
   };
 
   const handleRestoreAutomatedBackup = async (fileName: string) => {
-    if (!window.confirm(`⚠️ คำเตือน: คุณต้องการคืนค่าระบบกลับไปยังช่วงเวลาของไฟล์สำรองข้อมูล "${fileName}" ใช่หรือไม่?\nข้อมูลปัจจุบันทั้งหมดในระบบจะถูกเขียนทับและสูญหายทันที!`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: '⚠️ ยืนยันการกู้คืนข้อมูลระบบ (Database Restore)',
+      message: `คุณต้องการกู้คืนข้อมูลระบบย้อนกลับไปยังช่วงเวลาของไฟล์สำรองข้อมูล "${fileName}" ใช่หรือไม่?\n\nข้อมูลปัจจุบันในตารางระบบทั้งหมดจะถูกเขียนทับด้วยข้อมูลจากไฟล์นี้!`,
+      type: 'warning',
+      confirmText: 'ยืนยันการกู้คืนข้อมูล',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
     setIsRestoringAutomated(true);
     setAutomatedBackupMsg(null);
     try {
-      const res = await fetch(`/api/automated-backups/restore/${fileName}?role=${props.user?.role || 'admin'}&username=${encodeURIComponent(props.user?.firstName || 'ผู้ดูแลระบบ')}`, {
+      const res = await fetch(`/api/automated-backups/restore/${encodeURIComponent(fileName)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -573,7 +788,7 @@ export default function Settings(props: SettingsProps) {
       if (data.success) {
         setAutomatedBackupMsg({
           type: 'success',
-          text: `กู้คืนข้อมูลสำเร็จแล้ว! ระบบทำงานตามข้อมูล ณ ช่วงเวลา ${new Date(parseInt(fileName.split('_').pop()?.split('.')[0] || '0')).toLocaleString('th-TH')} เรียบร้อยแล้ว`
+          text: `กู้คืนข้อมูลระบบสำเร็จเรียบร้อยแล้ว! (นำเข้า ${data.details?.recordsCount || 0} รายการ ใน ${data.details?.tablesCount || 0} ตาราง)`
         });
         if (props.onSettingsUpdated) {
           props.onSettingsUpdated();
@@ -923,6 +1138,7 @@ export default function Settings(props: SettingsProps) {
     }
     if (activeTab === 'backup') {
       fetchAutomatedBackups();
+      fetchScheduledBackups();
     }
   }, [activeTab]);
 
@@ -1601,7 +1817,7 @@ export default function Settings(props: SettingsProps) {
   const canBackup = !props.user?.role || (props.hasPermission ? props.hasPermission('backup_restore') : props.user?.role === 'admin');
 
   interface NavItem {
-    id: 'system' | 'system_health' | 'system_doc' | 'users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control';
+    id: 'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control';
     label: string;
     sublabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -1659,6 +1875,14 @@ export default function Settings(props: SettingsProps) {
           icon: Shield,
           visible: canManageUsers,
           badge: users.length > 0 ? `${users.length}` : undefined
+        },
+        {
+          id: 'active_users',
+          label: 'ผู้ใช้ Real-time',
+          sublabel: 'ติดตามผู้ใช้สด และหน้าจอที่เปิดอยู่',
+          icon: Radio,
+          visible: canManageUsers,
+          badge: onlineUsersCount > 0 ? `${onlineUsersCount} ออนไลน์` : undefined
         },
         {
           id: 'permissions',
@@ -3205,6 +3429,48 @@ export default function Settings(props: SettingsProps) {
 
         {activeTab === 'users' && (
           <div className="space-y-5 animate-fade-in">
+            {/* Sub-tabs: User Directory vs Live Real-time Activity */}
+            <div className="flex items-center gap-2 border-b border-[var(--border-light)] pb-3">
+              <button
+                type="button"
+                onClick={() => setUserSubTab('list')}
+                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                  userSubTab === 'list'
+                    ? 'bg-[var(--primary-color)] text-white shadow-xs'
+                    : 'bg-white dark:bg-slate-800 text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-light)]'
+                }`}
+              >
+                <UserIcon className="w-4 h-4" />
+                <span>รายชื่อบุคลากร ({users.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setUserSubTab('realtime')}
+                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                  userSubTab === 'realtime'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'
+                }`}
+              >
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span>ติดตามกิจกรรมผู้ใช้ Real-time ({onlineUsersCount || 0})</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-700/30 text-white font-mono font-bold">
+                  LIVE
+                </span>
+              </button>
+            </div>
+
+            {userSubTab === 'realtime' ? (
+              <ActiveUsersRealtimeView 
+                onNavigateToLogs={() => props.onNavigateTab ? props.onNavigateTab('logs') : undefined} 
+                departments={departments} 
+              />
+            ) : (
+            <>
             {/* Header & Controls */}
             <div className="flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3663,7 +3929,16 @@ export default function Settings(props: SettingsProps) {
             </>
           );
         })()}
+            </>
+            )}
           </div>
+        )}
+
+        {activeTab === 'active_users' && (
+          <ActiveUsersRealtimeView 
+            onNavigateToLogs={() => props.onNavigateTab ? props.onNavigateTab('logs') : undefined} 
+            departments={departments} 
+          />
         )}
 
         {activeTab === 'permissions' && (() => {
@@ -3691,8 +3966,8 @@ export default function Settings(props: SettingsProps) {
                 },
                 {
                   key: 'delete_docs',
-                  title: 'ลบข้อมูลเอกสาร / ย้ายเข้าถังขยะ (Delete Documents)',
-                  desc: 'สิทธิ์การส่งเอกสารไปที่ถังขยะ หรือลบรายการเอกสารที่ไม่ถูกต้องออกจากระบบสารบรรณ',
+                  title: 'ลบข้อมูลเอกสาร / ย้ายเข้าคลังกู้คืน (Delete Documents)',
+                  desc: 'สิทธิ์การส่งเอกสารไปที่คลังกู้คืน หรือลบรายการเอกสารที่ไม่ถูกต้องออกจากระบบสารบรรณ',
                   note: 'แนะนำให้เปิดเฉพาะ Admin และ Moderator'
                 },
                 {
@@ -3773,8 +4048,8 @@ export default function Settings(props: SettingsProps) {
                 },
                 {
                   key: 'recycle_bin',
-                  title: 'ถังขยะเอกสารและการกู้คืน (Recycle Bin & Restore)',
-                  desc: 'สิทธิ์เข้าถึงถังขยะระบบ กู้คืนหนังสือที่ถูกลบ หรือทำลายเอกสารทิ้งถาวร',
+                  title: 'คลังกู้คืนเอกสาร (Recycle Bin & Restore)',
+                  desc: 'สิทธิ์เข้าถึงคลังกู้คืนระบบ กู้คืนหนังสือที่ถูกลบ หรือทำลายเอกสารทิ้งถาวร',
                   note: 'กู้คืนเอกสารที่ถูกลบโดยไม่ตั้งใจ'
                 }
               ]
@@ -4565,37 +4840,42 @@ export default function Settings(props: SettingsProps) {
         })()}
 
         {activeTab === 'backup' && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-6 sm:space-y-8 animate-fade-in">
             {/* Header section */}
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 shadow-sm">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-[var(--primary-color)]/10 text-[var(--primary-color)] rounded-xl">
-                  <Database className="w-7 h-7" />
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl p-5 sm:p-7 shadow-sm bg-gradient-to-br from-[var(--bg-surface)] via-[var(--bg-surface)] to-indigo-500/5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-5">
+                <div className="p-3.5 sm:p-4 bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 rounded-2xl border border-indigo-500/20 shrink-0 shadow-sm">
+                  <Database className="w-7 h-7 sm:w-8 sm:h-8" />
                 </div>
-                <div>
-                  <h3 className="text-xl font-sans font-semibold text-[var(--text-primary)]">
-                    สำรองและคืนค่าข้อมูลระบบ (Backup & Restore)
-                  </h3>
-                  <p className="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed">
-                    จัดการส่งออกและนำเข้าข้อมูลระบบสารบรรณอิเล็กทรอนิกส์ทั้งหมด รวมถึงข้อมูลในตาราง MySQL (หนังสือรับ, หนังสือส่ง, เวียน, ภายใน, คำสั่ง, ผู้ใช้งาน, การตั้งค่า) และไฟล์เอกสารแนบทั้งหมดในรูปแบบไฟล์บีบอัดมาตรฐาน <span className="font-mono px-1.5 py-0.5 bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded text-xs text-[var(--primary-color)] font-semibold">.tar</span>
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <h3 className="text-lg sm:text-xl font-bold text-[var(--text-primary)]">
+                      สำรองและคืนค่าข้อมูลระบบ (Backup & Restore Management)
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                      System Disaster Recovery
+                    </span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed max-w-4xl">
+                    จัดการส่งออกและนำเข้าข้อมูลระบบสารบรรณอิเล็กทรอนิกส์ทั้งหมด รวมถึงข้อมูลตารางฐานข้อมูล MySQL และ LocalDB (หนังสือรับ, หนังสือส่ง, เวียน, ภายใน, คำสั่ง, บัญชีผู้ใช้งาน, การตั้งค่า) และไฟล์เอกสารแนบทั้งหมดในระบบ
                   </p>
                 </div>
               </div>
             </div>
 
             {/* Grid 2 Columns: Backup Panel and Restore Panel */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
               
               {/* Backup Card */}
-              <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-6 flex flex-col justify-between shadow-sm hover:border-[var(--primary-color)]/40 transition-colors">
+              <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-5 sm:p-6 flex flex-col justify-between shadow-sm hover:border-emerald-500/40 transition-all group">
                 <div className="space-y-4">
-                  <div className="flex items-center gap-3 border-b border-[var(--border-light)] pb-4">
-                    <div className="p-2.5 bg-emerald-500/10 text-emerald-500 rounded-lg">
-                      <Download className="w-5 h-5" />
+                  <div className="flex items-center gap-3.5 border-b border-[var(--border-light)] pb-4">
+                    <div className="p-3 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-xl border border-emerald-500/20 shrink-0">
+                      <Download className="w-5 h-5 sm:w-6 sm:h-6" />
                     </div>
                     <div>
-                      <h4 className="font-sans font-medium text-base text-[var(--text-primary)]">
-                        1. สำรองข้อมูลระบบ (Export Backup)
+                      <h4 className="font-bold text-base text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                        1. สำรองข้อมูลระบบฉบับเต็ม (Export Full Backup)
                       </h4>
                       <p className="text-xs text-[var(--text-muted)]">
                         ดาวน์โหลดไฟล์ .tar บีบอัดข้อมูลสารบรรณและไฟล์แนบทั้งหมด
@@ -4603,52 +4883,64 @@ export default function Settings(props: SettingsProps) {
                     </div>
                   </div>
 
-                  <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-                    ระบบจะทำการอ่านข้อมูลจากตาราง MySQL ทั้งหมดในระบบ สร้างไฟล์ดัมพ์ JSON และคัดลอกไฟล์เอกสารแนบทั้งหมดในระบบ รวบรวมและบีบอัดเป็นไฟล์เดียวในรูปแบบ <strong className="text-[var(--text-primary)]">.tar</strong> เพื่อให้คุณสามารถนำไปจัดเก็บอย่างปลอดภัยหรือนำไปย้ายระบบไปยังเซิร์ฟเวอร์อื่นได้
+                  <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
+                    ระบบจะทำการอ่านข้อมูลจากตารางฐานข้อมูลทั้งหมด สร้างไฟล์ดัมพ์ JSON และคัดลอกไฟล์เอกสารแนบในระบบ รวบรวมและบีบอัดเป็นไฟล์เดียวในรูปแบบ <strong className="text-[var(--text-primary)] font-mono">.tar</strong> เพื่อความปลอดภัยสูงสุด
                   </p>
 
-                  <div className="bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-lg p-4 space-y-2 text-xs text-[var(--text-secondary)]">
-                    <div className="font-semibold text-[var(--text-primary)] flex items-center gap-1.5 mb-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500" /> ข้อมูลที่จะถูกสำรองไว้ในไฟล์ .tar:
+                  <div className="bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl p-4 space-y-2.5 text-xs text-[var(--text-secondary)]">
+                    <div className="font-bold text-[var(--text-primary)] flex items-center gap-1.5 mb-1">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> ข้อมูลที่ครอบคลุมในไฟล์ .tar:
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="flex items-center gap-1.5">• ทะเบียนหนังสือรับ / หนังสือส่ง / หนังสือเวียน</div>
-                      <div className="flex items-center gap-1.5">• งานธุรการ / คำสั่ง / ประกาศ / หนังสือรับรอง</div>
-                      <div className="flex items-center gap-1.5">• บัญชีผู้ใช้งานและสิทธิ์เข้าระบบ</div>
-                      <div className="flex items-center gap-1.5">• ข้อมูลโครงสร้างฝ่ายและตำแหน่งงาน</div>
-                      <div className="flex items-center gap-1.5">• การตั้งค่าองค์กรและ SMTP</div>
-                      <div className="flex items-center gap-1.5">• ไฟล์เอกสารแนบ (PDF/รูปภาพ/เอกสาร)</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] sm:text-xs">
+                      <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> ทะเบียนรับ/ส่ง/เวียน/ภายใน
+                      </div>
+                      <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> งานธุรการ/คำสั่ง/ประกาศ
+                      </div>
+                      <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> บัญชีผู้ใช้และสิทธิ์เข้าระบบ
+                      </div>
+                      <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> ข้อมูลฝ่ายและตำแหน่งงาน
+                      </div>
+                      <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> การตั้งค่าองค์กรและเลขจอง
+                      </div>
+                      <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-lighter)]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> ไฟล์เอกสารแนบทั้งหมด
+                      </div>
                     </div>
                   </div>
 
                   {backupStatusMsg && (
-                    <div className={`p-3.5 rounded-lg text-xs flex items-center gap-2.5 ${
+                    <div className={`p-3.5 rounded-xl text-xs flex items-center gap-2.5 border ${
                       backupStatusMsg.type === 'success' 
-                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' 
-                        : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
                     }`}>
                       {backupStatusMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-                      <span>{backupStatusMsg.text}</span>
+                      <span className="font-medium">{backupStatusMsg.text}</span>
                     </div>
                   )}
                 </div>
 
-                <div className="pt-6 mt-6 border-t border-[var(--border-light)]">
+                <div className="pt-5 mt-5 border-t border-[var(--border-light)]">
                   <button
                     type="button"
                     onClick={handleDownloadBackup}
                     disabled={isBackingUp}
-                    className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer animate-pulse-subtle"
+                    className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
                   >
                     {isBackingUp ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>กำลังรวบรวมข้อมูล...</span>
+                        <span>กำลังรวบรวมและบีบอัดข้อมูลสารบรรณ...</span>
                       </>
                     ) : (
                       <>
                         <Download className="w-4 h-4" />
-                        <span>ดาวน์โหลดข้อมูลสำรอง (.tar)</span>
+                        <span>ดาวน์โหลดข้อมูลสำรองฉบับเต็ม (.tar)</span>
                       </>
                     )}
                   </button>
@@ -4656,15 +4948,15 @@ export default function Settings(props: SettingsProps) {
               </div>
 
               {/* Restore Card */}
-              <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-6 flex flex-col justify-between shadow-sm hover:border-[var(--primary-color)]/40 transition-colors">
+              <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-5 sm:p-6 flex flex-col justify-between shadow-sm hover:border-amber-500/40 transition-all group">
                 <div className="space-y-4">
-                  <div className="flex items-center gap-3 border-b border-[var(--border-light)] pb-4">
-                    <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-lg">
-                      <Upload className="w-5 h-5" />
+                  <div className="flex items-center gap-3.5 border-b border-[var(--border-light)] pb-4">
+                    <div className="p-3 bg-amber-500/15 text-amber-600 dark:text-amber-400 rounded-xl border border-amber-500/20 shrink-0">
+                      <Upload className="w-5 h-5 sm:w-6 sm:h-6" />
                     </div>
                     <div>
-                      <h4 className="font-sans font-medium text-base text-[var(--text-primary)]">
-                        2. คืนค่าข้อมูลระบบ (Import Restore)
+                      <h4 className="font-bold text-base text-[var(--text-primary)] group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                        2. คืนค่าข้อมูลระบบ (Import Restore Archive)
                       </h4>
                       <p className="text-xs text-[var(--text-muted)]">
                         อัปโหลดไฟล์สำรองข้อมูล (.tar) เพื่อกู้คืนสารบรรณและไฟล์แนบ
@@ -4672,13 +4964,13 @@ export default function Settings(props: SettingsProps) {
                     </div>
                   </div>
 
-                  <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-                    เลือกไฟล์สำรองข้อมูล <strong className="text-[var(--text-primary)] font-mono">.tar</strong> ที่คุณเคยดาวน์โหลดไว้ เพื่อคืนค่าระบบทั้งหมดให้กลับไปยังช่วงเวลานั้น ข้อมูลหนังสือ บัญชี และไฟล์ต่างๆ จะถูกรีเซ็ตและอัปเดตตามไฟล์กู้คืน
+                  <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
+                    เลือกไฟล์สำรองข้อมูล <strong className="text-[var(--text-primary)] font-mono">.tar</strong> ที่คุณเคยดาวน์โหลดไว้ เพื่อคืนค่าระบบทั้งหมด ข้อมูลหนังสือ บัญชี และไฟล์แนบต่างๆ จะถูกอัปเดตตามไฟล์กู้คืน
                   </p>
 
-                  <div className="space-y-3">
-                    <label className="block text-xs font-semibold text-[var(--text-secondary)]">เลือกไฟล์สำรองข้อมูล (.tar)</label>
-                    <div className="flex items-center gap-3">
+                  <div className="space-y-3 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl p-4">
+                    <label className="block text-xs font-bold text-[var(--text-secondary)]">เลือกไฟล์สำรองข้อมูล (.tar)</label>
+                    <div className="flex flex-wrap items-center gap-3">
                       <input
                         type="file"
                         accept=".tar"
@@ -4693,19 +4985,20 @@ export default function Settings(props: SettingsProps) {
                       <button
                         type="button"
                         onClick={() => document.getElementById('restore-file-input')?.click()}
-                        className="py-2 px-4 bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-medium)] rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-2"
+                        className="py-2.5 px-4 bg-[var(--bg-surface)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-medium)] rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-xs min-h-[40px]"
                       >
-                        <Files className="w-4 h-4 text-[var(--text-muted)]" />
-                        <span>เลือกไฟล์ .tar...</span>
+                        <Files className="w-4 h-4 text-amber-500" />
+                        <span>เลือกไฟล์ .tar จากเครื่อง...</span>
                       </button>
 
                       {restoreFile && (
-                        <div className="flex items-center gap-2 text-xs text-[var(--text-primary)] bg-[var(--bg-canvas)] px-3 py-1.5 rounded-lg border border-[var(--border-light)] font-mono">
-                          <span className="truncate max-w-[150px] sm:max-w-xs">{restoreFile.name}</span>
+                        <div className="flex items-center gap-2 text-xs text-[var(--text-primary)] bg-amber-500/10 px-3 py-2 rounded-xl border border-amber-500/20 font-mono">
+                          <span className="truncate max-w-[160px] sm:max-w-xs">{restoreFile.name}</span>
                           <button
                             type="button"
                             onClick={() => setRestoreFile(null)}
-                            className="text-rose-400 hover:text-rose-500 font-semibold p-0.5"
+                            className="text-rose-500 hover:text-rose-600 font-semibold p-0.5 rounded cursor-pointer"
+                            title="ยกเลิกไฟล์"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -4715,17 +5008,17 @@ export default function Settings(props: SettingsProps) {
                   </div>
 
                   {restoreStatusMsg && (
-                    <div className={`p-3.5 rounded-lg text-xs flex flex-col gap-1.5 border ${
+                    <div className={`p-3.5 rounded-xl text-xs flex flex-col gap-1.5 border ${
                       restoreStatusMsg.type === 'success' 
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                        : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
                     }`}>
                       <div className="flex items-center gap-2">
                         {restoreStatusMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-                        <span className="font-semibold">{restoreStatusMsg.text}</span>
+                        <span className="font-bold">{restoreStatusMsg.text}</span>
                       </div>
                       {restoreStatusMsg.details && (
-                        <div className="pl-6 space-y-0.5 text-[10px] opacity-90 font-mono">
+                        <div className="pl-6 space-y-0.5 text-[11px] opacity-90 font-mono">
                           <div>• นำเข้าเอกสาร: {restoreStatusMsg.details.documentsCount || 0} รายการ</div>
                           <div>• คืนค่าไฟล์แนบ: {restoreStatusMsg.details.filesCount || 0} ไฟล์</div>
                         </div>
@@ -4734,12 +5027,12 @@ export default function Settings(props: SettingsProps) {
                   )}
                 </div>
 
-                <div className="pt-6 mt-6 border-t border-[var(--border-light)]">
+                <div className="pt-5 mt-5 border-t border-[var(--border-light)]">
                   <button
                     type="button"
                     onClick={() => setShowRestoreConfirmModal(true)}
                     disabled={!restoreFile || isRestoring}
-                    className="w-full py-3 px-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full py-3.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
                   >
                     {isRestoring ? (
                       <>
@@ -4749,7 +5042,7 @@ export default function Settings(props: SettingsProps) {
                     ) : (
                       <>
                         <RefreshCw className="w-4 h-4" />
-                        <span>เริ่มต้นคืนค่าข้อมูลระบบ (Restore)</span>
+                        <span>เริ่มต้นคืนค่าข้อมูลระบบ (Restore Archive)</span>
                       </>
                     )}
                   </button>
@@ -4758,182 +5051,759 @@ export default function Settings(props: SettingsProps) {
 
             </div>
 
-            {/* Automated Backups Section (Upgrade) */}
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-6 shadow-sm space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[var(--border-light)] pb-4 gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-indigo-500/10 text-indigo-500 rounded-lg">
-                    <Database className="w-5 h-5" />
+            {/* Automated Backups Section (Automated Daily Backups Engine & Daemon) */}
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-5 sm:p-7 shadow-sm space-y-6">
+              {/* Header Banner & Daemon Status */}
+              <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-transparent border border-indigo-500/20 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-5">
+                <div className="flex items-start gap-3.5 sm:gap-4">
+                  <div className="p-3 sm:p-3.5 rounded-2xl bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5 border border-indigo-500/30 shadow-xs">
+                    <Database className="w-6 h-6 sm:w-7 sm:h-7" />
                   </div>
-                  <div>
-                    <h4 className="font-sans font-semibold text-base text-[var(--text-primary)]">
-                      3. ประวัติการสำรองข้อมูลอัตโนมัติรายวัน (Automated Daily Backups Engine)
-                    </h4>
-                    <p className="text-xs text-[var(--text-muted)]">
-                      สำรองฐานข้อมูลอัตโนมัติทุกๆ 24 ชั่วโมงเพื่อความน่าเชื่อถือและความปลอดภัยสูงสุดของระบบ (จำกัดการเก็บย้อนหลัง 7 วัน)
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                      <h3 className="font-bold text-base sm:text-lg text-[var(--text-primary)]">
+                        3. ระบบตั้งเวลาสำรองข้อมูลอัตโนมัติ (Automated Daily Backups Engine)
+                      </h3>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold border flex items-center gap-1.5 shadow-xs ${
+                        isAutomatedBackupEnabled 
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' 
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                      }`}>
+                        <span className={`w-2 h-2 rounded-full ${isAutomatedBackupEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                        {isAutomatedBackupEnabled ? 'DAEMON ACTIVE' : 'DAEMON PAUSED'}
+                      </span>
+                    </div>
+                    <p className="text-xs sm:text-sm text-[var(--text-muted)] leading-relaxed max-w-2xl">
+                      ระบบประมวลผลพื้นหลัง (Daemon Engine) สำรองฐานข้อมูลสารบรรณตามรอบเวลา พร้อมระบบหมุนเวียน (Retention Rotation) เพื่อความปลอดภัยสูงสุด
                     </p>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-0">
-                  <div className="flex items-center gap-2 mr-2">
-                    <span className="text-xs font-semibold text-[var(--text-secondary)]">การสำรองอัตโนมัติ:</span>
+
+                <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto justify-start xl:justify-end pt-2 xl:pt-0 border-t xl:border-t-0 border-indigo-500/10">
+                  {/* Master Daemon Toggle Switch */}
+                  <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-light)] shadow-xs">
+                    <span className="text-xs font-bold text-[var(--text-secondary)]">Daemon หลัก:</span>
                     <button
                       type="button"
                       onClick={() => handleToggleAutomatedBackup(!isAutomatedBackupEnabled)}
                       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${isAutomatedBackupEnabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      title="เปิด/ปิดการทำงานของ Daemon สำรองข้อมูลอัตโนมัติทั้งระบบ"
                     >
                       <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${isAutomatedBackupEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
                     </button>
-                    <span className="text-[10px] text-[var(--text-muted)] w-8">{isAutomatedBackupEnabled ? 'เปิด' : 'ปิด'}</span>
+                    <span className="text-xs font-bold text-[var(--text-primary)] w-8">{isAutomatedBackupEnabled ? 'เปิด' : 'ปิด'}</span>
                   </div>
-                  
-                  {automatedBackups.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleDeleteAllAutomatedBackups}
-                      className="px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-lg text-xs font-medium hover:bg-rose-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>ลบทั้งหมด</span>
-                    </button>
-                  )}
 
                   <button
                     type="button"
-                    onClick={fetchAutomatedBackups}
-                    disabled={isLoadingAutomatedBackups}
-                    className="px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-medium)] rounded-lg text-xs font-medium hover:bg-[var(--border-lighter)] text-[var(--text-primary)] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    onClick={() => {
+                      fetchScheduledBackups();
+                      fetchAutomatedBackups();
+                    }}
+                    disabled={isLoadingScheduledBackups || isLoadingAutomatedBackups}
+                    className="p-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-surface)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs min-h-[38px]"
+                    title="รีเฟรชข้อมูล"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAutomatedBackups ? 'animate-spin' : ''}`} />
-                    <span>โหลดใหม่</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingScheduledBackups || isLoadingAutomatedBackups ? 'animate-spin' : ''}`} />
+                    <span>รีเฟรช</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleManualRunBackup}
+                    disabled={isManualRunningBackup}
+                    className="px-3.5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl shadow-sm hover:shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 min-h-[38px]"
+                    title="สั่งให้ระบบรันสำรองข้อมูลฉบับเต็มทันทีโดยไม่ต้องรอรอบเวลา"
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${isManualRunningBackup ? 'animate-bounce' : ''}`} />
+                    <span>{isManualRunningBackup ? 'กำลังสำรอง...' : 'สำรองข้อมูลทันที'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingBackupSchedule(null);
+                      setBackupScheduleFormData({
+                        name: 'สำรองข้อมูลระบบฉบับเต็มประจำวัน (รอบ 00:00 น.)',
+                        scheduleType: 'daily',
+                        scheduledTime: '00:00',
+                        weeklyDay: 'monday',
+                        intervalHours: 24,
+                        backupScope: 'full',
+                        retentionDays: 7,
+                        description: 'สำรองตารางฐานข้อมูลและสารบรรณระบบทั้งหมดทุกคืนอัตโนมัติ พร้อมระบบหมุนเวียนลบไฟล์เก่า',
+                        isActive: true
+                      });
+                      setShowBackupScheduleModal(true);
+                    }}
+                    className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-1.5 cursor-pointer min-h-[38px]"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>เพิ่มคิวตั้งเวลาใหม่</span>
                   </button>
                 </div>
               </div>
 
+              {/* Status & Feedback Message */}
               {automatedBackupMsg && (
-                <div className={`p-4 rounded-lg text-xs flex items-center gap-2 border ${
+                <div className={`p-4 rounded-xl text-xs sm:text-sm flex items-center gap-2.5 border shadow-xs animate-fade-in ${
                   automatedBackupMsg.type === 'success' 
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
                 }`}>
-                  {automatedBackupMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-                  <span>{automatedBackupMsg.text}</span>
+                  {automatedBackupMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" /> : <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />}
+                  <span className="font-semibold">{automatedBackupMsg.text}</span>
                 </div>
               )}
 
-              {isLoadingAutomatedBackups ? (
-                <div className="py-8 text-center text-xs text-[var(--text-muted)] flex flex-col items-center justify-center gap-2">
-                  <RefreshCw className="w-6 h-6 animate-spin text-[var(--primary-color)]" />
-                  <span>กำลังโหลดประวัติสำรองข้อมูลอัตโนมัติ...</span>
+              {/* Sub-tab Navigation */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[var(--border-light)] pb-3 gap-3">
+                <div className="flex items-center gap-2 p-1 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-2xl w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => setBackupSubTab('schedules')}
+                    className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      backupSubTab === 'schedules'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-lighter)]'
+                    }`}
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>คิวตั้งเวลาสำรอง ({scheduledBackups.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBackupSubTab('files')}
+                    className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      backupSubTab === 'files'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-lighter)]'
+                    }`}
+                  >
+                    <Database className="w-4 h-4" />
+                    <span>คลังไฟล์สำรอง ({automatedBackups.length})</span>
+                  </button>
                 </div>
-              ) : automatedBackups.length === 0 ? (
-                <div className="py-8 text-center text-xs text-[var(--text-muted)] border border-dashed border-[var(--border-medium)] rounded-xl bg-[var(--bg-canvas)]">
-                  ไม่พบไฟล์สำรองข้อมูลอัตโนมัติในสารบรรณระบบ (จะเริ่มต้นทำงานโดยอัตโนมัติเมื่อระบบรันครบกำหนดเวลา)
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)]">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-secondary)] border-b border-[var(--border-light)]">
-                        <th className="p-3.5 font-sans">#</th>
-                        <th className="p-3.5 font-sans">ชื่อไฟล์สำรองข้อมูล (.json)</th>
-                        <th className="p-3.5 font-sans">ขนาดไฟล์</th>
-                        <th className="p-3.5 font-sans">วันที่สร้างระบบ</th>
-                        <th className="p-3.5 font-sans text-right">การจัดการ</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-xs text-[var(--text-primary)] divide-y divide-[var(--border-lighter)]">
-                      {automatedBackups.map((bk, idx) => {
-                        const date = new Date(bk.createdAt);
-                        const formattedDate = date.toLocaleString('th-TH', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit'
-                        });
-                        const sizeKB = (bk.size / 1024).toFixed(1);
-                        
+
+                {backupSubTab === 'files' && automatedBackups.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteAllAutomatedBackups}
+                    className="px-3.5 py-2 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-bold hover:bg-rose-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer self-end sm:self-auto"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>ลบไฟล์สำรองทั้งหมด</span>
+                  </button>
+                )}
+              </div>
+
+              {/* TAB 1: SCHEDULES MANAGEMENT */}
+              {backupSubTab === 'schedules' && (
+                <div className="space-y-4">
+                  {isLoadingScheduledBackups ? (
+                    <div className="py-12 text-center text-xs text-[var(--text-muted)] flex flex-col items-center justify-center gap-2.5">
+                      <RefreshCw className="w-7 h-7 animate-spin text-indigo-500" />
+                      <span className="font-medium">กำลังโหลดรายการคิวตั้งเวลาสำรองข้อมูล...</span>
+                    </div>
+                  ) : scheduledBackups.length === 0 ? (
+                    <div className="py-12 px-4 text-center rounded-2xl bg-[var(--bg-canvas)] border border-dashed border-[var(--border-medium)] space-y-3">
+                      <Clock className="w-12 h-12 text-[var(--text-muted)] mx-auto opacity-40" />
+                      <h4 className="font-bold text-sm sm:text-base text-[var(--text-primary)]">ยังไม่มีคิวตั้งเวลาสำรองข้อมูลอัตโนมัติ</h4>
+                      <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto leading-relaxed">
+                        กำหนดเวลาสำรองข้อมูล เช่น ทุกวัน เวลา 00:00 น. หรือ ทุกๆ 6 ชั่วโมง เพื่อให้ระบบสำรองข้อมูลอัตโนมัติและเก็บรักษาไฟล์ตามนโยบาย Retention
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingBackupSchedule(null);
+                          setShowBackupScheduleModal(true);
+                        }}
+                        className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-md"
+                      >
+                        <Plus className="w-4 h-4" /> เพิ่มตั้งเวลาแรก
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+                      {scheduledBackups.map((sch) => {
+                        const scopeBadge = sch.backupScope === 'documents' 
+                          ? { label: 'เฉพาะทะเบียนสารบรรณ', color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' }
+                          : sch.backupScope === 'system_config'
+                          ? { label: 'เฉพาะผู้ใช้ & การตั้งค่า', color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' }
+                          : sch.backupScope === 'logs_audit'
+                          ? { label: 'เฉพาะบันทึกระบบ Logs', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' }
+                          : { label: 'ฉบับเต็มทั้งระบบ (Full)', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' };
+
+                        const scheduleText = sch.scheduleType === 'daily'
+                          ? `ทุกวัน เวลา ${sch.scheduledTime || '00:00'} น.`
+                          : sch.scheduleType === 'workdays'
+                          ? `วันทำการ (จันทร์-ศุกร์) เวลา ${sch.scheduledTime || '00:00'} น.`
+                          : sch.scheduleType === 'weekly'
+                          ? `ทุกวัน${sch.weeklyDay === 'monday' ? 'จันทร์' : sch.weeklyDay === 'tuesday' ? 'อังคาร' : sch.weeklyDay === 'wednesday' ? 'พุธ' : sch.weeklyDay === 'thursday' ? 'พฤหัสบดี' : sch.weeklyDay === 'friday' ? 'ศุกร์' : sch.weeklyDay === 'saturday' ? 'เสาร์' : 'อาทิตย์'} เวลา ${sch.scheduledTime || '00:00'} น.`
+                          : `ทุกๆ ${sch.intervalHours || 24} ชั่วโมง`;
+
                         return (
-                          <tr key={bk.filename} className="hover:bg-[var(--bg-surface)]/40 transition-colors">
-                            <td className="p-3.5 font-mono text-[var(--text-muted)]">{idx + 1}</td>
-                            <td className="p-3.5 font-mono text-[var(--primary-color)] font-medium max-w-[250px] truncate">
-                              {bk.filename}
-                            </td>
-                            <td className="p-3.5 font-mono text-[var(--text-secondary)]">{sizeKB} KB</td>
-                            <td className="p-3.5 text-[var(--text-secondary)]">{formattedDate}</td>
-                            <td className="p-3.5 text-right">
-                              <div className="flex items-center justify-end gap-2">
+                          <div
+                            key={sch.id}
+                            className={`p-5 sm:p-6 rounded-2xl border transition-all space-y-4 shadow-sm ${
+                              sch.isActive
+                                ? 'bg-gradient-to-br from-[var(--bg-surface)] to-[var(--bg-canvas)] border-indigo-500/30 hover:border-indigo-500/60 shadow-indigo-500/5'
+                                : 'bg-[var(--bg-overlay)]/40 border-[var(--border-light)] opacity-75'
+                            }`}
+                          >
+                            {/* Card Header */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                    sch.isActive 
+                                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' 
+                                      : 'bg-gray-500/10 text-gray-500 border-gray-500/20'
+                                  }`}>
+                                    {sch.isActive ? '● กำลังทำงาน' : '○ พักการทำงาน'}
+                                  </span>
+                                  <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-bold border ${scopeBadge.color}`}>
+                                    {scopeBadge.label}
+                                  </span>
+                                </div>
+                                <h4 className="font-bold text-sm sm:text-base text-[var(--text-primary)]">{sch.name}</h4>
+                              </div>
+
+                              {/* Toggle Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleBackupSchedule(sch.id)}
+                                className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
+                                  sch.isActive 
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30' 
+                                    : 'bg-gray-200 dark:bg-gray-800 text-gray-500 hover:bg-gray-300'
+                                }`}
+                                title={sch.isActive ? 'คลิกเพื่อพักการทำงาน' : 'คลิกเพื่อเปิดใช้งาน'}
+                              >
+                                {sch.isActive ? <CheckCircle2 className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                                <span>{sch.isActive ? 'เปิด' : 'ปิด'}</span>
+                              </button>
+                            </div>
+
+                            {/* Details Box */}
+                            <div className="p-3.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)] text-xs space-y-2.5">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                <span className="text-[var(--text-muted)] flex items-center gap-1.5 font-medium">
+                                  <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" /> กำหนดเวลาสำรอง:
+                                </span>
+                                <span className="font-bold text-[var(--text-primary)] bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 px-2.5 py-0.5 rounded-lg text-[11px] border border-indigo-500/20 self-start sm:self-auto">
+                                  ⏰ {scheduleText}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                <span className="text-[var(--text-muted)] flex items-center gap-1.5 font-medium">
+                                  <Database className="w-3.5 h-3.5 text-purple-500 shrink-0" /> นโยบายการเก็บรักษา:
+                                </span>
+                                <span className="font-bold text-purple-700 dark:text-purple-300 bg-purple-500/10 px-2.5 py-0.5 rounded-lg text-[11px] border border-purple-500/20 self-start sm:self-auto">
+                                  📦 เก็บย้อนหลัง {sch.retentionDays || 7} วัน (หมุนเวียน)
+                                </span>
+                              </div>
+
+                              {sch.description && (
+                                <div className="pt-2 border-t border-[var(--border-light)] text-[11px] text-[var(--text-muted)] leading-relaxed">
+                                  <span className="font-bold text-[var(--text-secondary)]">หมายเหตุ:</span> {sch.description}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Footer Stats & Actions */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-1 gap-3 border-t border-[var(--border-light)]">
+                              <div className="text-[10px] text-[var(--text-muted)] space-y-0.5 font-mono">
+                                <div>รันล่าสุด: {sch.lastRunAt ? new Date(sch.lastRunAt).toLocaleString('th-TH') : 'ยังไม่เคยรัน'}</div>
+                                {sch.lastRunStatus && (
+                                  <div className="flex items-center gap-1">
+                                    <span>สถานะ:</span>
+                                    <span className={sch.lastRunStatus === 'success' ? 'text-emerald-500 font-bold' : 'text-rose-500 font-bold'}>
+                                      {sch.lastRunStatus.toUpperCase()}
+                                    </span>
+                                    {sch.lastBackupFile && (
+                                      <span className="text-[var(--text-muted)] truncate max-w-[140px]" title={sch.lastBackupFile}>
+                                        ({sch.lastBackupFile})
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 self-end sm:self-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRunBackupScheduleNow(sch.id, sch.name)}
+                                  disabled={runningBackupScheduleId === sch.id}
+                                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold hover:opacity-90 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 min-h-[36px]"
+                                  title="ทดสอบรันสำรองข้อมูลตามกำหนดเวลานี้ทันที"
+                                >
+                                  <Zap className={`w-3.5 h-3.5 ${runningBackupScheduleId === sch.id ? 'animate-bounce' : ''}`} />
+                                  <span>{runningBackupScheduleId === sch.id ? 'กำลังรัน...' : 'รันทันที'}</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingBackupSchedule(sch);
+                                    setBackupScheduleFormData({
+                                      name: sch.name,
+                                      scheduleType: sch.scheduleType || 'daily',
+                                      scheduledTime: sch.scheduledTime || '00:00',
+                                      weeklyDay: sch.weeklyDay || 'monday',
+                                      intervalHours: sch.intervalHours || 24,
+                                      backupScope: sch.backupScope || 'full',
+                                      retentionDays: sch.retentionDays || 7,
+                                      description: sch.description || '',
+                                      isActive: Boolean(sch.isActive)
+                                    });
+                                    setShowBackupScheduleModal(true);
+                                  }}
+                                  className="p-2 rounded-xl border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center shadow-xs"
+                                  title="แก้ไขการตั้งเวลา"
+                                >
+                                  <Sliders className="w-3.5 h-3.5" />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBackupSchedule(sch.id, sch.name)}
+                                  className="p-2 rounded-xl border border-rose-200 dark:border-rose-900/50 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center shadow-xs"
+                                  title="ลบการตั้งเวลา"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: BACKUP ARCHIVES TABLE */}
+              {backupSubTab === 'files' && (
+                <div className="space-y-4">
+                  {isLoadingAutomatedBackups ? (
+                    <div className="py-12 text-center text-xs text-[var(--text-muted)] flex flex-col items-center justify-center gap-2.5">
+                      <RefreshCw className="w-7 h-7 animate-spin text-[var(--primary-color)]" />
+                      <span className="font-medium">กำลังโหลดประวัติและไฟล์สำรองข้อมูลอัตโนมัติ...</span>
+                    </div>
+                  ) : automatedBackups.length === 0 ? (
+                    <div className="py-12 px-4 text-center text-xs text-[var(--text-muted)] border border-dashed border-[var(--border-medium)] rounded-2xl bg-[var(--bg-canvas)] space-y-2">
+                      <Database className="w-10 h-10 text-[var(--text-muted)] mx-auto opacity-40" />
+                      <div className="font-bold text-sm text-[var(--text-primary)]">ไม่พบไฟล์สำรองข้อมูลในระบบ</div>
+                      <p className="max-w-md mx-auto text-[var(--text-muted)]">
+                        ระบบจะทำการสำรองข้อมูลอัตโนมัติตามรอบเวลาที่กำหนด หรือคุณสามารถกดปุ่ม "สำรองข้อมูลทันที" ด้านบนเพื่อสร้างไฟล์สำรองแรกได้ทันที
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Mobile Card View (< md) */}
+                      <div className="block md:hidden space-y-3">
+                        {automatedBackups.map((bk, idx) => {
+                          const date = new Date(bk.createdAt);
+                          const formattedDate = date.toLocaleString('th-TH', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          });
+                          const sizeKB = (bk.size / 1024).toFixed(1);
+
+                          return (
+                            <div key={bk.filename} className="p-4 rounded-2xl border border-[var(--border-light)] bg-[var(--bg-canvas)] space-y-3 shadow-xs">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-mono text-[var(--text-muted)]">#{idx + 1}</span>
+                                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                                      {bk.scope === 'documents' ? 'เอกสารสารบรรณ' : bk.scope === 'system_config' ? 'การตั้งค่าระบบ' : bk.scope === 'logs_audit' ? 'บันทึก Logs' : 'ฉบับเต็ม (Full)'}
+                                    </span>
+                                  </div>
+                                  <div className="font-mono text-xs font-bold text-[var(--primary-color)] break-all">
+                                    {bk.filename}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between text-xs text-[var(--text-secondary)] border-y border-[var(--border-light)] py-2 font-mono">
+                                <span>ขนาด: <strong>{sizeKB} KB</strong></span>
+                                <span>วันที่: <strong>{formattedDate}</strong></span>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-2 pt-1">
+                                <a
+                                  href={`/api/automated-backups/download/${encodeURIComponent(bk.filename)}?role=${props.user?.role || 'admin'}`}
+                                  download={bk.filename}
+                                  className="py-2 px-2 bg-[var(--bg-surface)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] font-bold rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs"
+                                  title="ดาวน์โหลดไฟล์ .tar"
+                                >
+                                  <Download className="w-3.5 h-3.5 text-indigo-500" />
+                                  <span>โหลด</span>
+                                </a>
                                 <button
                                   type="button"
                                   disabled={isRestoringAutomated}
                                   onClick={() => handleRestoreAutomatedBackup(bk.filename)}
-                                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg text-xs transition-colors inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                  className="py-2 px-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs disabled:opacity-50 cursor-pointer"
+                                  title="กู้คืนฐานข้อมูลระบบ"
                                 >
-                                  <RefreshCw className={`w-3 h-3 ${isRestoringAutomated ? 'animate-spin' : ''}`} />
-                                  <span>กู้คืนข้อมูล (Restore)</span>
+                                  <RefreshCw className={`w-3.5 h-3.5 ${isRestoringAutomated ? 'animate-spin' : ''}`} />
+                                  <span>กู้คืน</span>
                                 </button>
                                 <button
                                   type="button"
                                   disabled={isRestoringAutomated}
                                   onClick={() => handleDeleteAutomatedBackup(bk.filename)}
-                                  className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                                  title="ลบไฟล์สำรองข้อมูลนี้"
+                                  className="py-2 px-2 border border-rose-200 dark:border-rose-900/50 bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs disabled:opacity-50 cursor-pointer"
+                                  title="ลบไฟล์สำรองนี้"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>ลบ</span>
                                 </button>
                               </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Desktop Table View (>= md) */}
+                      <div className="hidden md:block overflow-x-auto rounded-2xl border border-[var(--border-light)] bg-[var(--bg-canvas)] shadow-xs">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-[var(--bg-surface)] text-xs font-bold text-[var(--text-secondary)] border-b border-[var(--border-light)]">
+                              <th className="p-3.5 font-sans">#</th>
+                              <th className="p-3.5 font-sans">ชื่อไฟล์สำรองข้อมูล (.tar)</th>
+                              <th className="p-3.5 font-sans">ขอบเขต (Scope)</th>
+                              <th className="p-3.5 font-sans">ขนาดไฟล์</th>
+                              <th className="p-3.5 font-sans">วันที่สร้างระบบ</th>
+                              <th className="p-3.5 font-sans text-right">การจัดการ</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-xs text-[var(--text-primary)] divide-y divide-[var(--border-lighter)]">
+                            {automatedBackups.map((bk, idx) => {
+                              const date = new Date(bk.createdAt);
+                              const formattedDate = date.toLocaleString('th-TH', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit'
+                              });
+                              const sizeKB = (bk.size / 1024).toFixed(1);
+                              
+                              return (
+                                <tr key={bk.filename} className="hover:bg-[var(--bg-surface)] transition-colors">
+                                  <td className="p-3.5 font-mono text-[var(--text-muted)]">{idx + 1}</td>
+                                  <td className="p-3.5 font-mono text-[var(--primary-color)] font-bold max-w-[280px] truncate">
+                                    {bk.filename}
+                                  </td>
+                                  <td className="p-3.5">
+                                    <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                                      {bk.scope === 'documents' ? 'เอกสารสารบรรณ' : bk.scope === 'system_config' ? 'การตั้งค่าระบบ' : bk.scope === 'logs_audit' ? 'บันทึก Logs' : 'ฉบับเต็ม (Full)'}
+                                    </span>
+                                  </td>
+                                  <td className="p-3.5 font-mono text-[var(--text-secondary)] font-semibold">{sizeKB} KB</td>
+                                  <td className="p-3.5 text-[var(--text-secondary)]">{formattedDate}</td>
+                                  <td className="p-3.5 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                      <a
+                                        href={`/api/automated-backups/download/${encodeURIComponent(bk.filename)}?role=${props.user?.role || 'admin'}`}
+                                        download={bk.filename}
+                                        className="px-3 py-1.5 bg-[var(--bg-surface)] border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] font-bold rounded-xl text-xs transition-colors inline-flex items-center gap-1 cursor-pointer shadow-xs"
+                                        title="ดาวน์โหลดไฟล์สำรองข้อมูล JSON"
+                                      >
+                                        <Download className="w-3.5 h-3.5 text-indigo-500" />
+                                        <span>ดาวน์โหลด</span>
+                                      </a>
+                                      <button
+                                        type="button"
+                                        disabled={isRestoringAutomated}
+                                        onClick={() => handleRestoreAutomatedBackup(bk.filename)}
+                                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition-colors inline-flex items-center gap-1 cursor-pointer disabled:opacity-50 shadow-xs"
+                                        title="กู้คืนฐานข้อมูลระบบกลับไปใช้ข้อมูลจากไฟล์นี้"
+                                      >
+                                        <RefreshCw className={`w-3 h-3 ${isRestoringAutomated ? 'animate-spin' : ''}`} />
+                                        <span>กู้คืน (Restore)</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isRestoringAutomated}
+                                        onClick={() => handleDeleteAutomatedBackup(bk.filename)}
+                                        className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                                        title="ลบไฟล์สำรองข้อมูลนี้"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Confirmation Modal for Restore */}
-            {showRestoreConfirmModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl w-full max-w-md overflow-hidden shadow-2xl animate-[scaleIn_0.2s_ease-out]">
-                  <div className="flex items-center justify-between p-4 border-b border-[var(--border-light)] bg-amber-500/10">
-                    <h3 className="font-sans font-semibold text-base text-amber-400 flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5 text-amber-400" /> ยืนยันการคืนค่าข้อมูลระบบ
+            {/* MODAL: ADD / EDIT BACKUP SCHEDULE */}
+            {showBackupScheduleModal && (
+              <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-scale-up max-h-[92vh] flex flex-col">
+                  <div className="p-4 sm:p-5 border-b border-[var(--border-light)] flex items-center justify-between bg-[var(--bg-canvas)] shrink-0">
+                    <h3 className="text-sm sm:text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
+                      <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-500" />
+                      {editingBackupSchedule ? 'แก้ไขคิวตั้งเวลาสำรองข้อมูล' : 'เพิ่มคิวตั้งเวลาสำรองข้อมูลอัตโนมัติ'}
                     </h3>
-                    <button 
+                    <button
                       type="button"
-                      onClick={() => setShowRestoreConfirmModal(false)}
-                      className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-1 rounded-lg"
+                      onClick={() => setShowBackupScheduleModal(false)}
+                      className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1.5 rounded-xl hover:bg-[var(--border-lighter)] cursor-pointer"
                     >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
 
-                  <div className="p-6 space-y-4">
-                    <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+                  <form onSubmit={handleSaveBackupSchedule} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto">
+                    {/* Schedule Name */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                        ชื่อรายการตั้งเวลา <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={backupScheduleFormData.name}
+                        onChange={(e) => setBackupScheduleFormData(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="เช่น สำรองข้อมูลฉบับเต็มประจำวัน (รอบเที่ยงคืน)"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    {/* Backup Scope */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                        <Database className="w-3.5 h-3.5 text-purple-500" />
+                        ขอบเขตข้อมูลที่ต้องการสำรอง (Backup Scope) <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
+                        {[
+                          { id: 'full', label: 'ฉบับเต็มทั้งระบบ (Full)', desc: 'รวมเอกสาร, ผู้ใช้, logs, การตั้งค่าทั้งหมด' },
+                          { id: 'documents', label: 'เฉพาะทะเบียนสารบรรณ', desc: 'หนังสือรับ-ส่ง, คำสั่ง, ประกาศ, เลขจอง' },
+                          { id: 'system_config', label: 'เฉพาะผู้ใช้ & การตั้งค่า', desc: 'บัญชีผู้ใช้, สิทธิ์, หน่วยงาน, ตำแหน่ง' },
+                          { id: 'logs_audit', label: 'เฉพาะบันทึกระบบ Logs', desc: 'ประวัติการเข้าใช้งาน, ร่องรอยกิจกรรม' }
+                        ].map((sc) => (
+                          <div
+                            key={sc.id}
+                            onClick={() => setBackupScheduleFormData(prev => ({ ...prev, backupScope: sc.id }))}
+                            className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                              backupScheduleFormData.backupScope === sc.id
+                                ? 'bg-indigo-500/10 border-indigo-500 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/20'
+                                : 'bg-[var(--bg-canvas)] border-[var(--border-light)] text-[var(--text-secondary)] hover:border-[var(--border-medium)]'
+                            }`}
+                          >
+                            <div className="font-bold text-xs sm:text-sm">{sc.label}</div>
+                            <div className="text-[10px] text-[var(--text-muted)] mt-1 leading-tight">{sc.desc}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Schedule Type & Timing */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                          ความถี่ในการสำรอง
+                        </label>
+                        <select
+                          value={backupScheduleFormData.scheduleType}
+                          onChange={(e) => setBackupScheduleFormData(prev => ({ ...prev, scheduleType: e.target.value }))}
+                          className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="daily">ทุกวัน (Daily)</option>
+                          <option value="workdays">วันทำการ (จันทร์ - ศุกร์)</option>
+                          <option value="weekly">ประจำสัปดาห์ (Weekly)</option>
+                          <option value="interval">ตามช่วงระยะเวลา (Interval Hours)</option>
+                        </select>
+                      </div>
+
+                      {backupScheduleFormData.scheduleType === 'weekly' ? (
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-[var(--text-primary)]">วันที่กำหนดในสัปดาห์</label>
+                          <select
+                            value={backupScheduleFormData.weeklyDay}
+                            onChange={(e) => setBackupScheduleFormData(prev => ({ ...prev, weeklyDay: e.target.value }))}
+                            className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value="monday">วันจันทร์</option>
+                            <option value="tuesday">วันอังคาร</option>
+                            <option value="wednesday">วันพุธ</option>
+                            <option value="thursday">วันพฤหัสบดี</option>
+                            <option value="friday">วันศุกร์</option>
+                            <option value="saturday">วันเสาร์</option>
+                            <option value="sunday">วันอาทิตย์</option>
+                          </select>
+                        </div>
+                      ) : backupScheduleFormData.scheduleType === 'interval' ? (
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-[var(--text-primary)]">ระยะเวลาทุกๆ (ชั่วโมง)</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="72"
+                            value={backupScheduleFormData.intervalHours}
+                            onChange={(e) => setBackupScheduleFormData(prev => ({ ...prev, intervalHours: parseInt(e.target.value) || 24 }))}
+                            className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                            เวลาที่ต้องการรัน (HH:mm)
+                          </label>
+                          <input
+                            type="time"
+                            required
+                            value={backupScheduleFormData.scheduledTime}
+                            onChange={(e) => setBackupScheduleFormData(prev => ({ ...prev, scheduledTime: e.target.value }))}
+                            className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Retention Policy */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5 text-amber-500" />
+                        นโยบายการเก็บรักษาไฟล์ (Retention Rotation)
+                      </label>
+                      <select
+                        value={backupScheduleFormData.retentionDays}
+                        onChange={(e) => setBackupScheduleFormData(prev => ({ ...prev, retentionDays: parseInt(e.target.value) || 7 }))}
+                        className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value={3}>เก็บย้อนหลัง 3 วัน</option>
+                        <option value={7}>เก็บย้อนหลัง 7 วัน (ค่ามาตรฐาน)</option>
+                        <option value={14}>เก็บย้อนหลัง 14 วัน (2 สัปดาห์)</option>
+                        <option value={30}>เก็บย้อนหลัง 30 วัน (1 เดือน)</option>
+                        <option value={60}>เก็บย้อนหลัง 60 วัน (2 เดือน)</option>
+                        <option value={90}>เก็บย้อนหลัง 90 วัน (3 เดือน)</option>
+                        <option value={180}>เก็บย้อนหลัง 180 วัน (6 เดือน)</option>
+                      </select>
+                      <p className="text-[10px] text-[var(--text-muted)]">
+                        * ระบบจะทำการลบไฟล์สำรองข้อมูลอัตโนมัติที่เก่ากว่าจำนวนวันที่กำหนดให้อัตโนมัติเพื่อประหยัดพื้นที่
+                      </p>
+                    </div>
+
+                    {/* Description */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-[var(--text-primary)]">คำอธิบายเพิ่มเติม</label>
+                      <textarea
+                        rows={2}
+                        value={backupScheduleFormData.description}
+                        onChange={(e) => setBackupScheduleFormData(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="ระบุหมายเหตุหรือวัตถุประสงค์ของคิวสำรองข้อมูลนี้..."
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-xs sm:text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500 resize-none"
+                      />
+                    </div>
+
+                    {/* Active Toggle */}
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-light)]">
+                      <div>
+                        <div className="text-xs sm:text-sm font-bold text-[var(--text-primary)]">เปิดใช้งานคิวนี้ทันที</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">Daemon จะตรวจรอบเวลาและสั่งรันอัตโนมัติ</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBackupScheduleFormData(prev => ({ ...prev, isActive: !prev.isActive }))}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                          backupScheduleFormData.isActive ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'
+                        }`}
+                      >
+                        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                          backupScheduleFormData.isActive ? 'translate-x-4' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {/* Modal Actions */}
+                    <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[var(--border-light)]">
+                      <button
+                        type="button"
+                        onClick={() => setShowBackupScheduleModal(false)}
+                        className="px-4 py-2.5 rounded-xl border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-xs font-bold text-[var(--text-secondary)] cursor-pointer"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-md hover:shadow-lg cursor-pointer"
+                      >
+                        {editingBackupSchedule ? 'บันทึกการแก้ไข' : 'บันทึกคิวตั้งเวลา'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Confirmation Modal for Restore */}
+            {showRestoreConfirmModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-scale-up">
+                  <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--border-light)] bg-amber-500/10">
+                    <h3 className="font-bold text-base text-amber-500 dark:text-amber-400 flex items-center gap-2">
+                      <AlertTriangle className="w-5 h-5 text-amber-500 dark:text-amber-400" /> ยืนยันการคืนค่าข้อมูลระบบ
+                    </h3>
+                    <button 
+                      type="button"
+                      onClick={() => setShowRestoreConfirmModal(false)}
+                      className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-1.5 rounded-xl hover:bg-amber-500/10 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="p-5 sm:p-6 space-y-4">
+                    <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
                       คุณกำลังจะทำการคืนค่าข้อมูลระบบจากไฟล์ <strong className="text-[var(--text-primary)] font-mono">{restoreFile?.name}</strong>
                     </p>
-                    <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-3 rounded-lg leading-relaxed">
-                      ⚠️ <strong>คำเตือน:</strong> ข้อมูลหนังสือสารบรรณ, บัญชีผู้ใช้ และการตั้งค่าทั้งหมดในระบบปัจจุบันจะถูกลบและเขียนทับด้วยข้อมูลจากไฟล์สำรองข้อมูลนี้ การดำเนินการนี้ไม่สามารถย้อนกลับได้
-                    </p>
+                    <div className="p-3.5 rounded-xl text-xs text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 leading-relaxed space-y-1">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 shrink-0" /> คำเตือนความปลอดภัย:
+                      </div>
+                      <div>ข้อมูลหนังสือสารบรรณ, บัญชีผู้ใช้ และการตั้งค่าทั้งหมดในระบบปัจจุบันจะถูกลบและเขียนทับด้วยข้อมูลจากไฟล์สำรองข้อมูลนี้ การดำเนินการนี้ไม่สามารถย้อนกลับได้</div>
+                    </div>
                     <p className="text-xs text-[var(--text-muted)]">
                       คุณแน่ใจหรือว่าต้องการดำเนินการต่อ?
                     </p>
 
-                    <div className="flex justify-end gap-3 pt-2 border-t border-[var(--border-light)]">
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[var(--border-light)]">
                       <button
                         type="button"
                         onClick={() => setShowRestoreConfirmModal(false)}
-                        className="px-4 py-2 border border-[var(--border-medium)] rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] transition-colors"
+                        className="px-4 py-2.5 border border-[var(--border-light)] rounded-xl text-xs font-bold text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] cursor-pointer"
                       >
                         ยกเลิก
                       </button>
                       <button
                         type="button"
                         onClick={handleRestoreSubmit}
-                        className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                        className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
                       >
                         <RefreshCw className="w-4 h-4" /> ยืนยันการคืนค่าข้อมูล
                       </button>
