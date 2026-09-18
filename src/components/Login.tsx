@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu, Sparkles, AlertTriangle, HelpCircle, Activity, Apple, Monitor, Smartphone, Tablet, Terminal, Users } from 'lucide-react';
 import ChangelogModal from './ChangelogModal';
 import VersionBadge from './VersionBadge';
-import HostTroubleshootingModal from './HostTroubleshootingModal';
 import { realtimeSync } from '../utils/realtimeSync';
 
 interface LoginProps {
@@ -239,7 +238,6 @@ export default function Login({ onLogin }: LoginProps) {
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
-  const [isHostHelpOpen, setIsHostHelpOpen] = useState(false);
   const [serverHealth, setServerHealth] = useState<'checking' | 'online' | 'fallback' | 'offline'>('checking');
   const [serverDetails, setServerDetails] = useState<any>(null);
   const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
@@ -259,7 +257,10 @@ export default function Login({ onLogin }: LoginProps) {
   const [alert, setAlert] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   const [os, setOs] = useState('กำลังตรวจสอบระบบ...');
-  const [time, setTime] = useState('');
+  const [time, setTime] = useState(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
   const [isDark, setIsDark] = useState(true);
   
   const [orgName, setOrgName] = useState('ระบบงานสารบรรณอิเล็กทรอนิกส์');
@@ -332,9 +333,12 @@ export default function Login({ onLogin }: LoginProps) {
     if (ua.indexOf('like Mac') !== -1) currentOs = 'iOS 17';
     setOs(`Client: ${currentOs}`);
 
-    const timer = setInterval(() => {
-      setTime(new Date().toLocaleTimeString('th-TH'));
-    }, 1000);
+    const updateTime = () => {
+      const now = new Date();
+      setTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    };
+    updateTime();
+    const timer = setInterval(updateTime, 1000);
     
     const fetchSettings = async () => {
       try {
@@ -628,7 +632,7 @@ export default function Login({ onLogin }: LoginProps) {
           <div className="absolute inset-0 cyber-grid-bg dark:opacity-40 opacity-20 transition-opacity duration-700"></div>
         </div>
 
-        <main className="w-full max-w-[440px] relative z-10 animate-slide-up flex flex-col">
+        <main className="w-full max-w-[440px] sm:max-w-[480px] md:max-w-[520px] relative z-10 animate-slide-up flex flex-col">
           
           <div className="text-center mb-8 relative">
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-[var(--bg-surface)] backdrop-blur-md border border-[var(--glass-border)] shadow-glow mb-4 p-1.5 relative group overflow-hidden transition-colors duration-500">
@@ -695,18 +699,9 @@ export default function Login({ onLogin }: LoginProps) {
               )}
 
               {serverHealth === 'offline' && (
-                <div className="mb-6 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs flex items-center justify-between gap-3 animate-fade-in">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                    <span>อัปโหลดขึ้นโฮสต์จริงแล้วเชื่อมต่อไม่ได้?</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsHostHelpOpen(true)}
-                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-900 dark:text-amber-100 font-semibold border border-amber-500/30 transition-all shrink-0 active:scale-95"
-                  >
-                    ดูวิธีแก้ปัญหา
-                  </button>
+                <div className="mb-6 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs flex items-center gap-2 animate-fade-in">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  <span>ระบบกำลังทำงานในโหมดออฟไลน์ (Local DB Cache)</span>
                 </div>
               )}
 
@@ -998,17 +993,23 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
             
             {/* Footer status bar inside card */}
-            <div className="bg-[var(--bg-elevated)]/80 backdrop-blur-xl px-2.5 py-2.5 sm:px-3 sm:py-3 border-t border-[var(--border-light)] flex flex-nowrap items-center justify-between gap-1.5 overflow-x-auto no-scrollbar transition-colors duration-500">
+            <div className="bg-[var(--bg-elevated)]/80 backdrop-blur-xl px-2 py-2 sm:px-3 sm:py-2.5 md:px-3.5 md:py-3 border-t border-[var(--border-light)] flex flex-row items-center justify-between gap-1 sm:gap-1.5 md:gap-2 w-full overflow-hidden transition-colors duration-500">
               {/* 1. Clock Badge */}
-              <div className="h-7.5 px-2.5 flex items-center gap-1 bg-[var(--bg-surface)] rounded-full border border-[var(--border-light)] shadow-sm font-mono text-[9.5px] text-[var(--text-secondary)] shrink-0">
-                <Clock className="w-3 h-3 text-[var(--primary-color)] shrink-0" />
-                <span className="whitespace-nowrap">{time}</span>
+              <div 
+                className="flex-1 min-w-0 h-[26px] sm:h-[30px] md:h-[32px] px-1 sm:px-2 md:px-2.5 flex items-center justify-center gap-0.5 sm:gap-1 md:gap-1.5 bg-[var(--bg-surface)] rounded-full border border-[var(--border-light)] shadow-sm font-mono text-[8px] sm:text-[9.5px] md:text-[10.5px] text-[var(--text-secondary)] transition-all"
+                title={`เวลาปัจจุบัน: ${time}`}
+              >
+                <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3 md:w-3.5 md:h-3.5 text-[var(--primary-color)] shrink-0" />
+                <span className="whitespace-nowrap tracking-tight sm:tracking-normal truncate">{time}</span>
               </div>
 
               {/* 2. Secure Badge */}
-              <div className="h-7.5 px-2.5 flex items-center gap-1 bg-[var(--bg-surface)] rounded-full border border-[var(--border-light)] shadow-sm text-[var(--success)] text-[9.5px] font-bold shrink-0">
-                <ShieldCheck className="w-3 h-3 text-emerald-500 shrink-0" />
-                <span className="whitespace-nowrap tracking-wider">SECURE</span>
+              <div 
+                className="flex-1 min-w-0 h-[26px] sm:h-[30px] md:h-[32px] px-1 sm:px-2 md:px-2.5 flex items-center justify-center gap-0.5 sm:gap-1 md:gap-1.5 bg-[var(--bg-surface)] rounded-full border border-[var(--border-light)] shadow-sm text-[var(--success)] text-[8px] sm:text-[9.5px] md:text-[10.5px] font-bold transition-all"
+                title="ระบบความปลอดภัย: มาตรฐานการเชื่อมต่อปลอดภัยและเข้ารหัสข้อมูลสารบรรณ"
+              >
+                <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3 md:w-3.5 md:h-3.5 text-emerald-500 shrink-0" />
+                <span className="whitespace-nowrap tracking-tight sm:tracking-wider">SECURE</span>
               </div>
 
               {/* 3. Client Badge */}
@@ -1016,22 +1017,24 @@ export default function Login({ onLogin }: LoginProps) {
                 const brand = getDeviceBrandIcon(navigator.userAgent);
                 return (
                   <div
-                    className="h-7.5 px-2.5 flex items-center gap-1 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 transition-all hover:scale-105 shadow-sm relative cursor-help text-[9.5px] font-sans font-bold whitespace-nowrap shrink-0"
+                    className="flex-1 min-w-0 h-[26px] sm:h-[30px] md:h-[32px] px-1 sm:px-2 md:px-2.5 flex items-center justify-center gap-0.5 sm:gap-1 md:gap-1.5 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 transition-all hover:scale-105 shadow-sm relative cursor-help text-[8px] sm:text-[9.5px] md:text-[10.5px] font-sans font-bold whitespace-nowrap"
                     title={`${brand.name} (${os})`}
                   >
-                    {brand.icon}
-                    <span className="opacity-95 text-[9px] font-semibold">{brand.version}</span>
-                    <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                    <span className="shrink-0 flex items-center justify-center [&>svg]:w-2.5 [&>svg]:h-2.5 sm:[&>svg]:w-3 sm:[&>svg]:h-3 md:[&>svg]:w-3.5 md:[&>svg]:h-3.5">
+                      {brand.icon}
+                    </span>
+                    <span className="opacity-95 text-[8px] sm:text-[9px] md:text-[10.5px] font-semibold truncate">{brand.version}</span>
+                    <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5 md:h-2 md:w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 md:h-2 md:w-2 bg-indigo-500" />
                     </span>
                   </div>
                 );
               })()}
 
-              {/* 4. Backend Badge */}
+              {/* 4. Backend Badge (Passive status badge, no popup modal) */}
               <div
-                className={`h-7.5 px-2.5 flex items-center gap-1 rounded-full border shadow-sm relative text-[9.5px] font-sans font-bold whitespace-nowrap shrink-0 ${
+                className={`flex-1 min-w-0 h-[26px] sm:h-[30px] md:h-[32px] px-1 sm:px-2 md:px-2.5 flex items-center justify-center gap-0.5 sm:gap-1 md:gap-1.5 rounded-full border shadow-sm relative text-[8px] sm:text-[9.5px] md:text-[10.5px] font-sans font-bold whitespace-nowrap transition-all hover:scale-105 select-none cursor-default ${
                   serverHealth === 'online'
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
                     : serverHealth === 'fallback'
@@ -1041,22 +1044,27 @@ export default function Login({ onLogin }: LoginProps) {
                     : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 font-bold'
                 }`}
                 title={
-                  serverHealth === 'online' ? 'Backend: ออนไลน์ (เชื่อมต่อสำเร็จ)' :
-                  serverHealth === 'fallback' ? 'Backend: โหมดสำรอง (Local DB)' :
-                  serverHealth === 'checking' ? 'กำลังตรวจสอบการเชื่อมต่อ...' :
+                  serverHealth === 'online' ? 'Backend Node.js: ออนไลน์ (เชื่อมต่อสำเร็จ)' :
+                  serverHealth === 'fallback' ? 'Backend: โหมดฐานข้อมูลสำรอง (Local DB)' :
+                  serverHealth === 'checking' ? 'Backend: กำลังตรวจสอบการเชื่อมต่อ...' :
                   'Backend: ออฟไลน์'
                 }
               >
-                <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current shrink-0">
+                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 sm:w-3 sm:h-3 md:w-3.5 md:h-3.5 fill-current shrink-0">
                   <path d="M12 1L2 6.8v10.4L12 23l10-5.8V6.8L12 1zm8.2 15.2L12 21l-8.2-4.8V7.8L12 3l8.2 4.8v8.4zM10.8 7.3L7 9.5v5l3.8 2.2V14.5l-2.2-1.3V10.8l2.2 1.3V7.3zm2.4 0v4.8l2.2-1.3v-2.4l-2.2 1.3V7.3z"/>
                 </svg>
-                <span className="opacity-95 text-[9px] font-semibold">
+                <span className="opacity-95 text-[8px] sm:text-[9px] md:text-[10.5px] font-semibold truncate">
                   {serverHealth === 'online' && 'NodeJS'}
-                  {serverHealth === 'fallback' && 'Local DB'}
+                  {serverHealth === 'fallback' && (
+                    <>
+                      <span className="inline sm:hidden">LocalDB</span>
+                      <span className="hidden sm:inline">Local DB</span>
+                    </>
+                  )}
                   {serverHealth === 'checking' && 'Checking'}
                   {serverHealth === 'offline' && 'Offline'}
                 </span>
-                <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5 md:h-2 md:w-2">
                   {serverHealth !== 'checking' && (
                     <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
                       serverHealth === 'online' ? 'bg-emerald-400' :
@@ -1064,7 +1072,7 @@ export default function Login({ onLogin }: LoginProps) {
                       'bg-rose-400'
                     }`} />
                   )}
-                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 md:h-2 md:w-2 ${
                     serverHealth === 'online' ? 'bg-emerald-500' :
                     serverHealth === 'fallback' ? 'bg-amber-500' :
                     serverHealth === 'checking' ? 'bg-slate-400 animate-pulse' :
@@ -1075,7 +1083,7 @@ export default function Login({ onLogin }: LoginProps) {
 
               {/* 5. Online Users Badge */}
               <div
-                className={`h-7.5 px-2.5 flex items-center gap-1 rounded-full border transition-all hover:scale-105 shadow-sm relative cursor-help text-[9.5px] font-sans font-bold whitespace-nowrap shrink-0 ${
+                className={`flex-1 min-w-0 h-[26px] sm:h-[30px] md:h-[32px] px-1 sm:px-2 md:px-2.5 flex items-center justify-center gap-0.5 sm:gap-1 md:gap-1.5 rounded-full border transition-all hover:scale-105 shadow-sm relative cursor-help text-[8px] sm:text-[9.5px] md:text-[10.5px] font-sans font-bold whitespace-nowrap ${
                   onlineUsersCount > 0
                     ? 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400'
                     : 'border-slate-300/40 dark:border-slate-700/40 bg-slate-500/5 text-slate-500 dark:text-slate-400'
@@ -1086,15 +1094,16 @@ export default function Login({ onLogin }: LoginProps) {
                     : `ไม่มีผู้ใช้งานที่ล็อกอินอยู่ในระบบขณะนี้ (ระบบพร้อมให้บริการ)`
                 }
               >
-                <Users className="w-3 h-3 shrink-0" />
-                <span className="opacity-95 text-[9px] font-semibold">
-                  {onlineUsersCount} ออนไลน์
+                <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3 md:w-3.5 md:h-3.5 shrink-0" />
+                <span className="opacity-95 text-[8px] sm:text-[9px] md:text-[10.5px] font-semibold truncate">
+                  <span className="inline sm:hidden">{onlineUsersCount} คน</span>
+                  <span className="hidden sm:inline">{onlineUsersCount} ออนไลน์</span>
                 </span>
-                <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5 md:h-2 md:w-2">
                   {onlineUsersCount > 0 && (
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
                   )}
-                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 md:h-2 md:w-2 ${
                     onlineUsersCount > 0 ? 'bg-sky-500' : 'bg-slate-400 dark:bg-slate-500'
                   }`} />
                 </span>
@@ -1118,14 +1127,6 @@ export default function Login({ onLogin }: LoginProps) {
         isOpen={isChangelogOpen}
         onClose={() => setIsChangelogOpen(false)}
         currentUser={null}
-      />
-
-      {/* Host Troubleshooting Modal */}
-      <HostTroubleshootingModal
-        isOpen={isHostHelpOpen}
-        onClose={() => setIsHostHelpOpen(false)}
-        serverHealth={serverHealth}
-        onRetryHealthCheck={checkServerHealth}
       />
 
       <style>{`

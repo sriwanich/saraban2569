@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, User, formatThaiDate, formatThaiDateShort, formatThaiDateMedium, formatThaiDateTime } from '../../types';
-import { Search, Eye, Edit2, Trash2, FileText, Plus, Printer, Paperclip, X, Pin } from 'lucide-react';
+import { Search, Eye, Edit2, Trash2, FileText, Plus, Printer, Paperclip, X, Pin, Zap } from 'lucide-react';
 
 interface Props {
   title: string;
@@ -131,15 +131,10 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
 
     if (isDeptDoc) {
       if (isMobile) {
-        return `${row.receiveNumber || '-'} (${row.department || 'ฝ่าย'})`;
+        return `${row.receiveNumber || '-'}`;
       }
       return (
-        <div className="flex flex-col">
-          <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{row.receiveNumber || '-'}</span>
-          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
-            {row.department ? `(ฝ่าย: ${row.department})` : '(ฝ่าย/กลุ่มงาน)'}
-          </span>
-        </div>
+        <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{row.receiveNumber || '-'}</span>
       );
     }
 
@@ -147,38 +142,34 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
       const deptRec = row.departmentReceives.find(r => r.department === user.department);
       if (deptRec) {
         if (isMobile) {
-          return `${deptRec.receiveNumber} (ฝ่าย) / ${row.receiveNumber || '-'} (กลาง)`;
+          return `${deptRec.receiveNumber || row.receiveNumber || '-'}`;
         }
         return (
-          <div className="flex flex-col">
-            <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{deptRec.receiveNumber} <span className="text-[10px] font-normal text-[var(--text-muted)]">(ฝ่าย)</span></span>
-            <span className="text-[11px] text-blue-500/80 font-mono">{row.receiveNumber} (กลาง)</span>
-          </div>
+          <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{deptRec.receiveNumber || row.receiveNumber || '-'}</span>
         );
       }
     }
 
     if (isMobile) {
-      return `${row.receiveNumber || '-'} (กลาง)`;
+      return `${row.receiveNumber || '-'}`;
     }
     return (
-      <div className="flex flex-col">
-        <span className="font-bold text-[var(--text-primary)] font-mono">{row.receiveNumber || '-'}</span>
-        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium whitespace-nowrap">(สารบรรณกลาง)</span>
-      </div>
+      <span className="font-bold text-[var(--text-primary)] font-mono">{row.receiveNumber || '-'}</span>
     );
   };
 
   const getPriorityBadge = (priority: string) => {
-    if (priority === 'ปกติ' || !priority) return null;
+    const cleanPriority = (priority || 'ปกติ').trim();
     let color = '';
-    if (priority === 'ด่วนที่สุด') color = 'text-red-400 border-red-500/30 bg-red-500/10';
-    else if (priority === 'ด่วนมาก') color = 'text-orange-400 border-orange-500/30 bg-orange-500/10';
-    else color = 'text-amber-400 border-amber-500/30 bg-amber-500/10';
+    if (cleanPriority === 'ด่วนที่สุด') color = 'text-red-600 border-red-500/20 bg-red-500/10 dark:text-red-400';
+    else if (cleanPriority === 'ด่วนมาก') color = 'text-orange-600 border-orange-500/20 bg-orange-500/10 dark:text-orange-400';
+    else if (cleanPriority === 'ด่วน') color = 'text-amber-600 border-amber-500/20 bg-amber-500/10 dark:text-amber-400';
+    else color = 'text-slate-500 border-slate-500/15 bg-slate-500/5 dark:text-slate-400 dark:bg-slate-500/10';
     
     return (
-      <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${color} whitespace-nowrap inline-block`}>
-        {priority}
+      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border ${color} whitespace-nowrap inline-flex items-center gap-1 shadow-sm`}>
+        {cleanPriority === 'ด่วนที่สุด' && <Zap className="w-3.5 h-3.5 text-red-500 dark:text-red-400 animate-pulse" />}
+        {cleanPriority}
       </span>
     );
   };
@@ -490,120 +481,62 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
       </div>
 
       {/* Main Table Container */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl overflow-hidden shadow-sm flex flex-col">
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl overflow-hidden shadow-sm flex flex-col">
         {/* Mobile View: Cards */}
         <div className="block lg:hidden divide-y divide-[var(--border-lighter)]">
           {paginatedDocs.length > 0 ? (
             paginatedDocs.map((row) => (
-              <div key={row.id} className="p-4 space-y-3 hover:bg-[var(--border-lighter)]/30 transition-colors">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex flex-wrap gap-1.5 items-center">
+              <div key={row.id} className="p-5 space-y-4 hover:bg-[var(--bg-elevated)]/50 transition-colors">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
                     {onToggleFavorite && (
                       <button
                         onClick={() => onToggleFavorite(row)}
-                        className={`p-1 rounded-md transition-colors ${
+                        className={`p-1.5 rounded-lg transition-colors ${
                           favorites.includes(row.id)
-                            ? 'text-amber-500 bg-amber-500/10 border border-amber-500/20'
+                            ? 'text-amber-500 bg-amber-500/10'
                             : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
                         }`}
                         title={favorites.includes(row.id) ? 'ยกเลิกปักหมุด' : 'ปักหมุด'}
                       >
-                        <Pin className={`w-3 h-3 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
+                        <Pin className={`w-4 h-4 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current' : ''}`} />
                       </button>
                     )}
-                    <span className="text-xs font-mono font-bold text-[var(--primary-color)] bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 px-2.5 py-0.5 rounded-md">
-                      {title.includes('ส่ง') ? 'เลขส่ง' : 'เลขรับ'}: {getReceiveNumberDisplay(row, true)}
-                    </span>
-                    <span className="text-xs font-mono text-[var(--text-muted)] bg-[var(--bg-elevated)] px-2 py-0.5 rounded border border-[var(--border-light)]">
-                      ปี พ.ศ. {row.year}
+                    <span className="text-xs font-mono font-bold text-[var(--primary-color)] bg-[var(--primary-color)]/10 px-3 py-1 rounded-lg">
+                      {getReceiveNumberDisplay(row, true)}
                     </span>
                   </div>
-                  <span className="text-xs font-medium text-[var(--text-secondary)] bg-[var(--bg-overlay)] px-2 py-0.5 rounded border border-[var(--border-light)]">
+                  <span className="text-xs font-semibold text-[var(--text-secondary)] bg-[var(--bg-overlay)] px-3 py-1 rounded-lg">
                     {formatThaiDateMedium(row.date)}
                   </span>
                 </div>
 
-                <div className="space-y-1.5">
-                  <div className="text-xs text-[var(--text-muted)] font-mono font-semibold">
-                    ที่ {row.docNumber}
-                  </div>
-                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-relaxed">
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-snug">
                     {row.title}
                   </h4>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                    {getPriorityBadge(row.priority)}
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap font-medium ${
-                      row.type === 'inbox' ? 'text-blue-400 border-blue-400/30 bg-blue-400/10' :
-                      row.type === 'outbox' ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' :
-                      'text-teal-400 border-teal-400/30 bg-teal-500/10'
-                    }`}>
-                      {row.type === 'inbox' ? 'หนังสือรับ' : row.type === 'outbox' ? 'หนังสือส่ง' : 'งานธุรการ'}
-                    </span>
-                    {row.attachments && row.attachments.length > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-2 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium">
-                        <Paperclip className="w-3 h-3" />
-                        <span>{row.attachments.length} ไฟล์</span>
-                      </span>
-                    )}
-                    {row.readStatus === 'read' && (
-                      <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded" title="คุณเปิดอ่านแล้ว">
-                        ✓✓ เปิดแล้ว
-                      </span>
-                    )}
-                    {row.readStatus === 'reading' && (
-                      <span className="text-[10px] text-green-500 font-bold bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded flex items-center gap-1" title="คุณกำลังอ่านอยู่">
-                        <span className="flex h-1.5 w-1.5 relative shrink-0">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
-                        </span>
-                        กำลังอ่าน
-                      </span>
-                    )}
-                    {row.readStatus === 'sent' && (
-                      <span className="text-[10px] text-slate-400 font-medium bg-slate-500/10 border border-slate-500/10 px-1.5 py-0.5 rounded" title="ส่งถึงคุณแล้ว (ยังไม่ได้เปิด)">
-                        ✓ ส่งแล้ว
-                      </span>
-                    )}
+                  <div className="text-xs font-mono text-[var(--text-muted)]">
+                    ที่ {row.docNumber}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs bg-[var(--bg-elevated)] p-2.5 rounded-lg border border-[var(--border-light)] text-[var(--text-secondary)]">
-                  <div>
-                    <span className="text-[var(--text-muted)] block mb-0.5">จาก</span>
-                    <span className="font-medium text-[var(--text-primary)] line-clamp-1">{row.from || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-[var(--text-muted)] block mb-0.5">ถึง</span>
-                    <span className="font-medium text-[var(--text-primary)] line-clamp-1">{row.to || '-'}</span>
-                  </div>
-                  <div className="col-span-2 border-t border-[var(--border-lighter)]/50 pt-2 mt-1">
-                    <span className="text-[var(--text-muted)] mr-1">ผู้รับผิดชอบ:</span>
-                    <span className="font-medium text-[var(--text-primary)]">
-                      {row.department || '-'} {row.assignee ? `(${row.assignee})` : ''}
-                    </span>
-                  </div>
-                  {row.note && (
-                    <div className="col-span-2 text-[var(--text-muted)] italic">
-                      <span className="font-medium">หมายเหตุ:</span> {row.note}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between text-xs text-[var(--text-muted)] pt-1">
-                  <span>ลงทะเบียน: {formatThaiDateTime(row.registerDate)}</span>
+                <div className="flex items-center justify-between pt-2">
                   <div className="flex items-center gap-2">
+                    {getPriorityBadge(row.priority)}
+                  </div>
+                  <div className="flex items-center gap-1.5">
                     <button 
                       onClick={() => onViewDoc(row)}
-                      className="p-1.5 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 rounded-md transition-colors"
-                      title="รายละเอียด"
+                      className="p-2 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-lg transition-colors"
+                      title="ดูรายละเอียด"
                     >
                       <Eye className="w-4 h-4" />
                     </button>
                     {onEditDoc && canEditDoc(row) && (
                       <button 
                         onClick={() => onEditDoc(row)}
-                        className="p-1.5 text-amber-400 hover:bg-amber-400/10 border border-amber-400/20 rounded-md transition-colors"
-                        title="แก้ไข"
+                        className="p-2 text-amber-500 hover:bg-amber-500/10 rounded-lg transition-colors"
+                        title="แก้ไขเอกสาร"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -611,8 +544,8 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                     {onDeleteDoc && canDeleteDoc(row) && (
                       <button 
                         onClick={() => onDeleteDoc(row.id)}
-                        className="p-1.5 text-red-400 hover:bg-red-400/10 border border-red-400/20 rounded-md transition-colors"
-                        title="ลบ"
+                        className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                        title="ลบเอกสาร"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -631,106 +564,103 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
 
         {/* Desktop View: Polished Table */}
         <div className="hidden lg:block overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse min-w-[1300px]">
+          <table className="w-full border-collapse min-w-[1200px]">
             <thead>
-              <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] text-[0.8rem] text-[var(--text-secondary)] font-semibold tracking-wide">
-                <th className="p-3.5 w-28 whitespace-nowrap">{title.includes('ส่ง') ? 'เลขส่ง' : 'เลขรับ'}</th>
-                <th className="p-3.5 w-20 whitespace-nowrap">ปี พ.ศ.</th>
-                <th className="p-3.5 w-36 whitespace-nowrap">เลขที่เอกสาร</th>
-                <th className="p-3.5 w-32 whitespace-nowrap">ลงวันที่ (ไทย)</th>
-                <th className="p-3.5 min-w-[260px]">เรื่อง / สาระสำคัญ</th>
-                <th className="p-3.5 w-40 whitespace-nowrap">จาก</th>
-                <th className="p-3.5 w-40 whitespace-nowrap">ถึง</th>
-                <th className="p-3.5 w-40 whitespace-nowrap">กลุ่มปฏิบัติงาน</th>
-                <th className="p-3.5 w-36 whitespace-nowrap">ผู้ปฏิบัติ</th>
-                <th className="p-3.5 w-36 whitespace-nowrap">วันลงทะเบียน</th>
-                <th className="p-3.5 w-28 text-right whitespace-nowrap sticky right-0 bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)]">การจัดการ</th>
+              <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-light)] text-[0.75rem] uppercase tracking-wider text-[var(--text-secondary)] font-bold">
+                <th className="p-4 rounded-tl-xl font-bold text-center w-[120px]">{title.includes('รับ') ? 'ลำดับ' : 'เลขทะเบียนส่ง'}</th>
+                <th className="p-4 font-bold text-center w-[100px]">ปี</th>
+                <th className="p-4 font-bold text-center w-[180px]">เลขที่หนังสือ</th>
+                <th className="p-4 font-bold text-center min-w-[380px]">เรื่อง / รายละเอียด</th>
+                <th className="p-4 font-bold text-center w-[250px]">ต้นทาง → ปลายทาง</th>
+                <th className="p-4 font-bold text-center w-[200px]">ผู้รับผิดชอบ</th>
+                <th className="p-4 text-center rounded-tr-xl font-bold w-[140px]">การจัดการ</th>
               </tr>
             </thead>
-            <tbody className="text-sm divide-y divide-[var(--border-lighter)]">
+            <tbody className="text-[13px] divide-y divide-[var(--border-lighter)] bg-[var(--bg-overlay)]/30">
               {paginatedDocs.length > 0 ? (
                 paginatedDocs.map((row) => (
                   <tr 
                     key={row.id} 
-                    className="hover:bg-[var(--border-lighter)]/40 transition-colors group"
+                    className="hover:bg-[var(--bg-elevated)]/50 transition-colors group"
                   >
-                    <td className="p-3.5 font-mono font-semibold text-[var(--primary-color)] align-top">
-                      {getReceiveNumberDisplay(row, false)}
-                    </td>
-                    <td className="p-3.5 font-mono text-[var(--text-secondary)] align-top">
-                      {row.year}
-                    </td>
-                    <td className="p-3.5 font-mono font-medium text-[var(--text-primary)] align-top whitespace-nowrap">
-                      {row.docNumber}
-                    </td>
-                    <td className="p-3.5 text-[var(--text-secondary)] align-top whitespace-nowrap">
-                      <span className="font-medium text-[var(--text-primary)]">
-                        {formatThaiDateMedium(row.date)}
+                    <td className="p-4 font-mono font-bold text-[var(--primary-color)] text-center align-middle">
+                      <span className="bg-[var(--primary-color)]/5 border border-[var(--primary-color)]/10 px-2.5 py-1 rounded-lg text-xs inline-block">
+                        {getReceiveNumberDisplay(row, false)}
                       </span>
                     </td>
-                    <td className="p-3.5 text-[var(--text-primary)] align-top leading-relaxed">
-                      <div className="flex items-start gap-2 flex-wrap">
-                        {onToggleFavorite && (
-                          <button
-                            onClick={() => onToggleFavorite(row)}
-                            className={`p-1 rounded-md transition-colors shrink-0 ${
-                              favorites.includes(row.id)
-                                ? 'text-amber-500 hover:bg-amber-500/10'
-                                : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
-                            }`}
-                            title={favorites.includes(row.id) ? 'ยกเลิกปักหมุดเอกสารสำคัญ' : 'ปักหมุดเอกสารสำคัญ'}
-                          >
-                            <Pin className={`w-3.5 h-3.5 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
-                          </button>
-                        )}
-                        <span className="font-medium hover:text-[var(--primary-color)] cursor-pointer transition-colors" onClick={() => onViewDoc(row)}>
+                    <td className="p-4 text-[var(--text-secondary)] text-center align-middle font-mono font-bold">
+                      {row.year}
+                    </td>
+                    <td className="p-4 font-mono text-[var(--text-primary)] text-center align-middle font-semibold text-xs">
+                      {row.docNumber || '—'}
+                    </td>
+                    <td className="p-4 text-[var(--text-primary)] align-middle text-left">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-[13.5px] text-[var(--text-primary)] leading-relaxed group-hover:text-[var(--primary-color)] transition-colors">
                           {row.title}
                         </span>
-                        <div className="flex items-center gap-1 shrink-0 flex-wrap">
-                          {getPriorityBadge(row.priority)}
-                          {row.attachments && row.attachments.length > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-1.5 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium whitespace-nowrap" title={`${row.attachments.length} ไฟล์แนบ`}>
-                              <Paperclip className="w-3 h-3" />
-                              <span>{row.attachments.length}</span>
-                            </span>
-                          )}
-                          {row.readStatus === 'read' && (
-                            <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded" title="คุณเปิดอ่านแล้ว">
-                              ✓✓ เปิดแล้ว
-                            </span>
-                          )}
-                          {row.readStatus === 'reading' && (
-                            <span className="text-[10px] text-green-500 font-bold bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded flex items-center gap-1" title="คุณกำลังอ่านอยู่">
-                              <span className="flex h-1.5 w-1.5 relative shrink-0">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
-                              </span>
-                              กำลังอ่าน
-                            </span>
-                          )}
-                          {row.readStatus === 'sent' && (
-                            <span className="text-[10px] text-slate-400 font-medium bg-slate-500/10 border border-slate-500/10 px-1.5 py-0.5 rounded" title="ส่งถึงคุณแล้ว (ยังไม่ได้เปิด)">
-                              ✓ ส่งแล้ว
-                            </span>
-                          )}
-                        </div>
                       </div>
-                      {row.note && (
-                        <p className="text-xs text-[var(--text-muted)] italic mt-0.5">หมายเหตุ: {row.note}</p>
+                      <div className="mt-2 flex items-center gap-1.5 flex-wrap justify-start">
+                        {getPriorityBadge(row.priority)}
+                        {row.attachments && row.attachments.length > 0 && (
+                          <span className="inline-flex items-center gap-1.5 text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-md border border-sky-500/20 font-bold shrink-0" title={`${row.attachments.length} ไฟล์แนบ`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-sky-600 dark:text-sky-400 shrink-0">
+                              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                            </svg>
+                            <span>{row.attachments.length}</span>
+                          </span>
+                        )}
+                        {row.registerDate && (
+                          <span className="text-[10px] font-mono font-semibold text-[var(--text-muted)] bg-[var(--bg-surface)] px-2 py-0.5 rounded border border-[var(--border-light)]">
+                            ลงทะเบียน: {formatThaiDateTime(row.registerDate)}
+                          </span>
+                        )}
+                        {row.status && (
+                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/10">
+                            {row.status}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4 align-middle text-center">
+                      {row.type === 'inbox' ? (
+                        <div className="inline-flex flex-col space-y-1 text-left">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-bold text-blue-600 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/10 w-[30px] text-center">จาก</span>
+                            <span className="text-xs font-bold text-[var(--text-primary)] truncate max-w-[170px]" title={row.from}>{row.from || '-'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-bold text-slate-400 bg-slate-500/10 px-1.5 py-0.5 rounded border border-slate-500/10 w-[30px] text-center">ถึง</span>
+                            <span className="text-xs text-[var(--text-secondary)] truncate max-w-[170px]" title={row.to}>{row.to || '-'}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="inline-flex flex-col space-y-1 text-left">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-bold text-slate-400 bg-slate-500/10 px-1.5 py-0.5 rounded border border-slate-500/10 w-[30px] text-center">จาก</span>
+                            <span className="text-xs text-[var(--text-secondary)] truncate max-w-[170px]" title={row.from}>{row.from || '-'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/10 w-[30px] text-center">ถึง</span>
+                            <span className="text-xs font-bold text-[var(--text-primary)] truncate max-w-[170px]" title={row.to}>{row.to || '-'}</span>
+                          </div>
+                        </div>
                       )}
                     </td>
-                    <td className="p-3.5 text-[var(--text-secondary)] align-top">{row.from || '-'}</td>
-                    <td className="p-3.5 text-[var(--text-secondary)] align-top">{row.to || '-'}</td>
-                    <td className="p-3.5 text-[var(--text-secondary)] align-top">{row.department || '-'}</td>
-                    <td className="p-3.5 text-[var(--text-secondary)] align-top">{row.assignee || '-'}</td>
-                    <td className="p-3.5 text-xs text-[var(--text-muted)] align-top whitespace-nowrap font-mono">
-                      {formatThaiDateTime(row.registerDate)}
+                    <td className="p-4 text-[var(--text-secondary)] text-center align-middle">
+                      {row.department ? (
+                        <span className="text-xs font-bold bg-violet-500/5 text-violet-600 border border-violet-500/10 px-2.5 py-1 rounded-lg inline-block">
+                          {row.department}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
                     </td>
-                    <td className="p-3.5 text-right whitespace-nowrap sticky right-0 bg-[var(--bg-surface)] group-hover:bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)] transition-colors align-top">
-                      <div className="flex items-center justify-end gap-1">
+                    <td className="p-4 text-center align-middle">
+                      <div className="flex items-center justify-center gap-1">
                         <button 
                           onClick={() => onViewDoc(row)}
-                          className="p-1.5 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-md transition-colors"
+                          className="p-2 text-[var(--text-secondary)] hover:text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-lg transition-colors cursor-pointer"
                           title="ดูรายละเอียด"
                         >
                           <Eye className="w-4 h-4" />
@@ -738,8 +668,8 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                         {onEditDoc && canEditDoc(row) && (
                           <button 
                             onClick={() => onEditDoc(row)}
-                            className="p-1.5 text-amber-400 hover:bg-amber-400/10 rounded-md transition-colors"
-                            title="แก้ไข"
+                            className="p-2 text-amber-500 hover:bg-amber-500/10 hover:text-amber-600 rounded-lg transition-colors cursor-pointer"
+                            title="แก้ไขเอกสาร"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
@@ -747,8 +677,8 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                         {onDeleteDoc && canDeleteDoc(row) && (
                           <button 
                             onClick={() => onDeleteDoc(row.id)}
-                            className="p-1.5 text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
-                            title="ลบ"
+                            className="p-2 text-red-500 hover:bg-red-500/10 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                            title="ลบเอกสาร"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -759,9 +689,8 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                 ))
               ) : (
                 <tr>
-                  <td colSpan={11} className="p-12 text-center text-[var(--text-muted)]">
-                    <FileText className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                    ไม่พบข้อมูลหนังสือในทะเบียน
+                  <td colSpan={7} className="p-16 text-center text-[var(--text-muted)] font-semibold">
+                    ไม่พบข้อมูลเอกสารในส่วนงานนี้
                   </td>
                 </tr>
               )}

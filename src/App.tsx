@@ -5,6 +5,8 @@ import { LoadingIndicator } from './components/LoadingIndicator';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import { PublicInfographicsViewer } from './components/views/PublicInfographicsViewer';
+import { PublicQrVerifyViewer } from './components/views/PublicQrVerifyViewer';
+import { useRealtimeSync } from './utils/realtimeSync';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -20,6 +22,7 @@ export default function App() {
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  
   const isPublicInfographic = 
     pathname.startsWith('/public/infographics') || 
     pathname.startsWith('/embed/infographics') || 
@@ -30,6 +33,17 @@ export default function App() {
     searchParams.has('infographic_id') ||
     searchParams.has('info_id') ||
     searchParams.get('view') === 'public_infographics';
+
+  const isPublicQrVerify = 
+    pathname.startsWith('/qr/') ||
+    pathname.startsWith('/verify') ||
+    pathname.startsWith('/public/verify') ||
+    hash.includes('/qr/') ||
+    hash.includes('/verify') ||
+    searchParams.has('slug') ||
+    searchParams.has('qr') ||
+    searchParams.get('view') === 'verify' ||
+    searchParams.get('view') === 'qr_verify';
 
   useEffect(() => {
     const savedUser = localStorage.getItem('edms_user_data') || sessionStorage.getItem('edms_user_data');
@@ -135,43 +149,27 @@ export default function App() {
     localStorage.setItem('theme', theme);
   }, [theme, isActualDark]);
 
-  // Real-time authenticated user presence heartbeat
+  // Listen for admin force logout and instant flash messages
+  useRealtimeSync(['FORCE_LOGOUT', 'USER_FLASH_MESSAGE'], (data) => {
+    if (!user) return;
+    const currentId = String(user.id || user.username).toLowerCase();
+    const targetId = String(data?.userId || data?.username || '').toLowerCase();
+
+    if (data?.type === 'FORCE_LOGOUT' || data?.reason) {
+      if (!targetId || targetId === currentId) {
+        alert(`⚠️ แจ้งเตือนจากระบบ: ${data.reason || 'ผู้ดูแลระบบได้สิ้นสุดเซสชันการทำงานของคุณ'}`);
+        handleLogout();
+      }
+    } else if (data?.type === 'USER_FLASH_MESSAGE' || data?.message) {
+      if (!targetId || targetId === currentId) {
+        alert(`📢 ข้อความแจ้งเตือนด่วนจาก ${data.senderName || 'ผู้ดูแลระบบ'}:\n\n${data.message}`);
+      }
+    }
+  });
+
+  // Clean presence session on browser tab close
   useEffect(() => {
     if (!isLoggedIn || !user) return;
-
-    const sendPresence = async (action: 'ping' | 'logout' = 'ping') => {
-      try {
-        const payload = {
-          action,
-          userId: user.id || user.username,
-          username: user.username,
-          fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-          role: user.role,
-          departmentId: user.departmentId
-        };
-        await fetch('/api/user-presence', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      } catch (_) {
-        // ignore network error
-      }
-    };
-
-    // Send immediate presence heartbeat on login/mount
-    sendPresence('ping');
-
-    // Send presence heartbeat every 15 seconds
-    const interval = setInterval(() => {
-      sendPresence('ping');
-    }, 15000);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        sendPresence('ping');
-      }
-    };
 
     const handleBeforeUnload = () => {
       try {
@@ -186,12 +184,9 @@ export default function App() {
       } catch (_) {}
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isLoggedIn, user]);
@@ -224,6 +219,14 @@ export default function App() {
         <ConfirmProvider>
           <PublicInfographicsViewer />
         </ConfirmProvider>
+      </ErrorBoundary>
+    );
+  }
+
+  if (isPublicQrVerify) {
+    return (
+      <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลหน้าตรวจสอบ QR Code">
+        <PublicQrVerifyViewer />
       </ErrorBoundary>
     );
   }

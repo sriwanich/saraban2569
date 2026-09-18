@@ -35,13 +35,18 @@ export default function DigitalSignatureView({ user, documents, onViewDoc, onRef
   const fetchSignatures = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/digital-signatures/list');
+      let res = await fetch('/api/digital-signatures/list');
+      if (!res.ok) {
+        res = await fetch('/api/digital-signatures');
+      }
       if (res.ok) {
         const data = await res.json();
-        setSignatures(data);
+        setSignatures(Array.isArray(data) ? data : []);
+      } else {
+        setSignatures([]);
       }
     } catch (err) {
-      console.error('Error fetching digital signatures:', err);
+      setSignatures([]);
     } finally {
       setIsLoading(false);
     }

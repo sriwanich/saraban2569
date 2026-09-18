@@ -63,6 +63,7 @@ export interface DocumentItem {
   isCentral?: number; // 1 = สารบรรณกลาง, 0 = สารบรรณฝ่าย
   isCircular?: boolean; // เป็นหนังสือเวียน (สำหรับหนังสือส่ง)
   readStatus?: 'read' | 'reading' | 'sent';
+  isRead?: boolean;
   createdBy?: string;
   departmentReceives?: {
     id: number;

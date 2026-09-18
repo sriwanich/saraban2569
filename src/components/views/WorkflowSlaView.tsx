@@ -259,12 +259,18 @@ export default function WorkflowSlaView({ documents, user, onViewDoc }: Workflow
       showToast('กรุณาเลือกหนังสือและเส้นทาง Workflow');
       return;
     }
+    const targetDoc = documents.find(d => String(d.id) === String(selectedDocId) || d.docNumber === selectedDocId);
     try {
       const res = await fetch('/api/workflows/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           docId: selectedDocId,
+          docNumber: targetDoc?.docNumber,
+          docTitle: targetDoc?.title,
+          department: targetDoc?.department,
+          assignee: targetDoc?.assignee,
+          priority: targetDoc?.priority,
           templateId: selectedTemplateId,
           user: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'ผู้เสนอเรื่อง'
         })

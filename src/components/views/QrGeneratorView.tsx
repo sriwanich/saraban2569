@@ -31,7 +31,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const [isAiStamperOpen, setIsAiStamperOpen] = useState(false);
 
   // System settings state & Drag-and-Drop state
-  const [sysSettings, setSysSettings] = useState<any>(null);
+  const [sysSettings, setSysSettings] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('moi_settings');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
   const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
@@ -43,7 +49,14 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         return null;
       })
       .then(data => {
-        if (data) setSysSettings(data);
+        if (data) {
+          setSysSettings(data);
+          if (data.logoUrl) {
+            try {
+              localStorage.setItem('moi_logo', data.logoUrl);
+            } catch (_) {}
+          }
+        }
       })
       .catch(err => {
         console.error('Error fetching settings in QrGeneratorView:', err);
@@ -90,7 +103,12 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
 
   // Form Fields
   const [urlInput, setUrlInput] = useState('https://rayong.popt.go.th');
+  const [customTitle, setCustomTitle] = useState('สนง.ปภ.ระยอง');
   const [textInput, setTextInput] = useState('ประกาศสำนักงาน ปภ. จังหวัดระยอง เรื่อง มาตรการป้องกันสาธารณภัย');
+  
+  // Simulator Countdown State
+  const [simCountdown, setSimCountdown] = useState(5);
+  const [simPaused, setSimPaused] = useState(false);
   
   // vCard Fields
   const [vcard, setVcard] = useState({
@@ -245,7 +263,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   // Default Garuda and Province Logos
   const defaultGarudaUrl = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
   const GARUDA_LOGO_URL = sysSettings?.garuda30Url || sysSettings?.garuda15Url || defaultGarudaUrl;
-  const DDPM_LOGO_URL = sysSettings?.logoUrl || 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
+  const DDPM_LOGO_URL = sysSettings?.logoUrl || (typeof window !== 'undefined' ? (localStorage.getItem('moi_logo') || localStorage.getItem('moi_schoolLogo')) : null) || '/ddpm-logo.svg';
 
   // Preset Color Palettes
   const presetPalettes = [
@@ -357,11 +375,22 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         frameTextColor
       };
 
+      let dynamicTitle = customTitle.trim() || (frameType !== 'none' && frameText ? frameText : '');
+      if (!dynamicTitle) {
+        if (qrType === 'url') {
+          dynamicTitle = urlInput.trim() ? urlInput.replace(/^https?:\/\//, '').split('/')[0] : 'เว็บไซต์หน่วยงาน';
+        } else if (qrType === 'edms') {
+          dynamicTitle = selectedDoc ? (selectedDoc.title || selectedDoc.docNumber) : 'เอกสารสารบรรณ ปภ.ระยอง';
+        } else {
+          dynamicTitle = 'สนง.ปภ.ระยอง';
+        }
+      }
+
       const res = await fetch('/api/qr-generator/dynamic', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: frameType !== 'none' && frameText ? frameText : `ลิ้งค์ตรวจสอบเอกสาร ${selectedDoc ? selectedDoc.docNumber : 'ทั่วไป'}`,
+          title: dynamicTitle,
           originalUrl: targetUrl,
           createdBy: user?.username || 'ผู้ดูแลระบบ',
           type: qrType,
@@ -518,6 +547,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     try {
       if (payloadToDecode.startsWith('http://') || payloadToDecode.startsWith('https://')) {
         let targetUrl = payloadToDecode;
+        let resolvedTitle = customTitle || (frameType !== 'none' && frameText ? frameText : 'สนง.ปภ.ระยอง');
 
         try {
           const urlObj = new URL(targetUrl);
@@ -531,6 +561,9 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               const data = await resolveRes.json();
               if (data.originalUrl) {
                 targetUrl = data.originalUrl;
+              }
+              if (data.title) {
+                resolvedTitle = data.title;
               }
             }
           }
@@ -553,9 +586,12 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                     type: 'document',
                     payload: payloadToDecode,
                     resolvedUrl: targetUrl,
+                    title: resData.document?.title || resolvedTitle,
                     document: resData.document,
                     signatures: resData.signatures
                   });
+                  setSimCountdown(5);
+                  setSimPaused(false);
                   setDecodeLoading(false);
                   return;
                 }
@@ -564,8 +600,11 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                   type: 'document_not_found',
                   payload: payloadToDecode,
                   resolvedUrl: targetUrl,
+                  title: resolvedTitle,
                   docId: docId
                 });
+                setSimCountdown(5);
+                setSimPaused(false);
                 setDecodeLoading(false);
                 return;
               }
@@ -579,8 +618,11 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
         setDecodedResult({
           type: 'url',
           payload: payloadToDecode,
-          resolvedUrl: targetUrl
+          resolvedUrl: targetUrl,
+          title: resolvedTitle
         });
+        setSimCountdown(5);
+        setSimPaused(false);
       } else if (payloadToDecode.startsWith('BEGIN:VCARD')) {
         const nameMatch = payloadToDecode.match(/FN:(.*)/);
         const phoneMatch = payloadToDecode.match(/TEL.*:(.*)/);
@@ -638,6 +680,18 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       handleDecodeAndVerify();
     }
   }, [activeTab, rawQrPayload]);
+
+  // Phone Simulator Countdown Timer Effect
+  useEffect(() => {
+    if (activeTab !== 'test' || simPaused || !decodedResult || decodedResult.type !== 'url') return;
+    if (simCountdown <= 0) return;
+
+    const timer = setInterval(() => {
+      setSimCountdown(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeTab, simPaused, simCountdown, decodedResult]);
 
   // Compute final QR payload
   const getComputedPayload = (): string => {
@@ -948,6 +1002,74 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
     gradientType, gradientColor2, gradientAngle,
     logoType, customLogoUrl, logoScale, frameType, frameText, frameColor, frameTextColor
   ]);
+
+  // Auto-sync / auto-register Dynamic QR when in dynamic mode
+  useEffect(() => {
+    if (generationMode !== 'dynamic') return;
+
+    const timer = setTimeout(async () => {
+      if (!registeredSlug) {
+        await registerDynamicQr();
+      } else {
+        // Update existing dynamic QR target url and title
+        let targetUrl = '';
+        const origin = typeof window !== 'undefined' ? window.location.origin : 'https://edms.go.th';
+        switch (qrType) {
+          case 'edms':
+            targetUrl = selectedDocId ? `${origin}/verify?docId=${selectedDocId}` : `${origin}/verify?docId=DEMO-DOC-2569`;
+            break;
+          case 'url':
+            let u = urlInput.trim();
+            if (u && !u.startsWith('http://') && !u.startsWith('https://')) {
+              u = 'https://' + u;
+            }
+            targetUrl = u || origin;
+            break;
+          case 'text':
+            targetUrl = textInput.trim() || origin;
+            break;
+          case 'vcard':
+            targetUrl = `BEGIN:VCARD\nVERSION:3.0\nN:${vcard.name}\nFN:${vcard.name}\nTITLE:${vcard.title}\nORG:${vcard.org}\nTEL;TYPE=WORK,VOICE:${vcard.phone}\nEMAIL:${vcard.email}\nADR;TYPE=WORK:;;${vcard.address}\nURL:${vcard.website}\nEND:VCARD`;
+            break;
+          case 'wifi':
+            targetUrl = `WIFI:S:${wifi.ssid};T:${wifi.encryption};P:${wifi.password};;`;
+            break;
+          case 'promptpay':
+            const cleanId = promptPay.id.replace(/[^0-9]/g, '');
+            targetUrl = `PROMPTPAY:${cleanId}:${promptPay.amount || '0'}`;
+            break;
+          default:
+            targetUrl = origin;
+        }
+
+        let dynamicTitle = customTitle.trim() || (frameType !== 'none' && frameText ? frameText : '');
+        if (!dynamicTitle) {
+          if (qrType === 'url') {
+            dynamicTitle = urlInput.trim() ? urlInput.replace(/^https?:\/\//, '').split('/')[0] : 'เว็บไซต์หน่วยงาน';
+          } else if (qrType === 'edms') {
+            dynamicTitle = selectedDoc ? (selectedDoc.title || selectedDoc.docNumber) : 'เอกสารสารบรรณ ปภ.ระยอง';
+          } else {
+            dynamicTitle = 'สนง.ปภ.ระยอง';
+          }
+        }
+
+        try {
+          await fetch(`/api/qr-generator/dynamic/${registeredSlug}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: dynamicTitle,
+              originalUrl: targetUrl,
+              status: 'active',
+              styleConfig: '{}'
+            })
+          });
+        } catch (_) {}
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [generationMode, qrType, urlInput, customTitle, textInput, selectedDocId, frameText, frameType]);
 
   // Handle logo file upload
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1512,7 +1634,24 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   };
 
   // Downloads PNG
-  const downloadPNG = () => {
+  const downloadPNG = async () => {
+    if (generationMode === 'dynamic' && !registeredSlug) {
+      showToast('info', 'กำลังลงทะเบียน Dynamic QR ก่อนส่งออกไฟล์...');
+      const slug = await registerDynamicQr();
+      if (slug) {
+        setTimeout(() => {
+          if (!canvasRef.current) return;
+          const link = document.createElement('a');
+          link.download = `EDMS-QR-${Date.now()}.png`;
+          link.href = canvasRef.current.toDataURL('image/png');
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          saveToHistory('PNG');
+        }, 300);
+        return;
+      }
+    }
     if (!canvasRef.current) return;
     const link = document.createElement('a');
     link.download = `EDMS-QR-${Date.now()}.png`;
@@ -1526,7 +1665,13 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   // Downloads SVG Vector
   const downloadSVG = async () => {
     try {
-      const payload = getComputedPayload();
+      let slug = registeredSlug;
+      if (generationMode === 'dynamic' && !slug) {
+        showToast('info', 'กำลังลงทะเบียน Dynamic QR ก่อนส่งออกไฟล์ SVG...');
+        slug = (await registerDynamicQr()) || '';
+      }
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://edms.go.th';
+      const payload = (generationMode === 'dynamic' && slug) ? `${origin}/qr/${slug}` : getComputedPayload();
       const svgString = await QRCode.toString(payload, {
         type: 'svg',
         margin: qrMargin,
@@ -2120,6 +2265,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                           onClick={() => {
                             setSelectedDocId(doc.id);
                             if (doc.title) {
+                              setCustomTitle(doc.title);
                               setFrameText(`ตรวจเลขหนังสือ: ${doc.docNumber || doc.id}`);
                             }
                           }}
@@ -2170,15 +2316,35 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
               )}
 
               {qrType === 'url' && (
-                <div className="space-y-2">
-                  <label className="block font-bold text-slate-700 dark:text-slate-300">ระบุลิงก์ปลายทาง (Target URL):</label>
-                  <input
-                    type="url"
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="https://example.com"
-                  />
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="block font-bold text-slate-700 dark:text-slate-300">
+                      ระบุลิงก์ปลายทาง (Target URL):
+                    </label>
+                    <input
+                      type="url"
+                      value={urlInput}
+                      onChange={(e) => setUrlInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+                      placeholder="https://rayong.popt.go.th"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block font-bold text-slate-700 dark:text-slate-300">
+                      เนื้อหา / ชื่อเรื่อง ที่แสดงบนหน้าต่างตรวจสอบ (Title / Subject):
+                    </label>
+                    <input
+                      type="text"
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-xs"
+                      placeholder="เช่น สนง.ปภ.ระยอง หรือ ข่าวสารประชาสัมพันธ์"
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      * ข้อความนี้จะแสดงในช่อง "เนื้อหา / ชื่อเรื่อง" บนหน้าต่างยืนยันความถูกต้องเมื่อสแกน QR Code
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -3972,9 +4138,18 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                         
                         {/* Header */}
                         <div className="flex flex-col items-center text-center space-y-1 pb-2.5 border-b border-slate-200 dark:border-slate-800">
-                          <img src={DDPM_LOGO_URL} className="w-8 h-8 object-contain" alt="ปภ" />
+                          <img 
+                            src={DDPM_LOGO_URL} 
+                            className="w-8 h-8 object-contain" 
+                            alt={`โลโก้หน่วยงาน ${sysSettings?.orgName || ''}`}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/ddpm-logo.svg';
+                            }}
+                          />
                           <h4 className="font-bold text-[10px] text-slate-800 dark:text-slate-200">ตรวจสอบความถูกต้องเอกสาร</h4>
-                          <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Rayong Disaster EDMS</span>
+                          <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">
+                            {sysSettings?.orgName || 'Rayong Disaster EDMS'}
+                          </span>
                         </div>
 
                         {/* Status Badge */}
@@ -4054,7 +4229,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                         )}
                         
                         <div className="pt-2 text-center">
-                          <p className="text-[8px] text-slate-400">ระบบบันทึกความสมบูรณ์กลาง ปภ.ระยอง</p>
+                          <p className="text-[8px] text-slate-400">ระบบบันทึกความสมบูรณ์กลาง {sysSettings?.orgName || 'ปภ.ระยอง'}</p>
                         </div>
 
                       </div>
@@ -4075,53 +4250,79 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
                       </div>
                     ) : decodedResult.type === 'url' ? (
                       /* URL Preview layout - Updated to match v2.0 Verification Landing Page */
-                      <div className="space-y-5 text-center py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        <div className="relative w-20 h-20 mx-auto">
+                      <div className="space-y-4 text-center py-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="relative w-16 h-16 mx-auto">
                           <div className="absolute inset-0 bg-emerald-500/20 rounded-full animate-ping"></div>
-                          <div className="relative w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40">
-                            <Check className="w-10 h-10 text-white stroke-[3]" />
+                          <div className="relative w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40">
+                            <Check className="w-8 h-8 text-white stroke-[3.5]" />
                           </div>
                         </div>
 
                         <div className="space-y-1">
-                          <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">ผ่านการตรวจสอบความถูกต้อง</h4>
-                          <div className="flex items-center justify-center gap-1.5 text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
+                          <h4 className="font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm">ผ่านการตรวจสอบความถูกต้อง</h4>
+                          <div className="flex items-center justify-center gap-1.5 text-[8px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
                             <ShieldCheck className="w-3 h-3" />
                             <span>QR Code Verified & Secure</span>
                           </div>
                         </div>
 
-                        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl text-left space-y-3 shadow-sm">
+                        <div className="p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl text-left space-y-2.5 shadow-xs">
                           <div>
                             <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">เนื้อหา / ชื่อเรื่อง:</span>
-                            <p className="text-[10px] font-bold text-slate-700 dark:text-slate-300 leading-tight">
-                              {frameType !== 'none' && frameText ? frameText : 'ลิงก์ภายนอกที่ตรวจสอบแล้ว'}
+                            <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200 leading-tight">
+                              {decodedResult.title || customTitle || (frameType !== 'none' && frameText ? frameText : 'สนง.ปภ.ระยอง')}
                             </p>
                           </div>
                           <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                             <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mb-1">ลิงก์ปลายทาง:</span>
                             <div className="p-2 bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-900 rounded-lg">
-                              <p className="font-mono text-[8px] text-slate-500 break-all leading-relaxed">
+                              <p className="font-mono text-[8px] text-slate-600 dark:text-slate-300 break-all leading-relaxed select-all">
                                 {decodedResult.resolvedUrl}
                               </p>
                             </div>
                           </div>
                         </div>
 
-                        <div className="space-y-3 pt-2">
+                        <div className="space-y-2 pt-1">
                           <a 
                             href={decodedResult.resolvedUrl} 
                             target="_blank" 
                             rel="noreferrer"
-                            className="w-full h-12 bg-slate-900 dark:bg-slate-800 hover:bg-black dark:hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-slate-900/20 text-xs"
+                            className="w-full h-10 bg-slate-900 dark:bg-slate-800 hover:bg-black dark:hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-md shadow-slate-900/20 text-xs"
                           >
                             <span>เข้าสู่ลิงก์ที่ระบุ</span>
                             <ExternalLink className="w-3 h-3" />
                           </a>
-                          <p className="text-[7px] text-slate-400 leading-relaxed text-center w-full block">
-                            * นี่คือภาพจำลองหน้าต่างตรวจสอบ (Verify Page) <br/>
-                            ที่ประชาชนจะเห็นเมื่อสแกน QR Code และจะนำทางอัตโนมัติใน 3 วินาที
-                          </p>
+
+                          {/* Simulator Interactive Pause / Play and Progress */}
+                          <div className="p-2.5 bg-slate-100 dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                            <div className="flex items-center justify-between gap-1 text-[9px]">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${simPaused ? 'bg-amber-500' : 'bg-emerald-500 animate-ping'}`} />
+                                <span className="font-bold text-slate-700 dark:text-slate-300 truncate">
+                                  {simPaused ? (
+                                    <span className="text-amber-600 dark:text-amber-400">หยุดการนับถอยหลังชั่วคราว</span>
+                                  ) : (
+                                    <span>ระบบจะนำทางอัตโนมัติใน <strong className="text-emerald-600 dark:text-emerald-400 font-black">{simCountdown}</strong> วินาที</span>
+                                  )}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setSimPaused(!simPaused)}
+                                className="px-2 py-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-[8px] text-slate-700 dark:text-slate-200 hover:bg-slate-50 flex items-center gap-1 shrink-0 cursor-pointer"
+                              >
+                                {simPaused ? <Play className="w-2.5 h-2.5 fill-current text-emerald-600" /> : <Pause className="w-2.5 h-2.5 fill-current text-amber-600" />}
+                                <span>{simPaused ? 'เริ่มต่อ' : 'หยุด'}</span>
+                              </button>
+                            </div>
+                            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1 overflow-hidden">
+                              <div 
+                                className={`h-full transition-all duration-1000 ${simPaused ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                style={{ width: `${(simCountdown / 5) * 100}%` }}
+                              />
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ) :

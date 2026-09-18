@@ -520,47 +520,34 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
 
         {/* Desktop View: Polished Table */}
         <div className="hidden md:block overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse min-w-[1000px]">
+          <table className="w-full border-collapse min-w-[1000px]">
             <thead>
-              <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] text-xs text-[var(--text-secondary)] font-semibold tracking-wider">
-                <th className="p-3.5 w-44">เลขที่เอกสาร / คำสั่ง</th>
-                <th className="p-3.5 w-28">ประเภท</th>
-                <th className="p-3.5 w-36">ลงวันที่ (ไทย)</th>
-                <th className="p-3.5 min-w-[280px]">เรื่อง / สาระสำคัญ</th>
-                <th className="p-3.5 w-44">แฟ้มจัดเก็บดิจิทัล</th>
-                <th className="p-3.5 w-36">ฝ่ายปฏิบัติ</th>
-                <th className="p-3.5 w-28 text-right sticky right-0 bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)]">การจัดการ</th>
+              <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] text-[0.75rem] text-[var(--text-secondary)] font-bold tracking-wider uppercase">
+                <th className="p-3.5 text-center font-bold w-44">เลขที่เอกสาร / คำสั่ง</th>
+                <th className="p-3.5 text-center font-bold w-28">ประเภท</th>
+                <th className="p-3.5 text-center font-bold w-36">ลงวันที่ (ไทย)</th>
+                <th className="p-3.5 text-center font-bold min-w-[280px]">เรื่อง / สาระสำคัญ</th>
+                <th className="p-3.5 text-center font-bold w-44">แฟ้มจัดเก็บดิจิทัล</th>
+                <th className="p-3.5 text-center font-bold w-36">ฝ่ายปฏิบัติ</th>
+                <th className="p-3.5 text-center font-bold w-28 sticky right-0 bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)]">การจัดการ</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border-lighter)] text-sm">
+            <tbody className="divide-y divide-[var(--border-lighter)] text-[13px]">
               {filteredDocs.length > 0 ? (
                 filteredDocs.map((row) => (
                   <tr key={row.id} className="hover:bg-[var(--border-lighter)]/40 transition-colors group">
-                    <td className="p-3.5 font-mono font-medium text-[var(--text-primary)] align-top whitespace-nowrap">
-                      <div className="flex flex-col gap-1">
-                        <span>{row.docNumber}</span>
-                        {!(row.isCentral === 0 || Number(row.isCentral) === 0) ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 w-fit">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                            สารบรรณกลาง
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 w-fit">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            ฝ่าย/กลุ่มงาน
-                          </span>
-                        )}
-                      </div>
+                    <td className="p-3.5 font-mono font-bold text-[var(--text-primary)] text-center align-middle whitespace-nowrap">
+                      <span>{row.docNumber}</span>
                     </td>
-                    <td className="p-3.5 align-top">
+                    <td className="p-3.5 text-center align-middle">
                       {getCategoryBadge(row.category)}
                     </td>
-                    <td className="p-3.5 text-xs text-[var(--text-secondary)] align-top whitespace-nowrap">
-                      <span className="font-medium text-[var(--text-primary)] text-sm">
+                    <td className="p-3.5 text-center align-middle whitespace-nowrap">
+                      <span className="font-bold text-[var(--text-primary)]">
                         {row.date ? formatThaiDateMedium(row.date) : '-'}
                       </span>
                     </td>
-                    <td className="p-3.5 leading-relaxed align-top">
+                    <td className="p-3.5 leading-relaxed text-left align-middle">
                       <div className="flex items-center gap-2">
                         {onToggleFavorite && (
                           <button
@@ -575,11 +562,13 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
                             <Pin className={`w-3.5 h-3.5 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
                           </button>
                         )}
-                        <div className="font-medium text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer flex items-center gap-1.5" onClick={() => onViewDoc(row)}>
+                        <div className="font-bold text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer flex items-center gap-1.5" onClick={() => onViewDoc(row)}>
                           <span>{row.title}</span>
                           {row.attachments && row.attachments.length > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] bg-[var(--primary-color)]/10 text-[var(--primary-color)] px-1.5 py-0.5 rounded border border-[var(--primary-color)]/20 font-medium shrink-0" title={`${row.attachments.length} ไฟล์แนบ`}>
-                              <Paperclip className="w-3 h-3" />
+                            <span className="inline-flex items-center gap-1.5 text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-md border border-sky-500/20 font-bold shrink-0" title={`${row.attachments.length} ไฟล์แนบ`}>
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-sky-600 dark:text-sky-400 shrink-0">
+                                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                              </svg>
                               <span>{row.attachments.length}</span>
                             </span>
                           )}
@@ -589,16 +578,22 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
                         <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">{row.content}</p>
                       )}
                     </td>
-                    <td className="p-3.5 align-top">
-                      <span className="text-xs px-2.5 py-1 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 font-medium inline-block max-w-[180px] truncate">
+                    <td className="p-3.5 text-center align-middle">
+                      <span className="text-xs px-2.5 py-1 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 font-bold inline-block max-w-[180px] truncate">
                         📁 {getFolderName(row)}
                       </span>
                     </td>
-                    <td className="p-3.5 text-xs text-[var(--text-secondary)] align-top">
-                      {row.department || '-'}
+                    <td className="p-3.5 text-center align-middle">
+                      {row.department ? (
+                        <span className="text-xs font-bold bg-violet-500/5 text-violet-600 border border-violet-500/10 px-2.5 py-0.5 rounded-lg inline-block">
+                          {row.department}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
                     </td>
-                    <td className="p-3.5 text-right whitespace-nowrap sticky right-0 bg-[var(--bg-surface)] group-hover:bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)] transition-colors align-top">
-                      <div className="flex items-center justify-end gap-1">
+                    <td className="p-3.5 text-center whitespace-nowrap sticky right-0 bg-[var(--bg-surface)] group-hover:bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)] transition-colors align-middle">
+                      <div className="flex items-center justify-center gap-1">
                         <button 
                           onClick={() => onViewDoc(row)}
                           className="p-1.5 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-md transition-colors"

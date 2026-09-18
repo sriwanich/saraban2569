@@ -13,16 +13,25 @@ interface SettingsProps {
   user?: any;
   hasPermission?: (key: string) => boolean;
   onNavigateTab?: (tab: string) => void;
+  onSubTabChange?: (subTab: string) => void;
 }
 
 export default function Settings(props: SettingsProps) {
   const { confirm } = useConfirm();
   const { onSettingsUpdated } = props;
-  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>(() => {
+    if (props.user?.role === 'moderator') return 'users';
+    return 'system';
+  });
   const [userSubTab, setUserSubTab] = useState<'list' | 'realtime'>('list');
   const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
     return typeof window !== 'undefined' ? realtimeSync.getOnlineUsers() : 0;
   });
+
+  useEffect(() => {
+    const currentSub = (activeTab === 'users' && userSubTab === 'realtime') ? 'active_users' : activeTab;
+    props.onSubTabChange?.(currentSub);
+  }, [activeTab, userSubTab]);
 
   useRealtimeSync(['ONLINE_USERS_COUNT', 'ACTIVE_USERS_UPDATED'], (data) => {
     if (data?.count !== undefined) {
@@ -33,17 +42,19 @@ export default function Settings(props: SettingsProps) {
   });
 
   useEffect(() => {
-    if (!props.hasPermission) return;
-    
     const isSystemAdmin = props.user?.role === 'admin';
-    const canManageUsers = props.hasPermission('manage_users') || isSystemAdmin;
-    const canManageSystem = props.hasPermission('system_settings') || isSystemAdmin;
+    const canManageUsers = props.hasPermission ? (props.hasPermission('manage_users') || isSystemAdmin) : (isSystemAdmin || props.user?.role === 'moderator');
+    const canManageSystem = props.hasPermission ? (props.hasPermission('system_settings') || isSystemAdmin) : isSystemAdmin;
     
-    if (!canManageSystem && (activeTab === 'system' || activeTab === 'smtp' || activeTab === 'system_doc' || activeTab === 'backup' || activeTab === 'dedup')) {
+    if (activeTab === 'permissions' && !isSystemAdmin) {
       if (canManageUsers) {
         setActiveTab('users');
-      } else {
-        setActiveTab('permissions');
+      } else if (canManageSystem) {
+        setActiveTab('system');
+      }
+    } else if (!canManageSystem && (activeTab === 'system' || activeTab === 'smtp' || activeTab === 'system_doc' || activeTab === 'backup' || activeTab === 'dedup')) {
+      if (canManageUsers) {
+        setActiveTab('users');
       }
     }
   }, [props.user?.role, props.hasPermission, activeTab]);
@@ -843,6 +854,7 @@ export default function Settings(props: SettingsProps) {
           role,
           permission_key,
           is_allowed: nextVal,
+          currentUserRole: props.user?.role,
           username: `${props.user?.firstName || ''} ${props.user?.lastName || ''}`.trim() || props.user?.username
         })
       });
@@ -858,7 +870,8 @@ export default function Settings(props: SettingsProps) {
         });
         props.onSettingsUpdated?.();
       } else {
-        alert('ไม่สามารถอัปเดตสิทธิ์การใช้งานได้');
+        const errorData = await res.json().catch(() => ({}));
+        alert(errorData.error || errorData.message || 'ไม่สามารถอัปเดตสิทธิ์การใช้งานได้');
       }
     } catch (e) {
       console.error(e);
@@ -912,6 +925,7 @@ export default function Settings(props: SettingsProps) {
             role: targetRole,
             permission_key: key,
             is_allowed: targetValue,
+            currentUserRole: props.user?.role,
             username: `${props.user?.firstName || ''} ${props.user?.lastName || ''}`.trim() || props.user?.username
           })
         });
@@ -1889,7 +1903,7 @@ export default function Settings(props: SettingsProps) {
           label: 'สิทธิ์',
           sublabel: 'กำหนดสิทธิ์ 4 บทบาท และฟังก์ชัน',
           icon: ShieldCheck,
-          visible: true
+          visible: props.user?.role === 'admin'
         }
       ]
     },
@@ -3466,7 +3480,9 @@ export default function Settings(props: SettingsProps) {
 
             {userSubTab === 'realtime' ? (
               <ActiveUsersRealtimeView 
+                currentUser={props.user}
                 onNavigateToLogs={() => props.onNavigateTab ? props.onNavigateTab('logs') : undefined} 
+                onNavigateTab={props.onNavigateTab}
                 departments={departments} 
               />
             ) : (
@@ -3936,12 +3952,14 @@ export default function Settings(props: SettingsProps) {
 
         {activeTab === 'active_users' && (
           <ActiveUsersRealtimeView 
+            currentUser={props.user}
             onNavigateToLogs={() => props.onNavigateTab ? props.onNavigateTab('logs') : undefined} 
+            onNavigateTab={props.onNavigateTab}
             departments={departments} 
           />
         )}
 
-        {activeTab === 'permissions' && (() => {
+        {activeTab === 'permissions' && props.user?.role === 'admin' && (() => {
           const permissionsList = [
             {
               section: '1. งานสารบรรณหลัก และเอกสาร (Core Document Operations)',

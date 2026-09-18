@@ -57,6 +57,30 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
 
   const [disasterPrefillData, setDisasterPrefillData] = useState<any>(null);
   const [isChangelogModalOpen, setIsChangelogModalOpen] = useState(false);
+  const [settingsSubTab, setSettingsSubTab] = useState<string>('system');
+  const [isUserActive, setIsUserActive] = useState<boolean>(true);
+
+  // User activity & idle state tracking for real-time presence
+  useEffect(() => {
+    let idleTimer: any = null;
+
+    const resetIdle = () => {
+      setIsUserActive(true);
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        setIsUserActive(false);
+      }, 60000); // 1 minute of no interaction marks as idle
+    };
+
+    const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(ev => window.addEventListener(ev, resetIdle, { passive: true }));
+    resetIdle();
+
+    return () => {
+      clearTimeout(idleTimer);
+      events.forEach(ev => window.removeEventListener(ev, resetIdle));
+    };
+  }, []);
 
   // Feature flags control from settings
   const [enabledFeatures, setEnabledFeatures] = useState<Record<string, boolean>>(() => {
@@ -307,6 +331,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [inboxDocs, setInboxDocs] = useState<DocumentItem[]>([]);
   const [outboxDocs, setOutboxDocs] = useState<DocumentItem[]>([]);
   const [adminDocs, setAdminDocs] = useState<DocumentItem[]>([]);
+  const [draftDocsCount, setDraftDocsCount] = useState(0);
 
   const [hasInboxLoaded, setHasInboxLoaded] = useState(false);
   const [hasOutboxLoaded, setHasOutboxLoaded] = useState(false);
@@ -410,9 +435,33 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           viewTitle = 'บันทึกประวัติระบบ (System Logs)';
           activeDetails = 'กำลังตรวจสอบบันทึกการใช้งานและ Audit Trail';
           break;
+        case 'recycle_bin':
+          viewTitle = 'คลังกู้คืนเอกสาร (Recycle Bin)';
+          activeDetails = 'กำลังตรวจสอบและกู้คืนเอกสารราชการที่ถูกลบ';
+          break;
         case 'settings':
-          viewTitle = 'ตั้งค่าระบบและผู้ดูแล';
-          activeDetails = 'กำลังจัดการข้อมูลระบบ บุคลากร และสิทธิ์ใช้งาน';
+          if (settingsSubTab === 'active_users' || settingsSubTab === 'realtime') {
+            viewTitle = 'ติดตามผู้ใช้งานและหน้าจอที่เปิดใช้งานสด';
+            activeDetails = 'กำลังตรวจสอบผู้ใช้ออนไลน์สดและหน้าจอที่เปิดอยู่';
+          } else if (settingsSubTab === 'users') {
+            viewTitle = 'จัดการข้อมูลเจ้าหน้าที่ & สิทธิ์';
+            activeDetails = 'กำลังจัดการรายชื่อเจ้าหน้าที่และฝ่ายงาน';
+          } else if (settingsSubTab === 'permissions') {
+            viewTitle = 'กำหนดสิทธิ์การใช้งาน (Permissions Matrix)';
+            activeDetails = 'กำลังกำหนดสิทธิ์การเข้าถึงโมดูล';
+          } else if (settingsSubTab === 'departments') {
+            viewTitle = 'โครงสร้างฝ่ายงาน ปภ.ระยอง';
+            activeDetails = 'กำลังจัดการข้อมูลฝ่ายงานและหน่วยงาน';
+          } else if (settingsSubTab === 'system_health') {
+            viewTitle = 'ตรวจสอบความสมบูรณ์ของระบบ (System Health)';
+            activeDetails = 'กำลังตรวจสอบสถานะเครือข่ายและระบบ';
+          } else if (settingsSubTab === 'backup') {
+            viewTitle = 'สำรองและกู้คืนฐานข้อมูล (Database Backup)';
+            activeDetails = 'กำลังตรวจสอบไฟล์สำรองและสถานะข้อมูล';
+          } else {
+            viewTitle = 'ตั้งค่าระบบและผู้ดูแล';
+            activeDetails = 'กำลังจัดการข้อมูลระบบและตั้งค่าทั่วไป';
+          }
           break;
         default:
           viewTitle = activeTab;
@@ -425,6 +474,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     const sendPresenceUpdate = async () => {
       try {
         const { viewTitle, activeDetails } = computeActivityInfo();
+        const currentViewVal = activeTab === 'settings' && (settingsSubTab === 'active_users' || settingsSubTab === 'realtime')
+          ? 'active_users'
+          : activeTab === 'settings'
+            ? `settings_${settingsSubTab}`
+            : activeTab;
+
         const payload = {
           userId: currentUser.id || currentUser.username,
           username: currentUser.username,
@@ -434,11 +489,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           departmentId: currentUser.departmentId,
           role: currentUser.role || 'user',
           avatar: currentUser.avatar || '',
-          currentView: activeTab,
+          currentView: currentViewVal,
           viewTitle,
           activeDetails,
           documentId: selectedDoc?.id || undefined,
-          status: (document.visibilityState === 'visible') ? 'active' : 'idle'
+          status: (document.visibilityState === 'visible' && isUserActive) ? 'active' : 'idle'
         };
         await fetch('/api/user-presence', {
           method: 'POST',
@@ -462,7 +517,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [currentUser, activeTab, selectedDoc, isCreateModalOpen]);
+  }, [currentUser, activeTab, settingsSubTab, isUserActive, selectedDoc, isCreateModalOpen]);
 
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -731,10 +786,38 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
+  const fetchDraftDocsCount = async () => {
+    try {
+      const res = await fetch('/api/drafts');
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const drafts = data.filter((d: any) => d.docType === 'draft_letter');
+          setDraftDocsCount(drafts.length);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Drafts fetch fallback active:', err);
+    }
+
+    // Local storage fallback
+    try {
+      const cached = localStorage.getItem('moi_drafts');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setDraftDocsCount(parsed.length);
+        }
+      }
+    } catch (_) {}
+  };
+
   const refreshData = async () => {
     await fetchDocuments();
     await fetchNotifications();
     await fetchFavorites();
+    await fetchDraftDocsCount();
   };
 
   const fetchRolePermissions = async () => {
@@ -880,41 +963,89 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
-  const baseNavItems: { id: string; icon: any; label: string; permKey?: string }[] = [
-    { id: 'overview', icon: Home, label: 'ภาพรวมระบบ' },
-    { id: 'ai_assistant', icon: Sparkles, label: 'ผู้ช่วย AI Smart', permKey: 'ai_assistant' },
-    { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ' },
-    { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง' },
-    { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ', permKey: 'admin_docs' },
-    { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
-    { id: 'favorites', icon: Pin, label: 'เอกสารสำคัญปักหมุด' },
-    { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร', permKey: 'draft_docs' },
-    { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล', permKey: 'digital_folders' },
-    { id: 'workflow_sla', icon: Workflow, label: 'ผังการเดินเอกสาร & SLA', permKey: 'workflow_sla' },
-    { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
-    { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
-    { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents' },
-    { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin' },
-    { id: 'user_manual', icon: HelpCircle, label: 'คู่มือการใช้งาน' },
-  ];
+  const unreadInboxCount = useMemo(() => {
+    return inboxDocs.filter(d => !d.isRead && isDocForUserDepartment(d)).length;
+  }, [inboxDocs, currentUser, rolePermissions]);
 
-  const navItems = baseNavItems.filter(item => {
-    if (enabledFeatures[item.id] === false) return false;
-    if (item.permKey && !hasPermission(item.permKey)) return false;
-    return true;
-  });
+  const outboxCount = useMemo(() => {
+    return outboxDocs.filter(isDocForUserDepartment).length;
+  }, [outboxDocs, currentUser, rolePermissions]);
 
-  if (hasPermission('audit_logs') && enabledFeatures['logs'] !== false) {
-    navItems.push({ id: 'logs', icon: ShieldCheck, label: 'บันทึกประวัติระบบ' });
-  }
+  const adminDocsCount = useMemo(() => {
+    return adminDocs.filter(isDocForUserDepartment).length;
+  }, [adminDocs, currentUser, rolePermissions]);
 
-  if (currentUser?.role === 'admin') {
-    navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' });
-  } else if (currentUser?.role === 'moderator') {
-    navItems.push({ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่า & สิทธิ์การใช้งาน' });
-  } else if (currentUser?.role === 'user') {
-    navItems.push({ id: 'settings', icon: SettingsIcon, label: 'สิทธิ์การใช้งาน' });
-  }
+  const favoritesCount = useMemo(() => {
+    return documents.filter(d => favorites.includes(d.id)).filter(isDocForUserDepartment).length;
+  }, [favorites, documents, currentUser, rolePermissions]);
+
+  const categorizedNavGroups = useMemo(() => {
+    const rawGroups: { category: string; items: { id: string; icon: any; label: string; permKey?: string; badge?: number | string; badgeColor?: string }[] }[] = [
+      {
+        category: 'หลัก & AI Smart',
+        items: [
+          { id: 'overview', icon: Home, label: 'ภาพรวมระบบ' },
+          { id: 'ai_assistant', icon: Sparkles, label: 'ผู้ช่วย AI Smart', permKey: 'ai_assistant' },
+        ]
+      },
+      {
+        category: 'งานสารบรรณ & เอกสาร',
+        items: [
+          { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ', badge: unreadInboxCount > 0 ? unreadInboxCount : undefined, badgeColor: 'bg-emerald-500 text-white' },
+          { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง', badge: outboxCount > 0 ? outboxCount : undefined, badgeColor: 'bg-sky-500 text-white' },
+          { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ', permKey: 'admin_docs', badge: adminDocsCount > 0 ? adminDocsCount : undefined, badgeColor: 'bg-teal-500 text-white' },
+          { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร', permKey: 'draft_docs', badge: draftDocsCount > 0 ? draftDocsCount : undefined, badgeColor: 'bg-indigo-500 text-white' },
+          { id: 'favorites', icon: Pin, label: 'เอกสารสำคัญปักหมุด', badge: favoritesCount > 0 ? favoritesCount : undefined, badgeColor: 'bg-amber-500 text-slate-950 font-extrabold' },
+          { id: 'folders', icon: FolderOpen, label: 'แฟ้มเอกสารดิจิทัล', permKey: 'digital_folders' },
+        ]
+      },
+      {
+        category: 'เครื่องมือ & ตรวจสอบ',
+        items: [
+          { id: 'workflow_sla', icon: Workflow, label: 'ผังการเดินเอกสาร & SLA', permKey: 'workflow_sla' },
+          { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
+          { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
+          { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
+          { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents' },
+          { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin' },
+        ]
+      },
+      {
+        category: 'ระบบ & การจัดการ',
+        items: [
+          ...(hasPermission('audit_logs') && enabledFeatures['logs'] !== false ? [{ id: 'logs', icon: ShieldCheck, label: 'บันทึกประวัติระบบ' }] : []),
+          { id: 'user_manual', icon: HelpCircle, label: 'คู่มือการใช้งาน' },
+          ...(currentUser?.role === 'admin'
+            ? [{ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' }]
+            : currentUser?.role === 'moderator'
+            ? [{ id: 'settings', icon: SettingsIcon, label: 'จัดการบุคลากร' }]
+            : (hasPermission('system_settings') || hasPermission('manage_users') || hasPermission('backup_restore'))
+            ? [{ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' }]
+            : [])
+        ]
+      }
+    ];
+
+    return rawGroups.map(group => ({
+      category: group.category,
+      items: group.items.filter(item => {
+        if (enabledFeatures[item.id] === false) return false;
+        if (item.permKey && !hasPermission(item.permKey)) return false;
+        return true;
+      })
+    })).filter(group => group.items.length > 0);
+  }, [enabledFeatures, currentUser, rolePermissions, unreadInboxCount, outboxCount, adminDocsCount, draftDocsCount, favoritesCount]);
+
+  const navItems = useMemo(() => {
+    return categorizedNavGroups.flatMap(g => g.items);
+  }, [categorizedNavGroups]);
+
+  const currentActiveTabMeta = useMemo(() => {
+    const found = navItems.find(n => n.id === activeTab);
+    if (found) return found;
+    if (activeTab === 'notifications') return { id: 'notifications', label: 'ศูนย์การแจ้งเตือน', icon: Bell };
+    return { id: 'overview', label: 'ภาพรวมระบบ', icon: Home };
+  }, [navItems, activeTab]);
 
   const handleViewDoc = (docOrId: DocumentItem | string) => {
     if (typeof docOrId === 'string') {
@@ -1123,7 +1254,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           <LogsView user={currentUser} />
         ));
       case 'settings':
-        return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} onNavigateTab={(tab: string) => setActiveTab(tab)} />;
+        return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} onNavigateTab={(tab: string) => setActiveTab(tab)} onSubTabChange={setSettingsSubTab} />;
       case 'notifications':
         return (
           <NotificationsView
@@ -1193,30 +1324,85 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             </button>
          </div>
          {/* Nav Links */}
-         <nav className={`flex-1 p-3.5 space-y-1.5 overflow-y-auto custom-scrollbar transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-2' : ''}`}>
-           {navItems.map((item) => {
-             const isActive = activeTab === item.id;
-             return (
-               <a 
-                 key={item.id} 
-                 href={`#${item.id}`} 
-                 onClick={(e) => { 
-                   e.preventDefault(); 
-                   setActiveTab(item.id);
-                   setIsMobileMenuOpen(false); 
-                 }} 
-                 className={`group relative flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-sm font-medium transition-all duration-300 ${
-                   isActive 
-                     ? 'bg-gradient-to-r from-[var(--primary-color)] to-blue-600 text-white shadow-lg shadow-[var(--primary-color)]/25 border border-white/10' 
-                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
-                 } ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 lg:w-11 lg:h-11 lg:mx-auto' : ''}`}
-                 title={item.label}
-               >
-                 <item.icon className={`w-[18px] h-[18px] shrink-0 transition-transform duration-300 group-hover:scale-110 ${isActive ? 'text-white drop-shadow-md' : 'text-[var(--text-muted)] group-hover:text-[var(--primary-color)]'}`} />
-                 <span className={`truncate transition-all duration-300 ${isSidebarCollapsed ? 'lg:hidden lg:opacity-0 lg:w-0' : 'opacity-100 text-[var(--text-primary)] font-semibold'}`}>{item.label}</span>
-               </a>
-             );
-           })}
+         <nav className={`flex-1 p-3 space-y-4 overflow-y-auto custom-scrollbar transition-all duration-300 ${isSidebarCollapsed ? 'lg:px-2' : ''}`}>
+           {categorizedNavGroups.map((group, groupIdx) => (
+             <div key={groupIdx} className="space-y-1">
+               {/* Group Section Header */}
+               <div className={`px-3 py-1 flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-[var(--text-muted)] ${isSidebarCollapsed ? 'lg:hidden' : ''}`}>
+                 <span className="truncate">{group.category}</span>
+                 <div className="h-px flex-1 bg-[var(--border-lighter)] ml-2 opacity-60" />
+               </div>
+
+               {/* Group Items */}
+               <div className="space-y-1">
+                 {group.items.map((item) => {
+                   const isActive = activeTab === item.id;
+                   const ItemIcon = item.icon;
+                   return (
+                     <a 
+                       key={item.id} 
+                       href={`#${item.id}`} 
+                       onClick={(e) => { 
+                         e.preventDefault(); 
+                         setActiveTab(item.id);
+                         setIsMobileMenuOpen(false); 
+                       }} 
+                       className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                         isActive 
+                           ? 'bg-gradient-to-r from-[var(--primary-color)] to-indigo-600 text-white shadow-md shadow-[var(--primary-color)]/25 font-bold' 
+                           : 'text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
+                       } ${isSidebarCollapsed ? 'lg:justify-center lg:px-0 lg:w-11 lg:h-11 lg:mx-auto' : ''}`}
+                       title={isSidebarCollapsed ? item.label : undefined}
+                     >
+                       {/* Active Indicator bar */}
+                       {isActive && !isSidebarCollapsed && (
+                         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-amber-400 rounded-r-full shadow-xs" />
+                       )}
+
+                       {/* SVG Icon Badge Container */}
+                       <div className={`p-1.5 rounded-lg transition-transform duration-200 group-hover:scale-110 shrink-0 ${
+                         isActive 
+                           ? 'bg-white/20 text-white' 
+                           : 'bg-[var(--bg-elevated)] text-[var(--text-muted)] group-hover:text-[var(--primary-color)] group-hover:bg-[var(--primary-color)]/10'
+                       }`}>
+                         <ItemIcon className="w-4.5 h-4.5 shrink-0" />
+                       </div>
+
+                       {/* Label */}
+                       <span className={`truncate flex-1 transition-all duration-300 ${isSidebarCollapsed ? 'lg:hidden lg:opacity-0 lg:w-0' : 'opacity-100'}`}>
+                         {item.label}
+                       </span>
+
+                       {/* Optional badge count */}
+                       {item.badge !== undefined && (
+                         <span className={`px-2 py-0.5 text-[10px] font-extrabold rounded-full transition-all shrink-0 ${
+                           isSidebarCollapsed ? 'lg:hidden' : ''
+                         } ${
+                           isActive 
+                             ? 'bg-white text-[var(--primary-color)] shadow-xs' 
+                             : item.badgeColor || 'bg-[var(--primary-color)] text-white'
+                         }`}>
+                           {item.badge}
+                         </span>
+                       )}
+
+                       {/* Collapsed Sidebar Hover Tooltip */}
+                       {isSidebarCollapsed && (
+                         <div className="hidden lg:group-hover:flex absolute left-full ml-3 px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-xl whitespace-nowrap shadow-xl z-50 pointer-events-none items-center gap-2 animate-in fade-in zoom-in-95 duration-150">
+                           <span>{item.label}</span>
+                           {item.badge !== undefined && (
+                             <span className="px-1.5 py-0.2 bg-amber-400 text-slate-950 font-bold text-[10px] rounded-full">
+                               {item.badge}
+                             </span>
+                           )}
+                         </div>
+                       )}
+                     </a>
+                   );
+                 })}
+               </div>
+             </div>
+           ))}
          </nav>
 
           {/* Sidebar Version / Changelog Footer */}
@@ -1259,16 +1445,26 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                 <Menu className="w-5 h-5" />
               </button>
              
-             {/* Header Title Badge */}
-              <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-gradient-to-r from-[var(--bg-elevated)] to-[var(--bg-surface)] border border-[var(--border-light)] min-w-0 max-w-[240px] sm:max-w-full transition-colors shadow-xs">
-                <Building2 className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
-                <span className="text-xs sm:text-sm font-semibold text-[var(--text-primary)] font-sans truncate tracking-tight">
-                  {currentUser?.role === 'admin'
-                    ? `EDMS: ${headerOrgName || orgName || 'ส่วนกลาง'}`
-                    : `EDMS: ${currentUser?.department || 'ฝ่ายงาน'}`
-                  }
-                </span>
-              </div>
+             {/* Header Title Badge & Active Section Indicator */}
+             <div className="flex items-center gap-2 max-w-full overflow-hidden">
+               <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[var(--bg-elevated)] to-[var(--bg-surface)] border border-[var(--border-light)] min-w-0 transition-colors shadow-xs">
+                 <Building2 className="w-4 h-4 text-[var(--primary-color)] shrink-0" />
+                 <span className="text-xs sm:text-sm font-semibold text-[var(--text-primary)] font-sans truncate tracking-tight">
+                   {currentUser?.role === 'admin'
+                     ? `EDMS: ${headerOrgName || orgName || 'ส่วนกลาง'}`
+                     : `EDMS: ${currentUser?.department || 'ฝ่ายงาน'}`
+                   }
+                 </span>
+               </div>
+
+               {/* Active Section SVG Badge */}
+               {currentActiveTabMeta && (
+                 <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/25 text-[var(--primary-color)] font-bold text-xs shrink-0 animate-in fade-in duration-200">
+                   {React.createElement(currentActiveTabMeta.icon, { className: "w-4 h-4 shrink-0" })}
+                   <span className="truncate">{currentActiveTabMeta.label}</span>
+                 </div>
+               )}
+             </div>
            </div>
 
            <div className="flex items-center gap-2 sm:gap-4 relative shrink-0">

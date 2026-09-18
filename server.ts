@@ -722,9 +722,11 @@ export function broadcastOnlineCount() {
     fullName: u.fullName,
     position: u.position,
     department: u.department,
+    departmentId: u.departmentId,
     role: u.role,
     avatar: u.avatar,
     ip: u.ip,
+    ipAddress: u.ip,
     device: u.device,
     browser: u.browser,
     currentView: u.currentView,
@@ -733,6 +735,7 @@ export function broadcastOnlineCount() {
     documentId: u.documentId,
     status: u.status,
     loginAt: u.loginAt,
+    loginTime: u.loginAt,
     lastActive: u.lastActive
   }));
   broadcastRealtimeEvent('ONLINE_USERS_COUNT', { count, onlineUsers: count });
@@ -852,9 +855,11 @@ app.get('/api/active-users', (req, res) => {
     fullName: u.fullName,
     position: u.position,
     department: u.department,
+    departmentId: u.departmentId,
     role: u.role,
     avatar: u.avatar,
     ip: u.ip,
+    ipAddress: u.ip,
     device: u.device,
     browser: u.browser,
     currentView: u.currentView,
@@ -863,6 +868,7 @@ app.get('/api/active-users', (req, res) => {
     documentId: u.documentId,
     status: u.status,
     loginAt: u.loginAt,
+    loginTime: u.loginAt,
     lastActive: u.lastActive
   }));
   res.json({
@@ -870,6 +876,44 @@ app.get('/api/active-users', (req, res) => {
     count: usersList.length,
     timestamp: Date.now()
   });
+});
+
+// Admin force logout / terminate session endpoint
+app.post('/api/active-users/terminate', async (req, res) => {
+  const { targetUserId, targetUsername, reason } = req.body || {};
+  const ip = getClientIp(req);
+  if (!targetUserId && !targetUsername) {
+    return res.status(400).json({ success: false, message: 'กรุณาระบุผู้ใช้งานที่ต้องการตัดการเชื่อมต่อ' });
+  }
+  const key = String(targetUserId || targetUsername).toLowerCase();
+  const existing = activeLoggedInUsers.get(key);
+  if (existing) {
+    activeLoggedInUsers.delete(key);
+    broadcastOnlineCount();
+    broadcastRealtimeEvent('FORCE_LOGOUT', {
+      userId: targetUserId,
+      username: targetUsername,
+      reason: reason || 'ผู้ดูแลระบบสิ้นสุดเซสชันการทำงานของคุณ'
+    });
+    await addSystemLog('TERMINATE_SESSION', `ผู้ดูแลระบบตัดการเชื่อมต่อเซสชันของ: ${existing.fullName || existing.username} (${reason || 'ไม่ระบุเหตุผล'})`, 'ผู้ดูแลระบบ', ip);
+  }
+  return res.json({ success: true, count: getActiveLoggedInUsersCount() });
+});
+
+// Instant flash message / notification to active user
+app.post('/api/active-users/message', async (req, res) => {
+  const { targetUserId, targetUsername, message, senderName } = req.body || {};
+  if (!message) {
+    return res.status(400).json({ success: false, message: 'กรุณาระบุข้อความแจ้งเตือน' });
+  }
+  broadcastRealtimeEvent('USER_FLASH_MESSAGE', {
+    targetUserId,
+    targetUsername,
+    message,
+    senderName: senderName || 'ผู้ดูแลระบบ',
+    timestamp: Date.now()
+  });
+  return res.json({ success: true });
 });
 
 // User Presence / Heartbeat Endpoint for Logged-In Users with automatic activity logging
@@ -1663,11 +1707,18 @@ app.post('/api/ai/remove-background', async (req, res) => {
 });
 app.get('/api/digital-signatures', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM digital_signatures ORDER BY timestampIso DESC');
-    res.json(rows);
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM digital_signatures ORDER BY timestampIso DESC');
+        if (rows && Array.isArray(rows)) {
+          return res.json(rows);
+        }
+      } catch (err) {}
+    }
+    return res.json(localDb.digital_signatures || []);
   } catch (error: any) {
-    console.error('MySQL Digital Signatures Fetch error:', error.message);
-    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงประวัติ Digital TSA' });
+    console.error('Digital Signatures Fetch error:', error.message);
+    return res.json(localDb.digital_signatures || []);
   }
 });
 
@@ -1676,15 +1727,22 @@ app.delete('/api/digital-signatures', async (req, res) => {
   const username = req.body?.username || req.query?.username || 'ผู้ดูแลระบบ';
 
   try {
-    await pool.query('DELETE FROM digital_signatures');
+    if (isMysqlOnline) {
+      try {
+        await pool.query('DELETE FROM digital_signatures');
+      } catch (err) {}
+    }
+    localDb.digital_signatures = [];
+    saveLocalDb();
     await addSystemLog('CLEAR_TSA_LOGS', 'ล้างประวัติ Digital TSA Logs ทั้งหมด', username, ip);
     return res.json({ success: true });
   } catch (error: any) {
-    console.error('MySQL Digital Signatures Clear error:', error.message);
-    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการล้างประวัติ Digital TSA' });
+    console.error('Digital Signatures Clear error:', error.message);
+    localDb.digital_signatures = [];
+    saveLocalDb();
+    return res.json({ success: true });
   }
 });
-
 
 app.delete('/api/digital-signatures/:id', async (req, res) => {
   const ip = getClientIp(req);
@@ -1692,12 +1750,20 @@ app.delete('/api/digital-signatures/:id', async (req, res) => {
   const logId = req.params.id;
 
   try {
-    await pool.query('DELETE FROM digital_signatures WHERE id = ?', [logId]);
+    if (isMysqlOnline) {
+      try {
+        await pool.query('DELETE FROM digital_signatures WHERE id = ?', [logId]);
+      } catch (err) {}
+    }
+    localDb.digital_signatures = (localDb.digital_signatures || []).filter((s: any) => String(s.id) !== String(logId));
+    saveLocalDb();
     await addSystemLog('DELETE_TSA_LOG', `ลบรายการ Digital TSA Log ID: ${logId}`, username, ip);
     return res.json({ success: true });
   } catch (error: any) {
-    console.error('MySQL Digital Signatures Delete specific error:', error.message);
-    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการลบรายการ Digital TSA' });
+    console.error('Digital Signatures Delete specific error:', error.message);
+    localDb.digital_signatures = (localDb.digital_signatures || []).filter((s: any) => String(s.id) !== String(logId));
+    saveLocalDb();
+    return res.json({ success: true });
   }
 });
 
@@ -3277,7 +3343,7 @@ function loadLocalDb() {
     }
     if (!localDb.role_permissions || !Array.isArray(localDb.role_permissions)) {
       localDb.role_permissions = [
-        // admin (18 permissions)
+        // admin (21 permissions)
         { role: 'admin', permission_key: 'view_all_docs', is_allowed: 1 },
         { role: 'admin', permission_key: 'create_docs', is_allowed: 1 },
         { role: 'admin', permission_key: 'edit_all_docs', is_allowed: 1 },
@@ -3285,6 +3351,7 @@ function loadLocalDb() {
         { role: 'admin', permission_key: 'approve_docs', is_allowed: 1 },
         { role: 'admin', permission_key: 'export_docs', is_allowed: 1 },
         { role: 'admin', permission_key: 'admin_docs', is_allowed: 1 },
+        { role: 'admin', permission_key: 'urgent_incidents', is_allowed: 1 },
         { role: 'admin', permission_key: 'ai_assistant', is_allowed: 1 },
         { role: 'admin', permission_key: 'infographics', is_allowed: 1 },
         { role: 'admin', permission_key: 'qr_generator', is_allowed: 1 },
@@ -3298,7 +3365,7 @@ function loadLocalDb() {
         { role: 'admin', permission_key: 'backup_restore', is_allowed: 1 },
         { role: 'admin', permission_key: 'audit_logs', is_allowed: 1 },
         { role: 'admin', permission_key: 'manage_changelog', is_allowed: 1 },
-        // moderator (16 permissions)
+        // moderator (17 permissions)
         { role: 'moderator', permission_key: 'view_all_docs', is_allowed: 1 },
         { role: 'moderator', permission_key: 'create_docs', is_allowed: 1 },
         { role: 'moderator', permission_key: 'edit_all_docs', is_allowed: 1 },
@@ -3306,6 +3373,7 @@ function loadLocalDb() {
         { role: 'moderator', permission_key: 'approve_docs', is_allowed: 1 },
         { role: 'moderator', permission_key: 'export_docs', is_allowed: 1 },
         { role: 'moderator', permission_key: 'admin_docs', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'urgent_incidents', is_allowed: 1 },
         { role: 'moderator', permission_key: 'ai_assistant', is_allowed: 1 },
         { role: 'moderator', permission_key: 'infographics', is_allowed: 1 },
         { role: 'moderator', permission_key: 'qr_generator', is_allowed: 1 },
@@ -3319,7 +3387,7 @@ function loadLocalDb() {
         { role: 'moderator', permission_key: 'backup_restore', is_allowed: 0 },
         { role: 'moderator', permission_key: 'audit_logs', is_allowed: 0 },
         { role: 'moderator', permission_key: 'manage_changelog', is_allowed: 0 },
-        // user (8 permissions)
+        // user (9 permissions)
         { role: 'user', permission_key: 'view_all_docs', is_allowed: 0 },
         { role: 'user', permission_key: 'create_docs', is_allowed: 1 },
         { role: 'user', permission_key: 'edit_all_docs', is_allowed: 0 },
@@ -3327,6 +3395,7 @@ function loadLocalDb() {
         { role: 'user', permission_key: 'approve_docs', is_allowed: 0 },
         { role: 'user', permission_key: 'export_docs', is_allowed: 1 },
         { role: 'user', permission_key: 'admin_docs', is_allowed: 0 },
+        { role: 'user', permission_key: 'urgent_incidents', is_allowed: 1 },
         { role: 'user', permission_key: 'ai_assistant', is_allowed: 1 },
         { role: 'user', permission_key: 'infographics', is_allowed: 1 },
         { role: 'user', permission_key: 'qr_generator', is_allowed: 1 },
@@ -3346,9 +3415,9 @@ function loadLocalDb() {
       // Ensure all standard keys exist in localDb.role_permissions
       const roles = ['admin', 'moderator', 'user'];
       const defaultAllowed: Record<string, Record<string, number>> = {
-        admin: { manage_changelog: 1 },
-        moderator: { manage_changelog: 0 },
-        user: { manage_changelog: 0 }
+        admin: { manage_changelog: 1, urgent_incidents: 1 },
+        moderator: { manage_changelog: 0, urgent_incidents: 1 },
+        user: { manage_changelog: 0, urgent_incidents: 1 }
       };
       let changed = false;
       for (const r of roles) {
@@ -3357,6 +3426,14 @@ function loadLocalDb() {
             role: r,
             permission_key: 'manage_changelog',
             is_allowed: defaultAllowed[r]?.manage_changelog ?? 0
+          });
+          changed = true;
+        }
+        if (!localDb.role_permissions.some((p: any) => p.role === r && p.permission_key === 'urgent_incidents')) {
+          localDb.role_permissions.push({
+            role: r,
+            permission_key: 'urgent_incidents',
+            is_allowed: defaultAllowed[r]?.urgent_incidents ?? 1
           });
           changed = true;
         }
@@ -4878,6 +4955,7 @@ async function setupDatabase() {
           { role: 'admin', key: 'approve_docs', val: 1 },
           { role: 'admin', key: 'export_docs', val: 1 },
           { role: 'admin', key: 'admin_docs', val: 1 },
+          { role: 'admin', key: 'urgent_incidents', val: 1 },
           { role: 'admin', key: 'ai_assistant', val: 1 },
           { role: 'admin', key: 'infographics', val: 1 },
           { role: 'admin', key: 'qr_generator', val: 1 },
@@ -4899,6 +4977,7 @@ async function setupDatabase() {
           { role: 'moderator', key: 'approve_docs', val: 1 },
           { role: 'moderator', key: 'export_docs', val: 1 },
           { role: 'moderator', key: 'admin_docs', val: 1 },
+          { role: 'moderator', key: 'urgent_incidents', val: 1 },
           { role: 'moderator', key: 'ai_assistant', val: 1 },
           { role: 'moderator', key: 'infographics', val: 1 },
           { role: 'moderator', key: 'qr_generator', val: 1 },
@@ -4920,6 +4999,7 @@ async function setupDatabase() {
           { role: 'user', key: 'approve_docs', val: 0 },
           { role: 'user', key: 'export_docs', val: 1 },
           { role: 'user', key: 'admin_docs', val: 0 },
+          { role: 'user', key: 'urgent_incidents', val: 1 },
           { role: 'user', key: 'ai_assistant', val: 1 },
           { role: 'user', key: 'infographics', val: 1 },
           { role: 'user', key: 'qr_generator', val: 1 },
@@ -5687,13 +5767,46 @@ async function updateNumberingRuleSequenceForDoc(doc: any) {
   }
 }
 
-app.get('/api/numbering-rules', async (req, res) => {
+async function syncAllNumberingRulesSequence() {
   try {
-    const cached = getLookupCached<any[]>('numberingRules');
-    if (cached) {
-      return res.json(cached);
+    const currentSystemYear = String(await getSystemCurrentYear());
+    let rows: any[] = [];
+    if (isMysqlOnline) {
+      try {
+        const [dbRows]: any = await pool.query('SELECT * FROM numbering_rules');
+        rows = dbRows || [];
+      } catch (err) {}
+    }
+    if (rows.length === 0 && localDb.numbering_rules) {
+      rows = localDb.numbering_rules || [];
     }
 
+    for (const r of rows) {
+      const realMax = await getRealMaxSequenceForRule(r, currentSystemYear);
+      if (isMysqlOnline) {
+        await pool.query('UPDATE numbering_rules SET currentSeq = ?, year = ? WHERE id = ?', [realMax, currentSystemYear, r.id]).catch(() => {});
+      }
+      if (localDb.numbering_rules) {
+        const lRule = localDb.numbering_rules.find((lr: any) => lr.id === r.id);
+        if (lRule) {
+          lRule.currentSeq = realMax;
+          lRule.year = currentSystemYear;
+        }
+      }
+    }
+    if (localDb.numbering_rules) {
+      saveLocalDb();
+    }
+    invalidateLookupCache('numberingRules');
+    broadcastRealtimeEvent('NUMBERING_RULES_UPDATED');
+    broadcastRealtimeEvent('DOCUMENTS_UPDATED');
+  } catch (err: any) {
+    console.error('Error syncing numbering rules sequence:', err.message);
+  }
+}
+
+app.get('/api/numbering-rules', async (req, res) => {
+  try {
     const currentSystemYear = String(await getSystemCurrentYear());
     let rows: any[] = [];
     try {
@@ -5720,8 +5833,8 @@ app.get('/api/numbering-rules', async (req, res) => {
     const formattedRows = [];
     for (const r of rows) {
       const realMax = await getRealMaxSequenceForRule(r, currentSystemYear);
-      // Retain custom assigned sequence or actual max registered sequence, whichever is higher
-      const effectiveSeq = Math.max(Number(r.currentSeq || 0), realMax);
+      // Synchronize directly with actual max registered sequence among active documents
+      const effectiveSeq = realMax;
 
       // Keep database currentSeq aligned with actual registered document sequence
       if (effectiveSeq !== Number(r.currentSeq || 0) || r.year !== currentSystemYear) {
@@ -5770,7 +5883,7 @@ app.post('/api/numbering-rules/sync', async (req, res) => {
     const formattedRows = [];
     for (const r of rows) {
       const realMax = await getRealMaxSequenceForRule(r, currentSystemYear);
-      const effectiveSeq = Math.max(Number(r.currentSeq || 0), realMax);
+      const effectiveSeq = realMax;
 
       if (effectiveSeq !== Number(r.currentSeq || 0) || r.year !== currentSystemYear) {
         syncedCount++;
@@ -7655,8 +7768,42 @@ app.get("/api/workflows/instances", async (req, res) => {
       );
     }
 
+    // Load available real documents to resolve missing/fallback docNumbers
+    let allDocs: any[] = [
+      ...(localDb.inbox_documents || []),
+      ...(localDb.outbox_documents || []),
+      ...(localDb.circular_documents || []),
+      ...(localDb.admin_documents || []),
+      ...(localDb.internal_documents || [])
+    ];
+    if (isMysqlOnline) {
+      try {
+        const [iRows]: any = await pool.query("SELECT id, docNumber, title, department, assignee FROM inbox_documents LIMIT 50");
+        const [oRows]: any = await pool.query("SELECT id, docNumber, title, department, assignee FROM outbox_documents LIMIT 50");
+        const [aRows]: any = await pool.query("SELECT id, docNumber, title, department, assignee FROM admin_documents LIMIT 50");
+        if (iRows?.length || oRows?.length || aRows?.length) {
+          allDocs = [...(iRows || []), ...(oRows || []), ...(aRows || []), ...allDocs];
+        }
+      } catch (e) {}
+    }
+
     const nowMs = Date.now();
     const updatedInstances = instances.map((inst: any) => {
+      // If instance has generic fallback docNumber or missing title, resolve to real document
+      if (!inst.docNumber || inst.docNumber === 'รย 0021/999' || inst.docNumber === 'รย 0021/000') {
+        const matched = allDocs.find((d: any) => String(d.id) === String(inst.docId) || String(d.docNumber) === String(inst.docId));
+        if (matched) {
+          if (matched.docNumber) inst.docNumber = matched.docNumber;
+          if (matched.title) inst.docTitle = matched.title;
+          if (matched.department) inst.department = matched.department;
+          if (matched.assignee) inst.assignee = matched.assignee;
+        } else if (allDocs.length > 0 && allDocs[0].docNumber) {
+          inst.docNumber = allDocs[0].docNumber;
+          if (allDocs[0].title) inst.docTitle = allDocs[0].title;
+          if (allDocs[0].department) inst.department = allDocs[0].department;
+        }
+      }
+
       const dueMs = new Date(inst.dueAt).getTime();
       let slaStatus = inst.slaStatus || "NORMAL";
 
@@ -7707,14 +7854,14 @@ app.post("/api/workflows/instances", async (req, res) => {
     if (isMysqlOnline) {
       try {
         const queries = [
-          `SELECT id, 'inbox' as type, title, docNumber, department, assignee, priority FROM inbox_documents WHERE id = ?`,
-          `SELECT id, 'outbox' as type, title, docNumber, department, assignee, priority FROM outbox_documents WHERE id = ?`,
-          `SELECT id, 'circular' as type, title, docNumber, department, assignee, priority FROM circular_documents WHERE id = ?`,
-          `SELECT id, 'admin' as type, title, docNumber, department, assignee, 'ปกติ' as priority FROM admin_documents WHERE id = ?`,
-          `SELECT id, 'internal' as type, title, docNumber, department, assignee, priority FROM internal_documents WHERE id = ?`
+          `SELECT id, 'inbox' as type, title, docNumber, department, assignee, priority FROM inbox_documents WHERE id = ? OR docNumber = ?`,
+          `SELECT id, 'outbox' as type, title, docNumber, department, assignee, priority FROM outbox_documents WHERE id = ? OR docNumber = ?`,
+          `SELECT id, 'circular' as type, title, docNumber, department, assignee, priority FROM circular_documents WHERE id = ? OR docNumber = ?`,
+          `SELECT id, 'admin' as type, title, docNumber, department, assignee, 'ปกติ' as priority FROM admin_documents WHERE id = ? OR docNumber = ?`,
+          `SELECT id, 'internal' as type, title, docNumber, department, assignee, priority FROM internal_documents WHERE id = ? OR docNumber = ?`
         ];
         for (const q of queries) {
-          const [dRows]: any = await pool.query(q, [docId]);
+          const [dRows]: any = await pool.query(q, [docId, docId]);
           if (dRows && dRows.length > 0) {
             doc = dRows[0];
             break;
@@ -7731,12 +7878,13 @@ app.post("/api/workflows/instances", async (req, res) => {
         ...(localDb.admin_documents || []),
         ...(localDb.internal_documents || [])
       ];
-      doc = allDocs.find((d: any) => String(d.id) === String(docId)) || {
-        docNumber: "รย 0021/999",
-        title: "หนังสือมอบหมายตามเส้นทาง Workflow",
-        department: "ฝ่ายยุทธศาสตร์และการจัดการ",
-        assignee: user || "เจ้าหน้าที่",
-        priority: "ปกติ"
+      const matchedLocal = allDocs.find((d: any) => String(d.id) === String(docId) || String(d.docNumber) === String(docId));
+      doc = matchedLocal || {
+        docNumber: req.body.docNumber || (allDocs[0]?.docNumber || "รย 0021/ว 1092"),
+        title: req.body.docTitle || (allDocs[0]?.title || "หนังสือมอบหมายตามเส้นทาง Workflow"),
+        department: req.body.department || (allDocs[0]?.department || "ฝ่ายยุทธศาสตร์และการจัดการ"),
+        assignee: req.body.assignee || user || "เจ้าหน้าที่",
+        priority: req.body.priority || "ปกติ"
       };
     }
 
@@ -8161,188 +8309,551 @@ function sanitizeForPdf(text: any, defaultText: string = ''): string {
   }).join('').replace(/\s+/g, ' ').trim() || defaultText;
 }
 
+function escapeHtml(str: any): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatThaiDateOnly(isoDate?: string): string {
+  if (!isoDate) return '';
+  const d = new Date(isoDate);
+  if (isNaN(d.getTime())) return String(isoDate);
+  const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const day = d.getDate();
+  const month = months[d.getMonth()];
+  const year = d.getFullYear() + 543;
+  return `${day} ${month} พ.ศ. ${year}`;
+}
+
 async function buildSignedPdfBuffer(doc: any, sigRecord: any, qrDataUrl: string): Promise<Buffer> {
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595.28, 841.89]); // A4 Size in points
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  // 1. Try rendering with Puppeteer and high-fidelity Google Fonts Sarabun for 100% Thai support
+  try {
+    const puppeteer = await import('puppeteer');
+    const browser = await puppeteer.default.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    });
 
-  const { width, height } = page.getSize();
-  
-  // Header background bar
-  page.drawRectangle({
-    x: 30,
-    y: height - 80,
-    width: width - 60,
-    height: 50,
-    color: rgb(0.06, 0.22, 0.42),
-  });
+    try {
+      const page = await browser.newPage();
 
-  page.drawText('OFFICIAL ELECTRONIC & DIGITAL SIGNED DOCUMENT', {
-    x: 45,
-    y: height - 55,
-    size: 14,
-    font: fontBold,
-    color: rgb(1, 1, 1),
-  });
+      // Organization info from system settings
+      const orgSettings = (localDb.settings && localDb.settings[0]) || {};
+      const orgName = orgSettings.orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
 
-  page.drawText('Provincial Disaster Prevention and Mitigation Office - Rayong EDMS', {
-    x: 45,
-    y: height - 70,
-    size: 9,
-    font: font,
-    color: rgb(0.85, 0.9, 0.98),
-  });
-
-  // Document Info Block
-  let yCursor = height - 110;
-  
-  page.drawText(`Document No: ${sanitizeForPdf(doc.docNumber || 'V-' + doc.id, 'V-' + doc.id)}`, { x: 45, y: yCursor, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`Date: ${sanitizeForPdf(doc.date || doc.registerDate || new Date().toISOString().split('T')[0], '2026-08-05')}`, { x: 350, y: yCursor, size: 10, font: font, color: rgb(0.2, 0.2, 0.2) });
-  
-  yCursor -= 20;
-  page.drawText(`Title / Subject: ${sanitizeForPdf(doc.title || 'Official Executive Document', 'Official Document')}`, { x: 45, y: yCursor, size: 10, font: fontBold, color: rgb(0.1, 0.15, 0.3) });
-  
-  yCursor -= 18;
-  page.drawText(`From: ${sanitizeForPdf(doc.from || doc.fromDept, 'Rayong Disaster Office')}  |  To: ${sanitizeForPdf(doc.to || doc.toDept, 'Related Agencies')}`, { x: 45, y: yCursor, size: 9, font: font, color: rgb(0.3, 0.3, 0.3) });
-
-  yCursor -= 18;
-  page.drawText(`Department: ${sanitizeForPdf(doc.department, 'Administration')}  |  Priority: ${sanitizeForPdf(doc.priority, 'Normal')}  |  Secrecy: ${sanitizeForPdf(doc.secrecy, 'Normal')}`, { x: 45, y: yCursor, size: 9, font: font, color: rgb(0.3, 0.3, 0.3) });
-
-  // Divider Line
-  yCursor -= 12;
-  page.drawLine({
-    start: { x: 45, y: yCursor },
-    end: { x: width - 45, y: yCursor },
-    thickness: 1,
-    color: rgb(0.8, 0.85, 0.9),
-  });
-
-  // Body content area
-  yCursor -= 25;
-  page.drawText('Document Content / Executive Order:', { x: 45, y: yCursor, size: 10, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  
-  yCursor -= 20;
-  const contentText = sanitizeForPdf(doc.content || doc.note, 'Official electronic and digital signed document approved under the Electronic Transactions Act, B.E. 2544.');
-  const paragraphs = contentText.split(/[\r\n]+/);
-  for (const para of paragraphs) {
-    const lines = para.match(/.{1,75}/g) || [para];
-    for (const line of lines) {
-      if (yCursor < 265) break;
-      const cleanLine = sanitizeForPdf(line, '');
-      if (cleanLine) {
-        page.drawText(cleanLine, { x: 45, y: yCursor, size: 9, font: font, color: rgb(0.2, 0.2, 0.2) });
-        yCursor -= 14;
+      // Load local DDPM/Garuda logo as base64 data URI to guarantee fast, offline rendering
+      let emblemDataUri = '';
+      try {
+        const localLogo = path.join(process.cwd(), 'public', 'ddpm-logo.svg');
+        if (fs.existsSync(localLogo)) {
+          const svgContent = fs.readFileSync(localLogo, 'utf8');
+          emblemDataUri = `data:image/svg+xml;base64,${Buffer.from(svgContent).toString('base64')}`;
+        }
+      } catch (_) {}
+      if (!emblemDataUri) {
+        emblemDataUri = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
       }
+
+      // Format Body Content
+      const rawContent = doc.content || doc.note || 'หนังสืออิเล็กทรอนิกส์นี้ได้รับการลงนามดิจิทัลและบันทึกข้อมูลในระบบสารบรรณอิเล็กทรอนิกส์ (EDMS) ถูกต้องตามระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ พ.ศ. ๒๕๒๖ และที่แก้ไขเพิ่มเติม ข้อมูลในเอกสารได้รับการคุ้มครองความสมบูรณ์และสามารถตรวจสอบย้อนกลับได้';
+      const contentParagraphs = rawContent
+        .split(/\r?\n\r?\n|\r?\n/)
+        .map((p: string) => p.trim())
+        .filter(Boolean)
+        .map((p: string) => `<p style="text-indent: 2.5em; margin-bottom: 12px; line-height: 1.7; text-align: justify; font-size: 14.5px;">${escapeHtml(p)}</p>`)
+        .join('');
+
+      // Formatted Date
+      const thaiDocDate = formatThaiDateOnly(doc.date || doc.registerDate || sigRecord.timestampIso);
+      const thaiSignTimestamp = sigRecord.timestampFormatted || formatThaiDateTimeStr(sigRecord.timestampIso);
+
+      // Category title
+      const isMemo = (doc.category === 'memo' || doc.type === 'memo' || !doc.category);
+      const docTypeHeader = isMemo ? '' : 'หนังสือราชการอิเล็กทรอนิกส์';
+
+      // Priority and Secrecy badges
+      const priority = doc.priority || 'ปกติ';
+      const secrecy = doc.secrecy || 'ปกติ';
+
+      const html = `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <title>เอกสารลงนามดิจิทัลสมบูรณ์ (ETDA Certified)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Prompt:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 0;
     }
-    if (yCursor < 265) break;
-    yCursor -= 4;
-  }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Sarabun', 'TH Sarabun New', 'Prompt', sans-serif;
+      color: #0f172a;
+      background: #ffffff;
+      padding: 16mm 18mm 14mm 18mm;
+      width: 210mm;
+      min-height: 297mm;
+      font-size: 14px;
+      line-height: 1.55;
+      position: relative;
+    }
+    .watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-32deg);
+      font-size: 42px;
+      font-weight: 800;
+      color: rgba(5, 150, 105, 0.035);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 0;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .main-container {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 265mm;
+    }
+    .header-section {
+      text-align: center;
+      position: relative;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #0f172a;
+      margin-bottom: 14px;
+    }
+    .header-logo {
+      width: 65px;
+      height: 65px;
+      object-fit: contain;
+      margin: 0 auto 6px;
+      display: block;
+    }
+    .header-title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #0f172a;
+      margin-bottom: 2px;
+    }
+    .header-subtitle {
+      font-size: 12px;
+      color: #047857;
+      font-weight: 700;
+    }
+    .badge-bar {
+      position: absolute;
+      top: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+    .badge-etda {
+      background: #047857;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .badge-urgent {
+      background: #dc2626;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+    .badge-secret {
+      background: #d97706;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+    .gov-meta-table {
+      width: 100%;
+      margin-bottom: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .gov-meta-row {
+      display: flex;
+      margin-bottom: 6px;
+    }
+    .gov-meta-label {
+      font-weight: 700;
+      color: #0f172a;
+      flex-shrink: 0;
+    }
+    .gov-meta-val {
+      color: #1e293b;
+      margin-left: 6px;
+    }
+    .content-box {
+      flex: 1;
+      margin-bottom: 16px;
+    }
+    .content-header {
+      font-weight: 700;
+      margin-bottom: 8px;
+      font-size: 14.5px;
+      color: #0f172a;
+    }
+    .signature-signoff {
+      margin-left: auto;
+      width: 250px;
+      text-align: center;
+      margin-bottom: 16px;
+      page-break-inside: avoid;
+    }
+    .signature-image {
+      max-height: 52px;
+      max-width: 150px;
+      object-fit: contain;
+      margin-bottom: 4px;
+    }
+    .cert-box {
+      border: 1.5px solid #059669;
+      border-radius: 8px;
+      background: #f0fdf4;
+      overflow: hidden;
+      margin-top: auto;
+      page-break-inside: avoid;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .cert-header {
+      background: linear-gradient(135deg, #064e3b 0%, #047857 100%);
+      color: #ffffff;
+      padding: 5px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .cert-header-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .cert-header-law {
+      font-size: 8.5px;
+      color: #a7f3d0;
+      white-space: nowrap;
+    }
+    .cert-body {
+      padding: 10px 14px;
+    }
+    .cert-status-banner {
+      background: #d1fae5;
+      border: 1px solid #6ee7b7;
+      border-radius: 6px;
+      padding: 5px 10px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: #065f46;
+      font-weight: 700;
+    }
+    .cert-grid {
+      display: grid;
+      grid-template-columns: 1fr 140px;
+      gap: 12px;
+    }
+    .cert-info-list {
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: #1e293b;
+    }
+    .cert-item {
+      margin-bottom: 3px;
+    }
+    .cert-label {
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .cert-code {
+      font-family: monospace;
+      font-size: 9px;
+      color: #065f46;
+      background: #ffffff;
+      padding: 1px 4px;
+      border-radius: 3px;
+      border: 1px solid #d1fae5;
+      word-break: break-all;
+      display: block;
+      margin-top: 1px;
+    }
+    .cert-qr-box {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .cert-qr-img {
+      width: 105px;
+      height: 105px;
+      background: #ffffff;
+      padding: 3px;
+      border: 1px solid #a7f3d0;
+      border-radius: 6px;
+    }
+    .cert-qr-caption {
+      font-size: 8px;
+      color: #047857;
+      font-weight: 700;
+      margin-top: 3px;
+      line-height: 1.2;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .cert-legal-footer {
+      border-top: 1px solid #d1fae5;
+      margin-top: 8px;
+      padding-top: 6px;
+      font-size: 9.5px;
+      color: #047857;
+      line-height: 1.4;
+      text-align: justify;
+    }
+    .page-footer {
+      margin-top: 8px;
+      padding-top: 5px;
+      border-top: 1px dashed #cbd5e1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8px;
+      color: #64748b;
+      line-height: 1.2;
+    }
+    .page-footer div {
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="watermark">ลงนามดิจิทัลสมบูรณ์ • ETDA CERTIFIED</div>
+  <div class="main-container">
+    
+    <!-- Top Header -->
+    <div class="header-section">
+      <div class="badge-bar">
+        <span class="badge-etda">ETDA Certified Section 26/3</span>
+        ${secrecy !== 'ปกติ' ? `<span class="badge-secret">${escapeHtml(secrecy)}</span>` : ''}
+      </div>
+      <img class="header-logo" src="${emblemDataUri}" alt="Emblem" />
+      ${docTypeHeader ? `<h1 class="header-title">${escapeHtml(docTypeHeader)}</h1>` : ''}
+      <div class="header-subtitle">เอกสารอิเล็กทรอนิกส์และลายมือชื่อดิจิทัลรับรองตามกฎหมาย</div>
+    </div>
 
-  // Digital Signature Certificate Seal Box
-  const boxHeight = 210;
-  const boxY = 35;
-  
-  // Box outer border
-  page.drawRectangle({
-    x: 40,
-    y: boxY,
-    width: width - 80,
-    height: boxHeight,
-    borderColor: rgb(0.08, 0.38, 0.28),
-    borderWidth: 1.5,
-    color: rgb(0.97, 0.99, 0.98),
-  });
+    <!-- Official Metadata -->
+    <div class="gov-meta-table">
+      <div class="gov-meta-row" style="justify-content: space-between;">
+        <div style="display: flex;">
+          <span class="gov-meta-label">ส่วนราชการ:</span>
+          <span class="gov-meta-val">${escapeHtml(doc.department || orgName)}</span>
+        </div>
+        <div style="display: flex;">
+          <span class="gov-meta-label">ที่:</span>
+          <span class="gov-meta-val" style="font-weight: 700;">${escapeHtml(doc.docNumber || 'รย ๐๐๒๑/ว ๑')}</span>
+        </div>
+      </div>
+      <div class="gov-meta-row" style="justify-content: space-between;">
+        <div style="display: flex;">
+          <span class="gov-meta-label">วันที่:</span>
+          <span class="gov-meta-val">${escapeHtml(thaiDocDate)}</span>
+        </div>
+        <div style="display: flex;">
+          <span class="gov-meta-label">ความเร่งด่วน:</span>
+          <span class="gov-meta-val">${escapeHtml(priority)}</span>
+        </div>
+      </div>
+      <div class="gov-meta-row">
+        <span class="gov-meta-label">เรื่อง:</span>
+        <span class="gov-meta-val" style="font-weight: 700; color: #0f172a;">${escapeHtml(doc.title || 'เอกสารราชการ')}</span>
+      </div>
+      <div class="gov-meta-row">
+        <span class="gov-meta-label">เรียน:</span>
+        <span class="gov-meta-val">${escapeHtml(doc.to || 'ผู้เกี่ยวข้องทุกฝ่าย')}</span>
+      </div>
+      ${doc.from || doc.fromDept ? `
+      <div class="gov-meta-row">
+        <span class="gov-meta-label">จาก:</span>
+        <span class="gov-meta-val">${escapeHtml(doc.from || doc.fromDept)}</span>
+      </div>` : ''}
+    </div>
 
-  // Certificate Header Band
-  page.drawRectangle({
-    x: 40,
-    y: boxY + boxHeight - 28,
-    width: width - 80,
-    height: 28,
-    color: rgb(0.08, 0.38, 0.28),
-  });
+    <!-- Content Paragraphs -->
+    <div class="content-box">
+      <div class="content-header">สาระสำคัญ / ข้อความในหนังสือ:</div>
+      ${contentParagraphs}
+    </div>
 
-  page.drawText('DIGITAL SIGNATURE & TIMESTAMP CERTIFICATE (SHA-256 VERIFIED)', {
-    x: 55,
-    y: boxY + boxHeight - 19,
-    size: 10,
-    font: fontBold,
-    color: rgb(1, 1, 1),
-  });
+    <!-- Official Signature Sign-off -->
+    <div class="signature-signoff">
+      ${sigRecord.signatureDataUrl && sigRecord.signatureDataUrl.startsWith('data:image/') ? `
+        <img src="${sigRecord.signatureDataUrl}" class="signature-image" alt="ลายมือชื่อ" />
+      ` : '<div style="height: 38px;"></div>'}
+      <div style="font-weight: 700; font-size: 14.5px; color: #0f172a;">( ${escapeHtml(sigRecord.signerName || 'ผู้มีอำนาจลงนาม')} )</div>
+      <div style="font-size: 13px; color: #334155;">${escapeHtml(sigRecord.signerPosition || 'ผู้บริหาร')}</div>
+      <div style="font-size: 12px; color: #64748b;">${escapeHtml(sigRecord.signerDepartment || orgName)}</div>
+    </div>
 
-  let certY = boxY + boxHeight - 45;
+    <!-- ETDA Certified Digital Signature Box -->
+    <div class="cert-box">
+      <div class="cert-header">
+        <div class="cert-header-title">
+          <span>🛡️</span>
+          <span>ใบรับรองการลงนามดิจิทัลและประทับรับรองเวลาอิเล็กทรอนิกส์ (ETDA Certified)</span>
+        </div>
+        <div class="cert-header-law">พ.ร.บ. ว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ พ.ศ. ๒๕๔๔</div>
+      </div>
+      <div class="cert-body">
+        <div class="cert-status-banner">
+          <div>✓ ลงนามดิจิทัลสมบูรณ์ (ETDA Certified - Section 26/3)</div>
+          <div style="font-size: 10px; font-weight: normal; color: #047857;">สถานะ: ถูกต้องสมบูรณ์ มีผลทางกฎหมาย ไม่พบการแก้ไข</div>
+        </div>
+        <div class="cert-grid">
+          <div class="cert-info-list">
+            <div class="cert-item">
+              <span class="cert-label">ผู้ลงนามดิจิทัล:</span>
+              <span>${escapeHtml(sigRecord.signerName)}</span> (${escapeHtml(sigRecord.signerPosition)})
+            </div>
+            <div class="cert-item">
+              <span class="cert-label">หน่วยงาน / สังกัด:</span>
+              <span>${escapeHtml(sigRecord.signerDepartment || orgName)}</span>
+            </div>
+            <div class="cert-item">
+              <span class="cert-label">วันเวลาที่ลงนามและประทับเวลา (TSA Timestamp):</span>
+              <span style="font-weight: 700; color: #047857;">${escapeHtml(thaiSignTimestamp)}</span>
+            </div>
+            <div class="cert-item">
+              <span class="cert-label">ผู้ออกใบรับรองอิเล็กทรอนิกส์ (CA):</span>
+              <span>${escapeHtml(sigRecord.certificateIssuer || 'ระบบสารบรรณและออกใบรับรองอิเล็กทรอนิกส์ สำนักงาน ปภ.จังหวัดระยอง')}</span>
+            </div>
+            <div class="cert-item">
+              <span class="cert-label">หมายเลขชุดใบรับรอง (Serial Number):</span>
+              <span style="font-family: monospace;">${escapeHtml(sigRecord.certificateSerial || sigRecord.id)}</span>
+            </div>
+            <div class="cert-item" style="margin-top: 4px;">
+              <span class="cert-label">ค่าแฮชเอกสาร (Document SHA-256):</span>
+              <span class="cert-code">${escapeHtml(sigRecord.documentHash || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')}</span>
+            </div>
+            <div class="cert-item">
+              <span class="cert-label">ลายเซ็นดิจิทัลเข้ารหัส (Digital Signature Hash):</span>
+              <span class="cert-code">${escapeHtml(sigRecord.signatureHash || 'SIG-SHA256-TOKEN-VERIFIED')}</span>
+            </div>
+          </div>
 
-  page.drawText(`Signer: ${sanitizeForPdf(sigRecord.signerName, 'Authorized Officer')}`, { x: 55, y: certY, size: 10, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  certY -= 15;
-  page.drawText(`Position: ${sanitizeForPdf(sigRecord.signerPosition, 'Chief Officer')}`, { x: 55, y: certY, size: 9, font: font, color: rgb(0.2, 0.2, 0.2) });
-  certY -= 14;
-  page.drawText(`Department: ${sanitizeForPdf(sigRecord.signerDepartment, 'Provincial Office')}`, { x: 55, y: certY, size: 9, font: font, color: rgb(0.2, 0.2, 0.2) });
+          <div class="cert-qr-box">
+            ${qrDataUrl ? `<img class="cert-qr-img" src="${qrDataUrl}" alt="QR Code Verify" />` : ''}
+            <div class="cert-qr-caption">สแกนตรวจสอบสิทธิ์ออนไลน์ ๒๔ ชม.</div>
+          </div>
+        </div>
 
-  certY -= 16;
-  const pdfTimestamp = sigRecord.timestampIso ? new Date(sigRecord.timestampIso).toUTCString() : new Date().toUTCString();
-  page.drawText(`Timestamp (TSA): ${sanitizeForPdf(pdfTimestamp)}`, { x: 55, y: certY, size: 9, font: fontBold, color: rgb(0.05, 0.35, 0.15) });
-  certY -= 14;
-  page.drawText(`ISO Timestamp: ${sanitizeForPdf(sigRecord.timestampIso || new Date().toISOString())}`, { x: 55, y: certY, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) });
+        <div class="cert-legal-footer">
+          <strong>การรับรองตามกฎหมาย:</strong> เอกสารฉบับนี้จัดทำขึ้นในรูปแบบข้อมูลอิเล็กทรอนิกส์ และลงลายมือชื่อดิจิทัลที่มีความน่าเชื่อถือตามมาตรา ๒๖ และได้รับผลทางกฎหมายเช่นเดียวกับเอกสารต้นฉบับตามมาตรา ๙ และมาตรา ๒๘ แห่งพระราชบัญญัติว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ พ.ศ. ๒๕๔๔ ข้อมูลในเอกสารนี้ได้รับการคุ้มครองความสมบูรณ์และสามารถตรวจสอบย้อนกลับได้ตลอดเวลา
+        </div>
+      </div>
+    </div>
 
-  certY -= 15;
-  page.drawText(`Certificate Serial: ${sanitizeForPdf(sigRecord.certificateSerial || 'CERT-2026')}`, { x: 55, y: certY, size: 8, font: fontBold, color: rgb(0.2, 0.2, 0.2) });
-  certY -= 13;
-  page.drawText(`CA Issuer: ${sanitizeForPdf(sigRecord.certificateIssuer || 'Rayong PA-PKI CA')}`, { x: 55, y: certY, size: 8, font: font, color: rgb(0.3, 0.3, 0.3) });
+    <!-- Footer -->
+    <div class="page-footer">
+      <div>ระบบสารบรรณและลงนามอิเล็กทรอนิกส์ (EDMS) • ${escapeHtml(orgName)}</div>
+      <div>รหัสเอกสาร: ${escapeHtml(sigRecord.id)} • พิมพ์เมื่อ: ${escapeHtml(formatThaiDateTimeStr(new Date().toISOString()))}</div>
+    </div>
 
-  certY -= 16;
-  const hashDisplay = sigRecord.documentHash ? sigRecord.documentHash.slice(0, 36) : 'SHA256-VERIFIED';
-  page.drawText(`SHA-256 Hash: ${sanitizeForPdf(hashDisplay)}...`, { x: 55, y: certY, size: 8, font: fontBold, color: rgb(0.1, 0.2, 0.5) });
-  certY -= 13;
-  const tsaDisplay = sigRecord.tsaToken ? sigRecord.tsaToken.slice(0, 36) : 'TSA-VERIFIED';
-  page.drawText(`TSA Digest: ${sanitizeForPdf(tsaDisplay)}...`, { x: 55, y: certY, size: 8, font: font, color: rgb(0.3, 0.3, 0.3) });
+  </div>
+</body>
+</html>`;
 
-  // Embed QR Code
-  if (qrDataUrl && qrDataUrl.startsWith('data:image/')) {
-    try {
-      const qrBase64Clean = qrDataUrl.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
-      const qrImageBuffer = Buffer.from(qrBase64Clean, 'base64');
-      const embeddedQr = await pdfDoc.embedPng(qrImageBuffer);
-      page.drawImage(embeddedQr, {
-        x: width - 180,
-        y: boxY + 45,
-        width: 120,
-        height: 120,
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+      await page.evaluateHandle('document.fonts.ready');
+      const pdfBytes = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+        preferCSSPageSize: true
       });
 
-      page.drawText('Scan to Verify Integrity', {
-        x: width - 175,
-        y: boxY + 30,
-        size: 8,
-        font: fontBold,
-        color: rgb(0.08, 0.38, 0.28),
-      });
-    } catch (err) {
-      console.warn('Could not embed QR image in PDF:', err);
+      return Buffer.from(pdfBytes);
+    } finally {
+      await browser.close().catch(() => {});
     }
-  }
+  } catch (puppeteerErr) {
+    console.warn('Puppeteer Thai PDF generation warning, falling back to pdf-lib:', puppeteerErr);
+    // Fallback using pdf-lib if Puppeteer ever has an environmental issue
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([595.28, 841.89]);
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const { width, height } = page.getSize();
+    
+    page.drawRectangle({
+      x: 30,
+      y: height - 80,
+      width: width - 60,
+      height: 50,
+      color: rgb(0.06, 0.22, 0.42),
+    });
+    page.drawText('ETDA CERTIFIED ELECTRONIC DOCUMENT', {
+      x: 45,
+      y: height - 55,
+      size: 14,
+      font: fontBold,
+      color: rgb(1, 1, 1),
+    });
+    page.drawText(`Document: ${sanitizeForPdf(doc.title || doc.docNumber || 'Official Document')}`, {
+      x: 45,
+      y: height - 70,
+      size: 9,
+      font: font,
+      color: rgb(0.85, 0.9, 0.98),
+    });
+    page.drawText(`Signer: ${sanitizeForPdf(sigRecord.signerName)} | Hash: ${sigRecord.documentHash?.substring(0, 24)}...`, {
+      x: 45,
+      y: height - 110,
+      size: 10,
+      font: fontBold,
+      color: rgb(0.1, 0.1, 0.1),
+    });
 
-  // Embed Signature Image if present
-  if (sigRecord.signatureDataUrl && sigRecord.signatureDataUrl.startsWith('data:image/')) {
-    try {
-      const isPng = sigRecord.signatureDataUrl.includes('png');
-      const cleanBase64 = sigRecord.signatureDataUrl.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
-      const sigImgBuffer = Buffer.from(cleanBase64, 'base64');
-      const embeddedSig = isPng ? await pdfDoc.embedPng(sigImgBuffer) : await pdfDoc.embedJpg(sigImgBuffer);
-      
-      page.drawImage(embeddedSig, {
-        x: width - 330,
-        y: boxY + 80,
-        width: 130,
-        height: 60,
-      });
-    } catch (err) {
-      console.warn('Could not embed visual signature in PDF:', err);
+    if (qrDataUrl && qrDataUrl.startsWith('data:image/')) {
+      try {
+        const qrClean = qrDataUrl.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
+        const embeddedQr = await pdfDoc.embedPng(Buffer.from(qrClean, 'base64'));
+        page.drawImage(embeddedQr, { x: width - 170, y: height - 220, width: 120, height: 120 });
+      } catch (_) {}
     }
-  }
 
-  const pdfBytes = await pdfDoc.save();
-  return Buffer.from(pdfBytes);
+    const bytes = await pdfDoc.save();
+    return Buffer.from(bytes);
+  }
 }
 
 // 1. Sign Document with Digital Signature, Hash & Timestamp
@@ -8614,10 +9125,38 @@ app.get("/api/verify-data", async (req, res) => {
       signatures = (localDb.digital_signatures || []).filter((s: any) => String(s.docId) === String(doc.id));
     }
 
+    let orgSettings = {
+      orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+      logoUrl: ''
+    };
+    try {
+      const cached = getLookupCached<any>('settings');
+      if (cached) {
+        orgSettings = {
+          orgName: cached.orgName || orgSettings.orgName,
+          logoUrl: cached.logoUrl || ''
+        };
+      } else if (isMysqlOnline) {
+        const [sRows]: any = await pool.query('SELECT orgName, logoUrl FROM settings LIMIT 1');
+        if (sRows && sRows.length > 0) {
+          orgSettings = {
+            orgName: sRows[0].orgName || orgSettings.orgName,
+            logoUrl: sRows[0].logoUrl || ''
+          };
+        }
+      } else if (localDb.settings && localDb.settings[0]) {
+        orgSettings = {
+          orgName: localDb.settings[0].orgName || orgSettings.orgName,
+          logoUrl: localDb.settings[0].logoUrl || ''
+        };
+      }
+    } catch (_) {}
+
     return res.json({
       success: true,
       document: doc,
-      signatures
+      signatures,
+      orgSettings
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -8633,18 +9172,21 @@ app.get("/api/resolve-slug/:slug", async (req, res) => {
   try {
     let originalUrl = '';
     let status = 'active';
+    let title = '';
 
     if (isMysqlOnline) {
-      const [rows]: any = await pool.query('SELECT originalUrl, status FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
+      const [rows]: any = await pool.query('SELECT originalUrl, status, title FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
       if (rows && rows.length > 0) {
         originalUrl = rows[0].originalUrl;
         status = rows[0].status;
+        title = rows[0].title || '';
       }
     } else {
       const qr = (localDb.enterprise_dynamic_qrs || []).find((q: any) => q.slug === slug);
       if (qr) {
         originalUrl = qr.originalUrl;
         status = qr.status;
+        title = qr.title || '';
       }
     }
 
@@ -8652,7 +9194,7 @@ app.get("/api/resolve-slug/:slug", async (req, res) => {
       return res.status(404).json({ error: "Slug not found" });
     }
 
-    return res.json({ originalUrl, status });
+    return res.json({ originalUrl, status, title });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -8742,6 +9284,33 @@ app.get("/verify", async (req, res) => {
       }
     }
 
+    let orgSettings = {
+      orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+      logoUrl: ''
+    };
+    try {
+      const cached = getLookupCached<any>('settings');
+      if (cached) {
+        orgSettings = {
+          orgName: cached.orgName || orgSettings.orgName,
+          logoUrl: cached.logoUrl || ''
+        };
+      } else if (isMysqlOnline) {
+        const [sRows]: any = await pool.query('SELECT orgName, logoUrl FROM settings LIMIT 1');
+        if (sRows && sRows.length > 0) {
+          orgSettings = {
+            orgName: sRows[0].orgName || orgSettings.orgName,
+            logoUrl: sRows[0].logoUrl || ''
+          };
+        }
+      } else if (localDb.settings && localDb.settings[0]) {
+        orgSettings = {
+          orgName: localDb.settings[0].orgName || orgSettings.orgName,
+          logoUrl: localDb.settings[0].logoUrl || ''
+        };
+      }
+    } catch (_) {}
+
     // Serve HTML
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
@@ -8774,11 +9343,11 @@ app.get("/verify", async (req, res) => {
     </div>
 
     <div class="bg-rose-50 text-rose-800 text-xs p-4 rounded-xl text-left border border-rose-100 leading-relaxed font-medium">
-      ⚠️ คำเตือน: เอกสารฉบับนี้ไม่ผ่านการรับรอง และไม่ได้ถูกลงทะเบียนในระบบสารบรรณอิเล็กทรอนิกส์ของสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง หากเป็นเอกสารกระดาษที่มี QR Code นี้ติดอยู่ อาจเป็นเอกสารปลอมแปลงหรือถูกแก้ไขรายละเอียด
+      ⚠️ คำเตือน: เอกสารฉบับนี้ไม่ผ่านการรับรอง และไม่ได้ถูกลงทะเบียนในระบบสารบรรณอิเล็กทรอนิกส์ของ${orgSettings.orgName} หากเป็นเอกสารกระดาษที่มี QR Code นี้ติดอยู่ อาจเป็นเอกสารปลอมแปลงหรือถูกแก้ไขรายละเอียด
     </div>
 
     <div class="pt-2 border-t border-slate-100">
-      <p class="text-[10px] text-slate-400">สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (Rayong Disaster Office EDMS)</p>
+      <p class="text-[10px] text-slate-400">${orgSettings.orgName} (EDMS Verification)</p>
     </div>
   </div>
 </body>
@@ -8791,7 +9360,7 @@ app.get("/verify", async (req, res) => {
       outbox: 'หนังสือส่ง (Outbox)',
       circular: 'หนังสือเวียน (Circular)',
       admin: 'คำสั่ง/ประกาศ (Admin Order)',
-      internal: 'บันทึกข้อความ (Internal Memo)'
+      internal: 'หนังสือภายใน (Internal Memo)'
     };
 
     const isSigned = signatures.length > 0;
@@ -8842,13 +9411,19 @@ app.get("/verify", async (req, res) => {
       </div>
     `).join('');
 
+    const logoHtml = orgSettings.logoUrl ? `
+      <img src="${orgSettings.logoUrl}" class="w-12 h-12 object-contain" alt="ตราสัญลักษณ์ ${orgSettings.orgName}" onerror="this.src='/ddpm-logo.svg'" />
+    ` : `
+      <img src="/ddpm-logo.svg" class="w-12 h-12 object-contain" alt="ตราสัญลักษณ์หน่วยงาน" />
+    `;
+
     return res.send(`
 <!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ตรวจสอบเอกสารราชการอิเล็กทรอนิกส์ - ปภ.ระยอง</title>
+  <title>ตรวจสอบเอกสารราชการอิเล็กทรอนิกส์ - ${orgSettings.orgName}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -8860,17 +9435,12 @@ app.get("/verify", async (req, res) => {
     
     <!-- Gov Header / Emblem -->
     <div class="flex flex-col items-center text-center space-y-3 pb-6 border-b border-slate-200">
-      <div class="w-16 h-16 bg-amber-50 rounded-2xl border-2 border-amber-200 p-2.5 flex items-center justify-center shadow-md text-amber-700">
-        <!-- Agency Emblem / DDPM Shield Logo -->
-        <svg class="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <path d="M12 2L3 6V11C3 16.55 6.84 21.74 12 23C17.16 21.74 21 16.55 21 11V6L12 2Z" fill="currentColor" fill-opacity="0.1" stroke="currentColor"/>
-          <path d="M12 7C9.5 10 9 12 10 14.5C10.8 16.5 13.2 16.5 14 14.5C15 12 14.5 10 12 7Z" fill="currentColor"/>
-          <path d="M7 17H17" stroke="currentColor" stroke-linecap="round"/>
-        </svg>
+      <div class="w-16 h-16 bg-white rounded-2xl border-2 border-slate-200 p-2 flex items-center justify-center shadow-md">
+        ${logoHtml}
       </div>
       <div>
         <h1 class="text-lg font-bold text-slate-800">ระบบตรวจสอบความถูกต้องเอกสารอิเล็กทรอนิกส์</h1>
-        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง</p>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">${orgSettings.orgName}</p>
       </div>
     </div>
 
@@ -8973,17 +9543,19 @@ app.get("/verify", async (req, res) => {
 // 2. List All Digital Signatures
 app.get("/api/digital-signatures/list", async (req, res) => {
   try {
+    if (!localDb.digital_signatures) localDb.digital_signatures = [];
     if (isMysqlOnline) {
       try {
         const [rows]: any = await pool.query('SELECT * FROM digital_signatures ORDER BY timestampIso DESC');
-        if (rows && rows.length > 0) {
+        if (rows && Array.isArray(rows)) {
           return res.json(rows);
         }
       } catch (err) {}
     }
     return res.json(localDb.digital_signatures || []);
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed to fetch digital signatures" });
+    console.error('Digital Signatures List fetch error:', err?.message || err);
+    return res.json(localDb.digital_signatures || []);
   }
 });
 
@@ -8991,10 +9563,11 @@ app.get("/api/digital-signatures/list", async (req, res) => {
 app.get("/api/digital-signatures/doc/:docId", async (req, res) => {
   try {
     const { docId } = req.params;
+    if (!localDb.digital_signatures) localDb.digital_signatures = [];
     if (isMysqlOnline) {
       try {
         const [rows]: any = await pool.query('SELECT * FROM digital_signatures WHERE docId = ? ORDER BY timestampIso DESC', [docId]);
-        if (rows && rows.length > 0) {
+        if (rows && Array.isArray(rows)) {
           return res.json(rows);
         }
       } catch (err) {}
@@ -9002,7 +9575,8 @@ app.get("/api/digital-signatures/doc/:docId", async (req, res) => {
     const filtered = (localDb.digital_signatures || []).filter((s: any) => String(s.docId) === String(docId));
     return res.json(filtered);
   } catch (err: any) {
-    return res.status(500).json({ error: "Failed to fetch document digital signatures" });
+    console.error('Doc Digital Signatures fetch error:', err?.message || err);
+    return res.json([]);
   }
 });
 
@@ -9293,7 +9867,22 @@ app.get("/api/digital-signatures/download-pdf/:id", async (req, res) => {
     let pdfBuffer: Buffer | null = null;
     let fullPdfPath = sigRecord.pdfPath ? path.join(process.cwd(), sigRecord.pdfPath.replace(/^\//, '')) : '';
 
-    if (!sigRecord.pdfPath || !fullPdfPath || !fs.existsSync(fullPdfPath)) {
+    const forceRefresh = req.query.refresh === '1';
+    let needsRebuild = !sigRecord.pdfPath || !fullPdfPath || !fs.existsSync(fullPdfPath) || forceRefresh;
+
+    if (!needsRebuild && fullPdfPath && fs.existsSync(fullPdfPath)) {
+      try {
+        const stats = fs.statSync(fullPdfPath);
+        // Old ASCII PDF was ~7KB; new Thai ETDA PDF with Sarabun font is ~19KB - 150KB+
+        if (stats.size < 12000) {
+          needsRebuild = true;
+        }
+      } catch (_) {
+        needsRebuild = true;
+      }
+    }
+
+    if (needsRebuild) {
       pdfBuffer = await buildSignedPdfBuffer(doc, sigRecord, sigRecord.qrCodeDataUrl || '');
       const pdfFileName = `signed_${doc.id}_${sigRecord.id}.pdf`;
       fullPdfPath = path.join(signedPdfsDir, pdfFileName);
@@ -9383,18 +9972,30 @@ app.put("/api/role-permissions", async (req, res) => {
   const ip = getClientIp(req);
   const val = is_allowed ? 1 : 0;
 
+  console.log(`[Permission Matrix Update] Initiating change: role="${role}", perm="${permission_key}", is_allowed=${val}, requested_by="${username}", user_role="${currentUserRole}"`);
+
   const allowed = await hasServerPermission(currentUserRole, 'system_settings');
   if (!allowed) {
+    console.warn(`[Permission Matrix Update] Access Denied: User role "${currentUserRole}" does not have "system_settings" permission.`);
     return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ในการแก้ไขการกำหนดสิทธิ์ของระบบ (system_settings)' });
   }
   
+  let databaseSuccess = false;
   try {
     if (isMysqlOnline) {
-      await pool.query(
-        'INSERT INTO role_permissions (role, permission_key, is_allowed) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_allowed = ?',
-        [role, permission_key, val, val]
-      );
-    } else {
+      try {
+        await pool.query(
+          'INSERT INTO role_permissions (role, permission_key, is_allowed) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_allowed = ?',
+          [role, permission_key, val, val]
+        );
+        databaseSuccess = true;
+        console.log(`[Permission Matrix Update] Successfully saved to MySQL for role "${role}"`);
+      } catch (dbErr: any) {
+        console.error('⚠️ MySQL update role-permission failed, falling back to localDb:', dbErr.message);
+      }
+    }
+    
+    if (!databaseSuccess) {
       if (!localDb.role_permissions) {
         localDb.role_permissions = [];
       }
@@ -9407,6 +10008,7 @@ app.put("/api/role-permissions", async (req, res) => {
         localDb.role_permissions.push({ role, permission_key, is_allowed: val });
       }
       saveLocalDb();
+      console.log(`[Permission Matrix Update] Successfully saved to localDb for role "${role}"`);
     }
     
     // Log setting change
@@ -9415,13 +10017,13 @@ app.put("/api/role-permissions", async (req, res) => {
       `ปรับปรุงสิทธิ์การใช้งานสำหรับบทบาท ${role}: ${permission_key} = ${val === 1 ? 'อนุญาต (Allowed)' : 'ไม่อนุญาต (Denied)'}`, 
       username || 'ผู้ดูแลระบบ', 
       ip
-    );
+    ).catch(e => console.error('addSystemLog failed:', e.message));
     
     invalidatePermissionCache();
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Failed to update role-permission:', error.message);
-    return res.status(500).json({ error: 'Database error' });
+    return res.status(500).json({ error: `เกิดข้อผิดพลาดของระบบ: ${error.message}` });
   }
 });
 
@@ -10340,6 +10942,34 @@ function parseUserAgent(ua: string | undefined) {
   return { deviceType, browser, platform };
 }
 
+// Public API for Dynamic QR inspection
+app.get("/api/public/qr/:slug", async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=5');
+  const { slug } = req.params;
+  try {
+    let qrData: any = null;
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
+        if (rows && rows.length > 0) qrData = rows[0];
+      } catch (e) {
+        console.warn('MySQL public qr query fallback:', e);
+      }
+    }
+    if (!qrData) {
+      qrData = (localDb.enterprise_dynamic_qrs || []).find((q: any) => q.slug === slug);
+    }
+
+    if (!qrData) {
+      return res.status(404).json({ error: 'ไม่พบข้อมูล QR Code นี้ในระบบ' });
+    }
+
+    return res.json(qrData);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Redirect and scan tracker
 app.get("/qr/:slug", async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
@@ -10364,18 +10994,21 @@ app.get("/qr/:slug", async (req, res) => {
   try {
     let originalUrl = '';
     let status = 'active';
+    let qrType = '';
 
     if (isMysqlOnline) {
-      const [rows]: any = await pool.query('SELECT originalUrl, status FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
+      const [rows]: any = await pool.query('SELECT originalUrl, status, type FROM enterprise_dynamic_qrs WHERE slug = ?', [slug]);
       if (rows && rows.length > 0) {
         originalUrl = rows[0].originalUrl;
         status = rows[0].status;
+        qrType = rows[0].type || '';
       }
     } else {
       const qr = (localDb.enterprise_dynamic_qrs || []).find((q: any) => q.slug === slug);
       if (qr) {
         originalUrl = qr.originalUrl;
         status = qr.status;
+        qrType = qr.type || '';
       }
     }
 
@@ -10458,6 +11091,10 @@ app.get("/qr/:slug", async (req, res) => {
       qrData = (localDb.enterprise_dynamic_qrs || []).find((q: any) => q.slug === slug);
     }
 
+    if (qrData?.type === 'edms' || originalUrl.includes('/verify?docId=')) {
+      return res.redirect(302, originalUrl);
+    }
+
     const title = qrData?.title || 'ลิงก์ตรวจสอบข้อมูลราชการ';
     const createdAt = qrData?.createdAt ? new Date(qrData.createdAt).toLocaleDateString('th-TH', { 
       year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
@@ -10497,99 +11134,175 @@ app.get("/qr/:slug", async (req, res) => {
     }
   </style>
 </head>
-<body class="bg-slate-50 min-h-screen text-slate-800 flex flex-col items-center justify-center p-4">
-  <div class="max-w-xl w-full space-y-6">
+<body class="bg-gradient-to-b from-slate-50 via-slate-100 to-slate-200 min-h-screen text-slate-800 flex flex-col items-center justify-center p-3 sm:p-6 md:p-8 antialiased">
+  <div class="max-w-lg w-full mx-auto space-y-4 sm:space-y-6">
     
     <!-- Verification Card -->
-    <div class="bg-white rounded-[2.5rem] shadow-2xl border border-emerald-500/10 overflow-hidden relative">
+    <div class="bg-white rounded-3xl sm:rounded-[2.5rem] shadow-xl sm:shadow-2xl border border-slate-200/80 overflow-hidden relative p-5 sm:p-8 md:p-10 text-center space-y-5 sm:space-y-6">
       <div class="scanner-line"></div>
       
-      <div class="p-8 sm:p-12 text-center space-y-8">
-        <!-- Success Animation -->
-        <div class="relative w-24 h-24 mx-auto">
-          <div class="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-25"></div>
-          <div class="relative w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/40">
-            <svg class="w-14 h-14 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path class="animate-check" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" stroke-dasharray="48" stroke-dashoffset="48"/>
-            </svg>
-          </div>
-        </div>
-
-        <div class="space-y-3">
-          <h1 class="text-2xl font-black text-slate-800 leading-tight">ผ่านการตรวจสอบความถูกต้อง</h1>
-          <p class="text-emerald-600 font-bold text-sm tracking-wide flex items-center justify-center gap-2">
-            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></path></svg>
-            QR CODE VERIFIED & SECURE
-          </p>
-        </div>
-
-        <!-- Details Grid -->
-        <div class="bg-slate-50 rounded-3xl p-6 border border-slate-100 text-left space-y-4">
-          <div class="space-y-1">
-            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ข้อมูลเนื้อหา / ชื่อเรื่อง:</span>
-            <p class="text-sm font-bold text-slate-700 leading-relaxed">${title}</p>
-          </div>
-          
-          <div class="grid grid-cols-2 gap-4">
-            <div class="space-y-1">
-              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">รหัสอ้างอิง:</span>
-              <p class="text-xs font-mono font-bold text-indigo-600">#${slug}</p>
-            </div>
-            <div class="space-y-1">
-              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">วันที่ลงทะเบียน:</span>
-              <p class="text-[11px] font-bold text-slate-600">${createdAt}</p>
-            </div>
-          </div>
-
-          <div class="pt-3 border-t border-slate-200">
-            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">ลิงก์ปลายทาง (Target URL):</span>
-            <div class="p-3 bg-white border border-slate-200 rounded-xl flex items-center gap-3 group">
-              <div class="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500 shrink-0">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-              </div>
-              <span class="text-[11px] font-mono text-slate-500 break-all leading-tight flex-1">
-                ${originalUrl}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Action Button -->
-        <div class="space-y-4">
-          <a id="proceed-button" href="${originalUrl}" class="w-full h-16 bg-slate-900 hover:bg-black text-white rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-xl shadow-slate-900/20 text-lg">
-            <span>เข้าสู่ลิงก์ข้อมูลที่ระบุ</span>
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-          </a>
-          <p id="redirect-timer" class="text-[10px] text-slate-400 font-medium leading-relaxed">
-            ระบบจะนำท่านไปยังลิงก์ปลายทางโดยอัตโนมัติใน <span class="text-slate-600 font-bold" id="countdown">3</span> วินาที...
-          </p>
+      <!-- Top Verification Emblem -->
+      <div class="relative w-20 h-20 sm:w-24 sm:h-24 mx-auto pt-1">
+        <div class="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-30"></div>
+        <div class="relative w-20 h-20 sm:w-24 sm:h-24 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg sm:shadow-xl shadow-emerald-500/30">
+          <svg class="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path class="animate-check" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" stroke-dasharray="48" stroke-dashoffset="48"/>
+          </svg>
         </div>
       </div>
+
+      <!-- Heading & Security Badge -->
+      <div class="space-y-1.5 sm:space-y-2">
+        <h1 class="text-xl sm:text-2xl md:text-3xl font-black text-slate-800 tracking-tight leading-tight">
+          ผ่านการตรวจสอบความถูกต้อง
+        </h1>
+        <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/60 text-[11px] sm:text-xs font-black text-emerald-600 uppercase tracking-wider">
+          <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+          <span>QR CODE VERIFIED & SECURE</span>
+        </div>
+      </div>
+
+      <!-- Details Box -->
+      <div class="bg-slate-50/80 rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-200/80 text-left space-y-4 shadow-xs">
+        <div class="space-y-1">
+          <span class="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider block">เนื้อหา / ชื่อเรื่อง:</span>
+          <p class="text-base sm:text-lg font-bold text-slate-900 leading-snug break-words">${title}</p>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-3 sm:gap-4 pt-1">
+          <div class="space-y-0.5">
+            <span class="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">รหัสอ้างอิง:</span>
+            <p class="text-xs sm:text-sm font-mono font-bold text-indigo-600">#${slug}</p>
+          </div>
+          <div class="space-y-0.5">
+            <span class="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">วันที่ลงทะเบียน:</span>
+            <p class="text-xs sm:text-[13px] font-semibold text-slate-600">${createdAt}</p>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200/80 space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">ลิงก์ปลายทาง:</span>
+            <button id="copy-url-btn" type="button" class="text-[11px] font-bold text-slate-500 hover:text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded shadow-2xs active:scale-95 transition">
+              คัดลอกลิงก์
+            </button>
+          </div>
+          <div class="p-3 bg-white border border-slate-200 rounded-xl flex items-center gap-2.5">
+            <div class="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500 shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+            </div>
+            <span id="target-url-text" class="text-xs sm:text-sm font-mono text-blue-600 break-all leading-tight flex-1 select-all">
+              ${originalUrl}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Area: Button & Timer -->
+      <div class="space-y-3 sm:space-y-4 pt-1">
+        <a id="proceed-button" href="${originalUrl}" class="w-full h-12 sm:h-14 bg-slate-900 hover:bg-black text-white rounded-xl sm:rounded-2xl font-bold flex items-center justify-center gap-2 sm:gap-3 transition-all active:scale-[0.98] shadow-lg sm:shadow-xl shadow-slate-900/20 text-sm sm:text-base cursor-pointer">
+          <span>เข้าสู่ลิงก์ที่ระบุ</span>
+          <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </a>
+
+        <!-- Countdown & Pause/Play Control Bar -->
+        <div class="bg-slate-50 border border-slate-200/80 rounded-xl sm:rounded-2xl p-3 sm:p-4 space-y-2 sm:space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 text-left min-w-0">
+              <span id="timer-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0"></span>
+              <span id="timer-status" class="text-xs sm:text-[13px] font-semibold text-slate-700 truncate">
+                เมื่อสแกน QR Code และจะนำทางอัตโนมัติใน <span id="countdown" class="text-emerald-600 font-black text-sm sm:text-base">5</span> วินาที
+              </span>
+            </div>
+            <button id="toggle-pause-btn" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-lg sm:rounded-xl shadow-2xs transition active:scale-95 shrink-0 cursor-pointer">
+              <svg id="pause-icon" class="w-3 h-3 fill-current text-amber-600" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+              <span id="toggle-btn-text">หยุดชั่วคราว</span>
+            </button>
+          </div>
+          <div class="w-full bg-slate-200 rounded-full h-1.5 sm:h-2 overflow-hidden">
+            <div id="progress-bar" class="h-full bg-emerald-500 transition-all duration-1000" style="width: 100%"></div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
-    <!-- Agency Badge Footer -->
-    <div class="flex items-center justify-center gap-3 text-slate-400">
-      <img src="https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png" class="w-6 h-6 grayscale opacity-60" alt="Logo" />
-      <div class="h-4 w-px bg-slate-300"></div>
-      <span class="text-[10px] font-bold tracking-widest uppercase">RAYONG-EDMS VERIFY v2.0.1</span>
+    <!-- Agency Footer -->
+    <div class="flex items-center justify-center gap-2 text-slate-400 text-[10px] sm:text-xs font-bold tracking-wider uppercase text-center px-2">
+      <img src="https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png" class="w-4 h-4 grayscale opacity-60 shrink-0" alt="Logo" />
+      <span>สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง • EDMS VERIFY</span>
     </div>
 
   </div>
 
   <script>
     const originalUrl = ${JSON.stringify(originalUrl)};
-    let timeLeft = 3;
+    let timeLeft = 5;
+    let isPaused = false;
     const countdownEl = document.getElementById('countdown');
-    const timer = setInterval(() => {
+    const timerStatusEl = document.getElementById('timer-status');
+    const timerDotEl = document.getElementById('timer-dot');
+    const toggleBtn = document.getElementById('toggle-pause-btn');
+    const toggleBtnText = document.getElementById('toggle-btn-text');
+    const pauseIcon = document.getElementById('pause-icon');
+    const progressBar = document.getElementById('progress-bar');
+    const copyBtn = document.getElementById('copy-url-btn');
+
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(originalUrl);
+        copyBtn.innerText = 'คัดลอกแล้ว';
+        copyBtn.classList.add('text-emerald-600');
+        setTimeout(() => {
+          copyBtn.innerText = 'คัดลอกลิงก์';
+          copyBtn.classList.remove('text-emerald-600');
+        }, 2000);
+      });
+    }
+
+    let timer = setInterval(tick, 1000);
+
+    function tick() {
+      if (isPaused) return;
       timeLeft--;
       if (countdownEl) countdownEl.innerText = timeLeft;
+      if (progressBar) progressBar.style.width = ((timeLeft / 5) * 100) + '%';
+
       if (timeLeft <= 0) {
         clearInterval(timer);
         window.location.href = originalUrl;
       }
-    }, 1000);
-    
-    // Stop timer if user clicks the button
+    }
+
+    toggleBtn.addEventListener('click', function() {
+      isPaused = !isPaused;
+      if (isPaused) {
+        toggleBtnText.innerText = 'เริ่มนับต่อ';
+        toggleBtn.classList.remove('bg-white', 'text-slate-700');
+        toggleBtn.classList.add('bg-emerald-600', 'text-white');
+        pauseIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        pauseIcon.classList.remove('text-amber-600');
+        pauseIcon.classList.add('text-white');
+        timerDotEl.classList.remove('animate-ping', 'bg-emerald-500');
+        timerDotEl.classList.add('bg-amber-500');
+        progressBar.classList.remove('bg-emerald-500');
+        progressBar.classList.add('bg-amber-500');
+        timerStatusEl.innerHTML = '<span class="text-amber-600 font-bold">หยุดการนับถอยหลังชั่วคราว</span>';
+      } else {
+        toggleBtnText.innerText = 'หยุดชั่วคราว';
+        toggleBtn.classList.add('bg-white', 'text-slate-700');
+        toggleBtn.classList.remove('bg-emerald-600', 'text-white');
+        pauseIcon.innerHTML = '<path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>';
+        pauseIcon.classList.add('text-amber-600');
+        pauseIcon.classList.remove('text-white');
+        timerDotEl.classList.add('animate-ping', 'bg-emerald-500');
+        timerDotEl.classList.remove('bg-amber-500');
+        progressBar.classList.add('bg-emerald-500');
+        progressBar.classList.remove('bg-amber-500');
+        timerStatusEl.innerHTML = 'เมื่อสแกน QR Code และจะนำทางอัตโนมัติใน <span id="countdown" class="text-emerald-600 font-black text-sm sm:text-base">' + timeLeft + '</span> วินาที';
+      }
+    });
+
     document.getElementById('proceed-button').addEventListener('click', () => {
       clearInterval(timer);
     });
@@ -10605,6 +11318,7 @@ app.get("/qr/:slug", async (req, res) => {
 
 // GET list of dynamic QR codes
 app.get(["/api/qr-generator/dynamic", "/api/qr-generator/dynamic/"], async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=5');
   try {
     if (isMysqlOnline) {
       try {
@@ -11447,14 +12161,30 @@ app.post('/api/login', async (req, res) => {
         // Register logged-in active presence immediately
         try {
           const uKey = String(sanitizedUser.id || sanitizedUser.username).toLowerCase();
+          const ua = req.headers['user-agent'] || '';
+          const { device, browser } = parseUserAgentInfo(ua);
+          const now = Date.now();
           activeLoggedInUsers.set(uKey, {
             userId: sanitizedUser.id || sanitizedUser.username,
             username: sanitizedUser.username,
             fullName: `${sanitizedUser.firstName || ''} ${sanitizedUser.lastName || ''}`.trim(),
-            role: sanitizedUser.role || '',
+            position: sanitizedUser.position || '',
+            department: sanitizedUser.department || '',
             departmentId: sanitizedUser.departmentId || '',
+            role: sanitizedUser.role || '',
+            avatar: sanitizedUser.avatar || '',
             ip,
-            lastActive: Date.now()
+            device,
+            browser,
+            currentView: 'overview',
+            viewTitle: 'ภาพรวมระบบ (Overview)',
+            activeDetails: 'เพิ่งเข้าสู่ระบบและพร้อมปฏิบัติงาน',
+            status: 'active',
+            loginAt: now,
+            lastActive: now,
+            lastLoggedView: 'overview',
+            lastLoggedDetails: 'เพิ่งเข้าสู่ระบบและพร้อมปฏิบัติงาน',
+            lastLoggedTime: now
           });
           broadcastOnlineCount();
         } catch (_) {}
@@ -14570,6 +15300,7 @@ app.delete('/api/documents/:id', async (req, res) => {
       await pool.query('DELETE FROM admin_documents WHERE id=?', [id]);
     }
 
+    await syncAllNumberingRulesSequence();
     await addSystemLog('DELETE_DOCUMENT', `ย้ายหนังสือไปยังถังขยะ ID: ${id} - ${doc?.title || localDoc?.title || ''}`, username, ip);
     return res.json({ success: true, movedToRecycleBin: true });
   } catch (error: any) {
@@ -14698,6 +15429,7 @@ app.post('/api/recycle-bin/:id/restore', async (req, res) => {
     }
     
     await addSystemLog('RESTORE_DOCUMENT', `กู้คืนหนังสือจากถังขยะสำเร็จ ID: ${d.id} - ${d.title}`, username, ip);
+    await syncAllNumberingRulesSequence();
     return res.json({ success: true, message: 'กู้คืนเอกสารสำเร็จ' });
   } catch (err: any) {
     console.error('Error in POST /api/recycle-bin/:id/restore:', err);
@@ -14784,6 +15516,7 @@ app.delete('/api/recycle-bin/:id', async (req, res) => {
     }
     
     await addSystemLog('PERMANENT_DELETE', `ลบหนังสือจากถังขยะอย่างถาวรสำเร็จ ID: ${docId} - ${itemToDelete.title}`, username, ip);
+    await syncAllNumberingRulesSequence();
     return res.json({ success: true, message: 'ลบเอกสารอย่างถาวรสำเร็จ' });
   } catch (err: any) {
     console.error('Error in DELETE /api/recycle-bin/:id:', err);

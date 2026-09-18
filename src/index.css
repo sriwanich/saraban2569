@@ -40,6 +40,7 @@
   :root {
     --bg-base: #F8FAFC;
     --bg-surface: #FFFFFF;
+    --bg-card: #FFFFFF;
     --bg-elevated: #F1F5F9;
     --bg-canvas: #FFFFFF;
     --bg-overlay: rgba(255, 255, 255, 0.90);
@@ -72,6 +73,7 @@
   .dark {
     --bg-base: #0B132B;
     --bg-surface: #101B37;
+    --bg-card: #101B37;
     --bg-elevated: #18264A;
     --bg-canvas: #070D1E;
     --bg-overlay: rgba(16, 27, 55, 0.88);

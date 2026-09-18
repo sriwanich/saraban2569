@@ -11,13 +11,18 @@ export default function DigitalSignaturesLogView({ user }: { user?: any }) {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/digital-signatures');
+      let res = await fetch('/api/digital-signatures');
+      if (!res.ok) {
+        res = await fetch('/api/digital-signatures/list');
+      }
       if (res.ok) {
         const data = await res.json();
-        setLogs(data);
+        setLogs(Array.isArray(data) ? data : []);
+      } else {
+        setLogs([]);
       }
     } catch (err) {
-      console.error('Error fetching digital signatures:', err);
+      setLogs([]);
     } finally {
       setLoading(false);
     }
@@ -111,31 +116,53 @@ export default function DigitalSignaturesLogView({ user }: { user?: any }) {
         </div>
       )}
 
-      <div className="bg-[var(--bg-surface)] rounded-2xl border overflow-hidden">
-        <table className="w-full">
+      <div className="bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden transition-all">
+        <table className="w-full border-collapse">
             <thead>
-                <tr className="bg-[var(--bg-canvas)] border-b text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-                    <th className="p-4">ID</th>
-                    <th className="p-4">เอกสาร</th>
-                    <th className="p-4">ผู้ลงนาม</th>
-                    <th className="p-4">เวลา (ISO)</th>
-                    <th className="p-4 text-center">จัดการ</th>
+                <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-light)] text-[0.75rem] font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+                    <th className="p-4 text-center font-bold w-36">ID บันทึก</th>
+                    <th className="p-4 text-center font-bold min-w-[280px]">เอกสารราชการ</th>
+                    <th className="p-4 text-center font-bold w-52">ผู้ลงนามดิจิทัล</th>
+                    <th className="p-4 text-center font-bold w-52">เวลาตราประทับ (TSA)</th>
+                    <th className="p-4 text-center font-bold w-28">การจัดการ</th>
                 </tr>
             </thead>
-            <tbody className="divide-y">
-                {logs.map(log => (
-                    <tr key={log.id} className="hover:bg-gray-50 text-sm">
-                        <td className="p-4 text-xs font-mono">{log.id.slice(0, 8)}...</td>
-                        <td className="p-4">{log.docTitle}</td>
-                        <td className="p-4">{log.signerName}</td>
-                        <td className="p-4 text-xs font-mono">{log.timestampIso}</td>
-                        <td className="p-4 text-center">
-                            <button onClick={() => deleteLog(log.id)} className="text-rose-500 hover:text-rose-700 cursor-pointer">
-                                <Trash2 className="w-4 h-4" />
+            <tbody className="divide-y divide-[var(--border-lighter)] bg-[var(--bg-overlay)]/30 text-[13px]">
+                {logs.length > 0 ? (
+                  logs.map(log => (
+                    <tr key={log.id} className="hover:bg-[var(--bg-elevated)]/50 transition-colors group">
+                        <td className="p-4 text-xs font-mono font-bold text-[var(--text-secondary)] text-center align-middle">
+                          {log.id.slice(0, 8)}...
+                        </td>
+                        <td className="p-4 font-bold text-[var(--text-primary)] text-left align-middle">
+                          {log.docTitle}
+                        </td>
+                        <td className="p-4 text-[var(--text-secondary)] text-center align-middle font-bold">
+                          {log.signerName}
+                        </td>
+                        <td className="p-4 text-xs font-mono text-[var(--text-secondary)] text-center align-middle font-semibold">
+                          {log.timestampIso}
+                        </td>
+                        <td className="p-4 text-center align-middle">
+                          <div className="flex items-center justify-center">
+                            <button 
+                              onClick={() => deleteLog(log.id)} 
+                              className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                              title="ลบประวัติ"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
+                          </div>
                         </td>
                     </tr>
-                ))}
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="p-12 text-center text-[var(--text-muted)] font-medium">
+                      ไม่พบประวัติการลงนามตราประทับดิจิทัลในระบบ
+                    </td>
+                  </tr>
+                )}
             </tbody>
         </table>
       </div>

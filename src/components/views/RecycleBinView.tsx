@@ -256,45 +256,47 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
           </div>
         ) : paginatedItems.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-[var(--border-light)] bg-[var(--bg-overlay)]/40 text-xs font-semibold text-[var(--text-secondary)]">
-                  <th className="py-3 px-4 sm:px-6">ประเภท</th>
-                  <th className="py-3 px-4 sm:px-6">ชื่อเรื่อง / เลขที่เอกสาร</th>
-                  <th className="py-3 px-4 sm:px-6 hidden md:table-cell">ลบโดย</th>
-                  <th className="py-3 px-4 sm:px-6">วันเวลาที่ลบ</th>
-                  <th className="py-3 px-4 sm:px-6 text-center">เวลาที่เหลือ</th>
-                  <th className="py-3 px-4 sm:px-6 text-right">การจัดการ</th>
+                <tr className="border-b border-[var(--border-light)] bg-[var(--bg-overlay)]/40 text-[0.75rem] font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+                  <th className="py-3 px-4 sm:px-6 text-center w-[120px]">ประเภท</th>
+                  <th className="py-3 px-4 sm:px-6 text-center min-w-[220px]">ชื่อเรื่อง / เลขที่เอกสาร</th>
+                  <th className="py-3 px-4 sm:px-6 text-center hidden md:table-cell w-[160px]">ลบโดย</th>
+                  <th className="py-3 px-4 sm:px-6 text-center w-[180px]">วันเวลาที่ลบ</th>
+                  <th className="py-3 px-4 sm:px-6 text-center w-[150px]">เวลาที่เหลือ</th>
+                  <th className="py-3 px-4 sm:px-6 text-center w-[180px]">การจัดการ</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--border-lighter)]/40 text-sm">
+              <tbody className="divide-y divide-[var(--border-lighter)]/40 text-[13px]">
                 {paginatedItems.map((item) => {
                   const remDays = getRemainingDays(item.deletedAt);
                   return (
                     <tr key={item.id} className="hover:bg-[var(--border-lighter)]/10 transition-colors group">
-                      <td className="py-3.5 px-4 sm:px-6 whitespace-nowrap">
-                        {getDocTypeBadge(item.docType)}
+                      <td className="py-3.5 px-4 sm:px-6 text-center align-middle whitespace-nowrap">
+                        <div className="inline-flex justify-center">
+                          {getDocTypeBadge(item.docType)}
+                        </div>
                       </td>
-                      <td className="py-3.5 px-4 sm:px-6 min-w-[200px]">
-                        <div className="font-semibold text-xs sm:text-sm text-[var(--text-primary)] leading-snug line-clamp-2">
+                      <td className="py-3.5 px-4 sm:px-6 min-w-[200px] text-left align-middle">
+                        <div className="font-bold text-[13.5px] text-[var(--text-primary)] leading-snug line-clamp-2">
                           {item.title}
                         </div>
-                        <div className="text-xs text-[var(--text-muted)] font-mono mt-1">
+                        <div className="text-xs text-[var(--text-muted)] font-mono mt-1 font-semibold">
                           เลขที่: {item.docNumber || 'ไม่ระบุ'}
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 sm:px-6 hidden md:table-cell whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-medium">
+                      <td className="py-3.5 px-4 sm:px-6 hidden md:table-cell text-center align-middle whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-bold">
                           <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                           <span>{item.deletedBy}</span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 sm:px-6 whitespace-nowrap">
-                        <div className="text-xs font-medium text-[var(--text-secondary)]">
+                      <td className="py-3.5 px-4 sm:px-6 text-center align-middle whitespace-nowrap">
+                        <div className="text-xs font-bold text-[var(--text-secondary)]">
                           {formatThaiDate(item.deletedAt)}
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 sm:px-6 text-center whitespace-nowrap">
+                      <td className="py-3.5 px-4 sm:px-6 text-center align-middle whitespace-nowrap">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold border ${
                           remDays <= 5 
                             ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-950/20 dark:border-rose-900/30' 
@@ -303,12 +305,12 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
                           เหลืออีก {remDays} วัน
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 sm:px-6 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="py-3.5 px-4 sm:px-6 text-center align-middle whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-2">
                           <button
                             onClick={() => setSelectedItemForRestore(item)}
                             title="กู้คืนเอกสาร"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold bg-amber-500/10 hover:bg-amber-500/15 text-amber-600 rounded border border-amber-500/20 transition-all shadow-sm"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold bg-amber-500/10 hover:bg-amber-500/15 text-amber-600 rounded border border-amber-500/20 transition-all shadow-sm cursor-pointer"
                           >
                             <Undo className="w-3.5 h-3.5" />
                             <span>กู้คืน</span>
@@ -317,7 +319,7 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
                           <button
                             onClick={() => setSelectedItemForDelete(item)}
                             title="ลบออกถาวร"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 rounded border border-rose-500/20 transition-all shadow-sm"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 rounded border border-rose-500/20 transition-all shadow-sm cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                             <span>ลบถาวร</span>
