@@ -61,8 +61,14 @@ export default defineConfig({
       }
     })
   ],
+  resolve: {
+    alias: {
+      'echarts-for-react': 'echarts-for-react/esm/index.js',
+      'echarts': 'echarts'
+    }
+  },
   optimizeDeps: {
-    include: ['fabric', 'pdf-lib', 'qrcode']
+    include: ['fabric', 'pdf-lib', 'qrcode', 'echarts', 'echarts-for-react']
   },
   build: {
     chunkSizeWarningLimit: 3000

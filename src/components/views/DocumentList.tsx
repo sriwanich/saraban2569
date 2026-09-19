@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, User, formatThaiDate, formatThaiDateShort, formatThaiDateMedium, formatThaiDateTime } from '../../types';
-import { Search, Eye, Edit2, Trash2, FileText, Plus, Printer, Paperclip, X, Pin, Zap } from 'lucide-react';
+import { Search, Eye, Edit2, Trash2, FileText, Plus, Printer, Paperclip, X, Pin, Zap, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface Props {
   title: string;
@@ -12,24 +12,37 @@ interface Props {
   onDeleteDoc?: (id: string) => void;
   favorites?: string[];
   onToggleFavorite?: (doc: DocumentItem) => void;
+  onReceiveDeptDoc?: (doc: DocumentItem) => void;
   hasPermission?: (key: string) => boolean;
+  defaultPageSize?: number;
 }
 
-export default function DocumentList({ title, documents, user, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite, hasPermission }: Props) {
+export const DocumentList = React.memo(function DocumentList({ title, documents, user, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite, onReceiveDeptDoc, hasPermission, defaultPageSize }: Props) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState<string>('all');
+  const [receiptStatusFilter, setReceiptStatusFilter] = useState<'all' | 'pending' | 'received'>('all');
   const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 50;
+
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const pageSize = defaultPageSize || 50;
   const [orgName, setOrgName] = useState('สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
   const [logoUrl, setLogoUrl] = useState('https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg');
 
   const [scopeFilter, setScopeFilter] = useState<'all' | 'central' | 'department'>('all');
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
 
-  // Reset page on filter change
+  // Reset page on filter or documents change
   useEffect(() => {
     setCurrentPage(0);
-  }, [searchTerm, selectedYear, scopeFilter, selectedDeptFilter]);
+  }, [debouncedSearchTerm, selectedYear, scopeFilter, selectedDeptFilter, documents]);
 
   useEffect(() => {
     fetch('/api/settings')
@@ -51,27 +64,49 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   // Privileged check: only admin and moderator can see Central Saraban documents
   const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
 
+  const isDocForUserDepartment = (doc: DocumentItem) => {
+    if (!user?.department) return false;
+    const userDept = user.department.trim();
+    if (doc.department && doc.department.trim() === userDept) return true;
+    if (doc.forwardedTo) {
+        const forwardedDepts = doc.forwardedTo.split(',').map(d => d.trim());
+        return forwardedDepts.includes(userDept);
+    }
+    return false;
+  };
+
+  const isReceivedByDept = (doc: DocumentItem) => {
+    if (!user?.department) return false;
+    const userDept = user.department.trim();
+    return doc.departmentReceives && Array.isArray(doc.departmentReceives) && 
+           doc.departmentReceives.some((r: any) => r.department && r.department.trim() === userDept);
+  };
+
   // Filter docs
   const filteredDocs = React.useMemo(() => {
     return documents.filter(doc => {
       const matchesSearch = 
-        doc.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        (doc.receiveNumber && doc.receiveNumber.includes(searchTerm)) ||
-        doc.docNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        doc.from.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        doc.to.toLowerCase().includes(searchTerm.toLowerCase());
+        doc.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) || 
+        (doc.receiveNumber && doc.receiveNumber.includes(debouncedSearchTerm)) ||
+        doc.docNumber.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        doc.from.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        doc.to.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
       
       const matchesYear = selectedYear === 'all' || doc.year === selectedYear;
 
       const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
 
-      // Regular users MUST NOT see Central Saraban documents UNLESS forwarded to or received by their department
-      if (!isCentralPrivileged && isCentralDoc) {
-        const userDept = user?.department;
-        const isForwardedToMe = userDept && doc.forwardedTo && doc.forwardedTo.includes(userDept);
-        const hasMyDeptReceive = userDept && doc.departmentReceives && doc.departmentReceives.some(r => r.department === userDept);
-        if (!isForwardedToMe && !hasMyDeptReceive) {
-          return false;
+      if (isCentralPrivileged) {
+        if (!isCentralDoc) return false;
+      } else {
+        // Regular users MUST NOT see Central Saraban documents UNLESS forwarded to or received by their department
+        if (isCentralDoc) {
+          const userDept = user?.department;
+          const isForwardedToMe = userDept && doc.forwardedTo && doc.forwardedTo.includes(userDept);
+          const hasMyDeptReceive = userDept && doc.departmentReceives && doc.departmentReceives.some(r => r.department === userDept);
+          if (!isForwardedToMe && !hasMyDeptReceive) {
+            return false;
+          }
         }
       }
 
@@ -84,10 +119,18 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
       const matchesDept = 
         selectedDeptFilter === 'all' ? true :
         (doc.department === selectedDeptFilter || (doc.departmentReceives && doc.departmentReceives.some(r => r.department === selectedDeptFilter)));
+      
+      const isReceivedByMyDept = isReceivedByDept(doc);
+      const isPendingReceiptByMyDept = isDocForUserDepartment(doc) && !isReceivedByMyDept;
 
-      return matchesSearch && matchesYear && matchesScope && matchesDept;
+      const matchesReceiptStatus = 
+        receiptStatusFilter === 'all' ? true :
+        receiptStatusFilter === 'pending' ? isPendingReceiptByMyDept :
+        isReceivedByMyDept;
+
+      return matchesSearch && matchesYear && matchesScope && matchesDept && matchesReceiptStatus;
     });
-  }, [documents, searchTerm, selectedYear, scopeFilter, selectedDeptFilter, isCentralPrivileged, user?.department]);
+  }, [documents, debouncedSearchTerm, selectedYear, scopeFilter, selectedDeptFilter, isCentralPrivileged, user?.department]);
 
   const sortedFilteredDocs = React.useMemo(() => {
     return [...filteredDocs].sort((a, b) => {
@@ -105,26 +148,43 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
   const availableYears = React.useMemo(() => Array.from(new Set(documents.map(d => d.year))).filter(Boolean).sort((a, b) => b.localeCompare(a)), [documents]);
   const availableDepartments = React.useMemo(() => Array.from(new Set(documents.map(d => d.department).filter(Boolean))) as string[], [documents]);
 
-  const canDeleteDoc = (row: DocumentItem) => {
+  const canDeleteDoc = React.useCallback((row: DocumentItem) => {
+    const isCentralDoc = !(row.isCentral === 0 || Number(row.isCentral) === 0);
+    const isPrivileged = user?.role === 'admin' || user?.role === 'moderator';
+    
+    if (isCentralDoc && !isPrivileged) return false;
+
     if (hasPermission) {
       return hasPermission('delete_docs');
     }
     if (!user) return true;
-    return user.role === 'admin' || user.role === 'moderator';
-  };
+    if (isPrivileged) return true;
+    
+    // Allow users to delete their own department documents
+    return !isCentralDoc && row.department === user.department;
+  }, [hasPermission, user]);
 
-  const canEditDoc = (row: DocumentItem) => {
+  const canEditDoc = React.useCallback((row: DocumentItem) => {
+    const isCentralDoc = !(row.isCentral === 0 || Number(row.isCentral) === 0);
+    const isPrivileged = user?.role === 'admin' || user?.role === 'moderator';
+
+    if (isCentralDoc && !isPrivileged) return false;
+
     if (hasPermission) {
       const isMine = (row.createdBy && row.createdBy === user?.username) ||
                      (row.assignee && user?.firstName && (row.assignee === user.firstName || row.assignee.includes(user.firstName)));
       return hasPermission('edit_all_docs') || Boolean(isMine);
     }
     if (!user) return true;
-    if (user.role === 'admin' || user.role === 'moderator') return true;
+    if (isPrivileged) return true;
+
+    // Allow users to edit their own department documents
+    const isMyDept = !isCentralDoc && row.department === user.department;
+
     const isMine = (row.createdBy && row.createdBy === user.username) ||
                    (row.assignee && (row.assignee === user.firstName || row.assignee.includes(user.firstName)));
-    return Boolean(isMine);
-  };
+    return Boolean(isMine || isMyDept);
+  }, [hasPermission, user]);
 
   const getReceiveNumberDisplay = (row: DocumentItem, isMobile: boolean) => {
     const isDeptDoc = row.isCentral === 0 || Number(row.isCentral) === 0;
@@ -463,6 +523,44 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
           </div>
         )}
 
+        <div className="flex items-center gap-1.5 ml-auto">
+          <button
+            type="button"
+            onClick={() => setReceiptStatusFilter('all')}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+              receiptStatusFilter === 'all'
+                ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm border border-[var(--border-light)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
+            }`}
+          >
+            ทั้งหมด
+          </button>
+          <button
+            type="button"
+            onClick={() => setReceiptStatusFilter('pending')}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              receiptStatusFilter === 'pending'
+                ? 'bg-amber-500 text-slate-950 shadow-sm'
+                : 'text-amber-600 hover:bg-amber-500/10'
+            }`}
+          >
+            <AlertCircle className={`w-3 h-3 ${receiptStatusFilter === 'pending' ? 'text-slate-950' : 'text-amber-500'}`} />
+            รอลงรับ ({documents.filter(d => isDocForUserDepartment(d) && !isReceivedByDept(d)).length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setReceiptStatusFilter('received')}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              receiptStatusFilter === 'received'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-emerald-600 hover:bg-emerald-500/10'
+            }`}
+          >
+            <CheckCircle2 className={`w-3 h-3 ${receiptStatusFilter === 'received' ? 'text-white' : 'text-emerald-500'}`} />
+            ลงรับแล้ว
+          </button>
+        </div>
+
         {((isCentralPrivileged && scopeFilter === 'department') || !isCentralPrivileged) && availableDepartments.length > 0 && (
           <div className="flex items-center gap-2 pl-2">
             <span className="text-xs text-[var(--text-muted)] font-medium">สังกัดฝ่าย:</span>
@@ -512,8 +610,13 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                 </div>
 
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-snug">
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-snug flex items-center gap-2">
                     {row.title}
+                    {isDocForUserDepartment(row) && !isReceivedByDept(row) && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950 uppercase animate-pulse shrink-0">
+                        รอลงรับ
+                      </span>
+                    )}
                   </h4>
                   <div className="text-xs font-mono text-[var(--text-muted)]">
                     ที่ {row.docNumber}
@@ -532,6 +635,15 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                     >
                       <Eye className="w-4 h-4" />
                     </button>
+                    {onReceiveDeptDoc && !isReceivedByDept(row) && isDocForUserDepartment(row) && (
+                      <button 
+                        onClick={() => onReceiveDeptDoc(row)}
+                        className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                        title="ลงรับหนังสือเข้าฝ่าย"
+                      >
+                        <Zap className="w-4 h-4" />
+                      </button>
+                    )}
                     {onEditDoc && canEditDoc(row) && (
                       <button 
                         onClick={() => onEditDoc(row)}
@@ -567,7 +679,7 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
           <table className="w-full border-collapse min-w-[1200px]">
             <thead>
               <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-light)] text-[0.75rem] uppercase tracking-wider text-[var(--text-secondary)] font-bold">
-                <th className="p-4 rounded-tl-xl font-bold text-center w-[120px]">{title.includes('รับ') ? 'ลำดับ' : 'เลขทะเบียนส่ง'}</th>
+                <th className="p-4 rounded-tl-xl font-bold text-center w-[150px]">{title.includes('รับ') ? 'ลำดับ' : 'เลขทะเบียนส่ง'}</th>
                 <th className="p-4 font-bold text-center w-[100px]">ปี</th>
                 <th className="p-4 font-bold text-center w-[180px]">เลขที่หนังสือ</th>
                 <th className="p-4 font-bold text-center min-w-[380px]">เรื่อง / รายละเอียด</th>
@@ -584,9 +696,24 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                     className="hover:bg-[var(--bg-elevated)]/50 transition-colors group"
                   >
                     <td className="p-4 font-mono font-bold text-[var(--primary-color)] text-center align-middle">
-                      <span className="bg-[var(--primary-color)]/5 border border-[var(--primary-color)]/10 px-2.5 py-1 rounded-lg text-xs inline-block">
-                        {getReceiveNumberDisplay(row, false)}
-                      </span>
+                      <div className="flex items-center justify-center gap-1.5">
+                        {onToggleFavorite && (
+                          <button
+                            onClick={() => onToggleFavorite(row)}
+                            className={`p-1.5 rounded-lg transition-all shrink-0 cursor-pointer ${
+                              favorites.includes(row.id)
+                                ? 'text-amber-500 bg-amber-500/10 scale-110'
+                                : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10 hover:scale-110'
+                            }`}
+                            title={favorites.includes(row.id) ? 'ยกเลิกปักหมุด' : 'ปักหมุดเอกสารนี้'}
+                          >
+                            <Pin className={`w-3.5 h-3.5 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current' : ''}`} />
+                          </button>
+                        )}
+                        <span className="bg-[var(--primary-color)]/5 border border-[var(--primary-color)]/10 px-2.5 py-1 rounded-lg text-xs inline-block">
+                          {getReceiveNumberDisplay(row, false)}
+                        </span>
+                      </div>
                     </td>
                     <td className="p-4 text-[var(--text-secondary)] text-center align-middle font-mono font-bold">
                       {row.year}
@@ -599,6 +726,11 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                         <span className="font-bold text-[13.5px] text-[var(--text-primary)] leading-relaxed group-hover:text-[var(--primary-color)] transition-colors">
                           {row.title}
                         </span>
+                        {isDocForUserDepartment(row) && !isReceivedByDept(row) && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950 uppercase animate-pulse shrink-0">
+                            รอลงรับ
+                          </span>
+                        )}
                       </div>
                       <div className="mt-2 flex items-center gap-1.5 flex-wrap justify-start">
                         {getPriorityBadge(row.priority)}
@@ -665,6 +797,15 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
                         >
                           <Eye className="w-4 h-4" />
                         </button>
+                        {onReceiveDeptDoc && !isReceivedByDept(row) && isDocForUserDepartment(row) && (
+                          <button 
+                            onClick={() => onReceiveDeptDoc(row)}
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-600 rounded-lg transition-all cursor-pointer animate-pulse-subtle bg-emerald-500/5 border border-emerald-500/20"
+                            title="ลงรับหนังสือเข้าฝ่าย"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                          </button>
+                        )}
                         {onEditDoc && canEditDoc(row) && (
                           <button 
                             onClick={() => onEditDoc(row)}
@@ -700,26 +841,50 @@ export default function DocumentList({ title, documents, user, onViewDoc, onCrea
 
         {/* Pagination Controls */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between p-4 border-t border-[var(--border-lighter)] bg-[var(--bg-elevated)]">
-             <button 
+          <div className="flex flex-col sm:flex-row items-center justify-between p-4 gap-3 border-t border-[var(--border-lighter)] bg-[var(--bg-elevated)] text-xs">
+            <div className="text-[var(--text-secondary)] font-medium">
+              แสดงรายการที่ <span className="font-bold text-[var(--text-primary)]">{currentPage * pageSize + 1}</span> ถึง <span className="font-bold text-[var(--text-primary)]">{Math.min((currentPage + 1) * pageSize, sortedFilteredDocs.length)}</span> จากทั้งหมด <span className="font-bold text-[var(--text-primary)]">{sortedFilteredDocs.length}</span> รายการ
+            </div>
+            
+            <div className="flex items-center gap-1.5 flex-wrap justify-center">
+              <button 
                 onClick={() => setCurrentPage(p => Math.max(0, p - 1))} 
                 disabled={currentPage === 0}
-                className="px-4 py-2 text-sm font-medium rounded-lg border border-[var(--border-light)] disabled:opacity-50 hover:bg-[var(--border-lighter)] transition-colors"
-             >
+                className="px-3 py-1.5 font-bold rounded-lg border border-[var(--border-light)] disabled:opacity-40 hover:bg-[var(--border-lighter)] transition-colors cursor-pointer"
+              >
                 ก่อนหน้า
-             </button>
-             <span className="text-sm text-[var(--text-secondary)]">หน้า {currentPage + 1} จาก {totalPages}</span>
-             <button 
+              </button>
+
+              <div className="flex items-center gap-1 flex-wrap">
+                {Array.from({ length: totalPages }, (_, i) => i).map((pageIdx) => (
+                  <button
+                    key={pageIdx}
+                    onClick={() => setCurrentPage(pageIdx)}
+                    className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-colors cursor-pointer ${
+                      currentPage === pageIdx
+                        ? 'bg-[var(--primary-color)] text-white shadow-xs'
+                        : 'border border-[var(--border-light)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)]'
+                    }`}
+                  >
+                    {pageIdx + 1}
+                  </button>
+                ))}
+              </div>
+
+              <button 
                 onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))} 
                 disabled={currentPage === totalPages - 1}
-                className="px-4 py-2 text-sm font-medium rounded-lg border border-[var(--border-light)] disabled:opacity-50 hover:bg-[var(--border-lighter)] transition-colors"
-             >
+                className="px-3 py-1.5 font-bold rounded-lg border border-[var(--border-light)] disabled:opacity-40 hover:bg-[var(--border-lighter)] transition-colors cursor-pointer"
+              >
                 ถัดไป
-             </button>
+              </button>
+            </div>
           </div>
         )}
       </div>
     </div>
   );
-}
+});
+
+export default DocumentList;
 

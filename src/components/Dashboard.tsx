@@ -44,6 +44,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   };
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [favActiveTab, setFavActiveTab] = useState<'inbox' | 'outbox' | 'admin'>('inbox');
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set(['overview']));
 
   useEffect(() => {
@@ -202,22 +203,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       return true;
     }
 
-    // 1. Check department-specific override first if user belongs to a department
-    if (currentUser?.department) {
-      const deptTag = `dept:${currentUser.department}`;
-      const deptPerm = rolePermissions.find(p => (p.role === deptTag || p.role === currentUser.department) && p.permission_key === key);
-      if (deptPerm) {
-        return deptPerm.is_allowed === 1 || deptPerm.is_allowed === true;
-      }
-    }
-
-    // 2. Fall back to role-based permission
+    // Fall back to role-based permission
     const perm = rolePermissions.find(p => p.role === currentUser.role && p.permission_key === key);
     if (perm) {
       return perm.is_allowed === 1 || perm.is_allowed === true;
     }
     
-    // Fallbacks if not configured in DB yet
+    // Automatic role-based fallbacks if not configured in DB yet
     if (currentUser.role === 'admin') return true;
     if (currentUser.role === 'moderator') {
       return [
@@ -332,6 +324,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [outboxDocs, setOutboxDocs] = useState<DocumentItem[]>([]);
   const [adminDocs, setAdminDocs] = useState<DocumentItem[]>([]);
   const [draftDocsCount, setDraftDocsCount] = useState(0);
+  const [urgentIncidentsCount, setUrgentIncidentsCount] = useState(0);
+  const [recycleBinCount, setRecycleBinCount] = useState(0);
 
   const [hasInboxLoaded, setHasInboxLoaded] = useState(false);
   const [hasOutboxLoaded, setHasOutboxLoaded] = useState(false);
@@ -682,15 +676,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const isCentralUser = isCentralPrivileged;
 
   const isDocForUserDepartment = (doc: DocumentItem) => {
-    if (isCentralPrivileged) return true;
+    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
+    if (isCentralPrivileged) return isCentralDoc;
 
     if (!currentUser?.department) return false;
 
     const userDept = currentUser.department.trim();
     const userName = currentUser.username;
     const userFirstName = currentUser.firstName;
-    const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
-
     const matchesDept = 
       doc.department === userDept ||
       doc.from === userDept ||
@@ -813,11 +806,41 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     } catch (_) {}
   };
 
+  const fetchUrgentIncidentsCount = async () => {
+    try {
+      const res = await fetch('/api/urgent-incidents');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setUrgentIncidentsCount(data.length);
+        }
+      }
+    } catch (err) {
+      console.warn('Urgent incidents count fetch fallback active:', err);
+    }
+  };
+
+  const fetchRecycleBinCount = async () => {
+    try {
+      const res = await fetch('/api/recycle-bin');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.items)) {
+          setRecycleBinCount(data.items.length);
+        }
+      }
+    } catch (err) {
+      console.warn('Recycle bin count fetch fallback active:', err);
+    }
+  };
+
   const refreshData = async () => {
     await fetchDocuments();
     await fetchNotifications();
     await fetchFavorites();
     await fetchDraftDocsCount();
+    await fetchUrgentIncidentsCount();
+    await fetchRecycleBinCount();
   };
 
   const fetchRolePermissions = async () => {
@@ -931,6 +954,45 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
+  const handleReceiveDeptDoc = async (doc: DocumentItem) => {
+    if (!currentUser?.department) return;
+    
+    const confirmed = await confirm({
+      title: 'ยืนยันการลงรับหนังสือเข้าฝ่าย',
+      message: `คุณต้องการลงรับหนังสือเรื่อง "${doc.title}" เข้าสารบรรณฝ่าย ${currentUser.department} ใช่หรือไม่?`,
+      type: 'info',
+      confirmText: 'ลงรับหนังสือ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    try {
+      const username = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username;
+      const res = await fetch(`/api/documents/${doc.id}/receive-department`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          department: currentUser.department,
+          username,
+          docType: doc.type,
+          year: currentYear
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        alert(`ลงรับหนังสือสำเร็จ! เลขรับฝ่าย: ${data.receiveNumber}/${currentYear}`);
+        await refreshData();
+      } else {
+        const err = await res.json();
+        alert(`เกิดข้อผิดพลาด: ${err.error || 'ไม่สามารถลงรับหนังสือได้'}`);
+      }
+    } catch (err) {
+      console.error("Error receiving department doc:", err);
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    }
+  };
+
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
   const [isDeletingDoc, setIsDeletingDoc] = useState(false);
 
@@ -963,6 +1025,22 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   };
 
+  const isReceivedByDept = (doc: DocumentItem) => {
+    if (!currentUser?.department) return false;
+    const userDept = currentUser.department.trim();
+    return doc.departmentReceives && Array.isArray(doc.departmentReceives) && 
+           doc.departmentReceives.some((r: any) => r.department && r.department.trim() === userDept);
+  };
+
+  const pendingReceiptCount = useMemo(() => {
+    // Only count as pending receipt if it's a doc for this department
+    // and it hasn't been received by this department yet.
+    // Central users should NOT have a pending receipt badge for everything.
+    if (isCentralPrivileged) return 0;
+    
+    return inboxDocs.filter(d => isDocForUserDepartment(d) && !isReceivedByDept(d)).length;
+  }, [inboxDocs, currentUser?.department, isCentralPrivileged]);
+
   const unreadInboxCount = useMemo(() => {
     return inboxDocs.filter(d => !d.isRead && isDocForUserDepartment(d)).length;
   }, [inboxDocs, currentUser, rolePermissions]);
@@ -991,7 +1069,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       {
         category: 'งานสารบรรณ & เอกสาร',
         items: [
-          { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ', badge: unreadInboxCount > 0 ? unreadInboxCount : undefined, badgeColor: 'bg-emerald-500 text-white' },
+          { id: 'inbox', icon: FileText, label: 'ทะเบียนหนังสือรับ', badge: pendingReceiptCount > 0 ? `รอลงรับ ${pendingReceiptCount}` : unreadInboxCount > 0 ? unreadInboxCount : undefined, badgeColor: pendingReceiptCount > 0 ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-emerald-500 text-white' },
           { id: 'outbox', icon: Send, label: 'ทะเบียนหนังสือส่ง', badge: outboxCount > 0 ? outboxCount : undefined, badgeColor: 'bg-sky-500 text-white' },
           { id: 'admin_docs', icon: FileSpreadsheet, label: 'ระบบงานธุรการ', permKey: 'admin_docs', badge: adminDocsCount > 0 ? adminDocsCount : undefined, badgeColor: 'bg-teal-500 text-white' },
           { id: 'draft_docs', icon: FileEdit, label: 'ร่างเอกสาร', permKey: 'draft_docs', badge: draftDocsCount > 0 ? draftDocsCount : undefined, badgeColor: 'bg-indigo-500 text-white' },
@@ -1006,8 +1084,8 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
           { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
           { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
-          { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents' },
-          { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin' },
+          { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents', badge: urgentIncidentsCount > 0 ? urgentIncidentsCount : undefined, badgeColor: 'bg-rose-500 text-white' },
+          { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin', badge: recycleBinCount > 0 ? recycleBinCount : undefined, badgeColor: 'bg-slate-500 text-white' },
         ]
       },
       {
@@ -1034,7 +1112,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         return true;
       })
     })).filter(group => group.items.length > 0);
-  }, [enabledFeatures, currentUser, rolePermissions, unreadInboxCount, outboxCount, adminDocsCount, draftDocsCount, favoritesCount]);
+  }, [enabledFeatures, currentUser, rolePermissions, unreadInboxCount, outboxCount, adminDocsCount, draftDocsCount, favoritesCount, urgentIncidentsCount, recycleBinCount]);
 
   const navItems = useMemo(() => {
     return categorizedNavGroups.flatMap(g => g.items);
@@ -1129,6 +1207,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           user={currentUser}
           favorites={favorites}
           onToggleFavorite={handleToggleFavorite}
+          onReceiveDeptDoc={handleReceiveDeptDoc}
           hasPermission={hasPermission}
         />;
       case 'outbox':
@@ -1142,6 +1221,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           user={currentUser}
           favorites={favorites}
           onToggleFavorite={handleToggleFavorite}
+          onReceiveDeptDoc={handleReceiveDeptDoc}
           hasPermission={hasPermission}
         />;
       case 'admin_docs':
@@ -1165,18 +1245,145 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             <InfographicsEditorView user={currentUser} />
           </React.Suspense>
         ));
-      case 'favorites':
-        return <DocumentList 
-          title="เอกสารสำคัญปักหมุด" 
-          documents={documents.filter(d => favorites.includes(d.id)).filter(isDocForUserDepartment)} 
-          onViewDoc={setSelectedDoc} 
-          onEditDoc={handleEditDoc}
-          onDeleteDoc={handleDeleteDoc}
-          user={currentUser}
-          favorites={favorites}
-          onToggleFavorite={handleToggleFavorite}
-          hasPermission={hasPermission}
-        />;
+      case 'favorites': {
+        const favoriteDocs = documents.filter(d => favorites.includes(d.id)).filter(isDocForUserDepartment);
+        const favInbox = favoriteDocs.filter(d => d.type === 'inbox');
+        const favOutbox = favoriteDocs.filter(d => d.type === 'outbox');
+        const favAdmin = favoriteDocs.filter(d => d.type === 'admin');
+
+        return (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-amber-500/10 to-indigo-500/5 border border-amber-500/20 rounded-2xl p-6 shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500 text-slate-950">
+                  <Pin className="w-5 h-5 fill-current" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-extrabold text-[var(--text-primary)] font-sans">เอกสารสำคัญปักหมุด แยกประเภท</h2>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1 font-medium">
+                    แสดงรายการเอกสารสำคัญที่ปักหมุดไว้ แยกประเภทเป็นหมวดหมู่ และแสดงหน้าละ 20 รายการเพื่อความรวดเร็วและเป็นระเบียบเรียบร้อย
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Interactive Tabs - Matches Dashboard/Overview exactly */}
+            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-lighter)] pb-4">
+              <button
+                type="button"
+                onClick={() => setFavActiveTab('inbox')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 cursor-pointer ${
+                  favActiveTab === 'inbox'
+                    ? 'bg-blue-500 text-white border-blue-500 shadow-sm shadow-blue-500/20'
+                    : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-light)] hover:bg-[var(--bg-elevated)]'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${favActiveTab === 'inbox' ? 'bg-white' : 'bg-blue-500'}`} />
+                <span>หนังสือรับเข้า ({favInbox.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFavActiveTab('outbox')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 cursor-pointer ${
+                  favActiveTab === 'outbox'
+                    ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm shadow-emerald-500/20'
+                    : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-light)] hover:bg-[var(--bg-elevated)]'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${favActiveTab === 'outbox' ? 'bg-white' : 'bg-emerald-500'}`} />
+                <span>หนังสือส่งออก ({favOutbox.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFavActiveTab('admin')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 cursor-pointer ${
+                  favActiveTab === 'admin'
+                    ? 'bg-violet-500 text-white border-violet-500 shadow-sm shadow-violet-500/20'
+                    : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-light)] hover:bg-[var(--bg-elevated)]'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${favActiveTab === 'admin' ? 'bg-white' : 'bg-violet-500'}`} />
+                <span>งานธุรการ ({favAdmin.length})</span>
+              </button>
+            </div>
+
+            {/* Tab Contents */}
+            {favActiveTab === 'inbox' && (
+              <div className="space-y-3 animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 shadow-xs animate-pulse"></span>
+                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 font-sans">
+                    รายการหนังสือรับปักหมุด
+                  </h3>
+                </div>
+                <DocumentList 
+                  title="หนังสือรับปักหมุด" 
+                  documents={favInbox} 
+                  onViewDoc={setSelectedDoc} 
+                  onEditDoc={handleEditDoc}
+                  onDeleteDoc={handleDeleteDoc}
+                  user={currentUser}
+                  favorites={favorites}
+                  onToggleFavorite={handleToggleFavorite}
+                  onReceiveDeptDoc={handleReceiveDeptDoc}
+                  hasPermission={hasPermission}
+                  defaultPageSize={20}
+                />
+              </div>
+            )}
+
+            {favActiveTab === 'outbox' && (
+              <div className="space-y-3 animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-xs animate-pulse"></span>
+                  <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-sans">
+                    รายการหนังสือส่งปักหมุด
+                  </h3>
+                </div>
+                <DocumentList 
+                  title="หนังสือส่งปักหมุด" 
+                  documents={favOutbox} 
+                  onViewDoc={setSelectedDoc} 
+                  onEditDoc={handleEditDoc}
+                  onDeleteDoc={handleDeleteDoc}
+                  user={currentUser}
+                  favorites={favorites}
+                  onToggleFavorite={handleToggleFavorite}
+                  onReceiveDeptDoc={handleReceiveDeptDoc}
+                  hasPermission={hasPermission}
+                  defaultPageSize={20}
+                />
+              </div>
+            )}
+
+            {favActiveTab === 'admin' && (
+              <div className="space-y-3 animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-violet-500 shadow-xs animate-pulse"></span>
+                  <h3 className="text-sm font-bold text-violet-600 dark:text-violet-400 font-sans">
+                    รายการเอกสารงานธุรการปักหมุด
+                  </h3>
+                </div>
+                <DocumentList 
+                  title="เอกสารงานธุรการปักหมุด" 
+                  documents={favAdmin} 
+                  onViewDoc={setSelectedDoc} 
+                  onEditDoc={handleEditDoc}
+                  onDeleteDoc={handleDeleteDoc}
+                  user={currentUser}
+                  favorites={favorites}
+                  onToggleFavorite={handleToggleFavorite}
+                  onReceiveDeptDoc={handleReceiveDeptDoc}
+                  hasPermission={hasPermission}
+                  defaultPageSize={20}
+                />
+              </div>
+            )}
+          </div>
+        );
+      }
       case 'draft_docs':
         return renderGuardedView('draft_docs', 'ระบบร่างและจัดทำหนังสือ', (
           <DraftDocsView 

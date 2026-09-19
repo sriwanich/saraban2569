@@ -14,12 +14,25 @@ interface Props {
 }
 
 export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc, onEditDoc, onDeleteDoc, favorites = [], onToggleFavorite }: Props) {
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('order');
   const [scopeFilter, setScopeFilter] = useState<'all' | 'central' | 'department'>('all');
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedYear, setSelectedYear] = useState('all');
   const [folders, setFolders] = useState<Folder[]>([]);
+
+  // Independent pagination states for each category
+  const [ordersPage, setOrdersPage] = useState(0);
+  const [announcementsPage, setAnnouncementsPage] = useState(0);
+  const [certificatesPage, setCertificatesPage] = useState(0);
+  const pageSize = 20;
+
+  // Reset pagination to first page when filtering or searching changes
+  useEffect(() => {
+    setOrdersPage(0);
+    setAnnouncementsPage(0);
+    setCertificatesPage(0);
+  }, [categoryFilter, scopeFilter, selectedDeptFilter, searchQuery, selectedYear]);
 
   // Privileged check: only admin and moderator can see Central Saraban administrative documents
   const isCentralPrivileged = user?.role === 'admin' || user?.role === 'moderator';
@@ -49,15 +62,16 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
   const filteredDocs = adminDocs.filter(doc => {
     const isCentralDoc = !(doc.isCentral === 0 || Number(doc.isCentral) === 0);
 
-    // Regular users MUST NOT see Central Saraban administrative documents UNLESS forwarded to or received by their department
-    if (!isCentralPrivileged && isCentralDoc) {
-      const userDept = user?.department;
-      const isForwardedToMe = userDept && doc.forwardedTo && doc.forwardedTo.includes(userDept);
-      const hasMyDeptReceive = userDept && doc.departmentReceives && doc.departmentReceives.some(r => r.department === userDept);
-      if (!isForwardedToMe && !hasMyDeptReceive) {
-        return false;
+      if (isCentralPrivileged) {
+        if (!isCentralDoc) return false;
+      } else {
+        const userDept = user?.department;
+        const isForwardedToMe = userDept && doc.forwardedTo && doc.forwardedTo.includes(userDept);
+        const hasMyDeptReceive = userDept && doc.departmentReceives && doc.departmentReceives.some(r => r.department === userDept);
+        if (!isForwardedToMe && !hasMyDeptReceive) {
+          return false;
+        }
       }
-    }
 
     const matchesScope = 
       !isCentralPrivileged ? true :
@@ -177,8 +191,289 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
     printWindow.document.close();
   };
 
+  const orderDocs = filteredDocs.filter(d => d.category === 'order');
+  const announcementDocs = filteredDocs.filter(d => d.category === 'announcement');
+  const certificateDocs = filteredDocs.filter(d => d.category === 'certificate' || (!d.category && d.type === 'admin'));
+
+  const paginatedOrders = orderDocs.slice(ordersPage * pageSize, (ordersPage + 1) * pageSize);
+  const ordersTotalPages = Math.ceil(orderDocs.length / pageSize);
+
+  const paginatedAnnouncements = announcementDocs.slice(announcementsPage * pageSize, (announcementsPage + 1) * pageSize);
+  const announcementsTotalPages = Math.ceil(announcementDocs.length / pageSize);
+
+  const paginatedCertificates = certificateDocs.slice(certificatesPage * pageSize, (certificatesPage + 1) * pageSize);
+  const certificatesTotalPages = Math.ceil(certificateDocs.length / pageSize);
+
+  const renderCategoryTable = (
+    title: string,
+    colorClass: string,
+    indicatorColor: string,
+    items: DocumentItem[],
+    paginatedItems: DocumentItem[],
+    currentPage: number,
+    totalPages: number,
+    setPage: (page: number) => void
+  ) => {
+    return (
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl overflow-hidden flex flex-col shadow-sm">
+        {/* Category Header */}
+        <div className="p-4 bg-[var(--bg-elevated)]/30 border-b border-[var(--border-lighter)] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full ${indicatorColor} shadow-xs animate-pulse`}></span>
+            <h3 className={`text-sm font-extrabold ${colorClass}`}>{title}</h3>
+            <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-[var(--border-light)] text-[var(--text-secondary)] font-mono">
+              {items.length} รายการ
+            </span>
+          </div>
+        </div>
+
+        {/* Mobile View */}
+        <div className="block md:hidden divide-y divide-[var(--border-lighter)]">
+          {paginatedItems.length > 0 ? (
+            paginatedItems.map((row) => (
+              <div key={row.id} className="p-4 space-y-3 hover:bg-[var(--border-lighter)]/30 transition-colors">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {onToggleFavorite && (
+                      <button
+                        onClick={() => onToggleFavorite(row)}
+                        className={`p-1 rounded-md transition-colors ${
+                          favorites.includes(row.id)
+                            ? 'text-amber-500 bg-amber-500/10 border border-amber-500/20'
+                            : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
+                        }`}
+                        title={favorites.includes(row.id) ? 'ยกเลิกปักหมุด' : 'ปักหมุด'}
+                      >
+                        <Pin className={`w-3 h-3 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
+                      </button>
+                    )}
+                    <span className="text-xs font-mono font-semibold text-[var(--text-primary)] bg-[var(--bg-elevated)] px-2.5 py-1 rounded border border-[var(--border-light)]">
+                      {row.docNumber}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-[var(--text-muted)] font-mono bg-[var(--bg-overlay)] px-2 py-0.5 rounded border border-[var(--border-light)]">
+                    พ.ศ. {row.year}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!(row.isCentral === 0 || Number(row.isCentral) === 0) ? (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                        สารบรรณกลาง
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        ฝ่าย/กลุ่มงาน
+                      </span>
+                    )}
+                    {getCategoryBadge(row.category)}
+                    <span className="text-[11px] px-2 py-0.5 rounded border border-amber-500/20 bg-amber-500/10 text-amber-400 font-medium">
+                      📁 {getFolderName(row)}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-relaxed">
+                    {row.title}
+                  </h4>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border-lighter)]/40">
+                  <span>ลงวันที่: {formatThaiDateMedium(row.date)}</span>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => onViewDoc(row)}
+                      className="p-1.5 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 rounded-md transition-colors"
+                      title="รายละเอียด"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => onEditDoc(row)}
+                      className="p-1.5 text-amber-400 hover:bg-amber-400/10 border border-amber-400/20 rounded-md transition-colors"
+                      title="แก้ไข"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => onDeleteDoc(row.id)}
+                      className="p-1.5 text-red-400 hover:bg-red-400/10 border border-red-400/20 rounded-md transition-colors"
+                      title="ลบ"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="p-12 text-center text-[var(--text-muted)]">ไม่พบข้อมูลในหมวดหมู่นี้</div>
+          )}
+        </div>
+
+        {/* Desktop View */}
+        <div className="hidden md:block overflow-x-auto custom-scrollbar">
+          <table className="w-full border-collapse min-w-[1000px]">
+            <thead>
+              <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] text-[0.75rem] text-[var(--text-secondary)] font-bold tracking-wider uppercase">
+                <th className="p-3.5 text-center font-bold w-44">เลขที่เอกสาร / คำสั่ง</th>
+                <th className="p-3.5 text-center font-bold w-28">ประเภท</th>
+                <th className="p-3.5 text-center font-bold w-36">ลงวันที่ (ไทย)</th>
+                <th className="p-3.5 text-center font-bold min-w-[280px]">เรื่อง / สาระสำคัญ</th>
+                <th className="p-3.5 text-center font-bold w-44">แฟ้มจัดเก็บดิจิทัล</th>
+                <th className="p-3.5 text-center font-bold w-36">ฝ่ายปฏิบัติ</th>
+                <th className="p-3.5 text-center font-bold w-28 sticky right-0 bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)]">การจัดการ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-lighter)] text-[13px]">
+              {paginatedItems.length > 0 ? (
+                paginatedItems.map((row) => (
+                  <tr key={row.id} className="hover:bg-[var(--border-lighter)]/40 transition-colors group">
+                    <td className="p-3.5 font-mono font-bold text-[var(--text-primary)] text-center align-middle whitespace-nowrap">
+                      <span>{row.docNumber}</span>
+                    </td>
+                    <td className="p-3.5 text-center align-middle">
+                      {getCategoryBadge(row.category)}
+                    </td>
+                    <td className="p-3.5 text-center align-middle whitespace-nowrap">
+                      <span className="font-bold text-[var(--text-primary)]">
+                        {row.date ? formatThaiDateMedium(row.date) : '-'}
+                      </span>
+                    </td>
+                    <td className="p-3.5 leading-relaxed text-left align-middle font-sans">
+                      <div className="flex items-center gap-2">
+                        {onToggleFavorite && (
+                          <button
+                            onClick={() => onToggleFavorite(row)}
+                            className={`p-1 rounded-md transition-colors shrink-0 ${
+                              favorites.includes(row.id)
+                                ? 'text-amber-500 hover:bg-amber-500/10'
+                                : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
+                            }`}
+                            title={favorites.includes(row.id) ? 'ยกเลิกปักหมุดเอกสารสำคัญ' : 'ปักหมุดเอกสารสำคัญ'}
+                          >
+                            <Pin className={`w-3.5 h-3.5 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
+                          </button>
+                        )}
+                        <div className="font-bold text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer flex items-center gap-1.5" onClick={() => onViewDoc(row)}>
+                          <span>{row.title}</span>
+                          {row.attachments && row.attachments.length > 0 && (
+                            <span className="inline-flex items-center gap-1.5 text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-md border border-sky-500/20 font-bold shrink-0" title={`${row.attachments.length} ไฟล์แนบ`}>
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-sky-600 dark:text-sky-400 shrink-0">
+                                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                              </svg>
+                              <span>{row.attachments.length}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {row.content && (
+                        <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">{row.content}</p>
+                      )}
+                    </td>
+                    <td className="p-3.5 text-center align-middle">
+                      <span className="text-xs px-2.5 py-1 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 font-bold inline-block max-w-[180px] truncate">
+                        📁 {getFolderName(row)}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-center align-middle">
+                      {row.department ? (
+                        <span className="text-xs font-bold bg-violet-500/5 text-violet-600 border border-violet-500/10 px-2.5 py-0.5 rounded-lg inline-block">
+                          {row.department}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
+                    </td>
+                    <td className="p-3.5 text-center whitespace-nowrap sticky right-0 bg-[var(--bg-surface)] group-hover:bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)] transition-colors align-middle">
+                      <div className="flex items-center justify-center gap-1">
+                        <button 
+                          onClick={() => onViewDoc(row)}
+                          className="p-1.5 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-md transition-colors"
+                          title="ดูรายละเอียด"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        {((!row.isCentral || Number(row.isCentral) === 0 ? (isCentralPrivileged || row.department === user?.department) : isCentralPrivileged)) && (
+                          <button 
+                            onClick={() => onEditDoc(row)}
+                            className="p-1.5 text-amber-400 hover:bg-amber-400/10 rounded-md transition-colors"
+                            title="แก้ไข"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {((!row.isCentral || Number(row.isCentral) === 0 ? (isCentralPrivileged || row.department === user?.department) : isCentralPrivileged)) && (
+                          <button 
+                            onClick={() => onDeleteDoc(row.id)}
+                            className="p-1.5 text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
+                            title="ลบ"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="p-12 text-center text-[var(--text-muted)] font-medium">
+                    ไม่พบข้อมูลเอกสารในหมวดหมู่นี้
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination Footer */}
+        {totalPages > 1 && (
+          <div className="px-4 py-3 bg-[var(--bg-elevated)]/30 border-t border-[var(--border-lighter)] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[var(--text-secondary)] font-medium">
+            <div>
+              แสดงรายการที่ <span className="font-bold">{currentPage * pageSize + 1}</span> ถึง <span className="font-bold">{Math.min((currentPage + 1) * pageSize, items.length)}</span> จากทั้งหมด <span className="font-bold text-[var(--text-primary)]">{items.length}</span> รายการ
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                type="button"
+                disabled={currentPage === 0}
+                onClick={() => setPage(currentPage - 1)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)] disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                ย้อนกลับ
+              </button>
+              {Array.from({ length: totalPages }).map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setPage(i)}
+                  className={`w-7 h-7 rounded-lg text-center flex items-center justify-center border font-bold transition-all cursor-pointer ${
+                    currentPage === i
+                      ? "bg-[var(--primary-color)] border-[var(--primary-color)] text-white shadow-xs"
+                      : "border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={currentPage >= totalPages - 1}
+                onClick={() => setPage(currentPage + 1)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)] disabled:opacity-40 transition-colors cursor-pointer"
+              >
+                ถัดไป
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in">
+    <div className="space-y-6 lg:space-y-8 pb-10 animate-fade-in font-sans">
       {/* Header section */}
       <div className="bg-[var(--bg-overlay)] backdrop-blur-3xl border border-[var(--border-light)] rounded-3xl p-6 lg:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-[var(--primary-color)]/10 to-transparent rounded-full blur-[100px] pointer-events-none -mr-20 -mt-20 transition-all duration-700 group-hover:from-[var(--primary-color)]/20" />
@@ -341,33 +636,19 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
       {/* Filters Section & Menu Grid */}
       <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
         {/* Category Selector Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full md:w-auto">
-          <button
-            type="button"
-            onClick={() => setCategoryFilter('all')}
-            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
-              categoryFilter === 'all'
-                ? 'bg-[var(--primary-color)] text-white border-[var(--primary-color)] shadow-md'
-                : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--primary-color)]/40 hover:shadow-sm'
-            }`}
-            title="แสดงเอกสารธุรการทั้งหมด"
-          >
-            <Layers className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
-            <span>ทั้งหมด</span>
-          </button>
-
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
           <button
             type="button"
             onClick={() => setCategoryFilter('order')}
             className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
               categoryFilter === 'order'
-                ? 'bg-violet-600 text-white border-violet-600 shadow-md'
+                ? 'bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-500/20'
                 : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-violet-600 hover:border-violet-500/40 hover:shadow-sm'
             }`}
-            title="กรองเฉพาะคำสั่ง"
+            title="คำสั่ง"
           >
             <Tag className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
-            <span>คำสั่ง</span>
+            <span>คำสั่ง สนง.ปภ. ({orderDocs.length})</span>
           </button>
 
           <button
@@ -375,13 +656,13 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
             onClick={() => setCategoryFilter('announcement')}
             className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
               categoryFilter === 'announcement'
-                ? 'bg-emerald-600 text-white border-emerald-600 shadow-md'
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-500/20'
                 : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-emerald-600 hover:border-emerald-500/40 hover:shadow-sm'
             }`}
-            title="กรองเฉพาะประกาศ"
+            title="ประกาศ"
           >
             <CheckCircle2 className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
-            <span>ประกาศ</span>
+            <span>ประกาศ สนง.ปภ. ({announcementDocs.length})</span>
           </button>
 
           <button
@@ -389,13 +670,13 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
             onClick={() => setCategoryFilter('certificate')}
             className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer group ${
               categoryFilter === 'certificate'
-                ? 'bg-orange-600 text-white border-orange-600 shadow-md'
+                ? 'bg-orange-600 text-white border-orange-600 shadow-md shadow-orange-500/20'
                 : 'bg-[var(--bg-surface)] border-[var(--border-light)] text-[var(--text-secondary)] hover:text-orange-600 hover:border-orange-500/40 hover:shadow-sm'
             }`}
-            title="กรองเฉพาะหนังสือรับรอง"
+            title="หนังสือรับรอง"
           >
             <Award className="w-4 h-4 shrink-0 group-hover:scale-110 transition-transform" />
-            <span>หนังสือรับรอง</span>
+            <span>หนังสือรับรอง/อื่น ๆ ({certificateDocs.length})</span>
           </button>
         </div>
 
@@ -431,204 +712,45 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
       </div>
 
       {/* Table & Cards section */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl overflow-hidden flex flex-col shadow-sm">
-        
-        {/* Mobile View: list of items as cards */}
-        <div className="block md:hidden divide-y divide-[var(--border-lighter)]">
-          {filteredDocs.length > 0 ? (
-            filteredDocs.map((row) => (
-              <div key={row.id} className="p-4 space-y-3 hover:bg-[var(--border-lighter)]/30 transition-colors">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    {onToggleFavorite && (
-                      <button
-                        onClick={() => onToggleFavorite(row)}
-                        className={`p-1 rounded-md transition-colors ${
-                          favorites.includes(row.id)
-                            ? 'text-amber-500 bg-amber-500/10 border border-amber-500/20'
-                            : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
-                        }`}
-                        title={favorites.includes(row.id) ? 'ยกเลิกปักหมุด' : 'ปักหมุด'}
-                      >
-                        <Pin className={`w-3 h-3 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
-                      </button>
-                    )}
-                    <span className="text-xs font-mono font-semibold text-[var(--text-primary)] bg-[var(--bg-elevated)] px-2.5 py-1 rounded border border-[var(--border-light)]">
-                      {row.docNumber}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-[var(--text-muted)] font-mono bg-[var(--bg-overlay)] px-2 py-0.5 rounded border border-[var(--border-light)]">
-                    พ.ศ. {row.year}
-                  </span>
-                </div>
+      <div className="space-y-10 animate-fade-in">
+        {categoryFilter === 'order' && (
+          renderCategoryTable(
+            'คำสั่ง สนง.ปภ. จังหวัดระยอง',
+            'text-violet-600 dark:text-violet-400',
+            'bg-violet-500',
+            orderDocs,
+            paginatedOrders,
+            ordersPage,
+            ordersTotalPages,
+            setOrdersPage
+          )
+        )}
 
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {!(row.isCentral === 0 || Number(row.isCentral) === 0) ? (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                        สารบรรณกลาง
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        ฝ่าย/กลุ่มงาน
-                      </span>
-                    )}
-                    {getCategoryBadge(row.category)}
-                    <span className="text-[11px] px-2 py-0.5 rounded border border-amber-500/20 bg-amber-500/10 text-amber-400 font-medium">
-                      📁 {getFolderName(row)}
-                    </span>
-                  </div>
-                  <h4 className="text-sm font-semibold text-[var(--text-primary)] leading-relaxed">
-                    {row.title}
-                  </h4>
-                </div>
+        {categoryFilter === 'announcement' && (
+          renderCategoryTable(
+            'ประกาศ สนง.ปภ. จังหวัดระยอง',
+            'text-emerald-600 dark:text-emerald-400',
+            'bg-emerald-500',
+            announcementDocs,
+            paginatedAnnouncements,
+            announcementsPage,
+            announcementsTotalPages,
+            setAnnouncementsPage
+          )
+        )}
 
-                <div className="flex items-center justify-between text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border-lighter)]/40">
-                  <span>ลงวันที่: {formatThaiDateMedium(row.date)}</span>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => onViewDoc(row)}
-                      className="p-1.5 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 border border-[var(--primary-color)]/20 rounded-md transition-colors"
-                      title="รายละเอียด"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => onEditDoc(row)}
-                      className="p-1.5 text-amber-400 hover:bg-amber-400/10 border border-amber-400/20 rounded-md transition-colors"
-                      title="แก้ไข"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => onDeleteDoc(row.id)}
-                      className="p-1.5 text-red-400 hover:bg-red-400/10 border border-red-400/20 rounded-md transition-colors"
-                      title="ลบ"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="p-12 text-center text-[var(--text-muted)]">ไม่พบข้อมูลคำสั่งหรือประกาศ</div>
-          )}
-        </div>
-
-        {/* Desktop View: Polished Table */}
-        <div className="hidden md:block overflow-x-auto custom-scrollbar">
-          <table className="w-full border-collapse min-w-[1000px]">
-            <thead>
-              <tr className="bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] text-[0.75rem] text-[var(--text-secondary)] font-bold tracking-wider uppercase">
-                <th className="p-3.5 text-center font-bold w-44">เลขที่เอกสาร / คำสั่ง</th>
-                <th className="p-3.5 text-center font-bold w-28">ประเภท</th>
-                <th className="p-3.5 text-center font-bold w-36">ลงวันที่ (ไทย)</th>
-                <th className="p-3.5 text-center font-bold min-w-[280px]">เรื่อง / สาระสำคัญ</th>
-                <th className="p-3.5 text-center font-bold w-44">แฟ้มจัดเก็บดิจิทัล</th>
-                <th className="p-3.5 text-center font-bold w-36">ฝ่ายปฏิบัติ</th>
-                <th className="p-3.5 text-center font-bold w-28 sticky right-0 bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)]">การจัดการ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--border-lighter)] text-[13px]">
-              {filteredDocs.length > 0 ? (
-                filteredDocs.map((row) => (
-                  <tr key={row.id} className="hover:bg-[var(--border-lighter)]/40 transition-colors group">
-                    <td className="p-3.5 font-mono font-bold text-[var(--text-primary)] text-center align-middle whitespace-nowrap">
-                      <span>{row.docNumber}</span>
-                    </td>
-                    <td className="p-3.5 text-center align-middle">
-                      {getCategoryBadge(row.category)}
-                    </td>
-                    <td className="p-3.5 text-center align-middle whitespace-nowrap">
-                      <span className="font-bold text-[var(--text-primary)]">
-                        {row.date ? formatThaiDateMedium(row.date) : '-'}
-                      </span>
-                    </td>
-                    <td className="p-3.5 leading-relaxed text-left align-middle">
-                      <div className="flex items-center gap-2">
-                        {onToggleFavorite && (
-                          <button
-                            onClick={() => onToggleFavorite(row)}
-                            className={`p-1 rounded-md transition-colors shrink-0 ${
-                              favorites.includes(row.id)
-                                ? 'text-amber-500 hover:bg-amber-500/10'
-                                : 'text-[var(--text-muted)] hover:text-amber-500 hover:bg-amber-500/10'
-                            }`}
-                            title={favorites.includes(row.id) ? 'ยกเลิกปักหมุดเอกสารสำคัญ' : 'ปักหมุดเอกสารสำคัญ'}
-                          >
-                            <Pin className={`w-3.5 h-3.5 transform rotate-45 ${favorites.includes(row.id) ? 'fill-current text-amber-500' : ''}`} />
-                          </button>
-                        )}
-                        <div className="font-bold text-[var(--text-primary)] hover:text-[var(--primary-color)] cursor-pointer flex items-center gap-1.5" onClick={() => onViewDoc(row)}>
-                          <span>{row.title}</span>
-                          {row.attachments && row.attachments.length > 0 && (
-                            <span className="inline-flex items-center gap-1.5 text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-md border border-sky-500/20 font-bold shrink-0" title={`${row.attachments.length} ไฟล์แนบ`}>
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-sky-600 dark:text-sky-400 shrink-0">
-                                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                              </svg>
-                              <span>{row.attachments.length}</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {row.content && (
-                        <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">{row.content}</p>
-                      )}
-                    </td>
-                    <td className="p-3.5 text-center align-middle">
-                      <span className="text-xs px-2.5 py-1 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 font-bold inline-block max-w-[180px] truncate">
-                        📁 {getFolderName(row)}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-center align-middle">
-                      {row.department ? (
-                        <span className="text-xs font-bold bg-violet-500/5 text-violet-600 border border-violet-500/10 px-2.5 py-0.5 rounded-lg inline-block">
-                          {row.department}
-                        </span>
-                      ) : (
-                        <span className="text-[var(--text-muted)]">—</span>
-                      )}
-                    </td>
-                    <td className="p-3.5 text-center whitespace-nowrap sticky right-0 bg-[var(--bg-surface)] group-hover:bg-[var(--bg-elevated)] z-10 border-l border-[var(--border-lighter)] shadow-[-4px_0_12px_rgba(0,0,0,0.15)] transition-colors align-middle">
-                      <div className="flex items-center justify-center gap-1">
-                        <button 
-                          onClick={() => onViewDoc(row)}
-                          className="p-1.5 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/10 rounded-md transition-colors"
-                          title="ดูรายละเอียด"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => onEditDoc(row)}
-                          className="p-1.5 text-amber-400 hover:bg-amber-400/10 rounded-md transition-colors"
-                          title="แก้ไข"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => onDeleteDoc(row.id)}
-                          className="p-1.5 text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
-                          title="ลบ"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={7} className="p-12 text-center text-[var(--text-muted)] font-medium">
-                    ไม่พบข้อมูลเอกสารธุรการ (คำสั่ง/ประกาศ/หนังสือรับรอง) ในฐานข้อมูล
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {categoryFilter === 'certificate' && (
+          renderCategoryTable(
+            'หนังสือรับรองและเอกสารธุรการอื่นๆ',
+            'text-orange-600 dark:text-orange-400',
+            'bg-orange-500',
+            certificateDocs,
+            paginatedCertificates,
+            certificatesPage,
+            certificatesTotalPages,
+            setCertificatesPage
+          )
+        )}
       </div>
     </div>
   );

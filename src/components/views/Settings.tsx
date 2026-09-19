@@ -822,8 +822,6 @@ export default function Settings(props: SettingsProps) {
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
   const [isUpdatingPermission, setIsUpdatingPermission] = useState<string | null>(null);
   const [permissionSearchTerm, setPermissionSearchTerm] = useState<string>('');
-  const [permissionViewMode, setPermissionViewMode] = useState<'roles' | 'departments' | 'combined'>('roles');
-  const [permissionDeptFilter, setPermissionDeptFilter] = useState<string>('ALL');
 
   const fetchRolePermissions = async () => {
     setIsLoadingPermissions(true);
@@ -3001,13 +2999,13 @@ export default function Settings(props: SettingsProps) {
 
             <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
               <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-1 flex items-center gap-2">
-                <Key className="w-5 h-5 text-[var(--primary-color)]" /> ตั้งค่า Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)
+                <Key className="w-5 h-5 text-[var(--primary-color)]" /> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)
               </h3>
               <p className="text-xs text-[var(--text-muted)] mb-4">
-                กำหนด Key จาก Google AI Studio เพื่อใช้สแกน อ่าน และถอดความเอกสารราชการโดยอัตโนมัติ ข้อมูลจะถูกจัดเก็บไว้ในฐานข้อมูล MySQL
+                กำหนด Key จาก Google AI Studio เพื่อใช้สแกน อ่าน และถอดความเอกสารราชการโดยอัตโนมัติ ข้อมูลจะถูกจัดเก็บไว้ในฐานข้อมูล MySQL และใช้เป็น Key หลักขององค์กร
               </p>
               <div className="space-y-2">
-                <label className="text-sm text-[var(--text-secondary)] font-medium">Google Gemini API Key</label>
+                <label className="text-sm text-[var(--text-secondary)] font-medium">องค์กร Google Gemini API Key</label>
                 <div className="relative flex items-center">
                   <input 
                     type={showGeminiKey ? "text" : "password"} 
@@ -4109,32 +4107,11 @@ export default function Settings(props: SettingsProps) {
             }
           ];
 
-          const defaultDeptList = [
-            { id: 'd1', name: 'ฝ่ายบริหารงานทั่วไป', description: 'งานธุรการ งานสารบรรณกลาง และงานอำนวยการ' },
-            { id: 'd2', name: 'ฝ่ายยุทธศาสตร์และการจัดการ', description: 'งานแผนงาน งบประมาณ และยุทธศาสตร์พัฒนา' },
-            { id: 'd3', name: 'ฝ่ายป้องกันและบรรเทาสาธารณภัย', description: 'งานป้องกัน บรรเทา และเตรียมพร้อมรับมือภัยพิบัติ' },
-            { id: 'd4', name: 'ฝ่ายสงเคราะห์ผู้ประสบภัย', description: 'งานฟื้นฟู สังคมสงเคราะห์ และช่วยเหลือผู้ประสบภัย' },
-            { id: 'd5', name: 'ฝ่ายส่งเสริมและพัฒนา', description: 'งานฝึกอบรมวิชาชีพ และพัฒนาชุมชนท้องถิ่น' }
-          ];
-
-          const effectiveDepartments = departments.length > 0 ? departments : defaultDeptList;
-          const displayedDepartments = permissionDeptFilter === 'ALL' 
-            ? effectiveDepartments 
-            : effectiveDepartments.filter((d: any) => d.name === permissionDeptFilter);
-
           // Calculate active permission count per role dynamically
           const totalKeysCount = permissionsList.reduce((acc, sec) => acc + sec.items.length, 0);
           const getActiveCount = (role: string) => {
             const rolePerms = rolePermissions.filter(p => p.role === role && p.is_allowed === 1);
             return rolePerms.length;
-          };
-
-          const getDeptActiveCount = (deptName: string) => {
-            const deptKey = `dept:${deptName}`;
-            const deptPerms = rolePermissions.filter(p => p.role === deptKey && p.is_allowed === 1);
-            if (deptPerms.length > 0) return deptPerms.length;
-            const defaultKeys = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'];
-            return defaultKeys.length;
           };
 
           const adminActiveCount = getActiveCount('admin');
@@ -4153,8 +4130,8 @@ export default function Settings(props: SettingsProps) {
             return { ...sec, items: matchedItems };
           }).filter(sec => sec.items.length > 0);
 
-          const renderToggle = (roleOrDept: string, key: string, isMobileInline: boolean = false) => {
-            const perm = rolePermissions.find(p => p.role === roleOrDept && p.permission_key === key);
+          const renderToggle = (role: string, key: string, isMobileInline: boolean = false) => {
+            const perm = rolePermissions.find(p => p.role === role && p.permission_key === key);
             let isAllowed = false;
             let isExplicit = false;
 
@@ -4162,36 +4139,30 @@ export default function Settings(props: SettingsProps) {
               isAllowed = perm.is_allowed === 1 || perm.is_allowed === true;
               isExplicit = true;
             } else {
-              if (roleOrDept === 'admin') isAllowed = true;
-              else if (roleOrDept === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
-              else if (roleOrDept === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'].includes(key);
-              else if (roleOrDept.startsWith('dept:')) {
-                isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'].includes(key);
-              }
+              if (role === 'admin') isAllowed = true;
+              else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
+              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'].includes(key);
             }
 
-            const updateKey = `${roleOrDept}-${key}`;
+            const updateKey = `${role}-${key}`;
             const isUpdating = isUpdatingPermission === updateKey;
             const isAdmin = props.user?.role === 'admin';
             
             // Protect Admin from self-lockout
-            const isProtected = roleOrDept === 'admin' && (key === 'system_settings' || key === 'manage_users');
+            const isProtected = role === 'admin' && (key === 'system_settings' || key === 'manage_users');
 
-            const isDept = roleOrDept.startsWith('dept:');
-            const roleColorClass = isDept 
-              ? 'bg-indigo-600' 
-              : roleOrDept === 'admin' 
-                ? 'bg-amber-500' 
-                : roleOrDept === 'moderator' 
-                  ? 'bg-indigo-600' 
-                  : 'bg-emerald-500';
+            const roleColorClass = role === 'admin' 
+              ? 'bg-amber-500' 
+              : role === 'moderator' 
+                ? 'bg-indigo-600' 
+                : 'bg-emerald-500';
 
             if (isMobileInline) {
               return (
                 <div className="flex items-center gap-2">
                   <button
                     disabled={!isAdmin || isProtected || isLoadingPermissions || isUpdating}
-                    onClick={() => handleTogglePermission(roleOrDept, key, isAllowed ? 1 : 0)}
+                    onClick={() => handleTogglePermission(role, key, isAllowed ? 1 : 0)}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                       isAllowed ? roleColorClass : 'bg-slate-300 dark:bg-slate-700'
                     } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-xs'}`}
@@ -4214,7 +4185,7 @@ export default function Settings(props: SettingsProps) {
               <div className="flex flex-col items-center justify-center gap-1 py-1">
                 <button
                   disabled={!isAdmin || isProtected || isLoadingPermissions || isUpdating}
-                  onClick={() => handleTogglePermission(roleOrDept, key, isAllowed ? 1 : 0)}
+                  onClick={() => handleTogglePermission(role, key, isAllowed ? 1 : 0)}
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                     isAllowed ? roleColorClass : 'bg-slate-200 dark:bg-slate-700'
                   } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-sm'}`}
@@ -4248,8 +4219,7 @@ export default function Settings(props: SettingsProps) {
                       </h3>
                     </div>
                     <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-3xl pt-1">
-                      ระบบบริหารจัดการสิทธิ์แบบ 2 มิติ (2D Permission Engine) รองรับทั้งการแบ่งตามบทบาทผู้ใช้ (User Roles) 
-                      และสิทธิ์เจาะจงรายฝ่าย/กลุ่มงาน (Department-Level Overrides) สามารถปรับเปลี่ยนยืดหยุ่นและมีผลทันทีทั่วทั้งองค์กร
+                      ระบบบริหารจัดการสิทธิ์อัตโนมัติ (Automated Role-Based Permission Engine) แบ่งตามบทบาทผู้ใช้ (Admin, Moderator, User) อย่างแม่นยำ มีผลทันทีทั่วทั้งองค์กร
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-white/10 shrink-0">
@@ -4268,76 +4238,8 @@ export default function Settings(props: SettingsProps) {
                 </div>
               </div>
 
-              {/* Control Mode Switcher Tabs */}
-              <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] p-2 rounded-2xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setPermissionViewMode('roles')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                      permissionViewMode === 'roles'
-                        ? 'bg-[var(--primary-color)] text-white shadow-sm'
-                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-canvas)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <Shield className="w-4 h-4" />
-                    <span>กำหนดสิทธิ์ตามบทบาท (User Roles)</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] ${permissionViewMode === 'roles' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-[var(--text-muted)]'}`}>
-                      3 บทบาท
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPermissionViewMode('departments')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                      permissionViewMode === 'departments'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-canvas)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <Building2 className="w-4 h-4" />
-                    <span>กำหนดสิทธิ์เจาะจงตามฝ่าย/กลุ่มงาน (Departments)</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] ${permissionViewMode === 'departments' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 text-[var(--text-muted)]'}`}>
-                      {effectiveDepartments.length} ฝ่าย
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPermissionViewMode('combined')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                      permissionViewMode === 'combined'
-                        ? 'bg-slate-900 text-white shadow-sm dark:bg-slate-800'
-                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-canvas)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <Layers className="w-4 h-4" />
-                    <span>ตารางภาพรวมทุกสิทธิ์ (Combined Matrix)</span>
-                  </button>
-                </div>
-
-                {permissionViewMode === 'departments' && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl shrink-0 text-xs">
-                    <Filter className="w-3.5 h-3.5 text-[var(--primary-color)]" />
-                    <span className="text-[var(--text-muted)] font-medium">กรองฝ่ายงาน:</span>
-                    <select
-                      value={permissionDeptFilter}
-                      onChange={(e) => setPermissionDeptFilter(e.target.value)}
-                      className="bg-transparent border-none text-xs font-bold text-[var(--text-primary)] outline-none cursor-pointer"
-                    >
-                      <option value="ALL">แสดงทุกฝ่าย ({effectiveDepartments.length})</option>
-                      {effectiveDepartments.map((d: any) => (
-                        <option key={d.id} value={d.name}>{d.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {/* Conditional Summary Cards View */}
-              {permissionViewMode === 'roles' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Summary Cards View */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Admin Card */}
                   <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-amber-500/30 shadow-sm space-y-3.5 relative overflow-hidden flex flex-col justify-between">
                     <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-bl-full pointer-events-none" />
@@ -4476,95 +4378,8 @@ export default function Settings(props: SettingsProps) {
                     </div>
                   </div>
                 </div>
-              )}
 
-              {/* Department Cards View */}
-              {permissionViewMode === 'departments' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {displayedDepartments.map((dept: any) => {
-                    const count = getDeptActiveCount(dept.name);
-                    const deptRoleKey = `dept:${dept.name}`;
-                    return (
-                      <div key={dept.id || dept.name} className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-indigo-500/20 shadow-xs space-y-3 relative overflow-hidden flex flex-col justify-between hover:border-indigo-500/40 transition-all">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
-                                <Building2 className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <h4 className="font-bold text-xs sm:text-sm text-[var(--text-primary)]">{dept.name}</h4>
-                                <span className="text-[10px] text-[var(--text-muted)] block line-clamp-1">{dept.description || 'กลุ่มงานภายในองค์กร'}</span>
-                              </div>
-                            </div>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                              Dept
-                            </span>
-                          </div>
-                        </div>
 
-                        <div className="space-y-2 pt-2 border-t border-[var(--border-lighter)]">
-                          <div className="flex items-center justify-between text-xs font-medium">
-                            <span className="text-[var(--text-muted)]">สิทธิ์เฉพาะเปิดใช้งาน:</span>
-                            <span className="text-indigo-600 dark:text-indigo-400 font-bold">{count} / {totalKeysCount}</span>
-                          </div>
-                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                            <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${(count / totalKeysCount) * 100}%` }} />
-                          </div>
-                          {props.user?.role === 'admin' && (
-                            <div className="flex items-center gap-2 pt-1">
-                              <button
-                                onClick={() => handleBatchToggleRole(deptRoleKey, 1)}
-                                disabled={isLoadingPermissions}
-                                className="flex-1 py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-300 text-[10px] font-semibold border border-indigo-200 dark:border-indigo-800 transition-colors"
-                              >
-                                เปิดสิทธิ์เฉพาะทั้งหมด
-                              </button>
-                              <button
-                                onClick={() => handleBatchToggleRole(deptRoleKey, 0)}
-                                disabled={isLoadingPermissions}
-                                className="flex-1 py-1 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300 text-[10px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors"
-                              >
-                                รีเซ็ตสิทธิ์
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Combined View Notice */}
-              {permissionViewMode === 'combined' && (
-                <div className="p-4 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 text-indigo-200 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-400/30">
-                      <Layers className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-white">ตารางเปรียบเทียบสิทธิ์ทุกบทบาทและฝ่ายงาน (2D Combined Matrix)</h4>
-                      <p className="text-xs text-indigo-300/80">
-                        ตารางจะแสดงบทบาทหลัก (Admin, Moderator, User) เคียงคู่กับฝ่ายงานที่เลือกเพื่อสอบทานและเปรียบเทียบสิทธิ์โดยรวม
-                      </p>
-                    </div>
-                  </div>
-                  <div className="hidden sm:flex items-center gap-2 shrink-0">
-                    <span className="text-xs font-semibold text-indigo-300">ฝ่ายงานที่แสดง:</span>
-                    <select
-                      value={permissionDeptFilter}
-                      onChange={(e) => setPermissionDeptFilter(e.target.value)}
-                      className="bg-indigo-900/80 border border-indigo-500/40 text-xs font-bold text-white rounded-lg px-2.5 py-1.5 outline-none cursor-pointer"
-                    >
-                      <option value="ALL">ทุกฝ่าย ({effectiveDepartments.length})</option>
-                      {effectiveDepartments.map((d: any) => (
-                        <option key={d.id} value={d.name}>{d.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
 
               {/* Dynamic Search & Control Header */}
               <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl overflow-hidden shadow-sm">
@@ -4670,71 +4485,48 @@ export default function Settings(props: SettingsProps) {
                                   {/* Roles Toggle Controls (Mobile Grid) */}
                                   <div className="pt-2 border-t border-[var(--border-lighter)] space-y-2">
                                     <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase">
-                                      {permissionViewMode === 'roles' ? 'สิทธิ์แยกตามระดับผู้ใช้งาน (Role Permissions)' : permissionViewMode === 'departments' ? 'สิทธิ์แยกตามฝ่าย/กลุ่มงาน (Department Permissions)' : 'สิทธิ์แบบรวมทุกมิติ (2D Permissions Matrix)'}
+                                      สิทธิ์แยกตามระดับผู้ใช้งาน (Role Permissions)
                                     </div>
 
                                     <div className="grid grid-cols-1 gap-2">
-                                      {/* Roles View */}
-                                      {(permissionViewMode === 'roles' || permissionViewMode === 'combined') && (
-                                        <>
-                                          <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
-                                                <Crown className="w-3.5 h-3.5" />
-                                              </div>
-                                              <div>
-                                                <span className="text-xs font-bold text-[var(--text-primary)]">Admin</span>
-                                                <span className="text-[10px] text-[var(--text-muted)] block">ผู้ดูแลระบบ</span>
-                                              </div>
-                                            </div>
-                                            <div>{renderToggle('admin', item.key, true)}</div>
+                                      <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                                            <Crown className="w-3.5 h-3.5" />
                                           </div>
+                                          <div>
+                                            <span className="text-xs font-bold text-[var(--text-primary)]">Admin</span>
+                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ดูแลระบบ</span>
+                                          </div>
+                                        </div>
+                                        <div>{renderToggle('admin', item.key, true)}</div>
+                                      </div>
 
-                                          <div className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                              <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
-                                                <ShieldCheck className="w-3.5 h-3.5" />
-                                              </div>
-                                              <div>
-                                                <span className="text-xs font-bold text-[var(--text-primary)]">Moderator</span>
-                                                <span className="text-[10px] text-[var(--text-muted)] block">ผู้ตรวจสอบ/สารบรรณ</span>
-                                              </div>
-                                            </div>
-                                            <div>{renderToggle('moderator', item.key, true)}</div>
+                                      <div className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
+                                            <ShieldCheck className="w-3.5 h-3.5" />
                                           </div>
+                                          <div>
+                                            <span className="text-xs font-bold text-[var(--text-primary)]">Moderator</span>
+                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ตรวจสอบ/สารบรรณ</span>
+                                          </div>
+                                        </div>
+                                        <div>{renderToggle('moderator', item.key, true)}</div>
+                                      </div>
 
-                                          <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
-                                                <UserIcon className="w-3.5 h-3.5" />
-                                              </div>
-                                              <div>
-                                                <span className="text-xs font-bold text-[var(--text-primary)]">User</span>
-                                                <span className="text-[10px] text-[var(--text-muted)] block">ผู้ใช้งานทั่วไป</span>
-                                              </div>
-                                            </div>
-                                            <div>{renderToggle('user', item.key, true)}</div>
+                                      <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
+                                            <UserIcon className="w-3.5 h-3.5" />
                                           </div>
-                                        </>
-                                      )}
-
-                                      {/* Departments View */}
-                                      {(permissionViewMode === 'departments' || permissionViewMode === 'combined') && (
-                                        displayedDepartments.map((dept: any) => (
-                                          <div key={dept.id || dept.name} className="p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                              <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
-                                                <Building2 className="w-3.5 h-3.5" />
-                                              </div>
-                                              <div>
-                                                <span className="text-xs font-bold text-[var(--text-primary)]">{dept.name}</span>
-                                                <span className="text-[10px] text-[var(--text-muted)] block">ฝ่าย/กลุ่มงาน</span>
-                                              </div>
-                                            </div>
-                                            <div>{renderToggle(`dept:${dept.name}`, item.key, true)}</div>
+                                          <div>
+                                            <span className="text-xs font-bold text-[var(--text-primary)]">User</span>
+                                            <span className="text-[10px] text-[var(--text-muted)] block">ผู้ใช้งานทั่วไป</span>
                                           </div>
-                                        ))
-                                      )}
+                                        </div>
+                                        <div>{renderToggle('user', item.key, true)}</div>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
@@ -4752,36 +4544,21 @@ export default function Settings(props: SettingsProps) {
                           <tr className="bg-[var(--bg-canvas)] border-b border-[var(--border-lighter)] text-xs font-semibold text-[var(--text-secondary)]">
                             <th className="p-4 w-1/3">ฟังก์ชันระบบ / รายการสิทธิ์การใช้งาน</th>
                             
-                            {(permissionViewMode === 'roles' || permissionViewMode === 'combined') && (
-                              <>
-                                <th className="p-4 text-center w-32 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold border-x border-[var(--border-lighter)]/40">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <Crown className="w-3.5 h-3.5" /> Admin
-                                  </div>
-                                </th>
-                                <th className="p-4 text-center w-32 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <ShieldCheck className="w-3.5 h-3.5" /> Moderator
-                                  </div>
-                                </th>
-                                <th className="p-4 text-center w-32 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold border-x border-[var(--border-lighter)]/40">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <UserIcon className="w-3.5 h-3.5" /> User
-                                  </div>
-                                </th>
-                              </>
-                            )}
-
-                            {(permissionViewMode === 'departments' || permissionViewMode === 'combined') && (
-                              displayedDepartments.map((dept: any) => (
-                                <th key={dept.id || dept.name} className="p-4 text-center min-w-[140px] bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
-                                  <div className="flex items-center justify-center gap-1 text-[11px]">
-                                    <Building2 className="w-3.5 h-3.5" />
-                                    <span className="line-clamp-1" title={dept.name}>{dept.name}</span>
-                                  </div>
-                                </th>
-                              ))
-                            )}
+                            <th className="p-4 text-center w-32 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold border-x border-[var(--border-lighter)]/40">
+                              <div className="flex items-center justify-center gap-1">
+                                <Crown className="w-3.5 h-3.5" /> Admin
+                              </div>
+                            </th>
+                            <th className="p-4 text-center w-32 bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 font-bold border-x border-[var(--border-lighter)]/40">
+                              <div className="flex items-center justify-center gap-1">
+                                <ShieldCheck className="w-3.5 h-3.5" /> Moderator
+                              </div>
+                            </th>
+                            <th className="p-4 text-center w-32 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold border-x border-[var(--border-lighter)]/40">
+                              <div className="flex items-center justify-center gap-1">
+                                <UserIcon className="w-3.5 h-3.5" /> User
+                              </div>
+                            </th>
 
                             <th className="p-4">ข้อแนะนำและผลกระทบเชิงความปลอดภัย</th>
                           </tr>
@@ -4789,7 +4566,7 @@ export default function Settings(props: SettingsProps) {
                         <tbody className="divide-y divide-[var(--border-lighter)] text-xs sm:text-sm">
                           {filteredSections.length === 0 ? (
                             <tr>
-                              <td colSpan={10} className="p-8 text-center text-[var(--text-muted)]">
+                              <td colSpan={5} className="p-8 text-center text-[var(--text-muted)]">
                                 ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
                               </td>
                             </tr>
@@ -4797,7 +4574,7 @@ export default function Settings(props: SettingsProps) {
                             filteredSections.map((sec, idx) => (
                               <React.Fragment key={idx}>
                                 <tr className="bg-[var(--bg-canvas)]/80 font-bold text-[var(--primary-color)] text-xs border-y border-[var(--border-lighter)]">
-                                  <td colSpan={10} className="py-3 px-4 flex items-center gap-2">
+                                  <td colSpan={5} className="py-3 px-4 flex items-center gap-2">
                                     <span className="w-2 h-2 rounded-full bg-[var(--primary-color)] inline-block" />
                                     {sec.section}
                                   </td>
@@ -4812,27 +4589,15 @@ export default function Settings(props: SettingsProps) {
                                       </div>
                                     </td>
 
-                                    {(permissionViewMode === 'roles' || permissionViewMode === 'combined') && (
-                                      <>
-                                        <td className="p-4 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                          {renderToggle('admin', item.key)}
-                                        </td>
-                                        <td className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                          {renderToggle('moderator', item.key)}
-                                        </td>
-                                        <td className="p-4 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                          {renderToggle('user', item.key)}
-                                        </td>
-                                      </>
-                                    )}
-
-                                    {(permissionViewMode === 'departments' || permissionViewMode === 'combined') && (
-                                      displayedDepartments.map((dept: any) => (
-                                        <td key={dept.id || dept.name} className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
-                                          {renderToggle(`dept:${dept.name}`, item.key)}
-                                        </td>
-                                      ))
-                                    )}
+                                    <td className="p-4 text-center bg-amber-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                      {renderToggle('admin', item.key)}
+                                    </td>
+                                    <td className="p-4 text-center bg-indigo-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                      {renderToggle('moderator', item.key)}
+                                    </td>
+                                    <td className="p-4 text-center bg-emerald-500/5 border-x border-[var(--border-lighter)]/40 align-middle">
+                                      {renderToggle('user', item.key)}
+                                    </td>
 
                                     <td className="p-4 text-[var(--text-secondary)] text-xs leading-relaxed align-middle">
                                       <div className="p-2.5 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)] space-y-1">

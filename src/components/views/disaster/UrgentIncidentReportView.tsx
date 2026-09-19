@@ -146,6 +146,16 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
     }
   }, [formData, viewMode, editingId]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanErrorMsg, setScanErrorMsg] = useState<string | null>(null);
   
@@ -780,9 +790,9 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
       const matchesSearch = 
-        (r.location || '').includes(searchQuery) || 
-        (r.docNumber || '').includes(searchQuery) ||
-        (r.reporterName || '').includes(searchQuery);
+        (r.location || '').includes(debouncedSearchQuery) || 
+        (r.docNumber || '').includes(debouncedSearchQuery) ||
+        (r.reporterName || '').includes(debouncedSearchQuery);
         
       if (!matchesSearch) return false;
 
@@ -792,7 +802,6 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
       const targetYearStr = String(targetYear);
       const targetThaiYearStr = targetYearStr.replace(/[0-9]/g, match => '๐๑๒๓๔๕๖๗๘๙'[parseInt(match)]);
 
-      // คำนวณปีงบประมาณและปีปฏิทินจากวันที่ในเอกสาร (docDate) โดยตรง (ไม่ใช้วันที่ลงทะเบียน createdAt)
       const docFiscalYear = getFiscalYearFromDocDate(r.docDate, r.startDate);
       const docCalendarYear = getCalendarYearFromDocDate(r.docDate, r.startDate);
 
@@ -811,8 +820,24 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
       }
 
       return matchesYear;
+    }).sort((a, b) => {
+      // Sort by docDate or createdAt descending
+      const dateA = a.docDate || a.createdAt;
+      const dateB = b.docDate || b.createdAt;
+      return dateB.localeCompare(dateA);
     });
   }, [reports, searchQuery, yearFilter, currentYear]);
+
+  // Reset to first page when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, yearFilter]);
+
+  const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
+  const paginatedReports = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredReports.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredReports, currentPage]);
 
   const availableYears = useMemo(() => {
     const years = new Set<number>();
@@ -1778,11 +1803,11 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               <button 
                 type="button"
                 onClick={handleAddNew}
-                title="ลงทะเบียนเหตุด่วน / รายงานใหม่"
+                title="สร้างแบบรายงานเหตุด่วนสาธารณภัย / รายงานใหม่"
                 className="flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all shadow-md shadow-red-600/20 hover:shadow-lg active:scale-[0.98] cursor-pointer text-xs font-bold group"
               >
                 <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                <span>ลงทะเบียนเหตุด่วนสาธารณภัย</span>
+                <span>สร้างแบบรายงานเหตุด่วนสาธารณภัย</span>
               </button>
             )}
           </div>
@@ -1836,52 +1861,56 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                   ) : filteredReports.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-10 text-[var(--text-muted)]">ไม่พบข้อมูลรายงานเหตุด่วน</td></tr>
                   ) : (
-                    filteredReports.map(report => (
-                      <tr key={report.id} className="hover:bg-[var(--bg-elevated)] transition-colors">
-                        <td className="px-4 py-3 align-top">
-                          <div className="font-medium text-[var(--text-primary)]">{report.docNumber || '-'}</div>
-                          <div className="text-xs text-[var(--text-muted)] mt-0.5">{report.docDate || '-'}</div>
-                        </td>
-                        <td className="px-4 py-3 align-top">
-                          <div className="text-[var(--text-primary)] font-medium max-w-[200px] lg:max-w-xs truncate" title={report.location}>{report.location}</div>
-                          <div className="text-xs text-[var(--text-secondary)] mt-0.5">
-                             {report.amphoe && report.amphoe !== 'ไม่ระบุอำเภอ' ? report.amphoe : ''}
+                    paginatedReports.map(report => (
+                      <tr key={report.id} className="hover:bg-[var(--bg-elevated)]/50 transition-colors group">
+                        <td className="px-4 py-4 align-top">
+                          <div className="font-semibold text-[var(--text-primary)] mb-0.5">{report.docNumber || '-'}</div>
+                          <div className="text-xs text-[var(--text-muted)] flex items-center gap-1.5">
+                            <FileText className="w-3 h-3" />
+                            {report.docDate || '-'}
                           </div>
                         </td>
-                        <td className="px-4 py-3 align-top">
+                        <td className="px-4 py-4 align-top">
+                          <div className="text-[var(--text-primary)] font-medium max-w-[220px] truncate leading-snug" title={report.location}>{report.location}</div>
+                          <div className="text-[11px] text-[var(--text-secondary)] mt-1 flex items-center gap-1">
+                             <span className="w-1.5 h-1.5 rounded-full bg-blue-500/50"></span>
+                             {report.amphoe && report.amphoe !== 'ไม่ระบุอำเภอ' ? report.amphoe : 'ไม่ระบุพื้นที่'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 align-top">
                           <div className="flex flex-wrap gap-1">
                             {report.incidentTypes.slice(0, 2).map((t, idx) => (
-                              <span key={idx} className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 text-[10px] px-2 py-0.5 rounded-full">{t}</span>
+                              <span key={idx} className="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-200/50 dark:border-amber-800/30">{t}</span>
                             ))}
                             {report.incidentTypes.length > 2 && (
-                              <span className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 text-[10px] px-2 py-0.5 rounded-full">+{report.incidentTypes.length - 2}</span>
+                              <span className="bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded border border-slate-200/50 dark:border-slate-700/50">+{report.incidentTypes.length - 2}</span>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 align-top">
+                        <td className="px-4 py-4 align-top">
                           {report.severity === 'รุนแรง' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-800/50">รุนแรง</span>
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 border border-red-200 dark:border-red-900/30">รุนแรง</span>
                           ) : report.severity === 'ปานกลาง' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-200 dark:border-orange-800/50">ปานกลาง</span>
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400 border border-orange-200 dark:border-orange-900/30">ปานกลาง</span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-800/50">เล็กน้อย</span>
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/30">เล็กน้อย</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 align-top">
-                          <div className="text-sm font-medium text-[var(--text-primary)]">{report.reporterName || '-'}</div>
-                          <div className="text-xs text-[var(--text-muted)] truncate max-w-[150px]">{report.reporterPosition || '-'}</div>
+                        <td className="px-4 py-4 align-top">
+                          <div className="text-sm font-semibold text-[var(--text-primary)]">{report.reporterName || '-'}</div>
+                          <div className="text-[11px] text-[var(--text-muted)] truncate max-w-[150px] italic">{report.reporterPosition || '-'}</div>
                         </td>
-                        <td className="px-4 py-3 align-top text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button onClick={() => { handleViewPreview(report, 'list'); }} className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 rounded transition-colors" title="ดูตัวอย่างก่อนพิมพ์">
+                        <td className="px-4 py-4 align-top text-right">
+                          <div className="flex items-center justify-end gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => { handleViewPreview(report, 'list'); }} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 rounded-lg transition-all" title="ดูตัวอย่างก่อนพิมพ์">
                               <FileText className="w-4 h-4" />
                             </button>
                             {canEdit && (
                               <>
-                                <button onClick={() => handleEdit(report)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 rounded transition-colors" title="แก้ไข">
+                                <button onClick={() => handleEdit(report)} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 rounded-lg transition-all" title="แก้ไข">
                                   <Edit className="w-4 h-4" />
                                 </button>
-                                <button onClick={() => handleDelete(report.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded transition-colors" title="ลบ">
+                                <button onClick={() => handleDelete(report.id)} className="p-2 text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-all" title="ลบ">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </>
@@ -1902,17 +1931,19 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                 ) : filteredReports.length === 0 ? (
                   <div className="text-center py-10 text-[var(--text-muted)]">ไม่พบข้อมูลรายงานเหตุด่วน</div>
                 ) : (
-                  filteredReports.map(report => (
-                    <div key={report.id} className="p-4 hover:bg-[var(--bg-elevated)] transition-colors">
+                  paginatedReports.map(report => (
+                    <div key={report.id} className="p-4 hover:bg-[var(--bg-elevated)]/50 transition-colors group">
                       <div className="flex justify-between items-start mb-3 gap-3">
                         <div className="flex-1">
-                           <div className="font-semibold text-[var(--text-primary)] text-sm line-clamp-2 leading-snug">
+                           <div className="font-bold text-[var(--text-primary)] text-sm line-clamp-2 leading-relaxed">
                              {report.location}
                            </div>
-                           <div className="text-xs text-[var(--text-secondary)] mt-1.5 flex flex-wrap gap-2 items-center">
-                             <span className="font-medium text-[var(--primary-color)]">{report.docNumber || '-'}</span>
-                             <span className="w-1 h-1 bg-[var(--text-muted)] rounded-full"></span>
-                             <span>{report.docDate || '-'}</span>
+                           <div className="text-[10px] text-[var(--text-secondary)] mt-2 flex flex-wrap gap-2 items-center">
+                             <span className="font-bold text-[var(--primary-color)] bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 rounded border border-blue-100 dark:border-blue-800/30">{report.docNumber || '-'}</span>
+                             <span className="flex items-center gap-1">
+                               <FileText className="w-3 h-3 text-[var(--text-muted)]" />
+                               {report.docDate || '-'}
+                             </span>
                            </div>
                         </div>
                         <div className="flex flex-col items-end gap-2 flex-shrink-0">
@@ -1926,36 +1957,36 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                         </div>
                       </div>
                       
-                      <div className="flex flex-wrap gap-1.5 mb-3">
+                      <div className="flex flex-wrap gap-1 mb-4">
                          {report.incidentTypes.slice(0, 3).map((t, idx) => (
-                            <span key={idx} className="bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] text-[10px] px-2 py-0.5 rounded-md">{t}</span>
+                            <span key={idx} className="bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] text-[10px] px-2 py-0.5 rounded-md font-medium">{t}</span>
                          ))}
                          {report.incidentTypes.length > 3 && (
-                            <span className="bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] text-[10px] px-2 py-0.5 rounded-md">+{report.incidentTypes.length - 3}</span>
+                            <span className="bg-[var(--bg-canvas)] border border-[var(--border-light)] text-[var(--text-secondary)] text-[10px] px-2 py-0.5 rounded-md font-medium">+{report.incidentTypes.length - 3}</span>
                          )}
                       </div>
 
                       <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border-lighter)]">
-                        <div className="flex items-center gap-2 max-w-[60%]">
-                           <div className="w-6 h-6 rounded-full bg-[var(--bg-overlay)] flex items-center justify-center text-[var(--text-secondary)] border border-[var(--border-light)] flex-shrink-0">
+                        <div className="flex items-center gap-2 max-w-[65%]">
+                           <div className="w-7 h-7 rounded-lg bg-[var(--bg-overlay)] flex items-center justify-center text-[var(--text-secondary)] border border-[var(--border-light)] flex-shrink-0">
                               <span className="text-[10px] font-bold">{report.reporterName ? report.reporterName.charAt(0) : '?'}</span>
                            </div>
                            <div className="truncate">
-                             <div className="text-[11px] font-medium text-[var(--text-primary)] truncate">{report.reporterName || '-'}</div>
-                             <div className="text-[9px] text-[var(--text-muted)] truncate">{report.reporterPosition || '-'}</div>
+                             <div className="text-[11px] font-bold text-[var(--text-primary)] truncate">{report.reporterName || '-'}</div>
+                             <div className="text-[9px] text-[var(--text-muted)] truncate italic">{report.reporterPosition || '-'}</div>
                            </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          <button onClick={() => { handleViewPreview(report, 'list'); }} className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 rounded transition-colors" title="ดูตัวอย่างก่อนพิมพ์">
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button onClick={() => { handleViewPreview(report, 'list'); }} className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 rounded-lg transition-all" title="ดูตัวอย่างก่อนพิมพ์">
                             <FileText className="w-4 h-4" />
                           </button>
                           {canEdit && (
                             <>
-                              <button onClick={() => handleEdit(report)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 rounded transition-colors" title="แก้ไข">
+                              <button onClick={() => handleEdit(report)} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 rounded-lg transition-all" title="แก้ไข">
                                 <Edit className="w-4 h-4" />
                               </button>
-                              <button onClick={() => handleDelete(report.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded transition-colors" title="ลบ">
+                              <button onClick={() => handleDelete(report.id)} className="p-2 text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 rounded-lg transition-all" title="ลบ">
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </>
@@ -1966,6 +1997,54 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                   ))
                 )}
             </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="px-4 py-4 border-t border-[var(--border-light)] flex flex-col sm:flex-row items-center justify-between gap-4 bg-[var(--bg-elevated)]/30">
+                <div className="text-xs text-[var(--text-secondary)] font-medium order-2 sm:order-1">
+                  แสดงรายการที่ <span className="text-[var(--text-primary)] font-bold">{(currentPage - 1) * itemsPerPage + 1}</span> ถึง <span className="text-[var(--text-primary)] font-bold">{Math.min(currentPage * itemsPerPage, filteredReports.length)}</span> จากทั้งหมด <span className="text-[var(--text-primary)] font-bold">{filteredReports.length}</span> รายการ
+                </div>
+                <div className="flex items-center gap-1 order-1 sm:order-2">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="p-1.5 rounded-lg border border-[var(--border-light)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  
+                  <div className="flex items-center gap-1 mx-2">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                      .map((p, idx, arr) => (
+                        <React.Fragment key={p}>
+                          {idx > 0 && arr[idx - 1] !== p - 1 && (
+                            <span className="text-[var(--text-muted)] px-1">...</span>
+                          )}
+                          <button
+                            onClick={() => setCurrentPage(p)}
+                            className={`min-w-[32px] h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${
+                              currentPage === p
+                                ? 'bg-[var(--primary-color)] text-white shadow-md shadow-[var(--primary-color)]/20'
+                                : 'border border-[var(--border-light)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-1.5 rounded-lg border border-[var(--border-light)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2211,6 +2290,19 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
               <div className="text-sm">
                 <p className="font-semibold">ข้อความจากระบบ AI</p>
                 <p className="text-amber-800 dark:text-amber-300 mt-0.5">{scanErrorMsg}</p>
+                {scanErrorMsg && (scanErrorMsg.includes('API Key') || scanErrorMsg.includes('คีย์')) && (
+                  <button 
+                    onClick={() => {
+                      const settingsTab = document.querySelector('[data-tab="settings"]') as HTMLElement;
+                      if (settingsTab) settingsTab.click();
+                      // Or just inform the user
+                      window.alert('กรุณาไปที่เมนู "ตั้งค่าระบบ" เพื่อกำหนด "องค์กร Google Gemini API Key"');
+                    }}
+                    className="text-amber-700 dark:text-amber-400 underline font-semibold mt-2 block"
+                  >
+                    ไปที่เมนูตั้งค่าระบบ
+                  </button>
+                )}
               </div>
             </div>
             {lastScanDataRef.current && (

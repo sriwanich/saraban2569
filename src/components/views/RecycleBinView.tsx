@@ -119,9 +119,24 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
     );
   });
 
+  const [activeCategory, setActiveCategory] = useState<'all' | 'inbox' | 'outbox' | 'admin' | 'internal' | 'circular'>('all');
+
+  const categories = [
+    { id: 'all', label: 'ทั้งหมด', icon: Trash2, count: filteredItems.length },
+    { id: 'inbox', label: 'หนังสือรับ', icon: FileText, count: filteredItems.filter(i => i.docType === 'inbox').length },
+    { id: 'outbox', label: 'หนังสือส่ง', icon: FileText, count: filteredItems.filter(i => i.docType === 'outbox').length },
+    { id: 'admin', label: 'งานธุรการ/ประกาศ', icon: FileText, count: filteredItems.filter(i => i.docType === 'admin').length },
+    { id: 'internal', label: 'บันทึกข้อความ', icon: FileText, count: filteredItems.filter(i => i.docType === 'internal').length },
+    { id: 'circular', label: 'หนังสือเวียน', icon: FileText, count: filteredItems.filter(i => i.docType === 'circular').length },
+  ];
+
+  const categorizedItems = activeCategory === 'all' 
+    ? filteredItems 
+    : filteredItems.filter(item => item.docType === activeCategory);
+
   // Pagination calculation
-  const totalPages = Math.ceil(filteredItems.length / pageSize) || 1;
-  const paginatedItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.ceil(categorizedItems.length / pageSize) || 1;
+  const paginatedItems = categorizedItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const formatThaiDate = (dateStr: string) => {
     try {
@@ -220,30 +235,58 @@ export default function RecycleBinView({ user, onRefreshMainData }: { user?: any
       </div>
 
       {/* Filters and Search Bar */}
-      <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] p-5 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col md:flex-row items-center justify-between gap-4 transition-all">
-        <div className="relative w-full md:max-w-md group">
-          <input
-            type="text"
-            placeholder="ค้นหาชื่อเอกสาร, เลขที่, ผู้ลบ..."
-            value={searchTerm}
-            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="w-full bg-white dark:bg-slate-900/50 border border-[var(--border-light)] rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] focus:ring-4 focus:ring-[var(--primary-color)]/10 transition-all shadow-sm"
-          />
-          <span className="absolute left-3.5 top-3 text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
-            <Search className="w-4 h-4" />
-          </span>
-          {searchTerm && (
-            <button
-              onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
-              className="absolute right-3 top-3 text-[var(--text-muted)] hover:text-rose-500 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+      <div className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          {categories.map((cat) => {
+            const Icon = cat.icon;
+            const isActive = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => { setActiveCategory(cat.id as any); setCurrentPage(1); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                  isActive 
+                    ? 'bg-[var(--primary-color)] border-[var(--primary-color)] text-white shadow-md shadow-[var(--primary-color)]/20' 
+                    : 'bg-white/50 dark:bg-slate-900/50 border-[var(--border-light)] text-[var(--text-secondary)] hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-[var(--text-muted)]'}`} />
+                <span>{cat.label}</span>
+                <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-[var(--text-muted)]'
+                }`}>
+                  {cat.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        <div className="text-sm text-[var(--text-secondary)] shrink-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-4 py-2 rounded-xl border border-[var(--border-light)] font-medium">
-          พบทั้งหมด <span className="font-bold text-[var(--text-primary)]">{filteredItems.length}</span> รายการ
+        <div className="bg-[var(--bg-overlay)] backdrop-blur-xl border border-[var(--border-light)] p-5 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col md:flex-row items-center justify-between gap-4 transition-all">
+          <div className="relative w-full md:max-w-md group">
+            <input
+              type="text"
+              placeholder="ค้นหาชื่อเอกสาร, เลขที่, ผู้ลบ..."
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              className="w-full bg-white dark:bg-slate-900/50 border border-[var(--border-light)] rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-color)] focus:ring-4 focus:ring-[var(--primary-color)]/10 transition-all shadow-sm"
+            />
+            <span className="absolute left-3.5 top-3 text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
+              <Search className="w-4 h-4" />
+            </span>
+            {searchTerm && (
+              <button
+                onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
+                className="absolute right-3 top-3 text-[var(--text-muted)] hover:text-rose-500 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          <div className="text-sm text-[var(--text-secondary)] shrink-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm px-4 py-2 rounded-xl border border-[var(--border-light)] font-medium">
+            พบ <span className="font-bold text-[var(--text-primary)]">{categorizedItems.length}</span> รายการ
+          </div>
         </div>
       </div>
 

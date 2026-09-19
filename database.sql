@@ -548,3 +548,46 @@ CREATE TABLE IF NOT EXISTS scheduled_backups (
   nextRunAt VARCHAR(50)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- PERFORMANCE INDEXES --
+-- Optimize document filtering and sorting
+CREATE INDEX idx_inbox_dept_status ON inbox_documents(department, status);
+CREATE INDEX idx_inbox_year ON inbox_documents(year);
+CREATE INDEX idx_inbox_created ON inbox_documents(createdAt);
+
+CREATE INDEX idx_outbox_dept_status ON outbox_documents(department, status);
+CREATE INDEX idx_outbox_year ON outbox_documents(year);
+CREATE INDEX idx_outbox_created ON outbox_documents(createdAt);
+
+CREATE INDEX idx_internal_dept_status ON internal_documents(department, status);
+CREATE INDEX idx_internal_year ON internal_documents(year);
+CREATE INDEX idx_internal_created ON internal_documents(createdAt);
+
+CREATE INDEX idx_circular_dept_status ON circular_documents(department, status);
+CREATE INDEX idx_circular_year ON circular_documents(year);
+CREATE INDEX idx_circular_created ON circular_documents(createdAt);
+
+CREATE INDEX idx_admin_category_status ON admin_documents(category, status);
+CREATE INDEX idx_admin_year ON admin_documents(year);
+CREATE INDEX idx_admin_created ON admin_documents(createdAt);
+
+CREATE INDEX idx_urgent_docdate ON urgent_incidents(docDate);
+CREATE INDEX idx_urgent_severity ON urgent_incidents(severity);
+CREATE INDEX idx_urgent_created ON urgent_incidents(createdAt);
+
+CREATE INDEX idx_draft_status ON draft_documents(status);
+CREATE INDEX idx_draft_created ON draft_documents(createdAt);
+
+CREATE INDEX idx_dept_rec_dept ON department_receives(department);
+CREATE INDEX idx_dept_rec_year ON department_receives(year);
+
+CREATE INDEX idx_track_docid_type ON document_tracking(docId, docType);
+CREATE INDEX idx_track_status ON document_tracking(status);
+
+CREATE INDEX idx_logs_action ON system_logs(action);
+CREATE INDEX idx_logs_created ON system_logs(createdAt);
+
+CREATE INDEX idx_ua_username ON user_activity(username);
+CREATE INDEX idx_ua_action ON user_activity(action);
+CREATE INDEX idx_ua_created ON user_activity(createdAt);
+
+

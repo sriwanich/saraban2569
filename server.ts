@@ -22,6 +22,9 @@ import QRCode from 'qrcode';
 
 const execFileAsync = promisify(execFile);
 
+// Global flag to disable email notifications if SMTP authentication fails due to IP/Auth issues
+let smtpBlocked = false;
+
 dotenv.config();
 
 // Global crash-prevention listeners for maximum server uptime & stability
@@ -48,9 +51,9 @@ function safeJsonParse<T = any>(value: any, fallback: T): T {
 // Standard Tier Sequence: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash
 // ==========================================
 export const DEFAULT_GEMINI_FALLBACK_MODELS = [
-  'gemini-3.1-flash-lite',
-  'gemini-flash-latest',
-  'gemini-3.8-flash'
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
 ];
 
 export function formatGeminiErrorMessage(err: any): string {
@@ -89,7 +92,7 @@ export function formatGeminiErrorMessage(err: any): string {
     return 'Google Gemini API Key ติดข้อจำกัด HTTP Referrer (Requests from referer are blocked): บน Google Cloud Console (เมนู APIs & Services > Credentials > คลิกที่ Gemini API Key) ในส่วน "Application restrictions" กรุณาเปลี่ยนเป็น "None" (ไม่มีการจำกัด) เนื่องจากระบบทำงานผ่าน Backend Server หรือเพิ่ม URL โดเมนของระบบลงใน Website restrictions';
   }
   if (lower.includes('api_key_invalid') || lower.includes('api key not valid') || (lower.includes('400') && lower.includes('api key')) || lower.includes('invalid authentication credentials')) {
-    return 'Gemini API Key ในระบบไม่ถูกต้อง หรือไม่ได้กำหนดค่าในระบบ กรุณาตรวจสอบในเมนูตั้งค่าระบบ หรือ Settings > Secrets';
+    return 'องค์กร Google Gemini API Key ในระบบไม่ถูกต้อง หรือไม่ได้กำหนดค่าในระบบ กรุณาตรวจสอบในเมนูตั้งค่าระบบ หรือ Settings > Secrets';
   }
   if (lower.includes('not found') && lower.includes('model')) {
     return 'ไม่พบโมเดล AI ที่ระบุ กำลังสลับไปยังโมเดลที่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง';
@@ -195,14 +198,29 @@ export async function getAppGeminiApiKey(customKey?: string): Promise<string> {
 
   try {
     if (typeof pool !== 'undefined' && isMysqlOnline) {
+      // Priority 1: settings table (standard)
       const [rows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
       if (rows && rows.length > 0 && rows[0].geminiApiKey) {
         apiKey = String(rows[0].geminiApiKey).trim();
       }
+      
+      // Priority 2: system_settings table (legacy fallback)
+      if (!apiKey) {
+        try {
+          const [stRows]: any = await pool.query('SELECT geminiApiKey FROM system_settings WHERE id = 1');
+          if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
+            apiKey = String(stRows[0].geminiApiKey).trim();
+          }
+        } catch (e) {
+          // ignore if table doesn't exist
+        }
+      }
     } else if (typeof localDb !== 'undefined' && localDb.settings && localDb.settings.length > 0) {
       apiKey = (localDb.settings[0].geminiApiKey || '').trim();
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error fetching Gemini API key from database:', e);
+  }
 
   return apiKey;
 }
@@ -1636,15 +1654,7 @@ app.post('/api/ai/remove-background', async (req, res) => {
       base64Data = image.replace(/^data:image\/\w+;base64,/, '');
     }
 
-    let apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query("SELECT geminiApiKey FROM system_settings WHERE id = 1");
-        if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
-    }
+    const apiKey = await getAppGeminiApiKey(reqApiKey);
 
     if (!apiKey) {
       return res.status(500).json({ error: 'ไม่พบ Gemini API Key ในระบบ' });
@@ -9662,13 +9672,7 @@ app.post("/api/digital-signatures/verify-file", upload.single('file'), async (re
     let aiAnalysis = null;
     if (useAi) {
       try {
-        let apiKey = (process.env.GEMINI_API_KEY || '').trim();
-        if (!apiKey) {
-          const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-          if (stRows && stRows[0] && stRows[0].geminiApiKey) {
-            apiKey = String(stRows[0].geminiApiKey).trim();
-          }
-        }
+        const apiKey = await getAppGeminiApiKey();
 
         if (apiKey) {
           const client = getGeminiClient(apiKey, req);
@@ -13308,6 +13312,96 @@ app.delete('/api/folders/:id', async (req, res) => {
   }
 });
 
+// Helper function to handle document forwarding and notifications
+async function handleDocumentForwarding(docId: string, docType: string, targetDepartments: string[], forwardNote: string, forwardedBy: string, ip: string, req: any) {
+  if (!docId || !targetDepartments || targetDepartments.length === 0) return;
+
+  const deptsString = targetDepartments.join(',');
+  const timestamp = new Date().toISOString();
+
+  const tableMap: Record<string, string> = {
+    inbox: 'inbox_documents',
+    outbox: 'outbox_documents',
+    internal: 'internal_documents',
+    admin: 'admin_documents'
+  };
+  const tableName = tableMap[docType] || 'inbox_documents';
+
+  try {
+    // Update document forwarding fields and status
+    await pool.query(
+      `UPDATE ${tableName} SET forwardedTo = ?, forwardedBy = ?, forwardedAt = ?, forwardNote = ?, status = 'ส่งต่อกลุ่มงาน' WHERE id = ?`,
+      [deptsString, forwardedBy || 'สารบรรณกลาง', timestamp, forwardNote || '', docId]
+    );
+
+    if (docType === 'outbox') {
+      await pool.query(
+        `UPDATE circular_documents SET forwardedTo = ?, forwardedBy = ?, forwardedAt = ?, forwardNote = ?, status = 'ส่งต่อกลุ่มงาน' WHERE id = ?`,
+        [deptsString, forwardedBy || 'สารบรรณกลาง', timestamp, forwardNote || '', docId]
+      );
+    }
+
+    // Insert tracking log
+    const trackingComment = `ส่งต่อหนังสือให้: ${deptsString}${forwardNote ? ` (คำสั่ง/ข้อความ: ${forwardNote})` : ''}`;
+    await pool.query(
+      'INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALUES (?, ?, ?, ?, ?)',
+      [docId, docType, 'ส่งต่อกลุ่มงาน', trackingComment, forwardedBy || 'สารบรรณกลาง']
+    );
+
+    await addSystemLog('FORWARD_DOCUMENT', `ส่งต่อหนังสือ ID ${docId} ไปยัง ${deptsString}`, forwardedBy || 'สารบรรณกลาง', ip);
+
+    // Trigger Email Notification for Forwarding
+    try {
+      const [fullDocs]: any = await pool.query(`SELECT * FROM ${tableName} WHERE id = ?`, [docId]);
+      if (fullDocs && fullDocs.length > 0) {
+        const doc = fullDocs[0];
+        const subject = `[แจ้งเตือน] ส่งต่อหนังสือถึงหน่วยงานท่าน: ${doc.title || 'ไม่มีชื่อเรื่อง'}`;
+        const htmlBody = `
+          <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+            <h2 style="color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px;">มีการส่งต่อหนังสือถึงหน่วยงานของท่าน</h2>
+            <p>เรียน เจ้าหน้าที่ผู้เกี่ยวข้อง,</p>
+            <p>มีการส่งต่อเอกสารจาก <strong>${forwardedBy || 'สารบรรณกลาง'}</strong> ถึงหน่วยงาน <strong>${deptsString}</strong> ดังนี้:</p>
+            <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
+              <p><strong>เรื่อง:</strong> ${doc.title || '-'}</p>
+              <p><strong>เลขที่หนังสือ:</strong> ${doc.docNumber || '-'}</p>
+              <p><strong>หมายเหตุการส่งต่อ:</strong> ${forwardNote || '-'}</p>
+            </div>
+            <p>กรุณาตรวจสอบข้อมูลเพิ่มเติมในระบบ EDMS เพื่อดำเนินการลงรับหนังสือเข้าสู่ฝ่ายของท่าน</p>
+            <p style="font-size: 0.8em; color: #94a3b8; text-align: center; margin-top: 20px;">นี่คือการแจ้งเตือนอัตโนมัติจากระบบ กรุณาอย่าตอบกลับอีเมลนี้</p>
+          </div>
+        `;
+        await sendNotificationEmail(targetDepartments, subject, htmlBody);
+      }
+    } catch (err: any) {
+      console.warn('Forwarding notification failed:', err.message);
+    }
+    
+    // Trigger rich notifications for each department
+    for (const dept of targetDepartments) {
+      try {
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.headers['x-forwarded-host'] || req.get('host');
+        const baseUrl = `${protocol}://${host}`;
+        
+        const emailHtml = generateDocNotificationEmailHtml({
+          badgeText: '✉️ มีเอกสารส่งต่อถึงกลุ่มงาน',
+          heading: `สารบรรณได้ส่งต่อเอกสารมายังฝ่าย/กลุ่มงาน: ${dept}`,
+          description: `มีเอกสารส่งต่อจากสารบรรณกลาง เพื่อให้บุคลากรในฝ่ายของท่านตรวจสอบและดำเนินการลงรับหนังสือเข้าสารบรรณฝ่าย`,
+          title: forwardNote ? `ส่งต่อเอกสาร: ${forwardNote}` : `ส่งต่อเอกสาร ID: ${docId}`,
+          department: dept,
+          actionUrl: `${baseUrl}/#inbox`,
+          actionText: 'ดูรายการหนังสือเพื่อลงรับ',
+          footerText: 'ระบบสารบรรณอิเล็กทรอนิกส์ (EDMS)'
+        });
+        
+        await sendNotificationEmail([dept], `[แจ้งเตือน] มีเอกสารส่งต่อถึงฝ่าย/กลุ่มงาน ${dept}`, emailHtml);
+      } catch (e) {}
+    }
+  } catch (err: any) {
+    console.error('Error in handleDocumentForwarding:', err.message);
+  }
+}
+
 // 6. Documents API Endpoints (หนังสือราชการ + คำสั่ง/ประกาศ - ดึงแบบแยกตาราง)
 app.get('/api/documents', async (req, res) => {
   try {
@@ -13509,90 +13603,11 @@ app.post('/api/documents/forward', async (req, res) => {
     return res.status(400).json({ error: 'กรุณาระบุเอกสารและฝ่ายที่ต้องการส่งต่อ' });
   }
 
-  const deptsString = targetDepartments.join(',');
-  const timestamp = new Date().toISOString();
   const ip = getClientIp(req);
 
   try {
-    const tableMap: Record<string, string> = {
-      inbox: 'inbox_documents',
-      outbox: 'outbox_documents',
-      internal: 'internal_documents',
-      admin: 'admin_documents'
-    };
-    const tableName = tableMap[docType] || 'inbox_documents';
-
-    // Update document forwarding fields and status
-    await pool.query(
-      `UPDATE ${tableName} SET forwardedTo = ?, forwardedBy = ?, forwardedAt = ?, forwardNote = ?, status = 'ส่งต่อกลุ่มงาน' WHERE id = ?`,
-      [deptsString, forwardedBy || 'สารบรรณกลาง', timestamp, forwardNote || '', docId]
-    );
-
-    if (docType === 'outbox') {
-      await pool.query(
-        `UPDATE circular_documents SET forwardedTo = ?, forwardedBy = ?, forwardedAt = ?, forwardNote = ?, status = 'ส่งต่อกลุ่มงาน' WHERE id = ?`,
-        [deptsString, forwardedBy || 'สารบรรณกลาง', timestamp, forwardNote || '', docId]
-      );
-    }
-
-    // Insert tracking log
-    const trackingComment = `ส่งต่อหนังสือให้: ${deptsString}${forwardNote ? ` (คำสั่ง/ข้อความ: ${forwardNote})` : ''}`;
-    await pool.query(
-      'INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALUES (?, ?, ?, ?, ?)',
-      [docId, docType, 'ส่งต่อกลุ่มงาน', trackingComment, forwardedBy || 'สารบรรณกลาง']
-    );
-
-    await addSystemLog('FORWARD_DOCUMENT', `ส่งต่อหนังสือ ID ${docId} ไปยัง ${deptsString}`, forwardedBy || 'สารบรรณกลาง', ip);
-
-    for (const dept of targetDepartments) {
-      // Auto-register department receive number upon forwarding
-      try {
-        const [docRow]: any = await pool.query(`SELECT year FROM ${tableName} WHERE id = ?`, [docId]);
-        const docYear = docRow && docRow[0] && docRow[0].year ? docRow[0].year : String(new Date().getFullYear() + 543);
-        
-        const [settingsRows]: any = await pool.query('SELECT startSequence FROM settings LIMIT 1');
-        const startSeq = (settingsRows && settingsRows[0] && settingsRows[0].startSequence) ? Number(settingsRows[0].startSequence) : 1;
-        const [maxRows]: any = await pool.query('SELECT MAX(receiveNumber) as maxNum FROM department_receives WHERE department = ? AND year = ?', [dept, docYear]);
-        const maxVal = maxRows[0]?.maxNum ? Number(maxRows[0].maxNum) : 0;
-        const nextNum = Math.max(startSeq, maxVal + 1);
-
-        await pool.query(
-          'INSERT IGNORE INTO department_receives (docId, department, receiveNumber, year, receivedBy) VALUES (?, ?, ?, ?, ?)',
-          [docId, dept, nextNum, docYear, forwardedBy || 'สารบรรณกลาง (อัตโนมัติ)']
-        );
-
-        const trackingComment = `ฝ่าย ${dept} ลงรับหนังสืออัตโนมัติจากการส่งต่อ (เลขรับฝ่าย: ${nextNum}/${docYear})`;
-        await pool.query(
-          'INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALUES (?, ?, ?, ?, ?)',
-          [docId, docType, 'ฝ่ายลงรับหนังสือ', trackingComment, forwardedBy || 'สารบรรณกลาง']
-        );
-      } catch (deptErr) {
-        console.error(`Auto dept receive error for ${dept}:`, deptErr);
-      }
-
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-      const host = req.headers['x-forwarded-host'] || req.get('host');
-      const baseUrl = `${protocol}://${host}`;
-      const settingsData = (localDb.settings && localDb.settings[0]) || {};
-
-      const emailHtml = generateDocNotificationEmailHtml({
-        badgeText: '✉️ มีเอกสารส่งต่อถึงกลุ่มงาน',
-        heading: `สารบรรณได้ส่งต่อเอกสารมายังฝ่าย/กลุ่มงาน: ${dept}`,
-        description: `มีเอกสารส่งต่อจากสารบรรณกลาง เพื่อให้บุคลากรในฝ่ายของท่านตรวจสอบและดำเนินการลงรับหนังสือ`,
-        title: forwardNote ? `ส่งต่อเอกสาร: ${forwardNote}` : `ส่งต่อเอกสาร ID: ${docId}`,
-        department: dept,
-        assignee: forwardedBy || 'สารบรรณกลาง',
-        note: forwardNote || `ส่งต่อโดย ${forwardedBy || 'สารบรรณกลาง'}`,
-        orgName: settingsData.orgName,
-        logoUrl: settingsData.logoUrl,
-        footerText: settingsData.footerText,
-        baseUrl
-      });
-      // sendNotificationEmail omitted to prevent sending emails to all personnel in the department
-    }
-
-
-    return res.json({ success: true, message: `ส่งต่อหนังสือให้ฝ่าย ${deptsString} เรียบร้อยแล้ว` });
+    await handleDocumentForwarding(docId, docType, targetDepartments, forwardNote, forwardedBy, ip, req);
+    return res.json({ success: true, message: `ส่งต่อหนังสือให้ฝ่าย ${targetDepartments.join(',')} เรียบร้อยแล้ว` });
   } catch (error: any) {
     console.error('Forward document error:', error.message);
     return res.status(500).json({ error: error.message });
@@ -13726,6 +13741,14 @@ app.post('/api/documents', async (req, res) => {
         'INSERT INTO document_tracking (docId, docType, status, comments, updatedBy) VALUES (?, ?, ?, ?, ?)',
         [docId, type, status, 'ลงทะเบียนเอกสารใหม่เข้าระบบ', doc.assignee || 'ผู้ดูแลระบบ']
       );
+
+      // Trigger Email Notification
+      notifyWorkChange({ ...doc, id: docId, type }, 'CREATE', type).catch(err => console.warn('Notification failed:', err.message));
+
+      // Auto-Forwarding if department is specified
+      if (doc.department && doc.department !== 'สารบรรณกลาง') {
+        handleDocumentForwarding(docId, type, [doc.department], 'ส่งต่อโดยอัตโนมัติขณะลงทะเบียน', doc.assignee || 'สารบรรณกลาง', ip, req).catch(err => console.warn('Auto-forwarding failed:', err.message));
+      }
 
       // Auto-create initial Version 1 snapshot
       if (!localDb.document_versions) localDb.document_versions = [];
@@ -13930,6 +13953,15 @@ app.put('/api/documents/:id', async (req, res) => {
 
       await addSystemLog('UPDATE_DOCUMENT', `แก้ไขรายละเอียดหนังสือ (${type}): ID ${id} - ${doc.title || ''} (สร้าง Version ${nextVerNum})`, doc.modifiedBy || doc.assignee || 'ผู้ใช้งาน', ip);
       await updateNumberingRuleSequenceForDoc(doc);
+
+      // Trigger Email Notification
+      notifyWorkChange({ ...doc, id, type }, 'UPDATE', type).catch(err => console.warn('Notification failed:', err.message));
+
+      // Auto-Forwarding if department is specified and changed or newly set
+      if (doc.department && doc.department !== 'สารบรรณกลาง') {
+        handleDocumentForwarding(id, type, [doc.department], 'ส่งต่อโดยอัตโนมัติขณะปรับปรุงข้อมูล', doc.modifiedBy || doc.assignee || 'สารบรรณกลาง', ip, req).catch(err => console.warn('Auto-forwarding failed:', err.message));
+      }
+
       return res.json({ success: true, version: newEditVersion });
     } catch (error: any) {
       console.error('Database error:', error.message);
@@ -15298,10 +15330,23 @@ app.delete('/api/documents/:id', async (req, res) => {
       await pool.query('DELETE FROM circular_documents WHERE id=?', [id]);
       await pool.query('DELETE FROM internal_documents WHERE id=?', [id]);
       await pool.query('DELETE FROM admin_documents WHERE id=?', [id]);
+      await pool.query('DELETE FROM workflow_instances WHERE docId=?', [id]);
+    }
+
+    if (localDb.workflow_instances) {
+      localDb.workflow_instances = localDb.workflow_instances.filter((wi: any) => String(wi.docId) !== String(id));
+      saveLocalDb();
     }
 
     await syncAllNumberingRulesSequence();
     await addSystemLog('DELETE_DOCUMENT', `ย้ายหนังสือไปยังถังขยะ ID: ${id} - ${doc?.title || localDoc?.title || ''}`, username, ip);
+
+    // Trigger Email Notification
+    const finalDoc = doc || localDoc;
+    if (finalDoc) {
+      notifyWorkChange(finalDoc, 'DELETE', tableType || localType).catch(err => console.warn('Notification failed:', err.message));
+    }
+
     return res.json({ success: true, movedToRecycleBin: true });
   } catch (error: any) {
     console.error('Database error on delete:', error.message);
@@ -16807,11 +16852,15 @@ app.post('/api/ai-scan', memoryUpload.single('file'), async (req, res) => {
       hint = req.body.hint || '';
       clientApiKey = req.body.apiKey || '';
     } else {
-      base64 = req.body.base64;
+      base64 = req.body.base64 || '';
       mimeType = req.body.mimeType || 'image/jpeg';
       outputType = req.body.outputType || 'auto';
       hint = req.body.hint || '';
       clientApiKey = req.body.apiKey || '';
+    }
+
+    if (base64) {
+      base64 = base64.replace(/^data:.*?;base64,/, '').trim();
     }
 
     if (!base64) {
@@ -16968,18 +17017,7 @@ app.post('/api/ai/detect-cross-references', async (req, res) => {
       return res.status(400).json({ success: false, error: 'กรุณาส่งข้อมูลหนังสือที่ต้องการตรวจสอบ' });
     }
 
-    let apiKey = (req.body.apiKey || '').trim();
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
-    }
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    }
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
 
     // Fetch existing documents from database for historical comparison
     let allDocs: any[] = [];
@@ -17291,18 +17329,7 @@ app.post('/api/ai/audit', async (req, res) => {
   try {
     const { docType, docNum, date, to, subject, ref, att, body, signer, signerPos, orgName } = req.body;
     
-    let apiKey = (req.body.apiKey || '').trim();
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
-    }
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    }
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
 
     if (!apiKey) {
       return res.status(400).json({
@@ -18270,6 +18297,10 @@ app.post('/api/drafts', async (req, res) => {
       ]
     );
     await addSystemLog('CREATE_DRAFT', `บันทึกร่างเอกสาร: ${title || 'ร่างเอกสาร'}`, createdBy || 'ผู้ใช้งาน', ip);
+    
+    // Trigger Email Notification
+    notifyWorkChange({ title, docNumber, date, status, createdBy }, 'CREATE', 'draft').catch(err => console.warn('Notification failed:', err.message));
+
     return res.json({ success: true, id: result.insertId });
   } catch (error: any) {
     console.error('Error saving draft:', error.message);
@@ -18312,6 +18343,10 @@ app.put('/api/drafts/:id', async (req, res) => {
       ]
     );
     await addSystemLog('UPDATE_DRAFT', `อัปเดตร่างเอกสาร ID: ${id}`, createdBy || 'ผู้ใช้งาน', ip);
+    
+    // Trigger Email Notification
+    notifyWorkChange({ title, docNumber, date, status, createdBy }, 'UPDATE', 'draft').catch(err => console.warn('Notification failed:', err.message));
+
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Error updating draft:', error.message);
@@ -18364,6 +18399,10 @@ app.delete('/api/drafts/:id', async (req, res) => {
 
     await pool.query('DELETE FROM draft_documents WHERE id=?', [id]);
     await addSystemLog('DELETE_DRAFT', detailsStr, username, ip);
+
+    // Trigger Email Notification
+    notifyWorkChange({ title: draftSubject, createdBy }, 'DELETE', 'draft').catch(err => console.warn('Notification failed:', err.message));
+
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting draft:', error.message);
@@ -18690,20 +18729,7 @@ app.delete('/api/project-summaries/:id', async (req, res) => {
 app.post('/api/ai/summarize-project', async (req, res) => {
   try {
     const d = req.body;
-    let apiKey = (req.body.apiKey || '').trim();
-
-    if (!apiKey) {
-      try {
-        const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-        if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-          apiKey = String(stRows[0].geminiApiKey).trim();
-        }
-      } catch (e) {}
-    }
-
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    }
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
 
     if (!apiKey) {
       return res.status(400).json({ 
@@ -20378,22 +20404,7 @@ app.post('/api/ai/infographics', async (req, res) => {
 
     const cleanPrompt = prompt.trim();
 
-    // Fetch Gemini API Key
-    let apiKey = '';
-    try {
-      const [stRows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-      if (stRows && stRows[0] && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
-        apiKey = String(stRows[0].geminiApiKey).trim();
-      }
-    } catch (e) {
-      // ignore
-    }
-    if (!apiKey && typeof localDb !== 'undefined' && localDb && localDb.settings && localDb.settings[0] && localDb.settings[0].geminiApiKey) {
-      apiKey = String(localDb.settings[0].geminiApiKey).trim();
-    }
-    if (!apiKey) {
-      apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    }
+    const apiKey = await getAppGeminiApiKey();
 
     if (!apiKey) {
       return res.status(400).json({ 
@@ -20402,71 +20413,70 @@ app.post('/api/ai/infographics', async (req, res) => {
       });
     }
 
-    const modelsToTry = DEFAULT_GEMINI_FALLBACK_MODELS;
-    let generatedData = null;
-
     const client = getGeminiClient(apiKey, req);
-
-    for (const modelName of modelsToTry) {
-        try {
-          const response = await client.models.generateContent({
-            model: modelName,
-            contents: `กรุณาออกแบบเนื้อหา โครงสร้างคู่สี และข้อมูลสถิติของภาพ Infographic ในหัวข้อ: "${cleanPrompt}"
+    const { response } = await callGeminiWithFallback({
+      client,
+      contents: `กรุณาออกแบบเนื้อหา โครงสร้างคู่สี และข้อมูลสถิติของภาพ Infographic ในหัวข้อ: "${cleanPrompt}"
 ให้ออกมาเป็นโครงสร้างภาษาไทยที่สวยงาม กระชับ และเหมาะสมกับหน่วยงานราชการหรือหัวข้อดังกล่าว`,
-            config: {
-              systemInstruction: `คุณคือ "Infographic AI Design Assistant" ที่ช่วยคิดเนื้อหาและคู่สีสำหรับการออกแบบภาพอินโฟกราฟิก
+      config: {
+        systemInstruction: `คุณคือ "Infographic AI Design Assistant" ที่ช่วยคิดเนื้อหาและคู่สีสำหรับการออกแบบภาพอินโฟกราฟิก
 กรุณาตอบกลับในรูปแบบ JSON ตามโครงสร้าง (responseSchema) ที่กำหนดให้เท่านั้น ห้ามมีคำเกริ่นนำหรือ markdown ล้อมรอบนอกเหนือจากโครงสร้าง JSON`,
-              responseMimeType: 'application/json',
-              responseSchema: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: 'หัวข้อหลักสั้นๆ เด่นๆ (Main Title)' },
+            subtitle: { type: Type.STRING, description: 'คำโปรยย่อยหรือคำอธิบายประกอบหัวข้อหลัก (Subtitle)' },
+            designAdvice: { type: Type.STRING, description: 'คำแนะนำสั้นๆ ในการออกแบบภาพ เช่น รูปแบบ ฟอนต์ หรืออารมณ์ของภาพ' },
+            colors: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'คู่สีที่แนะนำ 4-5 สี (HEX Codes เช่น #1e3a8a, #3b82f6) ที่เข้ากับหัวข้อดังกล่าวอย่างโดดเด่นและสบายตา'
+            },
+            textSections: {
+              type: Type.ARRAY,
+              items: {
                 type: Type.OBJECT,
                 properties: {
-                  title: { type: Type.STRING, description: 'หัวข้อหลักสั้นๆ เด่นๆ (Main Title)' },
-                  subtitle: { type: Type.STRING, description: 'คำโปรยย่อยหรือคำอธิบายประกอบหัวข้อหลัก (Subtitle)' },
-                  designAdvice: { type: Type.STRING, description: 'คำแนะนำสั้นๆ ในการออกแบบภาพ เช่น รูปแบบ ฟอนต์ หรืออารมณ์ของภาพ' },
-                  colors: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: 'คู่สีที่แนะนำ 4-5 สี (HEX Codes เช่น #1e3a8a, #3b82f6) ที่เข้ากับหัวข้อดังกล่าวอย่างโดดเด่นและสบายตา'
-                  },
-                  textSections: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        heading: { type: Type.STRING, description: 'หัวข้อย่อยสั้นกระชับ (เช่น "ขั้นตอนที่ 1", "การเตรียมพร้อม")' },
-                        body: { type: Type.STRING, description: 'รายละเอียดเนื้อหาที่กระชับ ไม่เกิน 1-2 ประโยค เพื่อให้อ่านง่ายบนภาพ' }
-                      },
-                      required: ['heading', 'body']
-                    },
-                    description: 'หัวข้อย่อยและเนื้อหาประกอบ 3-4 ส่วน'
-                  },
-                  stats: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        value: { type: Type.STRING, description: 'ตัวเลขสถิติหรือหน่วยเปอร์เซ็นต์เด่นๆ (เช่น "95%", "24 ชม.", "1,200 ราย")' },
-                        label: { type: Type.STRING, description: 'คำอธิบายสถิติดังกล่าว (เช่น "ความพึงพอใจ", "ระยะเวลาดำเนินการ")' },
-                        color: { type: Type.STRING, description: 'รหัสสีที่แนะนำสำหรับการเน้นตัวเลขสถิตินี้ เช่น #ef4444' }
-                      },
-                      required: ['value', 'label', 'color']
-                    },
-                    description: 'ตัวเลขสถิติหรือดัชนีชี้วัดเด่นๆ 2-3 ค่า'
-                  }
+                  heading: { type: Type.STRING, description: 'หัวข้อย่อยสั้นกระชับ (เช่น "ขั้นตอนที่ 1", "การเตรียมพร้อม")' },
+                  body: { type: Type.STRING, description: 'รายละเอียดเนื้อหาที่กระชับ ไม่เกิน 1-2 ประโยค เพื่อให้อ่านง่ายบนภาพ' }
                 },
-                required: ['title', 'subtitle', 'colors', 'textSections', 'stats', 'designAdvice']
-              }
+                required: ['heading', 'body']
+              },
+              description: 'หัวข้อย่อยและเนื้อหาประกอบ 3-4 ส่วน'
+            },
+            stats: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  value: { type: Type.STRING, description: 'ตัวเลขสถิติหรือหน่วยเปอร์เซ็นต์เด่นๆ (เช่น "95%", "24 ชม.", "1,200 ราย")' },
+                  label: { type: Type.STRING, description: 'คำอธิบายสถิติดังกล่าว (เช่น "ความพึงพอใจ", "ระยะเวลาดำเนินการ")' },
+                  color: { type: Type.STRING, description: 'รหัสสีที่แนะนำสำหรับการเน้นตัวเลขสถิตินี้ เช่น #ef4444' }
+                },
+                required: ['value', 'label', 'color']
+              },
+              description: 'ตัวเลขสถิติหรือดัชนีชี้วัดเด่นๆ 2-3 ค่า'
             }
-          });
-
-          if (response && response.text) {
-            generatedData = JSON.parse(response.text.trim());
-            break;
-          }
-        } catch (err: any) {
-          // continue to next model
+          },
+          required: ['title', 'subtitle', 'colors', 'textSections', 'stats', 'designAdvice']
         }
       }
+    });
+
+    let generatedData = null;
+    if (response && response.text) {
+      try {
+        generatedData = JSON.parse(response.text.trim());
+      } catch (e) {
+        // Handle potential text wrapping in response
+        const text = response.text();
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          generatedData = JSON.parse(jsonMatch[0]);
+        }
+      }
+    }
 
     if (!generatedData) {
       throw new Error('ระบบ AI ไม่สามารถประมวลผลคำขอได้ในขณะนี้ กรุณาตรวจสอบการตั้งค่าคีย์หรือลองใหม่อีกครั้ง');
@@ -20885,6 +20895,9 @@ app.post('/api/urgent-incidents', async (req, res) => {
       values
     );
 
+    // Trigger Email Notification
+    notifyWorkChange(newRecord, 'CREATE', 'urgent_incident').catch(err => console.warn('Notification failed:', err.message));
+
     res.json({
       success: true,
       message: 'บันทึกแบบรายงานเหตุด่วนสาธารณภัยลง MySQL สำเร็จ',
@@ -20944,6 +20957,9 @@ app.put('/api/urgent-incidents/:id', async (req, res) => {
       );
     }
 
+    // Trigger Email Notification
+    notifyWorkChange(updatedRecord, 'UPDATE', 'urgent_incident').catch(err => console.warn('Notification failed:', err.message));
+
     res.json({
       success: true,
       message: 'อัปเดตแบบรายงานเหตุด่วนสาธารณภัยลง MySQL เรียบร้อย',
@@ -20959,11 +20975,20 @@ app.delete('/api/urgent-incidents/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
+    // Fetch before delete for notification
+    const [rows]: any = await pool.query('SELECT * FROM urgent_incidents WHERE id = ?', [id]);
+    const docToDelete = rows && rows.length > 0 ? mapIncidentFromDb(rows[0]) : null;
+
     const [result]: any = await pool.query('DELETE FROM urgent_incidents WHERE id = ?', [id]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, error: 'ไม่พบรายงานเหตุด่วนที่ต้องการลบในระบบ' });
     }
     
+    // Trigger Email Notification
+    if (docToDelete) {
+      notifyWorkChange(docToDelete, 'DELETE', 'urgent_incident').catch(err => console.warn('Notification failed:', err.message));
+    }
+
     res.json({ success: true, message: 'ลบแบบรายงานเหตุด่วนสาธารณภัยจาก MySQL เรียบร้อย' });
   } catch (err: any) {
     console.error('Error deleting urgent incident from MySQL:', err);
@@ -21039,6 +21064,10 @@ export async function sendNotificationEmail(
   subject: string,
   htmlContent: string
 ) {
+  if (smtpBlocked) {
+    console.log(`[Email Notification Skipped] SMTP blocked due to previous IP/Auth errors. Cannot send "${subject}".`);
+    return;
+  }
   try {
     let settings: any = {};
     if (isMysqlOnline) {
@@ -21098,6 +21127,7 @@ export async function sendNotificationEmail(
         if (
           fullName === target ||
           username === target ||
+          department === target ||
           (target.length > 2 && (fullName.includes(target) || username.includes(target)))
         ) {
           matchingEmails.add(String(u.email).trim());
@@ -21136,6 +21166,12 @@ export async function sendNotificationEmail(
 
     transporter.sendMail(mailOptions, async (err: any, info: any) => {
       if (err) {
+        const isIpError = err.message.includes('525') || err.message.includes('5.7.1') || err.message.includes('Unauthorized IP');
+        if (isIpError) {
+          smtpBlocked = true;
+          console.error('SMTP Authentication Error (IP/Auth): Disabling email notifications for the remainder of this session.', err.message);
+          return;
+        }
         console.error('Error sending notification email:', err.message);
         await addSystemLog('EMAIL_FAILED', `ส่งอีเมลแจ้งเตือน "${subject}" ไปยัง ${recipientList.join(', ')} ไม่สำเร็จ: ${err.message}`, 'ระบบอัตโนมัติ', '127.0.0.1');
       } else {
@@ -21145,6 +21181,80 @@ export async function sendNotificationEmail(
     });
   } catch (err: any) {
     console.error('sendNotificationEmail Error:', err.message);
+  }
+}
+
+/**
+ * Helper to notify work change (Create, Update, Delete) via Email
+ */
+export async function notifyWorkChange(doc: any, action: 'CREATE' | 'UPDATE' | 'DELETE', type: string) {
+  const typeMap: any = {
+    inbox: 'หนังสือรับ',
+    outbox: 'หนังสือส่ง',
+    circular: 'หนังสือเวียน',
+    internal: 'บันทึกข้อความ',
+    admin: 'งานธุรการ/ประกาศ',
+    urgent_incident: 'รายงานเหตุด่วนสาธารณภัย'
+  };
+
+  const actionMap: any = {
+    CREATE: 'เพิ่ม/ลงทะเบียน',
+    UPDATE: 'แก้ไข/อัปเดต',
+    DELETE: 'ลบ (ย้ายไปคลังกู้คืน)'
+  };
+
+  const docTitle = doc.title || doc.docNumber || doc.location || 'ไม่ระบุชื่อ';
+  const docTypeLabel = typeMap[type] || type;
+  const actionLabel = actionMap[action] || action;
+  
+  const subject = `[แจ้งเตือน] ${actionLabel}${docTypeLabel}: ${docTitle}`;
+  const htmlContent = `
+    <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+      <h2 style="color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px;">การแจ้งเตือนจากระบบ EDMS</h2>
+      <p>เรียน ท่านผู้เกี่ยวข้อง,</p>
+      <p>มีการ <strong>${actionLabel}</strong> ข้อมูลในส่วนของ <strong>${docTypeLabel}</strong> ในระบบเรียบร้อยแล้ว ดังนี้:</p>
+      <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 5px 0; color: #64748b; width: 140px;"><strong>เรื่อง/สถานที่:</strong></td>
+            <td style="padding: 5px 0;">${docTitle}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>เลขที่:</strong></td>
+            <td style="padding: 5px 0;">${doc.docNumber || doc.receiveNumber || '-'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>วันที่:</strong></td>
+            <td style="padding: 5px 0;">${doc.date || doc.docDate || '-'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>ผู้รับผิดชอบ:</strong></td>
+            <td style="padding: 5px 0;">${doc.assignee || doc.reporterName || '-'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>สถานะ:</strong></td>
+            <td style="padding: 5px 0;"><span style="background-color: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">${doc.status || 'ปกติ'}</span></td>
+          </tr>
+        </table>
+      </div>
+      <p style="font-size: 0.9em; color: #666; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
+        ท่านได้รับอีเมลนี้เนื่องจากระบบตรวจพบว่าท่านเป็นผู้เกี่ยวข้องกับงานชิ้นนี้ และท่านได้เปิดการแจ้งเตือนทางอีเมลไว้ในเมนูตั้งค่าโปรไฟล์
+      </p>
+      <p style="font-size: 0.8em; color: #94a3b8; text-align: center;">นี่คือการแจ้งเตือนอัตโนมัติจากระบบ กรุณาอย่าตอบกลับอีเมลนี้</p>
+    </div>
+  `;
+
+  const targets = new Set<string>();
+  if (doc.assignee) targets.add(doc.assignee);
+  if (doc.createdBy) targets.add(doc.createdBy);
+  if (doc.reporterName) targets.add(doc.reporterName);
+  if (doc.fromPerson) targets.add(doc.fromPerson);
+  if (doc.toPerson) targets.add(doc.toPerson);
+
+  const targetList = Array.from(targets).filter(t => t && t !== 'ผู้ดูแลระบบ' && t !== 'Admin');
+
+  if (targetList.length > 0) {
+    await sendNotificationEmail(targetList, subject, htmlContent);
   }
 }
 

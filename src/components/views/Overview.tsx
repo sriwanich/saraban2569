@@ -42,26 +42,38 @@ export default function Overview({ documents, user, onCreateDoc, onViewDoc, enab
   // Filtered Documents
   const filteredDocs = useMemo(() => {
     return documents.filter(doc => {
-      // Filter out disabled feature types
       if (doc.type === 'inbox' && !showInbox) return false;
       if (doc.type === 'outbox' && !showOutbox) return false;
       if (doc.type === 'admin' && !showAdmin) return false;
-
       const matchYear = selectedYear === 'all' || doc.year === selectedYear;
       const matchType = selectedType === 'all' || doc.type === selectedType;
       return matchYear && matchType;
     });
   }, [documents, selectedYear, selectedType, showInbox, showOutbox, showAdmin]);
 
-  // Core Counts
   const totalCount = filteredDocs.length;
-  const inboxDocs = filteredDocs.filter(d => d.type === 'inbox');
-  const outboxDocs = filteredDocs.filter(d => d.type === 'outbox');
-  const adminDocs = filteredDocs.filter(d => d.type === 'admin');
 
-  const inboxDocsList = useMemo(() => filteredDocs.filter(d => d.type === 'inbox'), [filteredDocs]);
-  const outboxDocsList = useMemo(() => filteredDocs.filter(d => d.type === 'outbox'), [filteredDocs]);
-  const adminDocsList = useMemo(() => filteredDocs.filter(d => d.type === 'admin'), [filteredDocs]);
+  // Filtered Documents Categorization
+  const categorizedDocs = useMemo(() => {
+    const inbox: DocumentItem[] = [];
+    const outbox: DocumentItem[] = [];
+    const admin: DocumentItem[] = [];
+
+    filteredDocs.forEach(doc => {
+      if (doc.type === 'inbox') inbox.push(doc);
+      else if (doc.type === 'outbox') outbox.push(doc);
+      else if (doc.type === 'admin') admin.push(doc);
+    });
+
+    return { inbox, outbox, admin };
+  }, [filteredDocs]);
+
+  const { inbox: inboxDocsList, outbox: outboxDocsList, admin: adminDocsList } = categorizedDocs;
+
+  // For compatibility with any direct references to these variables
+  const inboxDocs = inboxDocsList;
+  const outboxDocs = outboxDocsList;
+  const adminDocs = adminDocsList;
 
   const itemsPerPage = 5;
 
