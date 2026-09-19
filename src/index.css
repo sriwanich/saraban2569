@@ -235,3 +235,67 @@
   50% { transform: translateX(30%); }
   100% { transform: translateX(200%); }
 }
+
+/* Infographics Editor System Theme Integration */
+.light-editor {
+  background-color: var(--bg-base) !important;
+  color: var(--text-primary) !important;
+}
+
+.light-editor header,
+.light-editor footer,
+.light-editor .bg-\[\#18181b\],
+.light-editor .bg-\[\#141416\],
+.light-editor .bg-\[\#121214\] {
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-light) !important;
+}
+
+.light-editor .bg-\[\#111113\] {
+  background-color: var(--bg-base) !important;
+}
+
+.light-editor .border-\[\#27272a\],
+.light-editor .border-gray-800,
+.light-editor .border-gray-700 {
+  border-color: var(--border-light) !important;
+}
+
+.light-editor input[type="text"],
+.light-editor input[type="number"],
+.light-editor select,
+.light-editor textarea {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-medium) !important;
+  color: var(--text-primary) !important;
+}
+
+.light-editor input::placeholder,
+.light-editor textarea::placeholder {
+  color: var(--text-muted) !important;
+}
+
+.light-editor .text-gray-100,
+.light-editor .text-gray-200,
+.light-editor .text-gray-300 {
+  color: var(--text-primary) !important;
+}
+
+.light-editor .text-gray-400,
+.light-editor .text-gray-500 {
+  color: var(--text-secondary) !important;
+}
+
+.light-editor .hover\:bg-gray-800:hover,
+.light-editor .hover\:bg-gray-700:hover {
+  background-color: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+}
+
+.light-editor .bg-gray-800,
+.light-editor .bg-gray-900 {
+  background-color: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+}
+

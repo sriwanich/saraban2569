@@ -636,9 +636,6 @@ export const PublicInfographicsViewer: React.FC = () => {
                   }}
                 />
               )}
-              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] font-bold">
-                EDMS Infographics
-              </span>
               <div>
                 <h1 className="font-bold text-sm sm:text-base font-sans text-white line-clamp-1">
                   {data?.name || 'Infographic Presentation'}

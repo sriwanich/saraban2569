@@ -19,7 +19,8 @@ import {
   Briefcase, Scale, Building2, Share2, FileSignature, QrCode, Gift, Percent,
   Coins, DollarSign, Megaphone, CheckCheck, Workflow, ShieldCheck as ShieldCheckIcon,
   Ruler, Magnet, Crosshair, Columns, EyeOff, Maximize2, Minimize2, Scaling, Expand, Shrink, Smartphone, Monitor,
-  Upload, RotateCcw, Crop, MoreHorizontal, Menu, ChevronDown, AlignHorizontalSpaceAround, AlignVerticalSpaceAround
+  Upload, RotateCcw, Crop, MoreHorizontal, MoreVertical, Menu, ChevronDown, AlignHorizontalSpaceAround, AlignVerticalSpaceAround,
+  Sun, Moon
 } from 'lucide-react';
 
 import { InfographicsGalleryModal } from './InfographicsGalleryModal';
@@ -75,12 +76,33 @@ const ICON_LIBRARY = [
 ];
 
 interface InfographicsEditorViewProps {
-  user: any;
+  user?: any;
+  systemTheme?: 'light' | 'dark' | 'auto';
+  isSystemDark?: boolean;
 }
 
-export default function InfographicsEditorView({ user }: InfographicsEditorViewProps) {
+export default function InfographicsEditorView({ user, systemTheme = 'auto', isSystemDark }: InfographicsEditorViewProps) {
   const { confirm } = useConfirm();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // System theme preference & synchronization
+  const [themePreference, setThemePreference] = useState<'auto' | 'dark' | 'light'>(() => {
+    return (localStorage.getItem('infographics_editor_theme_pref') as 'auto' | 'dark' | 'light') || 'auto';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('infographics_editor_theme_pref', themePreference);
+  }, [themePreference]);
+
+  const isEffectiveDark = React.useMemo(() => {
+    if (themePreference === 'dark') return true;
+    if (themePreference === 'light') return false;
+    // 'auto' mode: follow systemTheme / app theme
+    if (systemTheme === 'dark') return true;
+    if (systemTheme === 'light') return false;
+    if (isSystemDark !== undefined) return isSystemDark;
+    return typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  }, [themePreference, systemTheme, isSystemDark]);
   const [fabricLoaded, setFabricLoaded] = useState(false);
   const [fabricError, setFabricError] = useState<string | null>(null);
   const [canvas, setCanvas] = useState<any>(null);
@@ -135,6 +157,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   // Mobile navigation tabs: 'canvas', 'layers', 'tools', 'properties'
   const [mobileTab, setMobileTab] = useState<'canvas' | 'layers' | 'tools' | 'properties'>('canvas');
   const [showMobileMoreMenu, setShowMobileMoreMenu] = useState(false);
+  const [showMobileDrawer, setShowMobileDrawer] = useState(false);
 
   // Toast / Notifications
   const [saveToast, setSaveToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -142,7 +165,6 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   // Design Canvas settings
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 1200 });
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
-  const [themeMode, setThemeMode] = useState<'dark' | 'light'>('dark');
 
   // Properties form states (synchronized with selected canvas object)
   const [objX, setObjX] = useState<number | ''>('');
@@ -1539,20 +1561,15 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#111113] text-gray-200 select-none overflow-hidden font-sans">
+    <div className={`flex flex-col h-screen select-none overflow-hidden font-sans transition-colors duration-200 ${
+      isEffectiveDark ? 'dark-editor bg-[#111113] text-gray-200' : 'light-editor bg-[var(--bg-base)] text-[var(--text-primary)]'
+    }`}>
       
       {/* 1. TOP HEADER: Premium Penpot Branded Header */}
       <header className="h-14 bg-[#18181b] border-b border-[#27272a] px-4 flex items-center justify-between shrink-0 select-none z-40">
         
-        {/* Brand Logo & Project Title */}
+        {/* Project Title & Controls */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 py-1 px-3 rounded-lg bg-gradient-to-br from-[#1e40af] via-[#3b82f6] to-[#6366f1] shadow-[0_4px_12px_rgba(59,130,246,0.3)] border border-white/10 ring-1 ring-white/5">
-            <ShieldCheck className="w-5 h-5 text-white shadow-sm" />
-            <span className="text-sm font-black text-white tracking-[0.1em] uppercase">EDMS CREATIVE</span>
-          </div>
-          
-          <div className="h-5 w-px bg-gray-700 hidden sm:block"></div>
-
           {/* Project Name editable directly */}
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
@@ -1604,6 +1621,37 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
         {/* Enterprise Collaboration & Help */}
         <div className="flex items-center gap-2 mr-2">
+          {/* Theme Selector (Syncs with system theme by default) */}
+          <button 
+            onClick={() => {
+              const nextPref = themePreference === 'auto' ? 'light' : themePreference === 'light' ? 'dark' : 'auto';
+              setThemePreference(nextPref);
+            }}
+            className={`px-2.5 py-1 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold border shadow-xs cursor-pointer ${
+              isEffectiveDark 
+                ? 'bg-gray-800/80 text-gray-200 hover:bg-gray-700 border-gray-700' 
+                : 'bg-indigo-50/80 text-indigo-900 hover:bg-indigo-100 border-indigo-200'
+            }`}
+            title={`ธีม Infographics: ${themePreference === 'auto' ? 'ตามธีมระบบ' : themePreference === 'light' ? 'โหมดสว่าง' : 'โหมดมืด'} (คลิกเพื่อเปลี่ยน)`}
+          >
+            {themePreference === 'auto' ? (
+              <>
+                <Monitor className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-[10px] hidden sm:inline">ตามระบบ</span>
+              </>
+            ) : themePreference === 'light' ? (
+              <>
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span className="text-[10px] hidden sm:inline">สว่าง</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-[10px] hidden sm:inline">มืด</span>
+              </>
+            )}
+          </button>
+
           <button 
             onClick={() => setShowShortcutsModal(true)}
             className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-1"
@@ -1633,6 +1681,16 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
           <div className="h-4 w-px bg-gray-700 hidden md:block"></div>
           
+          {/* AI Generator Button */}
+          <button
+            onClick={() => { setActiveSidebarTab('ai'); setShowMobileDrawer(true); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-purple-500/20 transition-all cursor-pointer"
+            title="AI อัจฉริยะช่วยคิดเนื้อหาและคำไทย"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-pink-200" />
+            <span className="hidden sm:inline">AI ช่วยสร้าง</span>
+          </button>
+
           {/* Gallery Open */}
           <button
             onClick={() => setShowGalleryModal(true)}
@@ -1673,9 +1731,9 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
 
           {/* Export Dropdown options */}
           <div className="relative group">
-            <button className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black shadow-lg shadow-indigo-500/20 transition-all">
+            <button className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black shadow-lg shadow-indigo-500/20 transition-all">
               <Download className="w-3.5 h-3.5" />
-              <span>ส่งออก</span>
+              <span className="hidden sm:inline">ส่งออก</span>
               <ChevronDown className="w-3.5 h-3.5 opacity-60" />
             </button>
             <div className="absolute right-0 top-full mt-1.5 w-52 bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl py-2 hidden group-hover:block z-50 overflow-hidden">
@@ -1721,8 +1779,98 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
               </div>
             </div>
           </div>
+
+          {/* Mobile Header Menu toggle button */}
+          <button
+            onClick={() => setShowMobileMoreMenu(!showMobileMoreMenu)}
+            className="lg:hidden p-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl flex items-center justify-center"
+            title="เครื่องมือเพิ่มเติม (More Options)"
+          >
+            <MoreVertical className="w-4 h-4 text-indigo-400" />
+          </button>
         </div>
       </header>
+
+      {/* Mobile Header Menu Overlay Sheet */}
+      {showMobileMoreMenu && (
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-3 sm:p-6">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMobileMoreMenu(false)} />
+          <div className="relative w-full max-w-md bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl p-4 z-10 space-y-3 animate-in fade-in slide-in-from-bottom duration-200">
+            <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
+              <span className="text-xs font-bold text-gray-200 flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-indigo-400" />
+                เครื่องมือ & คำสั่งด่วน
+              </span>
+              <button onClick={() => setShowMobileMoreMenu(false)} className="p-1 hover:bg-gray-800 rounded text-gray-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { canvas?.undo(); setShowMobileMoreMenu(false); }}
+                className="flex items-center gap-2 p-2.5 bg-[#121214] hover:bg-gray-800 border border-gray-800 rounded-xl text-xs text-gray-200"
+              >
+                <Undo className="w-4 h-4 text-sky-400" />
+                <span>ย้อนกลับ (Undo)</span>
+              </button>
+              <button
+                onClick={() => { canvas?.redo(); setShowMobileMoreMenu(false); }}
+                className="flex items-center gap-2 p-2.5 bg-[#121214] hover:bg-gray-800 border border-gray-800 rounded-xl text-xs text-gray-200"
+              >
+                <Redo className="w-4 h-4 text-sky-400" />
+                <span>ทำซ้ำ (Redo)</span>
+              </button>
+              <button
+                onClick={() => { setGridVisible(!gridVisible); setShowMobileMoreMenu(false); }}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs ${gridVisible ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-[#121214] border-gray-800 text-gray-200'}`}
+              >
+                <Grid className="w-4 h-4" />
+                <span>ตาราง (Grid)</span>
+              </button>
+              <button
+                onClick={() => { setShowRulers(!showRulers); setShowMobileMoreMenu(false); }}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs ${showRulers ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-[#121214] border-gray-800 text-gray-200'}`}
+              >
+                <Ruler className="w-4 h-4" />
+                <span>ไม้บรรทัด (Rulers)</span>
+              </button>
+              <button
+                onClick={() => { setShowGalleryModal(true); setShowMobileMoreMenu(false); }}
+                className="flex items-center gap-2 p-2.5 bg-[#121214] hover:bg-gray-800 border border-gray-800 rounded-xl text-xs text-gray-200"
+              >
+                <FolderOpen className="w-4 h-4 text-sky-400" />
+                <span>คลังงาน (Gallery)</span>
+              </button>
+              <button
+                onClick={() => { setShowShortcutsModal(true); setShowMobileMoreMenu(false); }}
+                className="flex items-center gap-2 p-2.5 bg-[#121214] hover:bg-gray-800 border border-gray-800 rounded-xl text-xs text-gray-200"
+              >
+                <Keyboard className="w-4 h-4 text-amber-400" />
+                <span>คีย์ลัด (Shortcuts)</span>
+              </button>
+            </div>
+
+            <div className="pt-2 border-t border-[#27272a] space-y-1.5">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">ส่งออกไฟล์ (Export Options)</span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => { handleExportFile('png'); setShowMobileMoreMenu(false); }}
+                  className="p-2 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white rounded-xl text-xs font-bold text-center"
+                >
+                  PNG High-Res
+                </button>
+                <button
+                  onClick={() => { handleExportFile('pdf'); setShowMobileMoreMenu(false); }}
+                  className="p-2 bg-rose-600/20 hover:bg-rose-600 border border-rose-500/30 text-rose-300 hover:text-white rounded-xl text-xs font-bold text-center"
+                >
+                  PDF Document
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Keyboard Shortcuts Modal (Enterprise Help) */}
       {showShortcutsModal && (
@@ -1824,10 +1972,10 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
         <div className="flex shrink-0 border-r border-[#27272a] bg-[#18181b] z-10">
           
           {/* Vertical Compact Tab Bar */}
-          <div className="w-14 bg-[#141416] flex flex-col items-center py-4 gap-3">
+          <div className="w-14 bg-[#141416] flex flex-col items-center py-3 gap-2.5 shrink-0 z-20 overflow-y-auto max-h-full scrollbar-none select-none">
             
             <button
-              onClick={() => setActiveSidebarTab('layers')}
+              onClick={() => { setActiveSidebarTab('layers'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'layers' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="เลเยอร์ & รายการวัตถุ (Layers)"
             >
@@ -1836,7 +1984,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('pages')}
+              onClick={() => { setActiveSidebarTab('pages'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'pages' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="แผ่นงานหลายหน้า (Pages / Slides)"
             >
@@ -1845,7 +1993,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('shapes')}
+              onClick={() => { setActiveSidebarTab('shapes'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'shapes' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="รูปทรงเวกเตอร์ (Shapes)"
             >
@@ -1854,7 +2002,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('text')}
+              onClick={() => { setActiveSidebarTab('text'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="ตัวหนังสือ (Typography)"
             >
@@ -1863,7 +2011,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('images')}
+              onClick={() => { setActiveSidebarTab('images'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'images' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="รูปภาพและอัปโหลด (Upload Images)"
             >
@@ -1872,7 +2020,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('icons')}
+              onClick={() => { setActiveSidebarTab('icons'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'icons' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="สัญลักษณ์และไอคอน (Icons)"
             >
@@ -1881,7 +2029,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('background')}
+              onClick={() => { setActiveSidebarTab('background'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'background' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="สีกระดาษและพื้นหลัง (Background)"
             >
@@ -1890,7 +2038,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('graphite')}
+              onClick={() => { setActiveSidebarTab('graphite'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'graphite' ? 'bg-[#1e1e24] border border-[#ff8c00]/30 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="Graphite Node & Non-destructive Vector Effects (โนดกราไฟต์)"
             >
@@ -1899,7 +2047,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('templates')}
+              onClick={() => { setActiveSidebarTab('templates'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'templates' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="กล่องโมดูลเวกเตอร์พร้อมใช้"
             >
@@ -1908,7 +2056,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('ai')}
+              onClick={() => { setActiveSidebarTab('ai'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'ai' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="AI อัจฉริยะ (Smart AI Designer)"
             >
@@ -1917,7 +2065,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
 
             <button
-              onClick={() => setActiveSidebarTab('canvas-settings')}
+              onClick={() => { setActiveSidebarTab('canvas-settings'); setShowMobileDrawer(true); }}
               className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'canvas-settings' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="ขนาดกระดาษ & พื้นหลัง (Board Presets)"
             >
@@ -1937,8 +2085,47 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             </button>
           </div>
 
+          {/* Mobile Drawer Backdrop Overlay */}
+          {showMobileDrawer && (
+            <div
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs z-30 md:hidden"
+              onClick={() => setShowMobileDrawer(false)}
+            />
+          )}
+
           {/* Drawer Sub-panel (Vary by selected tab) */}
-          <div className="w-64 bg-[#18181b] p-4 flex flex-col overflow-y-auto shrink-0 border-r border-[#27272a] hidden md:flex">
+          <div className={`bg-[#18181b] flex flex-col shrink-0 border-r border-[#27272a] z-30 ${showMobileDrawer ? 'fixed inset-y-0 left-14 w-[calc(100vw-4.5rem)] max-w-[290px] shadow-2xl animate-in slide-in-from-left duration-200' : 'hidden md:flex w-64'}`}>
+            
+            {/* Sticky Header with Always-Visible Close Button */}
+            <div className="flex items-center justify-between p-3 border-b border-[#27272a] bg-[#18181b] shrink-0 z-10">
+              <span className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5 truncate">
+                <Sliders className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="truncate">
+                  {activeSidebarTab === 'layers' && 'เลเยอร์ & รายการวัตถุ'}
+                  {activeSidebarTab === 'pages' && 'แผ่นงานหลายหน้า'}
+                  {activeSidebarTab === 'shapes' && 'รูปทรงเวกเตอร์'}
+                  {activeSidebarTab === 'text' && 'ตัวหนังสือ (Typography)'}
+                  {activeSidebarTab === 'images' && 'รูปภาพ & อัปโหลด'}
+                  {activeSidebarTab === 'icons' && 'สัญลักษณ์ & ไอคอน'}
+                  {activeSidebarTab === 'background' && 'สีกระดาษ & พื้นหลัง'}
+                  {activeSidebarTab === 'graphite' && 'กราไฟต์โนด'}
+                  {activeSidebarTab === 'templates' && 'โมดูลพร้อมใช้'}
+                  {activeSidebarTab === 'ai' && 'AI ช่วยสร้างคำ'}
+                  {activeSidebarTab === 'canvas-settings' && 'ขนาดกระดาษ'}
+                </span>
+              </span>
+              <button 
+                onClick={() => setShowMobileDrawer(false)} 
+                className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg flex items-center gap-1 text-[11px] font-bold transition-all shrink-0 ml-2 cursor-pointer"
+                title="ปิดหน้าต่าง (Close Drawer)"
+              >
+                <X className="w-4 h-4 text-rose-400" />
+                <span>ปิด</span>
+              </button>
+            </div>
+
+            {/* Scrollable Content Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
             
             {/* 2BB: Polotno Style Vector Icons Search Tab */}
             {activeSidebarTab === 'icons' && (
@@ -2830,27 +3017,48 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
             {/* 2F: AI content generator (Gemini integration) */}
             {activeSidebarTab === 'ai' && (
               <div className="space-y-4">
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5 pb-1 border-b border-gray-800">
                   <Sparkles className="w-4 h-4 text-pink-400" />
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Gemini ช่วยคิดคำและหัวข้อ</h3>
+                  <h3 className="text-xs font-bold text-gray-200 uppercase tracking-wider">AI ช่วยคิดคำ & หัวข้อข่าว</h3>
                 </div>
                 
-                <p className="text-[10px] text-gray-500 font-sans leading-relaxed">
-                  กรอกคำค้นหรือแนวทางที่ต้องการให้ AI ช่วยออกแบบเนื้อหาภาษาไทย (เช่น แผนรับมือน้ำท่วมรวดเร็ว 3 บรรทัด) แล้วคลิกสร้างเพื่อนำข้อความไปวางลงบนกระดาษทันที
+                <p className="text-[10px] text-gray-400 font-sans leading-relaxed">
+                  กรอกคำค้นหรือแนวทางที่ต้องการให้ AI ช่วยออกแบบเนื้อหาภาษาไทย แล้วกดปุ่มประมวลผลเพื่อนำข้อความไปวางลงบนกระดาษทันที
                 </p>
+
+                {/* Quick Prompt Chips */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">ตัวอย่างคำสั่งด่วน:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'หัวข้อข่าวประชาสัมพันธ์สั้นๆ 1 ประโยค',
+                      'สรุปแนวทางรับมืออุทกภัย 3 ข้อกระชับ',
+                      'สถิติผลงานประจำปี สรุปตัวเลขน่าสนใจ',
+                      'คำขวัญและป้ายเตือนภัยสาธารณภัย'
+                    ].map((samplePrompt, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setAiPrompt(samplePrompt)}
+                        className="px-2 py-1 rounded-lg bg-[#121214] hover:bg-purple-600/20 border border-gray-800 hover:border-purple-500/50 text-[10px] text-gray-300 hover:text-purple-300 transition-all text-left"
+                      >
+                        ⚡ {samplePrompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <textarea
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="พิมพ์หัวข้อหรือคำสั่งให้ AI คิดคำ..."
+                  placeholder="พิมพ์หัวข้อ หรือ เลือกคำสั่งด่วนด้านบน..."
                   rows={4}
-                  className="w-full bg-[#121214] border border-[#27272a] rounded-xl p-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500 font-sans resize-none"
+                  className="w-full bg-[#121214] border border-[#27272a] rounded-xl p-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-purple-500 font-sans resize-none"
                 />
 
                 <button
                   onClick={handleGenerateAIContent}
                   disabled={aiGenerating || !aiPrompt.trim()}
-                  className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-pink-500/10 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   {aiGenerating ? (
                     <>
@@ -2984,6 +3192,7 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
 
@@ -3581,23 +3790,111 @@ export default function InfographicsEditorView({ user }: InfographicsEditorViewP
       )}
 
       {mobileTab === 'tools' && (
-        <div className="fixed inset-x-0 bottom-14 bg-[#18181b]/95 backdrop-blur-md z-30 p-4 border-t border-[#27272a] shadow-2xl grid grid-cols-4 gap-2.5 animate-slideUp">
-          <button onClick={() => { handleInsertShape('rect'); setMobileTab('canvas'); }} className="flex flex-col items-center p-2 bg-[#121214] rounded-xl text-xs">
-            <Square className="w-5 h-5 mb-1 text-indigo-400" />
-            <span>สี่เหลี่ยม</span>
-          </button>
-          <button onClick={() => { handleInsertShape('circle'); setMobileTab('canvas'); }} className="flex flex-col items-center p-2 bg-[#121214] rounded-xl text-xs">
-            <Circle className="w-5 h-5 mb-1 text-indigo-400" />
-            <span>วงกลม</span>
-          </button>
-          <button onClick={() => { handleInsertText('h2'); setMobileTab('canvas'); }} className="flex flex-col items-center p-2 bg-[#121214] rounded-xl text-xs">
-            <Type className="w-5 h-5 mb-1 text-indigo-400" />
-            <span>ข้อความ</span>
-          </button>
-          <button onClick={() => { toggleDrawMode(); setMobileTab('canvas'); }} className="flex flex-col items-center p-2 bg-[#121214] rounded-xl text-xs">
-            <PenTool className="w-5 h-5 mb-1 text-indigo-400" />
-            <span>วาดเขียน</span>
-          </button>
+        <div className="fixed inset-x-0 bottom-14 max-h-[70vh] overflow-y-auto bg-[#18181b]/95 backdrop-blur-md z-30 p-4 border-t border-[#27272a] shadow-2xl space-y-3 animate-slideUp">
+          <div className="flex justify-between items-center pb-2 border-b border-gray-800">
+            <span className="text-xs font-bold text-gray-200">เมนูเครื่องมือทั้งหมด (All Menus)</span>
+            <button onClick={() => setMobileTab('canvas')} className="p-1 hover:bg-gray-800 rounded text-gray-400">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+            <button
+              onClick={() => { setActiveSidebarTab('pages'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Columns className="w-5 h-5 text-emerald-400" />
+              <span className="text-[10px] font-bold text-gray-200">หน้ากระดาษ</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('layers'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Layers className="w-5 h-5 text-indigo-400" />
+              <span className="text-[10px] font-bold text-gray-200">เลเยอร์</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('shapes'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Shapes className="w-5 h-5 text-sky-400" />
+              <span className="text-[10px] font-bold text-gray-200">รูปทรง</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('text'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Type className="w-5 h-5 text-amber-400" />
+              <span className="text-[10px] font-bold text-gray-200">ข้อความ</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('images'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <ImageIcon className="w-5 h-5 text-purple-400" />
+              <span className="text-[10px] font-bold text-gray-200">รูปภาพ</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('icons'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Sticker className="w-5 h-5 text-pink-400" />
+              <span className="text-[10px] font-bold text-gray-200">ไอคอน</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('background'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Palette className="w-5 h-5 text-amber-500" />
+              <span className="text-[10px] font-bold text-gray-200">พื้นหลัง</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('templates'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <LayoutGrid className="w-5 h-5 text-blue-400" />
+              <span className="text-[10px] font-bold text-gray-200">โมดูล</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('ai'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Sparkles className="w-5 h-5 text-fuchsia-400" />
+              <span className="text-[10px] font-bold text-gray-200">AI ผู้ช่วย</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('graphite'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Workflow className="w-5 h-5 text-orange-400" />
+              <span className="text-[10px] font-bold text-gray-200">กราไฟต์</span>
+            </button>
+
+            <button
+              onClick={() => { setActiveSidebarTab('canvas-settings'); setShowMobileDrawer(true); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <Sliders className="w-5 h-5 text-teal-400" />
+              <span className="text-[10px] font-bold text-gray-200">ตั้งค่ากระดาษ</span>
+            </button>
+
+            <button
+              onClick={() => { toggleDrawMode(); setMobileTab('canvas'); }}
+              className="flex flex-col items-center justify-center p-3 bg-[#121214] hover:bg-indigo-600/20 border border-gray-800 hover:border-indigo-500 rounded-xl text-xs gap-1.5 transition-all text-center"
+            >
+              <PenTool className="w-5 h-5 text-rose-400" />
+              <span className="text-[10px] font-bold text-gray-200">ปากกาเขียน</span>
+            </button>
+          </div>
         </div>
       )}
 
