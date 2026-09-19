@@ -899,7 +899,7 @@ export default function Login({ onLogin }: LoginProps) {
                 <form onSubmit={handleSubmit} className="space-y-5 animate-fade-in">
                   <div>
                     <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5 font-sans transition-colors" htmlFor="username">
-                      ชื่อผู้ใช้งาน (Username)
+                      ชื่อผู้ใช้งาน หรือ อีเมล (Username / Email)
                     </label>
                     <div className="relative group">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors">
@@ -911,7 +911,7 @@ export default function Login({ onLogin }: LoginProps) {
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
                         className="block w-full pl-11 pr-4 py-3 border border-[var(--border-medium)] rounded-xl bg-[var(--bg-canvas)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent transition-all font-sans"
-                        placeholder="กรอกชื่อผู้ใช้งาน"
+                        placeholder="กรอกชื่อผู้ใช้งาน หรืออีเมล"
                         autoComplete="username"
                         required
                       />

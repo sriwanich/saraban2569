@@ -3392,19 +3392,19 @@ function loadLocalDb() {
         { role: 'moderator', permission_key: 'workflow_sla', is_allowed: 1 },
         { role: 'moderator', permission_key: 'digital_signatures', is_allowed: 1 },
         { role: 'moderator', permission_key: 'recycle_bin', is_allowed: 1 },
-        { role: 'moderator', permission_key: 'manage_users', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'manage_users', is_allowed: 0 },
         { role: 'moderator', permission_key: 'system_settings', is_allowed: 0 },
         { role: 'moderator', permission_key: 'backup_restore', is_allowed: 0 },
         { role: 'moderator', permission_key: 'audit_logs', is_allowed: 0 },
         { role: 'moderator', permission_key: 'manage_changelog', is_allowed: 0 },
-        // user (9 permissions)
+        // user (10 permissions)
         { role: 'user', permission_key: 'view_all_docs', is_allowed: 0 },
         { role: 'user', permission_key: 'create_docs', is_allowed: 1 },
         { role: 'user', permission_key: 'edit_all_docs', is_allowed: 0 },
         { role: 'user', permission_key: 'delete_docs', is_allowed: 0 },
         { role: 'user', permission_key: 'approve_docs', is_allowed: 0 },
         { role: 'user', permission_key: 'export_docs', is_allowed: 1 },
-        { role: 'user', permission_key: 'admin_docs', is_allowed: 0 },
+        { role: 'user', permission_key: 'admin_docs', is_allowed: 1 },
         { role: 'user', permission_key: 'urgent_incidents', is_allowed: 1 },
         { role: 'user', permission_key: 'ai_assistant', is_allowed: 1 },
         { role: 'user', permission_key: 'infographics', is_allowed: 1 },
@@ -3422,14 +3422,19 @@ function loadLocalDb() {
       ];
       saveLocalDb();
     } else {
+      // Clean up any non-standard or department-specific roles from role_permissions
+      const validRoles = ['admin', 'moderator', 'user'];
+      const beforeCount = localDb.role_permissions.length;
+      localDb.role_permissions = localDb.role_permissions.filter((p: any) => validRoles.includes(p.role));
+      let changed = localDb.role_permissions.length !== beforeCount;
+
       // Ensure all standard keys exist in localDb.role_permissions
       const roles = ['admin', 'moderator', 'user'];
       const defaultAllowed: Record<string, Record<string, number>> = {
-        admin: { manage_changelog: 1, urgent_incidents: 1 },
-        moderator: { manage_changelog: 0, urgent_incidents: 1 },
-        user: { manage_changelog: 0, urgent_incidents: 1 }
+        admin: { manage_changelog: 1, urgent_incidents: 1, admin_docs: 1 },
+        moderator: { manage_changelog: 0, urgent_incidents: 1, admin_docs: 1, manage_users: 0 },
+        user: { manage_changelog: 0, urgent_incidents: 1, admin_docs: 1, manage_users: 0 }
       };
-      let changed = false;
       for (const r of roles) {
         if (!localDb.role_permissions.some((p: any) => p.role === r && p.permission_key === 'manage_changelog')) {
           localDb.role_permissions.push({
@@ -3448,6 +3453,13 @@ function loadLocalDb() {
           changed = true;
         }
       }
+      // Ensure moderator and user manage_users is strictly 0
+      localDb.role_permissions.forEach((p: any) => {
+        if ((p.role === 'moderator' || p.role === 'user') && p.permission_key === 'manage_users' && p.is_allowed !== 0) {
+          p.is_allowed = 0;
+          changed = true;
+        }
+      });
       if (changed) saveLocalDb();
     }
     if (!localDb.changelogs || !Array.isArray(localDb.changelogs) || localDb.changelogs.length === 0) {
@@ -4996,7 +5008,7 @@ async function setupDatabase() {
           { role: 'moderator', key: 'workflow_sla', val: 1 },
           { role: 'moderator', key: 'digital_signatures', val: 1 },
           { role: 'moderator', key: 'recycle_bin', val: 1 },
-          { role: 'moderator', key: 'manage_users', val: 1 },
+          { role: 'moderator', key: 'manage_users', val: 0 },
           { role: 'moderator', key: 'system_settings', val: 0 },
           { role: 'moderator', key: 'backup_restore', val: 0 },
           { role: 'moderator', key: 'audit_logs', val: 0 },
@@ -5008,7 +5020,7 @@ async function setupDatabase() {
           { role: 'user', key: 'delete_docs', val: 0 },
           { role: 'user', key: 'approve_docs', val: 0 },
           { role: 'user', key: 'export_docs', val: 1 },
-          { role: 'user', key: 'admin_docs', val: 0 },
+          { role: 'user', key: 'admin_docs', val: 1 },
           { role: 'user', key: 'urgent_incidents', val: 1 },
           { role: 'user', key: 'ai_assistant', val: 1 },
           { role: 'user', key: 'infographics', val: 1 },
@@ -5042,6 +5054,7 @@ async function setupDatabase() {
         if (seedCount > 0) {
           console.log(`✅ Seeded ${seedCount} missing default role_permissions in MySQL`);
         }
+        await pool.query("UPDATE role_permissions SET is_allowed = 0 WHERE role IN ('moderator', 'user') AND permission_key = 'manage_users'").catch(() => {});
         console.log('✅ Initialized and verified role_permissions table in MySQL');
       } catch (e) {
         console.warn('Note checking/creating/seeding role_permissions table:', e);
@@ -8343,11 +8356,15 @@ function formatThaiDateOnly(isoDate?: string): string {
 async function buildSignedPdfBuffer(doc: any, sigRecord: any, qrDataUrl: string): Promise<Buffer> {
   // 1. Try rendering with Puppeteer and high-fidelity Google Fonts Sarabun for 100% Thai support
   try {
+    // Puppeteer stripped for AI Studio migration
+    /*
     const puppeteer = await import('puppeteer');
     const browser = await puppeteer.default.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
     });
+    */
+    throw new Error('Puppeteer is disabled in this environment. Falling back to pdf-lib.');
 
     try {
       const page = await browser.newPage();
@@ -9983,6 +10000,11 @@ app.put("/api/role-permissions", async (req, res) => {
     console.warn(`[Permission Matrix Update] Access Denied: User role "${currentUserRole}" does not have "system_settings" permission.`);
     return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ในการแก้ไขการกำหนดสิทธิ์ของระบบ (system_settings)' });
   }
+
+  // Strict constraint: manage_users is strictly reserved for Admin (cannot be granted to moderator or user)
+  if (role !== 'admin' && permission_key === 'manage_users' && val === 1) {
+    return res.status(400).json({ success: false, error: 'ไม่อนุญาตให้เปิดสิทธิ์การจัดการบุคลากร (manage_users) สำหรับบทบาทอื่นที่ไม่ใช่ Admin' });
+  }
   
   let databaseSuccess = false;
   try {
@@ -10028,6 +10050,129 @@ app.put("/api/role-permissions", async (req, res) => {
   } catch (error: any) {
     console.error('Failed to update role-permission:', error.message);
     return res.status(500).json({ error: `เกิดข้อผิดพลาดของระบบ: ${error.message}` });
+  }
+});
+
+app.post("/api/role-permissions/reset-defaults", async (req, res) => {
+  const currentUserRole = req.body.currentUserRole || req.headers.role || '';
+  const username = req.body.username || 'ผู้ดูแลระบบ';
+  const ip = getClientIp(req);
+
+  const allowed = await hasServerPermission(currentUserRole, 'system_settings');
+  if (!allowed && currentUserRole !== 'admin') {
+    return res.status(403).json({ success: false, error: 'ขออภัย คุณไม่มีสิทธิ์ในการคืนค่าการกำหนดสิทธิ์ของระบบ' });
+  }
+
+  const logicalDefaults: Array<{ role: string; key: string; val: number }> = [
+    // Admin: 21/21 (สิทธิ์เต็ม 100%)
+    { role: 'admin', key: 'view_all_docs', val: 1 },
+    { role: 'admin', key: 'create_docs', val: 1 },
+    { role: 'admin', key: 'edit_all_docs', val: 1 },
+    { role: 'admin', key: 'delete_docs', val: 1 },
+    { role: 'admin', key: 'approve_docs', val: 1 },
+    { role: 'admin', key: 'export_docs', val: 1 },
+    { role: 'admin', key: 'admin_docs', val: 1 },
+    { role: 'admin', key: 'urgent_incidents', val: 1 },
+    { role: 'admin', key: 'ai_assistant', val: 1 },
+    { role: 'admin', key: 'infographics', val: 1 },
+    { role: 'admin', key: 'qr_generator', val: 1 },
+    { role: 'admin', key: 'draft_docs', val: 1 },
+    { role: 'admin', key: 'digital_folders', val: 1 },
+    { role: 'admin', key: 'workflow_sla', val: 1 },
+    { role: 'admin', key: 'digital_signatures', val: 1 },
+    { role: 'admin', key: 'recycle_bin', val: 1 },
+    { role: 'admin', key: 'manage_users', val: 1 },
+    { role: 'admin', key: 'system_settings', val: 1 },
+    { role: 'admin', key: 'backup_restore', val: 1 },
+    { role: 'admin', key: 'audit_logs', val: 1 },
+    { role: 'admin', key: 'manage_changelog', val: 1 },
+
+    // Moderator: 16/21 (สารบรรณกลาง / ผู้ตรวจสอบ / อนุมัติ / เครื่องมือช่วยงาน - ไม่รวมตั้งค่าโครงสร้างระบบ)
+    { role: 'moderator', key: 'view_all_docs', val: 1 },
+    { role: 'moderator', key: 'create_docs', val: 1 },
+    { role: 'moderator', key: 'edit_all_docs', val: 1 },
+    { role: 'moderator', key: 'delete_docs', val: 1 },
+    { role: 'moderator', key: 'approve_docs', val: 1 },
+    { role: 'moderator', key: 'export_docs', val: 1 },
+    { role: 'moderator', key: 'admin_docs', val: 1 },
+    { role: 'moderator', key: 'urgent_incidents', val: 1 },
+    { role: 'moderator', key: 'ai_assistant', val: 1 },
+    { role: 'moderator', key: 'infographics', val: 1 },
+    { role: 'moderator', key: 'qr_generator', val: 1 },
+    { role: 'moderator', key: 'draft_docs', val: 1 },
+    { role: 'moderator', key: 'digital_folders', val: 1 },
+    { role: 'moderator', key: 'workflow_sla', val: 1 },
+    { role: 'moderator', key: 'digital_signatures', val: 1 },
+    { role: 'moderator', key: 'recycle_bin', val: 1 },
+    { role: 'moderator', key: 'manage_users', val: 0 },
+    { role: 'moderator', key: 'system_settings', val: 0 },
+    { role: 'moderator', key: 'backup_restore', val: 0 },
+    { role: 'moderator', key: 'audit_logs', val: 0 },
+    { role: 'moderator', key: 'manage_changelog', val: 0 },
+
+    // User: 10/21 (เจ้าหน้าที่ผู้ปฏิบัติงาน - สร้างเอกสาร/ร่าง/เครื่องมือ/รายงานเหตุด่วน/แบบฟอร์ม - ห้ามลบ/แก้ผู้อื่น/อนุมัติ/ระบบ)
+    { role: 'user', key: 'view_all_docs', val: 0 },
+    { role: 'user', key: 'create_docs', val: 1 },
+    { role: 'user', key: 'edit_all_docs', val: 0 },
+    { role: 'user', key: 'delete_docs', val: 0 },
+    { role: 'user', key: 'approve_docs', val: 0 },
+    { role: 'user', key: 'export_docs', val: 1 },
+    { role: 'user', key: 'admin_docs', val: 1 },
+    { role: 'user', key: 'urgent_incidents', val: 1 },
+    { role: 'user', key: 'ai_assistant', val: 1 },
+    { role: 'user', key: 'infographics', val: 1 },
+    { role: 'user', key: 'qr_generator', val: 1 },
+    { role: 'user', key: 'draft_docs', val: 1 },
+    { role: 'user', key: 'digital_folders', val: 1 },
+    { role: 'user', key: 'workflow_sla', val: 1 },
+    { role: 'user', key: 'digital_signatures', val: 0 },
+    { role: 'user', key: 'recycle_bin', val: 0 },
+    { role: 'user', key: 'manage_users', val: 0 },
+    { role: 'user', key: 'system_settings', val: 0 },
+    { role: 'user', key: 'backup_restore', val: 0 },
+    { role: 'user', key: 'audit_logs', val: 0 },
+    { role: 'user', key: 'manage_changelog', val: 0 }
+  ];
+
+  try {
+    if (isMysqlOnline) {
+      try {
+        // Delete any non-standard or department-specific permissions
+        await pool.query("DELETE FROM role_permissions WHERE role NOT IN ('admin', 'moderator', 'user')");
+        for (const item of logicalDefaults) {
+          await pool.query(
+            'INSERT INTO role_permissions (role, permission_key, is_allowed) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_allowed = ?',
+            [item.role, item.key, item.val, item.val]
+          );
+        }
+      } catch (dbErr: any) {
+        console.warn('MySQL reset-defaults warning:', dbErr.message);
+      }
+    }
+
+    localDb.role_permissions = logicalDefaults.map(item => ({
+      role: item.role,
+      permission_key: item.key,
+      is_allowed: item.val
+    }));
+    saveLocalDb();
+
+    await addSystemLog(
+      'RESET_PERMISSIONS',
+      'ปรับปรุงสิทธิ์การใช้งาน Admin, Moderator, User ตามตรรกะระบบอัตโนมัติ (ยกเลิกการกำหนดสิทธิ์เจาะจงตามฝ่ายงาน)',
+      username,
+      ip
+    ).catch(e => console.error('addSystemLog failed:', e.message));
+
+    invalidatePermissionCache();
+    return res.json({ 
+      success: true, 
+      message: 'ปรับปรุงและกำหนดสิทธิ์ผู้ใช้งาน Admin, Moderator, User ตามตรรกะระบบอัตโนมัติสำเร็จเรียบร้อยแล้ว',
+      totalCount: logicalDefaults.length
+    });
+  } catch (error: any) {
+    console.error('Failed to reset role permissions:', error);
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -11967,6 +12112,11 @@ app.get("/api/users", async (req, res) => {
 });
 
 app.post('/api/users', async (req, res) => {
+  const currentUserRole = req.body.currentUserRole || req.headers.role || '';
+  if (currentUserRole === 'moderator' || currentUserRole === 'user') {
+    return res.status(403).json({ error: 'ไม่อนุญาต: สิทธิ์การจัดการบุคลากรสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin Only)' });
+  }
+
   const { username, password, email, firstName, lastName, position, department, role, avatar } = req.body;
   const emailNotif = req.body.emailNotifications !== undefined ? (req.body.emailNotifications ? 1 : 0) : 1;
   const ip = getClientIp(req);
@@ -12010,6 +12160,14 @@ app.post('/api/users', async (req, res) => {
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const data = req.body;
+  const currentUserRole = data.currentUserRole || req.headers.role || '';
+  const currentUserId = data.currentUserId || req.headers['x-user-id'] || '';
+
+  // Non-admins (e.g. moderator/user) can only update their own profile, not manage other users
+  if ((currentUserRole === 'moderator' || currentUserRole === 'user') && String(id) !== String(currentUserId)) {
+    return res.status(403).json({ error: 'ไม่อนุญาต: สิทธิ์การจัดการบุคลากรสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin Only)' });
+  }
+
   const ip = getClientIp(req);
   const emailNotif = data.emailNotifications !== undefined ? (data.emailNotifications ? 1 : 0) : 1;
 
@@ -12088,6 +12246,11 @@ app.put('/api/users/:id', async (req, res) => {
 });
 
 app.delete('/api/users/:id', async (req, res) => {
+  const currentUserRole = req.body.currentUserRole || req.headers.role || req.query.role || '';
+  if (currentUserRole === 'moderator' || currentUserRole === 'user') {
+    return res.status(403).json({ error: 'ไม่อนุญาต: สิทธิ์การจัดการบุคลากรสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin Only)' });
+  }
+
   const { id } = req.params;
   const ip = getClientIp(req);
   try {
@@ -12111,28 +12274,34 @@ app.delete('/api/users/:id', async (req, res) => {
   }
 });
 
-// 3. Login API Endpoint with Argon2id Verification & Auto-Upgrade
+// 3. Login API Endpoint with Argon2id Verification & Auto-Upgrade (supports Username or Email)
 app.post('/api/login', async (req, res) => {
-  const username = req.body.username ? String(req.body.username).trim() : '';
+  const loginIdentifier = (req.body.username || req.body.email || req.body.identifier || '').trim();
   const password = req.body.password ? String(req.body.password).trim() : '';
   const ip = getClientIp(req);
 
-  if (!username || !password) {
-    return res.status(400).json({ success: false, message: 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน' });
+  if (!loginIdentifier || !password) {
+    return res.status(400).json({ success: false, message: 'กรุณากรอกชื่อผู้ใช้หรืออีเมล และรหัสผ่าน' });
   }
 
   try {
     let user: any = null;
     if (isMysqlOnline) {
       try {
-        const [rows]: any = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER(?)', [username]);
+        const [rows]: any = await pool.query(
+          'SELECT * FROM users WHERE LOWER(username) = LOWER(?) OR (email IS NOT NULL AND LOWER(email) = LOWER(?))',
+          [loginIdentifier, loginIdentifier]
+        );
         if (rows && rows.length > 0) user = rows[0];
       } catch (dbErr: any) {
         console.warn('⚠️ [Login] MySQL user query failed, falling back to local store:', dbErr.message);
       }
     }
     if (!user && localDb && localDb.users) {
-      user = localDb.users.find((u: any) => u.username && u.username.toLowerCase() === username.toLowerCase());
+      user = localDb.users.find((u: any) => 
+        (u.username && u.username.toLowerCase() === loginIdentifier.toLowerCase()) ||
+        (u.email && u.email.toLowerCase() === loginIdentifier.toLowerCase())
+      );
     }
 
     if (user) {
@@ -12152,7 +12321,7 @@ app.post('/api/login', async (req, res) => {
                 saveLocalDb();
               }
             }
-            console.log(`🔐 Auto-upgraded password to Argon2id for user: ${username}`);
+            console.log(`🔐 Auto-upgraded password to Argon2id for user: ${user.username}`);
           } catch (e: any) {
             console.warn('Password upgrade non-critical error:', e.message);
           }
@@ -12193,13 +12362,13 @@ app.post('/api/login', async (req, res) => {
           broadcastOnlineCount();
         } catch (_) {}
 
-        await addSystemLog('LOGIN_SUCCESS', `เข้าสู่ระบบสำเร็จ (${user.firstName || username} ${user.lastName || ''}) - ยืนยันรหัสผ่านด้วย Argon2id`, username, ip);
+        await addSystemLog('LOGIN_SUCCESS', `เข้าสู่ระบบสำเร็จ (${user.firstName || user.username} ${user.lastName || ''} - ${user.username}) - ยืนยันรหัสผ่านด้วย Argon2id`, user.username, ip);
         return res.json({ success: true, user: sanitizedUser });
       }
     }
     
-    await addSystemLog('LOGIN_FAILED', `พยายามเข้าสู่ระบบไม่สำเร็จ (ชื่อผู้ใช้: ${username})`, username || 'Unknown', ip);
-    return res.status(401).json({ success: false, message: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง' });
+    await addSystemLog('LOGIN_FAILED', `พยายามเข้าสู่ระบบไม่สำเร็จ (ชื่อผู้ใช้/อีเมล: ${loginIdentifier})`, loginIdentifier || 'Unknown', ip);
+    return res.status(401).json({ success: false, message: 'ชื่อผู้ใช้งานหรืออีเมล หรือรหัสผ่านไม่ถูกต้อง' });
   } catch (error: any) {
     console.error('Database error in /api/login:', error.message);
     return res.status(500).json({ success: false, error: 'Database error', message: error.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล' });
@@ -14117,11 +14286,15 @@ async function generatePdfThumbnail(pdfFullPath: string, targetPageIdx: number =
     const workerCode = fs.readFileSync(workerPath, 'utf8');
     const pdfJsCode = fs.readFileSync(pdfJsPath, 'utf8');
 
+    // Puppeteer stripped for AI Studio migration
+    /*
     const puppeteer = await import('puppeteer');
     const browser = await puppeteer.default.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
     });
+    */
+    throw new Error('Puppeteer is disabled in this environment.');
 
     try {
       const page = await browser.newPage();
@@ -19860,23 +20033,33 @@ app.post('/api/infographics', async (req, res) => {
       ? JSON.stringify(allowedEditors) 
       : (typeof allowedEditors === 'string' ? allowedEditors : null);
 
-    await pool.query(
-      `INSERT INTO infographics (
-        id, name, data, thumbnail, isPublic, allowEmbed, allowDownload, 
-        accessPassword, authorName, authorDepartment, description, tags, 
-        scope, ownerId, ownerName, ownerDepartment, allowedEditors, allowDepartmentEdit,
-        viewCount, downloadCount, embedCount, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
-      [
-        id, name || 'Infographic', data, thumbnail, 
-        isPublic ? 1 : 0, allowEmbed ? 1 : 0, allowDownload ? 1 : 0,
-        accessPassword || null, authorName || null, authorDepartment || null,
-        description || null, tags || null,
-        scope || 'central', ownerId || null, ownerName || authorName || null, ownerDepartment || authorDepartment || null,
-        stringifiedEditors, allowDepartmentEdit ? 1 : 0,
-        nowIso, nowIso
-      ]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO infographics (
+          id, name, data, thumbnail, isPublic, allowEmbed, allowDownload, 
+          accessPassword, authorName, authorDepartment, description, tags, 
+          scope, ownerId, ownerName, ownerDepartment, allowedEditors, allowDepartmentEdit,
+          viewCount, downloadCount, embedCount, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)`,
+        [
+          id, name || 'Infographic', data, thumbnail, 
+          isPublic ? 1 : 0, allowEmbed ? 1 : 0, allowDownload ? 1 : 0,
+          accessPassword || null, authorName || null, authorDepartment || null,
+          description || null, tags || null,
+          scope || 'central', ownerId || null, ownerName || authorName || null, ownerDepartment || authorDepartment || null,
+          stringifiedEditors, allowDepartmentEdit ? 1 : 0,
+          nowIso, nowIso
+        ]
+      );
+    } catch (dbError) {
+      console.warn('Full schema insert failed, retrying with basic columns:', dbError);
+      await pool.query(
+        `INSERT INTO infographics (
+          id, name, data, thumbnail, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, name || 'Infographic', data, thumbnail, nowIso, nowIso]
+      );
+    }
     
     res.json({ 
       id, name, thumbnail, 
@@ -19944,24 +20127,34 @@ app.put('/api/infographics/:id', async (req, res) => {
       : current.allowedEditors;
     const finalAllowDepartmentEdit = allowDepartmentEdit !== undefined ? (allowDepartmentEdit ? 1 : 0) : current.allowDepartmentEdit;
 
-    await pool.query(
-      `UPDATE infographics SET 
-        name = ?, data = ?, thumbnail = ?, 
-        isPublic = ?, allowEmbed = ?, allowDownload = ?, 
-        accessPassword = ?, authorName = ?, authorDepartment = ?, 
-        description = ?, tags = ?,
-        scope = ?, ownerId = ?, ownerName = ?, ownerDepartment = ?,
-        allowedEditors = ?, allowDepartmentEdit = ?, updated_at = ? 
-      WHERE id = ?`,
-      [
-        finalName, finalData, finalThumbnail, 
-        finalIsPublic, finalAllowEmbed, finalAllowDownload, 
-        finalAccessPassword, finalAuthorName, finalAuthorDepartment, 
-        finalDescription, finalTags,
-        finalScope, finalOwnerId, finalOwnerName, finalOwnerDepartment,
-        finalAllowedEditors, finalAllowDepartmentEdit, nowIso, req.params.id
-      ]
-    );
+    try {
+      await pool.query(
+        `UPDATE infographics SET 
+          name = ?, data = ?, thumbnail = ?, 
+          isPublic = ?, allowEmbed = ?, allowDownload = ?, 
+          accessPassword = ?, authorName = ?, authorDepartment = ?, 
+          description = ?, tags = ?,
+          scope = ?, ownerId = ?, ownerName = ?, ownerDepartment = ?,
+          allowedEditors = ?, allowDepartmentEdit = ?, updated_at = ? 
+        WHERE id = ?`,
+        [
+          finalName, finalData, finalThumbnail, 
+          finalIsPublic, finalAllowEmbed, finalAllowDownload, 
+          finalAccessPassword, finalAuthorName, finalAuthorDepartment, 
+          finalDescription, finalTags,
+          finalScope, finalOwnerId, finalOwnerName, finalOwnerDepartment,
+          finalAllowedEditors, finalAllowDepartmentEdit, nowIso, req.params.id
+        ]
+      );
+    } catch (dbError) {
+      console.warn('Full schema update failed, retrying with basic columns:', dbError);
+      await pool.query(
+        `UPDATE infographics SET 
+          name = ?, data = ?, thumbnail = ?, updated_at = ? 
+        WHERE id = ?`,
+        [finalName, finalData, finalThumbnail, nowIso, req.params.id]
+      );
+    }
     
     res.json({ 
       id: req.params.id, 

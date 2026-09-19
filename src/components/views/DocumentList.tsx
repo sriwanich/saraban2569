@@ -158,10 +158,7 @@ export const DocumentList = React.memo(function DocumentList({ title, documents,
       return hasPermission('delete_docs');
     }
     if (!user) return true;
-    if (isPrivileged) return true;
-    
-    // Allow users to delete their own department documents
-    return !isCentralDoc && row.department === user.department;
+    return isPrivileged;
   }, [hasPermission, user]);
 
   const canEditDoc = React.useCallback((row: DocumentItem) => {
@@ -178,12 +175,9 @@ export const DocumentList = React.memo(function DocumentList({ title, documents,
     if (!user) return true;
     if (isPrivileged) return true;
 
-    // Allow users to edit their own department documents
-    const isMyDept = !isCentralDoc && row.department === user.department;
-
     const isMine = (row.createdBy && row.createdBy === user.username) ||
                    (row.assignee && (row.assignee === user.firstName || row.assignee.includes(user.firstName)));
-    return Boolean(isMine || isMyDept);
+    return Boolean(isMine);
   }, [hasPermission, user]);
 
   const getReceiveNumberDisplay = (row: DocumentItem, isMobile: boolean) => {

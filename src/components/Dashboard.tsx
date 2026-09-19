@@ -203,6 +203,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       return true;
     }
 
+    // Strict constraint: Moderator is never allowed to access or use manage_users
+    if (currentUser.role === 'moderator' && key === 'manage_users') {
+      return false;
+    }
+
     // Fall back to role-based permission
     const perm = rolePermissions.find(p => p.role === currentUser.role && p.permission_key === key);
     if (perm) {
@@ -214,14 +219,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (currentUser.role === 'moderator') {
       return [
         'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
-        'admin_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
-        'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin', 'manage_users', 'urgent_incidents'
+        'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
+        'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin'
       ].includes(key);
     }
     if (currentUser.role === 'user') {
       return [
-        'create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator',
-        'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'
+        'create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator',
+        'draft_docs', 'digital_folders', 'workflow_sla'
       ].includes(key);
     }
     return false;
@@ -1095,9 +1100,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           { id: 'user_manual', icon: HelpCircle, label: 'คู่มือการใช้งาน' },
           ...(currentUser?.role === 'admin'
             ? [{ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' }]
-            : currentUser?.role === 'moderator'
-            ? [{ id: 'settings', icon: SettingsIcon, label: 'จัดการบุคลากร' }]
-            : (hasPermission('system_settings') || hasPermission('manage_users') || hasPermission('backup_restore'))
+            : (hasPermission('system_settings') || (currentUser?.role !== 'moderator' && hasPermission('manage_users')) || hasPermission('backup_restore'))
             ? [{ id: 'settings', icon: SettingsIcon, label: 'ตั้งค่าระบบ' }]
             : [])
         ]

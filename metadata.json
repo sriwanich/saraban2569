@@ -1,6 +1,6 @@
 {
-  "name": "EDMS Saraban",
-  "description": "ระบบงานสารบรรณอิเล็กทรอนิกส์ สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง (Electronic Document Management System)",
+  "name": "EDMS Creative Studio",
+  "description": "ระบบออกแบบอินโฟกราฟิกและสื่อประชาสัมพันธ์ระดับองค์กร สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

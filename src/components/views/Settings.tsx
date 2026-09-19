@@ -19,10 +19,7 @@ interface SettingsProps {
 export default function Settings(props: SettingsProps) {
   const { confirm } = useConfirm();
   const { onSettingsUpdated } = props;
-  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>(() => {
-    if (props.user?.role === 'moderator') return 'users';
-    return 'system';
-  });
+  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
   const [userSubTab, setUserSubTab] = useState<'list' | 'realtime'>('list');
   const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
     return typeof window !== 'undefined' ? realtimeSync.getOnlineUsers() : 0;
@@ -43,7 +40,7 @@ export default function Settings(props: SettingsProps) {
 
   useEffect(() => {
     const isSystemAdmin = props.user?.role === 'admin';
-    const canManageUsers = props.hasPermission ? (props.hasPermission('manage_users') || isSystemAdmin) : (isSystemAdmin || props.user?.role === 'moderator');
+    const canManageUsers = isSystemAdmin || (props.user?.role !== 'moderator' && (props.hasPermission ? props.hasPermission('manage_users') : false));
     const canManageSystem = props.hasPermission ? (props.hasPermission('system_settings') || isSystemAdmin) : isSystemAdmin;
     
     if (activeTab === 'permissions' && !isSystemAdmin) {
@@ -56,6 +53,8 @@ export default function Settings(props: SettingsProps) {
       if (canManageUsers) {
         setActiveTab('users');
       }
+    } else if (!canManageUsers && (activeTab === 'users' || activeTab === 'active_users')) {
+      setActiveTab('system');
     }
   }, [props.user?.role, props.hasPermission, activeTab]);
   const [activeSystemDocTab, setActiveSystemDocTab] = useState<'docSettings' | 'customNumbering' | 'departments' | 'positions'>('docSettings');
@@ -822,6 +821,7 @@ export default function Settings(props: SettingsProps) {
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
   const [isUpdatingPermission, setIsUpdatingPermission] = useState<string | null>(null);
   const [permissionSearchTerm, setPermissionSearchTerm] = useState<string>('');
+  const [permissionTierFilter, setPermissionTierFilter] = useState<'all' | 'admin_only' | 'governance' | 'operational'>('all');
 
   const fetchRolePermissions = async () => {
     setIsLoadingPermissions(true);
@@ -879,18 +879,16 @@ export default function Settings(props: SettingsProps) {
     }
   };
 
-  const handleBatchToggleRole = async (targetRole: string, targetValue: number) => {
+  const [isResettingDefaults, setIsResettingDefaults] = useState(false);
+
+  const handleBatchToggleRole = async (targetRole: 'admin' | 'moderator' | 'user', targetValue: number) => {
     if (props.user?.role !== 'admin') return;
     const actionText = targetValue === 1 ? 'เปิดใช้งานสิทธิ์ทั้งหมด' : 'ปิดใช้งานสิทธิ์ทั้งหมด';
     const roleName = targetRole === 'admin' 
       ? 'Admin (ผู้ดูแลระบบ)' 
       : targetRole === 'moderator' 
-        ? 'Moderator (ผู้ตรวจสอบ)' 
-        : targetRole === 'user' 
-          ? 'User (ผู้ใช้งานทั่วไป)' 
-          : targetRole.startsWith('dept:') 
-            ? `ฝ่าย/กลุ่มงาน "${targetRole.replace('dept:', '')}"` 
-            : targetRole;
+        ? 'Moderator (ผู้ตรวจสอบ/สารบรรณกลาง)' 
+        : 'User (ผู้ใช้งานทั่วไป)';
 
     const confirmed = await confirm({
       title: 'ยืนยันการเปลี่ยนสิทธิ์การเข้าถึงทั้งหมด',
@@ -915,6 +913,9 @@ export default function Settings(props: SettingsProps) {
         if (targetRole === 'admin' && (key === 'system_settings' || key === 'manage_users') && targetValue === 0) {
           continue;
         }
+        if (targetRole !== 'admin' && (key === 'manage_users' || key === 'system_settings') && targetValue === 1) {
+          continue;
+        }
         await fetch('/api/role-permissions', {
           method: 'PUT',
           cache: 'no-cache',
@@ -935,6 +936,43 @@ export default function Settings(props: SettingsProps) {
       alert('เกิดข้อผิดพลาดในการอัปเดตสิทธิ์กลุ่ม');
     } finally {
       setIsLoadingPermissions(false);
+    }
+  };
+
+  const handleResetLogicalDefaults = async () => {
+    if (props.user?.role !== 'admin') return;
+    const confirmed = await confirm({
+      title: 'ปรับใช้สิทธิ์ตามตรรกะระบบอัตโนมัติ',
+      message: 'ระบบจะกำหนดสิทธิ์ผู้ใช้งาน Admin (21 สิทธิ์), Moderator (16 สิทธิ์), User (10 สิทธิ์) ตามมาตรฐานตรรกะระบบอัตโนมัติ และยกเลิกการกำหนดสิทธิ์เจาะจงตามฝ่ายงาน คุณต้องการดำเนินการหรือไม่?',
+      type: 'info',
+      confirmText: 'ปรับใช้สิทธิ์อัตโนมัติ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    setIsResettingDefaults(true);
+    try {
+      const res = await fetch('/api/role-permissions/reset-defaults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentUserRole: props.user?.role,
+          username: `${props.user?.firstName || ''} ${props.user?.lastName || ''}`.trim() || props.user?.username
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        await fetchRolePermissions();
+        props.onSettingsUpdated?.();
+        alert('ปรับปรุงและกำหนดสิทธิ์ผู้ใช้งาน Admin, Moderator, User ตามตรรกะระบบอัตโนมัติสำเร็จเรียบร้อยแล้ว');
+      } else {
+        alert(data.error || 'ไม่สามารถปรับใช้ค่าเริ่มต้นตามตรรกะได้');
+      }
+    } catch (err) {
+      console.error('Reset logical defaults error:', err);
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    } finally {
+      setIsResettingDefaults(false);
     }
   };
 
@@ -1825,7 +1863,7 @@ export default function Settings(props: SettingsProps) {
   };
 
   const canManageSystem = !props.user?.role || (props.hasPermission ? props.hasPermission('system_settings') : props.user?.role === 'admin');
-  const canManageUsers = !props.user?.role || (props.hasPermission ? props.hasPermission('manage_users') : (props.user?.role === 'admin' || props.user?.role === 'moderator'));
+  const canManageUsers = props.user?.role === 'admin' || (props.user?.role !== 'moderator' && (props.hasPermission ? props.hasPermission('manage_users') : false));
   const canBackup = !props.user?.role || (props.hasPermission ? props.hasPermission('backup_restore') : props.user?.role === 'admin');
 
   interface NavItem {
@@ -1882,7 +1920,7 @@ export default function Settings(props: SettingsProps) {
       items: [
         {
           id: 'users',
-          label: props.user?.role === 'moderator' ? 'บุคลากร' : 'บุคลากร',
+          label: 'บุคลากร',
           sublabel: 'รายชื่อเจ้าหน้าที่, สังกัดฝ่าย, รหัสผ่าน',
           icon: Shield,
           visible: canManageUsers,
@@ -1899,7 +1937,7 @@ export default function Settings(props: SettingsProps) {
         {
           id: 'permissions',
           label: 'สิทธิ์',
-          sublabel: 'กำหนดสิทธิ์ 4 บทบาท และฟังก์ชัน',
+          sublabel: 'กำหนดสิทธิ์ Admin, Moderator, User',
           icon: ShieldCheck,
           visible: props.user?.role === 'admin'
         }
@@ -2085,7 +2123,7 @@ export default function Settings(props: SettingsProps) {
                 </button>
               )}
 
-              {activeTab === 'users' && (
+              {activeTab === 'users' && canManageUsers && (
                 <button
                   type="button"
                   onClick={() => setShowAddModal(true)}
@@ -3440,6 +3478,17 @@ export default function Settings(props: SettingsProps) {
         )}
 
         {activeTab === 'users' && (
+          !canManageUsers ? (
+            <div className="p-8 sm:p-12 text-center bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl space-y-3">
+              <div className="w-12 h-12 rounded-full bg-rose-500/10 text-rose-500 mx-auto flex items-center justify-center">
+                <Shield className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-[var(--text-primary)]">ไม่อนุญาตให้เข้าถึงการจัดการบุคลากร</h3>
+              <p className="text-xs sm:text-sm text-[var(--text-muted)] max-w-md mx-auto">
+                สิทธิ์การเข้าถึงและจัดการบุคลากรสงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin Only) เท่านั้น ไม่อนุญาตให้บทบาทอื่นเข้าถึงหรือแก้ไข
+              </p>
+            </div>
+          ) : (
           <div className="space-y-5 animate-fade-in">
             {/* Sub-tabs: User Directory vs Live Real-time Activity */}
             <div className="flex items-center gap-2 border-b border-[var(--border-light)] pb-3">
@@ -3946,9 +3995,10 @@ export default function Settings(props: SettingsProps) {
             </>
             )}
           </div>
+          )
         )}
 
-        {activeTab === 'active_users' && (
+        {activeTab === 'active_users' && canManageUsers && (
           <ActiveUsersRealtimeView 
             currentUser={props.user}
             onNavigateToLogs={() => props.onNavigateTab ? props.onNavigateTab('logs') : undefined} 
@@ -4118,15 +4168,28 @@ export default function Settings(props: SettingsProps) {
           const modActiveCount = getActiveCount('moderator');
           const userActiveCount = getActiveCount('user');
 
-          // Filter by search term
+          const getPermissionTier = (key: string): 'admin_only' | 'governance' | 'operational' => {
+            const adminOnlyKeys = ['manage_users', 'system_settings', 'backup_restore', 'audit_logs', 'manage_changelog'];
+            const governanceKeys = ['view_all_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'digital_signatures', 'recycle_bin'];
+            if (adminOnlyKeys.includes(key)) return 'admin_only';
+            if (governanceKeys.includes(key)) return 'governance';
+            return 'operational';
+          };
+
+          // Filter by search term & tier
           const filteredSections = permissionsList.map(sec => {
-            if (!permissionSearchTerm.trim()) return sec;
-            const term = permissionSearchTerm.toLowerCase();
-            const matchedItems = sec.items.filter(item => 
-              item.title.toLowerCase().includes(term) ||
-              item.desc.toLowerCase().includes(term) ||
-              item.key.toLowerCase().includes(term)
-            );
+            let matchedItems = sec.items;
+            if (permissionTierFilter !== 'all') {
+              matchedItems = matchedItems.filter(item => getPermissionTier(item.key) === permissionTierFilter);
+            }
+            if (permissionSearchTerm.trim()) {
+              const term = permissionSearchTerm.toLowerCase();
+              matchedItems = matchedItems.filter(item => 
+                item.title.toLowerCase().includes(term) ||
+                item.desc.toLowerCase().includes(term) ||
+                item.key.toLowerCase().includes(term)
+              );
+            }
             return { ...sec, items: matchedItems };
           }).filter(sec => sec.items.length > 0);
 
@@ -4140,22 +4203,34 @@ export default function Settings(props: SettingsProps) {
               isExplicit = true;
             } else {
               if (role === 'admin') isAllowed = true;
-              else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs'].includes(key);
-              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla', 'urgent_incidents'].includes(key);
+              else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs', 'manage_users', 'manage_changelog'].includes(key);
+              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
+            }
+
+            // Strict rule: Moderator and User can never have manage_users
+            if (role !== 'admin' && key === 'manage_users') {
+              isAllowed = false;
             }
 
             const updateKey = `${role}-${key}`;
             const isUpdating = isUpdatingPermission === updateKey;
             const isAdmin = props.user?.role === 'admin';
             
-            // Protect Admin from self-lockout
-            const isProtected = role === 'admin' && (key === 'system_settings' || key === 'manage_users');
+            // Protect Admin from self-lockout & protect manage_users from non-admin
+            const isProtected = (role === 'admin' && (key === 'system_settings' || key === 'manage_users'))
+              || (role !== 'admin' && key === 'manage_users');
 
             const roleColorClass = role === 'admin' 
               ? 'bg-amber-500' 
               : role === 'moderator' 
                 ? 'bg-indigo-600' 
                 : 'bg-emerald-500';
+
+            const toggleTitle = isProtected
+              ? (role === 'admin' ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin (ห้ามปิด)' : 'สงวนสิทธิ์เฉพาะผู้ดูแลระบบ (Admin Only) เท่านั้น ไม่อนุญาตให้ Moderator ใช้งาน')
+              : !isAdmin
+                ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้'
+                : 'คลิกเพื่อสลับสิทธิ์การใช้งาน';
 
             if (isMobileInline) {
               return (
@@ -4166,7 +4241,7 @@ export default function Settings(props: SettingsProps) {
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                       isAllowed ? roleColorClass : 'bg-slate-300 dark:bg-slate-700'
                     } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-xs'}`}
-                    title={isProtected ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin (ห้ามปิด)' : !isAdmin ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้' : 'คลิกเพื่อสลับสิทธิ์การใช้งาน'}
+                    title={toggleTitle}
                   >
                     <span
                       className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
@@ -4189,7 +4264,7 @@ export default function Settings(props: SettingsProps) {
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                     isAllowed ? roleColorClass : 'bg-slate-200 dark:bg-slate-700'
                   } ${(!isAdmin || isProtected) ? 'opacity-70 cursor-not-allowed' : 'hover:scale-105 active:scale-95 shadow-sm'}`}
-                  title={isProtected ? 'สงวนสิทธิ์ขั้นต่ำสำหรับ Admin (ห้ามปิด)' : !isAdmin ? 'เฉพาะ Admin ที่แก้ไขสิทธิ์ได้' : 'คลิกเพื่อสลับสิทธิ์การใช้งาน'}
+                  title={toggleTitle}
                 >
                   <span
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
@@ -4219,20 +4294,33 @@ export default function Settings(props: SettingsProps) {
                       </h3>
                     </div>
                     <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-3xl pt-1">
-                      ระบบบริหารจัดการสิทธิ์อัตโนมัติ (Automated Role-Based Permission Engine) แบ่งตามบทบาทผู้ใช้ (Admin, Moderator, User) อย่างแม่นยำ มีผลทันทีทั่วทั้งองค์กร
+                      ระบบบริหารจัดการสิทธิ์อัตโนมัติ (Automated Role-Based Permission Engine) แบ่งตามบทบาทผู้ใช้ (Admin, Moderator, User) อย่างแม่นยำ ปราศจากการกำหนดเจาะจงรายฝ่าย/กลุ่มงาน มีผลทันทีทั่วทั้งองค์กร
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-white/10 shrink-0">
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold">
-                      <Crown className="w-3.5 h-3.5 text-amber-400" /> Admin ({adminActiveCount}/{totalKeysCount})
-                    </div>
-                    <span className="text-slate-500 text-xs">&gt;</span>
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold">
-                      <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" /> Moderator ({modActiveCount}/{totalKeysCount})
-                    </div>
-                    <span className="text-slate-500 text-xs">&gt;</span>
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">
-                      <UserIcon className="w-3.5 h-3.5 text-emerald-400" /> User ({userActiveCount}/{totalKeysCount})
+                  <div className="flex flex-wrap items-center gap-3 shrink-0">
+                    {props.user?.role === 'admin' && (
+                      <button
+                        onClick={handleResetLogicalDefaults}
+                        disabled={isLoadingPermissions || isResettingDefaults}
+                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold text-xs shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                        title="คลิกเพื่อรีเซ็ตและปรับปรุงสิทธิ์ Admin (21), Moderator (16), User (10) ตามมาตรฐานตรรกะอัตโนมัติ"
+                      >
+                        <Sparkles className={`w-4 h-4 ${isResettingDefaults ? 'animate-spin' : ''}`} />
+                        <span>{isResettingDefaults ? 'กำลังจัดสรรสิทธิ์...' : 'ปรับใช้สิทธิ์ตามตรรกะระบบอัตโนมัติ'}</span>
+                      </button>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-white/10 shrink-0">
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold">
+                        <Crown className="w-3.5 h-3.5 text-amber-400" /> Admin ({adminActiveCount}/{totalKeysCount})
+                      </div>
+                      <span className="text-slate-500 text-xs">&gt;</span>
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold">
+                        <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" /> Moderator ({modActiveCount}/{totalKeysCount})
+                      </div>
+                      <span className="text-slate-500 text-xs">&gt;</span>
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">
+                        <UserIcon className="w-3.5 h-3.5 text-emerald-400" /> User ({userActiveCount}/{totalKeysCount})
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -4259,7 +4347,7 @@ export default function Settings(props: SettingsProps) {
                         </span>
                       </div>
                       <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                        มีสิทธิ์จัดการระบบสารบรรณเต็มรูปแบบ จัดการบทบาทผู้ใช้ ตั้งค่าเลขสารบรรณ และสำรองข้อมูล
+                        มีสิทธิ์จัดการระบบสารบรรณเต็มรูปแบบ จัดการบทบาทผู้ใช้ ตั้งค่าเลขสารบรรณ สำรองข้อมูลระบบ ตรวจสอบ Audit Log และจัดการ Changelog
                       </p>
                     </div>
 
@@ -4271,6 +4359,17 @@ export default function Settings(props: SettingsProps) {
                       <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                         <div className="bg-amber-500 h-full transition-all duration-300" style={{ width: `${(adminActiveCount / totalKeysCount) * 100}%` }} />
                       </div>
+                      {props.user?.role === 'admin' && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleBatchToggleRole('admin', 1)}
+                            disabled={isLoadingPermissions}
+                            className="w-full py-1 px-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-700 dark:text-amber-300 text-[11px] font-semibold border border-amber-200 dark:border-amber-800 transition-colors"
+                          >
+                            เปิดสิทธิ์ Admin ทั้งหมด (100%)
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -4285,7 +4384,7 @@ export default function Settings(props: SettingsProps) {
                           </div>
                           <div>
                             <h4 className="font-bold text-[var(--text-primary)]">Moderator (ผู้ตรวจสอบ)</h4>
-                            <span className="text-xs text-[var(--text-muted)]">หัวหน้ากลุ่มงาน / เจ้าหน้าที่สารบรรณ</span>
+                            <span className="text-xs text-[var(--text-muted)]">สารบรรณกลาง / ผู้ตรวจสอบ</span>
                           </div>
                         </div>
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/15 text-indigo-500 border border-indigo-500/30">
@@ -4293,7 +4392,7 @@ export default function Settings(props: SettingsProps) {
                         </span>
                       </div>
                       <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                        มีสิทธิ์ออกเลขสารบรรณ ตรวจสอบร่างหนังสือ อนุมัติเอกสาร ลงนามดิจิทัล และดูแลผู้ใช้ในฝ่าย
+                        สำหรับสารบรรณกลางและผู้ตรวจสอบ: เข้าถึงสารบรรณกลาง ตรวจร่าง อนุมัติเอกสาร ลงนามดิจิทัล กู้คืนเอกสาร แบบรายงานเหตุด่วน และเครื่องมือ AI/Infographics/QR (ไม่เปิดสิทธิ์ตั้งค่าโครงสร้างระบบ)
                       </p>
                     </div>
 
@@ -4345,7 +4444,7 @@ export default function Settings(props: SettingsProps) {
                         </span>
                       </div>
                       <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                        สร้างและแก้ไขเอกสารของตนเอง ใช้งาน AI สารบรรณ ออกแบบ Infographics และจัดเก็บลงแฟ้มงาน
+                        สำหรับเจ้าหน้าที่ผู้ปฏิบัติงาน: สร้าง/ยกร่างเอกสารของตนเอง รายงานเหตุด่วน ขอใช้รถ/ห้องประชุม ใช้งาน AI สารบรรณ ออกแบบ Infographics แฟ้มงาน และ SLA (สงวนสิทธิ์ลบ/แก้ไขเอกสารผู้อื่น)
                       </p>
                     </div>
 
@@ -4383,16 +4482,61 @@ export default function Settings(props: SettingsProps) {
 
               {/* Dynamic Search & Control Header */}
               <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-2xl overflow-hidden shadow-sm">
-                <div className="p-4 bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-5 h-5 text-[var(--primary-color)]" />
-                    <h4 className="font-bold text-[var(--text-primary)] text-sm sm:text-base font-sans">
-                      แผงตารางควบคุมสิทธิ์ทุกฟังก์ชัน (Role Permission Matrix)
-                    </h4>
+                <div className="p-4 bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-[var(--primary-color)]" />
+                      <h4 className="font-bold text-[var(--text-primary)] text-sm sm:text-base font-sans">
+                        แผงตารางควบคุมสิทธิ์ทุกฟังก์ชัน (Role Permission Matrix)
+                      </h4>
+                    </div>
+                    {/* Tier Filter Tabs */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                      <button
+                        onClick={() => setPermissionTierFilter('all')}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                          permissionTierFilter === 'all'
+                            ? 'bg-[var(--primary-color)] text-white shadow-xs'
+                            : 'bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-lighter)]'
+                        }`}
+                      >
+                        ทั้งหมด ({totalKeysCount})
+                      </button>
+                      <button
+                        onClick={() => setPermissionTierFilter('admin_only')}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                          permissionTierFilter === 'admin_only'
+                            ? 'bg-amber-500 text-white shadow-xs'
+                            : 'bg-[var(--bg-canvas)] text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 border border-amber-500/20'
+                        }`}
+                      >
+                        👑 เฉพาะ Admin (5)
+                      </button>
+                      <button
+                        onClick={() => setPermissionTierFilter('governance')}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                          permissionTierFilter === 'governance'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-[var(--bg-canvas)] text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 border border-indigo-500/20'
+                        }`}
+                      >
+                        🛡️ Admin & Moderator (6)
+                      </button>
+                      <button
+                        onClick={() => setPermissionTierFilter('operational')}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                          permissionTierFilter === 'operational'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-[var(--bg-canvas)] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 border border-emerald-500/20'
+                        }`}
+                      >
+                        👥 ทุกบทบาท (10)
+                      </button>
+                    </div>
                   </div>
 
                   {/* Search Bar & Refresh */}
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="flex items-center gap-2 w-full lg:w-auto">
                     <div className="relative flex-1 sm:w-64">
                       <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
@@ -4440,7 +4584,7 @@ export default function Settings(props: SettingsProps) {
                     <div className="block md:hidden p-3 sm:p-4 space-y-4">
                       {filteredSections.length === 0 ? (
                         <div className="p-8 text-center text-[var(--text-muted)] bg-[var(--bg-canvas)] rounded-xl border border-[var(--border-lighter)]">
-                          ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
+                          ไม่พบฟังก์ชันที่ตรงกับเงื่อนไขการค้นหา
                         </div>
                       ) : (
                         filteredSections.map((sec, idx) => (
@@ -4468,18 +4612,9 @@ export default function Settings(props: SettingsProps) {
                                         {item.key}
                                       </span>
                                     </div>
-                                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed pt-1">
                                       {item.desc}
                                     </p>
-                                  </div>
-
-                                  {/* Security Note */}
-                                  <div className="p-2.5 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-lighter)] text-[11px] text-[var(--text-muted)] flex items-start gap-1.5">
-                                    <Shield className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
-                                    <div>
-                                      <span className="font-semibold text-[var(--text-primary)] block">{item.note}</span>
-                                      <span className="text-[10px]">ควบคุมสิทธิ์การเข้าถึงและการมองเห็นในระบบ</span>
-                                    </div>
                                   </div>
 
                                   {/* Roles Toggle Controls (Mobile Grid) */}
@@ -4560,14 +4695,14 @@ export default function Settings(props: SettingsProps) {
                               </div>
                             </th>
 
-                            <th className="p-4">ข้อแนะนำและผลกระทบเชิงความปลอดภัย</th>
+                            <th className="p-4">คำแนะนำผลกระทบ</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--border-lighter)] text-xs sm:text-sm">
                           {filteredSections.length === 0 ? (
                             <tr>
                               <td colSpan={5} className="p-8 text-center text-[var(--text-muted)]">
-                                ไม่พบฟังก์ชันที่ตรงกับคำค้นหา "{permissionSearchTerm}"
+                                ไม่พบฟังก์ชันที่ตรงกับเงื่อนไขการค้นหา
                               </td>
                             </tr>
                           ) : (

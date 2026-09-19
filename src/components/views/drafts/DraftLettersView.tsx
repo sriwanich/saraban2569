@@ -5,7 +5,8 @@ import {
   Plus, Eye, Save, Printer, FileDown, Trash2, History, Crown, X,
   Sparkles, AlertCircle, CheckCircle2, Copy, ZoomIn, ZoomOut, 
   Search, PenTool, LayoutGrid, Split, Maximize2, FileCheck,
-  Building, Phone, ArrowUpRight, HelpCircle, Wand2, RefreshCw, Check
+  Building, Phone, ArrowUpRight, HelpCircle, Wand2, RefreshCw, Check,
+  ChevronDown, ChevronUp, Shield, Mail, Layers
 } from 'lucide-react';
 import { 
   LETTER_TYPES, 
@@ -80,6 +81,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
   const [editorContent, setEditorContent] = useState<string>('');
 
   // Dropdown Panels
+  const [showContactDetails, setShowContactDetails] = useState<boolean>(false);
   const [showGarudaPanel, setShowGarudaPanel] = useState<boolean>(false);
   const [garudaSize, setGarudaSize] = useState<string>('113');
   const [garudaAlign, setGarudaAlign] = useState<'center' | 'left' | 'right'>('center');
@@ -890,33 +892,34 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
       )}
 
       {/* Main Glass Header & Sub-Tabs */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 sm:p-6 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
-              <PenTool className="w-5 h-5" />
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center text-white shadow-md shadow-indigo-500/20 shrink-0">
+            <PenTool className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl sm:text-2xl font-bold text-[var(--text-primary)] tracking-tight">
+                ร่างหนังสือราชการ
+              </h2>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                {docType}
+              </span>
+              {editingDraftDbId && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                  <PenTool className="w-3 h-3" /> กำลังแก้ไขแบบร่าง #{editingDraftDbId}
+                </span>
+              )}
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl sm:text-2xl font-bold text-[var(--text-primary)]">
-                  ร่างหนังสือราชการ
-                </h2>
-                {editingDraftDbId && (
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center gap-1">
-                    <PenTool className="w-3 h-3" /> กำลังแก้ไขแบบร่างเดิม #{editingDraftDbId}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs sm:text-sm text-[var(--text-secondary)] mt-0.5">
-                ระบบร่างหนังสือราชการไทยตามระเบียบงานสารบรรณ พร้อม Live A4 Preview และ AI ช่วยร่างอัจฉริยะ
-              </p>
-            </div>
+            <p className="text-xs sm:text-sm text-[var(--text-secondary)] mt-0.5">
+              จัดทำหนังสือราชการตามระเบียบงานสารบรรณ พร้อมระบบ Live A4 Preview เสมือนจริง และผู้ช่วย AI อัจฉริยะ
+            </p>
           </div>
         </div>
 
         {/* Tab Switcher & Fast Actions */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex p-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl">
+          <div className="inline-flex p-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl shadow-inner">
             <button
               onClick={() => setActiveTab('editor')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -949,6 +952,9 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
               }`}
             >
               <LayoutGrid className="w-3.5 h-3.5" /> คลังเทมเพลตมาตรฐาน
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${activeTab === 'templates' ? 'bg-white/25 text-white' : 'bg-[var(--primary-color)]/10 text-[var(--primary-color)]'}`}>
+                {PRESET_OFFICIAL_TEMPLATES.length}
+              </span>
             </button>
           </div>
 
@@ -956,9 +962,9 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
           {activeTab === 'editor' && editingDraftDbId && (
             <button
               onClick={handleResetNewDraft}
-              className="px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-light)] text-[var(--text-primary)] text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-light)] text-[var(--text-primary)] text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
-              <Plus className="w-3.5 h-3.5" /> ขึ้นแบบร่างใหม่
+              <Plus className="w-3.5 h-3.5 text-indigo-500" /> ขึ้นแบบร่างใหม่
             </button>
           )}
         </div>
@@ -967,16 +973,16 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
       {/* VIEW: EDITOR & LIVE A4 */}
       {activeTab === 'editor' && (
         <div className="space-y-4">
-          {/* Editor Control Bar (View Switcher + Quick Actions) */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
+          {/* Smart Action Dock / Control Bar */}
+          <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-2.5 sm:p-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
             {/* Left: View Mode Toggle */}
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-[var(--text-secondary)] mr-1 hidden sm:inline">มุมมอง:</span>
-              <div className="inline-flex p-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg">
+              <span className="text-xs font-semibold text-[var(--text-secondary)] hidden sm:inline">มุมมอง:</span>
+              <div className="inline-flex p-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl">
                 <button
                   onClick={() => setViewMode('split')}
-                  className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    viewMode === 'split' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    viewMode === 'split' ? 'bg-[var(--primary-color)] text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                   }`}
                   title="แบ่ง ๒ ฝั่ง (Editor + Live A4)"
                 >
@@ -984,8 +990,8 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                 </button>
                 <button
                   onClick={() => setViewMode('editor')}
-                  className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    viewMode === 'editor' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    viewMode === 'editor' ? 'bg-[var(--primary-color)] text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                   }`}
                   title="โหมดพิมพ์เต็มจอ"
                 >
@@ -993,8 +999,8 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                 </button>
                 <button
                   onClick={() => setViewMode('preview')}
-                  className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    viewMode === 'preview' ? 'bg-[var(--primary-color)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    viewMode === 'preview' ? 'bg-[var(--primary-color)] text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                   }`}
                   title="โหมดตัวอย่างกระดาษ A4"
                 >
@@ -1002,15 +1008,15 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                 </button>
               </div>
 
-              {/* Thai Numerals Converter */}
-              <div className="inline-flex items-center p-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg">
+              {/* Thai Numerals Converter Widget */}
+              <div className="inline-flex items-center p-1 bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl">
                 <button
                   type="button"
                   onClick={() => handleConvertDigits(true)}
-                  className="px-2.5 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors flex items-center gap-1.5 cursor-pointer"
-                  title="แปลงตัวเลขทั้งหมดในเลขที่หนังสือและเนื้อหาเป็นเลขไทย (๐-๙)"
+                  className="px-2.5 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="แปลงตัวเลขทั้งหมดในเอกสารเป็นเลขไทย (๐-๙)"
                 >
-                  <span>🇹🇭 แปลงเลขไทย ๐-๙</span>
+                  <span>🇹🇭 เลขไทย ๐-๙</span>
                   {arabicDigitsFound > 0 && (
                     <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950 animate-pulse">
                       พบ {arabicDigitsFound}
@@ -1020,22 +1026,22 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                 <button
                   type="button"
                   onClick={() => handleConvertDigits(false)}
-                  className="px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                  title="แปลงกลับเป็นเลขอารบิก 0-9 ทั้งหมด"
+                  className="px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] rounded-lg transition-colors cursor-pointer"
+                  title="แปลงกลับเป็นเลขอารบิก 0-9"
                 >
                   0-9
                 </button>
               </div>
             </div>
 
-            {/* Right: AI Assistant Buttons & Save Draft */}
+            {/* Right: AI Assistant Tools & Document Actions */}
             <div className="flex flex-wrap items-center gap-2">
               {/* AI Auto-Format to Saraban Standards */}
-              <div className="flex items-center">
+              <div className="flex items-center rounded-xl overflow-hidden shadow-sm border border-amber-500/30">
                 <button
                   onClick={() => handleAutoFormatSaraban(false)}
                   disabled={isAutoFormatting}
-                  className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold rounded-l-lg transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                  className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   title="ตรวจทานและจัดหน้าตามระเบียบสารบรรณอัตโนมัติด้วย AI"
                 >
                   {isAutoFormatting ? (
@@ -1048,46 +1054,56 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                 <button
                   onClick={() => handleAutoFormatSaraban(true)}
                   disabled={isAutoFormatting}
-                  className="px-2 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 text-[11px] font-bold rounded-r-lg border-l border-amber-700/30 transition-all cursor-pointer disabled:opacity-50"
+                  className="px-2 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 text-[11px] font-bold border-l border-amber-700/30 transition-all cursor-pointer disabled:opacity-50"
                   title="จัดหน้าตามระเบียบสารบรรณทันทีใน 1 คลิก (1-Click Auto Format)"
                 >
                   ด่วน
                 </button>
               </div>
 
+              {/* AI Smart Draft Modal */}
               <button
                 onClick={() => setShowAiDraftModal(true)}
-                className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-bold rounded-lg hover:from-purple-500 hover:to-indigo-500 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                title="สร้างเนื้อหาหนังสือตามโครงสร้าง ๓ ย่อหน้าด้วย AI"
               >
-                <Sparkles className="w-3.5 h-3.5 animate-pulse" /> ✨ AI ช่วยร่างเนื้อหา
+                <Sparkles className="w-3.5 h-3.5 animate-pulse" /> AI ช่วยร่าง
               </button>
 
+              {/* AI Rule & Spelling Audit */}
               <button
                 onClick={handleAuditDocument}
                 disabled={isAuditing}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                title="ตรวจสอบความถูกต้องตามระเบียบสารบรรณ คำผิด และราชาศัพท์"
               >
-                <FileCheck className="w-3.5 h-3.5" /> {isAuditing ? 'กำลังตรวจ...' : 'AI ตรวจระเบียบ'}
+                <FileCheck className="w-3.5 h-3.5" /> {isAuditing ? 'กำลังตรวจ...' : 'ตรวจระเบียบ'}
               </button>
 
+              <div className="h-5 w-px bg-[var(--border-light)] mx-0.5 hidden sm:block" />
+
+              {/* Save Draft Button */}
               <button
                 onClick={handleSaveDraft}
-                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                title="บันทึกแบบร่างลงระบบ"
               >
-                <Save className="w-3.5 h-3.5" /> {editingDraftDbId ? 'อัปเดตแบบร่าง' : 'บันทึกแบบร่าง'}
+                <Save className="w-3.5 h-3.5" /> {editingDraftDbId ? 'อัปเดตร่าง' : 'บันทึกร่าง'}
               </button>
 
+              {/* Print Document */}
               <button
                 onClick={handlePrintDoc}
-                className="p-1.5 bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-lg transition-colors cursor-pointer"
-                title="สั่งพิมพ์"
+                className="p-1.5 bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-xl transition-colors cursor-pointer"
+                title="สั่งพิมพ์เอกสารขนาดจริง"
               >
                 <Printer className="w-4 h-4 text-violet-500" />
               </button>
 
+              {/* Export Word */}
               <button
                 onClick={() => downloadAsDoc(getCurrentDocHtml(), `ร่างหนังสือ_${subject || 'ราชการ'}`)}
-                className="p-1.5 bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-lg transition-colors cursor-pointer"
+                className="p-1.5 bg-[var(--bg-overlay)] hover:bg-[var(--border-lighter)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-xl transition-colors cursor-pointer"
                 title="ส่งออกไฟล์ Word (.docx)"
               >
                 <FileDown className="w-4 h-4 text-blue-500" />
@@ -1100,16 +1116,21 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
             {/* LEFT COLUMN: FORM & EDITOR */}
             {(viewMode === 'split' || viewMode === 'editor') && (
               <div className={`${viewMode === 'split' ? 'lg:col-span-6 xl:col-span-7' : 'lg:col-span-12'} space-y-4`}>
-                {/* Form Metadata Section */}
+                {/* Card 1: Form Metadata Section */}
                 <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-3">
-                    <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-[var(--primary-color)]" /> ข้อมูลหนังสือราชการ
-                    </h3>
-
-                    {/* Quick Category Selector */}
+                  {/* Header & Quick Template Select */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-lighter)] pb-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-[var(--text-secondary)]">ประเภท:</span>
+                      <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                        ๑
+                      </div>
+                      <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                        ข้อมูลและหัวหนังสือราชการ
+                      </h3>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Document Type Selector */}
                       <select
                         value={docType}
                         onChange={e => {
@@ -1117,7 +1138,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                           setDocType(val);
                           setSelectedTypeTitle(val);
                         }}
-                        className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1 text-xs font-semibold text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none cursor-pointer"
+                        className="bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1.5 text-xs font-bold text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none cursor-pointer"
                       >
                         <option value="หนังสือส่ง">หนังสือส่ง (หนังสือภายนอก)</option>
                         <option value="บันทึกข้อความ">บันทึกข้อความ (หนังสือภายใน)</option>
@@ -1127,14 +1148,32 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                         <option value="คำสั่ง">คำสั่ง</option>
                         <option value="ประกาศ">ประกาศ</option>
                       </select>
+
+                      {/* Quick Template Selector */}
+                      <select
+                        onChange={e => {
+                          const pId = e.target.value;
+                          if (!pId) return;
+                          const found = PRESET_OFFICIAL_TEMPLATES.find(p => p.id === pId);
+                          if (found) handleLoadPresetTemplate(found);
+                          e.target.value = '';
+                        }}
+                        defaultValue=""
+                        className="bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:border-indigo-500 outline-none cursor-pointer"
+                      >
+                        <option value="" disabled>⚡ โหลดเทมเพลตตัวอย่าง...</option>
+                        {PRESET_OFFICIAL_TEMPLATES.map(p => (
+                          <option key={p.id} value={p.id}>{p.name} ({p.category})</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
                   {/* Metadata Fields Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                     {/* Doc Number */}
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
+                    <div className="sm:col-span-2">
+                      <div className="flex items-center justify-between mb-1.5">
                         <label className="text-xs font-bold text-[var(--text-secondary)] flex items-center gap-1.5">
                           <span>เลขที่หนังสือ (ที่)</span>
                           {/[0-9]/.test(docNum) && (
@@ -1147,7 +1186,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                           <button
                             type="button"
                             onClick={() => setAutoThaiDocNum(!autoThaiDocNum)}
-                            className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+                            className={`text-[10px] px-2 py-0.5 rounded cursor-pointer transition-colors ${
                               autoThaiDocNum 
                                 ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-500/30' 
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-transparent'
@@ -1199,12 +1238,12 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                           }
                         }}
                         placeholder="รย ๐๐๒๑.๑/..."
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] font-mono focus:border-[var(--primary-color)] outline-none"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] font-mono font-medium focus:border-[var(--primary-color)] outline-none transition-colors"
                       />
                       {docNum && (
-                        <div className="flex flex-wrap gap-1 mt-1">
+                        <div className="flex flex-wrap gap-1 mt-1.5">
                           {parseDocNumberStructure(docNum, docType).tags.map((tag, idx) => (
-                            <span key={idx} className="text-[9px] font-mono px-1 py-0.2 rounded bg-blue-500/10 text-blue-600 dark:text-blue-300 border border-blue-500/20">
+                            <span key={idx} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20">
                               {tag.label}: <strong>{tag.value}</strong>
                             </span>
                           ))}
@@ -1213,27 +1252,34 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                     </div>
 
                     {/* Date */}
-                    <div>
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">ลงวันที่</label>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
+                        ลงวันที่
+                      </label>
                       <input
                         type="date"
                         value={date}
                         onChange={e => setDate(e.target.value)}
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none cursor-pointer"
                       />
-                      <div className="text-[10px] text-[var(--text-muted)] mt-1 font-medium truncate">
-                        {thDateFull(date)}
+                      <div className="text-[11px] text-[var(--text-secondary)] mt-1.5 font-medium flex items-center gap-1">
+                        <span className="text-[var(--text-muted)]">รูปแบบทางการ:</span>
+                        <strong className="text-[var(--text-primary)]">{thDateFull(date)}</strong>
                       </div>
                     </div>
 
                     {/* Urgency */}
-                    <div>
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">ความเร่งด่วน</label>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
+                        ชั้นความเร็ว / ความเร่งด่วน
+                      </label>
                       <select
                         value={urgency}
                         onChange={e => setUrgency(e.target.value)}
-                        className={`w-full bg-[var(--bg-overlay)] border rounded-lg px-3 py-1.5 text-xs font-bold outline-none cursor-pointer ${
-                          urgency !== 'ปกติ' ? 'border-red-500 text-red-600 dark:text-red-400' : 'border-[var(--border-light)] text-[var(--text-primary)]'
+                        className={`w-full bg-[var(--bg-overlay)] border rounded-xl px-3 py-2 text-xs font-bold outline-none cursor-pointer transition-colors ${
+                          urgency !== 'ปกติ' 
+                            ? 'border-red-500 text-red-600 dark:text-red-400 bg-red-500/5' 
+                            : 'border-[var(--border-light)] text-[var(--text-primary)]'
                         }`}
                       >
                         <option value="ปกติ">ปกติ</option>
@@ -1244,13 +1290,17 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                     </div>
 
                     {/* Secrecy */}
-                    <div>
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">ชั้นความลับ</label>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
+                        ชั้นความลับ
+                      </label>
                       <select
                         value={secrecy}
                         onChange={e => setSecrecy(e.target.value)}
-                        className={`w-full bg-[var(--bg-overlay)] border rounded-lg px-3 py-1.5 text-xs font-bold outline-none cursor-pointer ${
-                          secrecy !== 'ไม่ลับ' && secrecy ? 'border-amber-500 text-amber-600 dark:text-amber-400' : 'border-[var(--border-light)] text-[var(--text-primary)]'
+                        className={`w-full bg-[var(--bg-overlay)] border rounded-xl px-3 py-2 text-xs font-bold outline-none cursor-pointer transition-colors ${
+                          secrecy !== 'ไม่ลับ' && secrecy 
+                            ? 'border-amber-500 text-amber-600 dark:text-amber-400 bg-amber-500/5' 
+                            : 'border-[var(--border-light)] text-[var(--text-primary)]'
                         }`}
                       >
                         <option value="ไม่ลับ">ไม่ลับ (ทั่วไป)</option>
@@ -1261,8 +1311,8 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                     </div>
 
                     {/* Recipient */}
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">
+                    <div className="sm:col-span-4">
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
                         เรียน / ถึง <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -1272,15 +1322,16 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                           const val = autoThaiDocNum ? toThaiNumeral(e.target.value) : e.target.value;
                           setTo(val);
                         }}
-                        placeholder="เช่น ผู้ว่าราชการจังหวัดระยอง / นายอำเภอทุกอำเภอ"
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                        placeholder="เช่น ผู้ว่าราชการจังหวัดระยอง / นายอำเภอทุกอำเภอ / หัวหน้าส่วนราชการประจำจังหวัด"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] font-medium focus:border-[var(--primary-color)] outline-none transition-colors"
                       />
                     </div>
 
-                    {/* Subject */}
-                    <div className="sm:col-span-2 lg:col-span-3">
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">
-                        เรื่อง <span className="text-red-500">*</span>
+                    {/* Subject (Key Title) */}
+                    <div className="sm:col-span-4">
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5 flex items-center justify-between">
+                        <span>เรื่อง <span className="text-red-500">*</span></span>
+                        <span className="text-[11px] text-[var(--text-muted)]">ระบุสาระสำคัญให้ชัดเจน กระชับ ไม่เกิน ๒ บรรทัด</span>
                       </label>
                       <input
                         type="text"
@@ -1290,13 +1341,15 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                           setSubject(val);
                         }}
                         placeholder="กรอกชื่อเรื่องของหนังสือราชการ..."
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] font-semibold focus:border-[var(--primary-color)] outline-none"
+                        className="w-full bg-[var(--bg-overlay)] border-2 border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl px-3.5 py-2.5 text-sm font-bold text-[var(--text-primary)] outline-none transition-all"
                       />
                     </div>
 
                     {/* Reference */}
-                    <div>
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">อ้างถึง (ถ้ามี)</label>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
+                        อ้างถึง (ถ้ามี)
+                      </label>
                       <input
                         type="text"
                         value={refText}
@@ -1304,14 +1357,16 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                           const val = autoThaiDocNum ? toThaiNumeral(e.target.value) : e.target.value;
                           setRefText(val);
                         }}
-                        placeholder="หนังสือที่อ้างถึง..."
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                        placeholder="หนังสือที่อ้างถึง เช่น หนังสือจังหวัดระยอง ที่..."
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
                       />
                     </div>
 
                     {/* Attachment */}
                     <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">สิ่งที่ส่งมาด้วย (ถ้ามี)</label>
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
+                        สิ่งที่ส่งมาด้วย (ถ้ามี)
+                      </label>
                       <input
                         type="text"
                         value={attText}
@@ -1320,28 +1375,317 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                           setAttText(val);
                         }}
                         placeholder="กำหนดการ / บัญชีรายชื่อ / เอกสารแนบ..."
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card 2: Rich Text Editor Body */}
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                  {/* Editor Header Bar */}
+                  <div className="bg-[var(--bg-elevated)] border-b border-[var(--border-light)] p-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                        ๒
+                      </div>
+                      <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                        เนื้อความหนังสือราชการ
+                      </h3>
+                    </div>
+
+                    {/* Live Word & Paragraph Stats */}
+                    <div className="flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+                      <span className="px-2 py-0.5 rounded-full bg-[var(--bg-overlay)] border border-[var(--border-lighter)]">
+                        ย่อหน้า: <strong>{(editorContent || '').match(/<p\b/gi)?.length || (editorContent ? 1 : 0)}</strong>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-[var(--bg-overlay)] border border-[var(--border-lighter)]">
+                        คำ: <strong>{(editorContent || '').replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean).length}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Editor Toolbar */}
+                  <div className="bg-[var(--bg-overlay)] border-b border-[var(--border-lighter)] p-2 flex flex-wrap items-center gap-1.5">
+                    {/* Basic text style */}
+                    <div className="flex items-center bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => execCommand('bold')}
+                        className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
+                        title="ตัวหนา (Ctrl+B)"
+                      >
+                        <Bold className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => execCommand('italic')}
+                        className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
+                        title="ตัวเอียง (Ctrl+I)"
+                      >
+                        <Italic className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => execCommand('underline')}
+                        className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
+                        title="ขีดเส้นใต้ (Ctrl+U)"
+                      >
+                        <Underline className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Alignment */}
+                    <div className="flex items-center bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => execCommand('justifyLeft')}
+                        className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
+                        title="จัดชิดซ้าย"
+                      >
+                        <AlignLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => execCommand('justifyCenter')}
+                        className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
+                        title="จัดกึ่งกลาง"
+                      >
+                        <AlignCenter className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => execCommand('justifyRight')}
+                        className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
+                        title="จัดชิดขวา"
+                      >
+                        <AlignRight className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => execCommand('justifyFull')}
+                        className="p-1.5 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 rounded font-semibold transition-colors cursor-pointer"
+                        title="จัดเต็มแนว (Justify - มาตรฐานราชการ)"
+                      >
+                        <AlignJustify className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="h-4 w-px bg-[var(--border-light)] mx-0.5" />
+
+                    {/* Insert Official Phrases Dropdown */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowPhrasesDropdown(!showPhrasesDropdown)}
+                        className="px-2.5 py-1 text-xs bg-[var(--bg-surface)] border border-[var(--border-light)] hover:border-indigo-500 rounded-lg font-semibold text-[var(--text-primary)] transition-colors flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>📌 แทรกวลีราชการ</span>
+                        <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" />
+                      </button>
+
+                      {showPhrasesDropdown && (
+                        <div className="absolute top-full left-0 mt-1.5 w-80 p-3 bg-[var(--bg-surface)] border border-indigo-500/30 rounded-2xl shadow-2xl z-30 space-y-2 animate-fade-in">
+                          <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-1.5">
+                            <span className="text-xs font-bold text-[var(--text-primary)]">เลือกวลีมาตรฐานตามระเบียบ</span>
+                            <button onClick={() => setShowPhrasesDropdown(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="flex gap-1 border-b border-[var(--border-lighter)] pb-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPhraseCategory('openings')}
+                              className={`px-2 py-1 text-[11px] rounded-lg font-medium cursor-pointer ${
+                                phraseCategory === 'openings' ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-bold' : 'text-[var(--text-secondary)]'
+                              }`}
+                            >
+                              ภาคเหตุ (ต้น)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPhraseCategory('transitions')}
+                              className={`px-2 py-1 text-[11px] rounded-lg font-medium cursor-pointer ${
+                                phraseCategory === 'transitions' ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-bold' : 'text-[var(--text-secondary)]'
+                              }`}
+                            >
+                              ภาคประสงค์ (กลาง)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPhraseCategory('closings')}
+                              className={`px-2 py-1 text-[11px] rounded-lg font-medium cursor-pointer ${
+                                phraseCategory === 'closings' ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 font-bold' : 'text-[var(--text-secondary)]'
+                              }`}
+                            >
+                              ภาคสรุป (ท้าย)
+                            </button>
+                          </div>
+
+                          <div className="max-h-52 overflow-y-auto space-y-1 custom-scrollbar">
+                            {OFFICIAL_STANDARD_PHRASES[phraseCategory].map((phrase, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => handleInsertPhrase(phrase.text)}
+                                className="w-full text-left p-2 rounded-xl hover:bg-[var(--bg-overlay)] text-xs text-[var(--text-primary)] transition-colors border border-transparent hover:border-[var(--border-light)] cursor-pointer"
+                              >
+                                <div className="font-bold text-indigo-600 dark:text-indigo-400 text-[11px]">{phrase.label}</div>
+                                <div className="text-[11px] text-[var(--text-secondary)] line-clamp-2 mt-0.5">{phrase.text}</div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Insert Garuda Stamp */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowGarudaPanel(!showGarudaPanel)}
+                        className="px-2.5 py-1 text-xs bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 rounded-lg font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Crown className="w-3.5 h-3.5" /> <span>ตราครุฑ</span>
+                        <ChevronDown className="w-3 h-3 text-amber-500/70" />
+                      </button>
+
+                      {showGarudaPanel && (
+                        <div className="absolute top-full left-0 mt-1.5 w-64 p-3.5 bg-[var(--bg-surface)] border border-amber-500/40 rounded-2xl shadow-2xl z-30 space-y-3 animate-fade-in">
+                          <div className="text-xs font-bold text-[var(--text-primary)] flex items-center justify-between border-b border-[var(--border-lighter)] pb-1.5">
+                            <span>แทรกตราครุฑในเนื้อหา</span>
+                            <button onClick={() => setShowGarudaPanel(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-[var(--text-secondary)] block mb-1">ขนาดมาตรฐาน</label>
+                            <div className="flex gap-2">
+                              {[
+                                { sz: '60', label: '1.5 ซม. (ใน)' },
+                                { sz: '113', label: '3.0 ซม. (นอก)' }
+                              ].map(item => (
+                                <label key={item.sz} className="text-xs text-[var(--text-primary)] flex items-center gap-1.5 cursor-pointer">
+                                  <input type="radio" name="garudaSize" value={item.sz} checked={garudaSize === item.sz} onChange={e => setGarudaSize(e.target.value)} />
+                                  {item.label}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-[var(--text-secondary)] block mb-1">ตำแหน่งวาง</label>
+                            <div className="flex gap-2">
+                              {[
+                                { id: 'left', label: 'ซ้าย' },
+                                { id: 'center', label: 'กลาง' }
+                              ].map(item => (
+                                <label key={item.id} className="text-xs text-[var(--text-primary)] flex items-center gap-1.5 cursor-pointer">
+                                  <input type="radio" name="garudaAlign" value={item.id} checked={garudaAlign === item.id} onChange={e => setGarudaAlign(e.target.value as any)} />
+                                  {item.label}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={insertGaruda}
+                            className="w-full bg-amber-500 text-slate-950 text-xs font-bold py-1.5 rounded-xl hover:bg-amber-400 transition-colors shadow-sm cursor-pointer"
+                          >
+                            แทรกลงในเนื้อหา
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Indentation Visual Hint Bar */}
+                  <div className="bg-[var(--bg-elevated)] border-b border-[var(--border-lighter)] px-5 py-1 text-[10px] text-[var(--text-muted)] flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-4 h-0.5 bg-indigo-500/40"></span>
+                      <span>ระยะร่นย่อหน้าตามระเบียบ: <strong>๒.๕ ซม.</strong> (Text Indent 2.5em)</span>
+                    </span>
+                    <span className="font-mono">TH SarabunPSK ๑๖pt</span>
+                  </div>
+
+                  {/* ContentEditable Document Editor Body */}
+                  <div
+                    ref={editorRef}
+                    contentEditable
+                    onInput={handleEditorInput}
+                    className="p-6 sm:p-8 min-h-[380px] text-base text-slate-900 dark:text-slate-100 leading-relaxed outline-none focus:ring-0 custom-scrollbar bg-white dark:bg-slate-900 border-none select-text"
+                    style={{ 
+                      fontFamily: "'Sarabun', 'TH SarabunPSK', sans-serif",
+                      fontSize: '16pt',
+                      lineHeight: '1.65'
+                    }}
+                  />
+                </div>
+
+                {/* Card 3: Signer & Contact Details */}
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-5 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                        ๓
+                      </div>
+                      <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                        ผู้ลงนามและส่วนราชการเจ้าของเรื่อง
+                      </h3>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowContactDetails(!showContactDetails)}
+                      className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>{showContactDetails ? 'ย่อข้อมูลติดต่อ' : 'แก้ไขข้อมูลติดต่อส่วนท้าย'}</span>
+                      {showContactDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  {/* Signer Main Inputs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
+                        ชื่อ-สกุล ผู้ลงนาม <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={signer}
+                        onChange={e => setSigner(e.target.value)}
+                        placeholder="เช่น นายสมชาย มุ่งมั่นพัฒนา"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
+                        ตำแหน่งผู้ลงนาม <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={signerPos}
+                        onChange={e => setSignerPos(e.target.value)}
+                        placeholder="เช่น หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง"
+                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-xl px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
                       />
                     </div>
                   </div>
 
-                  {/* Collapsible Contact Section */}
-                  <div className="pt-2 border-t border-[var(--border-lighter)]">
-                    <details className="text-xs text-[var(--text-secondary)] group">
-                      <summary className="font-semibold cursor-pointer select-none flex items-center justify-between text-[var(--text-primary)] hover:text-indigo-500 py-1">
-                        <span className="flex items-center gap-1.5">
-                          <Building className="w-3.5 h-3.5 text-indigo-500" /> หน่วยงานเจ้าของเรื่อง & ข้อมูลติดต่อส่วนท้าย
-                        </span>
-                        <span className="text-[11px] text-[var(--text-muted)] group-open:rotate-180 transition-transform">▼</span>
-                      </summary>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-3">
+                  {/* Expandable Contact Details */}
+                  {showContactDetails && (
+                    <div className="pt-3 border-t border-[var(--border-lighter)] space-y-3 animate-fade-in">
+                      <div className="text-[11px] font-bold text-[var(--text-secondary)] flex items-center gap-1.5">
+                        <Building className="w-3.5 h-3.5 text-indigo-500" /> ข้อมูลส่วนราชการเจ้าของเรื่อง (มุมล่างซ้ายของหนังสือ)
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         <div>
-                          <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">หน่วยงานหลัก</label>
+                          <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">ส่วนราชการหลัก</label>
                           <input
                             type="text"
                             value={orgName}
                             onChange={e => setOrgName(e.target.value)}
-                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1 text-xs text-[var(--text-primary)] outline-none"
+                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--text-primary)] outline-none"
                           />
                         </div>
                         <div>
@@ -1353,11 +1697,11 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                               const val = autoThaiDocNum ? toThaiNumeral(e.target.value) : e.target.value;
                               setDeptContact(val);
                             }}
-                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1 text-xs text-[var(--text-primary)] outline-none"
+                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--text-primary)] outline-none"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">เบอร์โทรศัพท์</label>
+                          <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">โทรศัพท์</label>
                           <input
                             type="text"
                             value={phone}
@@ -1365,7 +1709,7 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                               const val = autoThaiDocNum ? toThaiNumeral(e.target.value) : e.target.value;
                               setPhone(val);
                             }}
-                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1 text-xs text-[var(--text-primary)] outline-none font-mono"
+                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--text-primary)] outline-none font-mono"
                           />
                         </div>
                         <div>
@@ -1374,280 +1718,22 @@ export default function DraftLettersView({ user, onSendToSignQueue, prefillData 
                             type="text"
                             value={email}
                             onChange={e => setEmail(e.target.value)}
-                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1 text-xs text-[var(--text-primary)] outline-none"
+                            className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--text-primary)] outline-none"
                           />
                         </div>
                       </div>
-                    </details>
-                  </div>
-                </div>
-
-                {/* Rich Editor Section */}
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                  {/* Toolbar */}
-                  <div className="bg-[var(--bg-elevated)] border-b border-[var(--border-light)] p-2.5 flex flex-wrap items-center gap-1.5">
-                    {/* Basic text style */}
-                    <button
-                      onClick={() => execCommand('bold')}
-                      className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                      title="ตัวหนา (Ctrl+B)"
-                    >
-                      <Bold className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => execCommand('italic')}
-                      className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                      title="ตัวเอียง (Ctrl+I)"
-                    >
-                      <Italic className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => execCommand('underline')}
-                      className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                      title="ขีดเส้นใต้ (Ctrl+U)"
-                    >
-                      <Underline className="w-4 h-4" />
-                    </button>
-
-                    <div className="h-4 w-px bg-[var(--border-light)] mx-1" />
-
-                    {/* Alignment */}
-                    <button
-                      onClick={() => execCommand('justifyLeft')}
-                      className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                      title="จัดชิดซ้าย"
-                    >
-                      <AlignLeft className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => execCommand('justifyCenter')}
-                      className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                      title="จัดกึ่งกลาง"
-                    >
-                      <AlignCenter className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => execCommand('justifyRight')}
-                      className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                      title="จัดชิดขวา"
-                    >
-                      <AlignRight className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => execCommand('justifyFull')}
-                      className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--border-lighter)] rounded transition-colors cursor-pointer"
-                      title="จัดเต็มแนว (Justify - มาตรฐานราชการ)"
-                    >
-                      <AlignJustify className="w-4 h-4" />
-                    </button>
-
-                    <div className="h-4 w-px bg-[var(--border-light)] mx-1" />
-
-                    {/* Insert Official Phrases Dropdown */}
-                    <div className="relative">
-                      <button
-                        onClick={() => setShowPhrasesDropdown(!showPhrasesDropdown)}
-                        className="px-2.5 py-1 text-xs bg-[var(--bg-surface)] border border-[var(--border-light)] hover:border-indigo-500 rounded font-semibold text-[var(--text-primary)] transition-colors flex items-center gap-1 cursor-pointer"
-                      >
-                        📌 แทรกวลีราชการ ▼
-                      </button>
-
-                      {showPhrasesDropdown && (
-                        <div className="absolute top-full left-0 mt-1.5 w-80 p-3 bg-[var(--bg-surface)] border border-indigo-500/30 rounded-xl shadow-2xl z-30 space-y-2 animate-fade-in">
-                          <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-1.5">
-                            <span className="text-xs font-bold text-[var(--text-primary)]">เลือกวลีมาตรฐานราชการ</span>
-                            <button onClick={() => setShowPhrasesDropdown(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-
-                          <div className="flex gap-1 border-b border-[var(--border-lighter)] pb-1.5">
-                            <button
-                              onClick={() => setPhraseCategory('openings')}
-                              className={`px-2 py-1 text-[11px] rounded font-medium cursor-pointer ${
-                                phraseCategory === 'openings' ? 'bg-indigo-500/15 text-indigo-500 font-bold' : 'text-[var(--text-secondary)]'
-                              }`}
-                            >
-                              ขึ้นต้น (ย่อหน้า ๑)
-                            </button>
-                            <button
-                              onClick={() => setPhraseCategory('transitions')}
-                              className={`px-2 py-1 text-[11px] rounded font-medium cursor-pointer ${
-                                phraseCategory === 'transitions' ? 'bg-indigo-500/15 text-indigo-500 font-bold' : 'text-[var(--text-secondary)]'
-                              }`}
-                            >
-                              เชื่อมโยง (ย่อหน้า ๒)
-                            </button>
-                            <button
-                              onClick={() => setPhraseCategory('closings')}
-                              className={`px-2 py-1 text-[11px] rounded font-medium cursor-pointer ${
-                                phraseCategory === 'closings' ? 'bg-indigo-500/15 text-indigo-500 font-bold' : 'text-[var(--text-secondary)]'
-                              }`}
-                            >
-                              คำลงท้าย (ย่อหน้า ๓)
-                            </button>
-                          </div>
-
-                          <div className="max-h-48 overflow-y-auto space-y-1 custom-scrollbar">
-                            {OFFICIAL_STANDARD_PHRASES[phraseCategory].map((phrase, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => handleInsertPhrase(phrase.text)}
-                                className="w-full text-left p-2 rounded-lg hover:bg-[var(--bg-overlay)] text-xs text-[var(--text-primary)] transition-colors border border-transparent hover:border-[var(--border-light)] cursor-pointer"
-                              >
-                                <div className="font-semibold text-indigo-500 text-[11px]">{phrase.label}</div>
-                                <div className="text-[11px] text-[var(--text-secondary)] line-clamp-1">{phrase.text}</div>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
-
-                    {/* Insert Garuda Stamp */}
-                    <div className="relative">
-                      <button
-                        onClick={() => setShowGarudaPanel(!showGarudaPanel)}
-                        className="px-2.5 py-1 text-xs bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 rounded font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Crown className="w-3.5 h-3.5" /> ตราครุฑ
-                      </button>
-
-                      {showGarudaPanel && (
-                        <div className="absolute top-full left-0 mt-1.5 w-64 p-3 bg-[var(--bg-surface)] border border-amber-500/40 rounded-xl shadow-2xl z-30 space-y-3 animate-fade-in">
-                          <div className="text-xs font-bold text-[var(--text-primary)] flex items-center justify-between border-b border-[var(--border-lighter)] pb-1.5">
-                            <span>แทรกตราครุฑในเนื้อหา</span>
-                            <button onClick={() => setShowGarudaPanel(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          <div>
-                            <label className="text-[11px] text-[var(--text-secondary)] block mb-1">ขนาดตราครุฑ</label>
-                            <div className="flex gap-2">
-                              {[
-                                { sz: '60', label: '1.5 ซม. (ใน)' },
-                                { sz: '113', label: '3.0 ซม. (นอก)' }
-                              ].map(item => (
-                                <label key={item.sz} className="text-xs text-[var(--text-primary)] flex items-center gap-1 cursor-pointer">
-                                  <input type="radio" name="garudaSize" value={item.sz} checked={garudaSize === item.sz} onChange={e => setGarudaSize(e.target.value)} />
-                                  {item.label}
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                          <div>
-                            <label className="text-[11px] text-[var(--text-secondary)] block mb-1">ตำแหน่ง</label>
-                            <div className="flex gap-2">
-                              {[
-                                { id: 'left', label: 'ซ้าย' },
-                                { id: 'center', label: 'กลาง' }
-                              ].map(item => (
-                                <label key={item.id} className="text-xs text-[var(--text-primary)] flex items-center gap-1 cursor-pointer">
-                                  <input type="radio" name="garudaAlign" value={item.id} checked={garudaAlign === item.id} onChange={e => setGarudaAlign(e.target.value as any)} />
-                                  {item.label}
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                          <button
-                            onClick={insertGaruda}
-                            className="w-full bg-amber-500 text-slate-950 text-xs font-bold py-1.5 rounded-lg hover:bg-amber-400 transition-colors cursor-pointer"
-                          >
-                            แทรกลงในเนื้อหา
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Quick Thai Numerals in Editor Toolbar */}
-                    <div className="flex items-center bg-emerald-500/10 border border-emerald-500/30 rounded-lg overflow-hidden ml-auto mr-2">
-                      <button
-                        type="button"
-                        onClick={() => handleConvertDigits(true)}
-                        className="px-2.5 py-1 text-xs text-emerald-700 dark:text-emerald-300 font-bold hover:bg-emerald-500/20 flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title="แปลงตัวเลขทั้งหมดในเลขที่หนังสือและเนื้อหาเป็นเลขไทย (๐-๙)"
-                      >
-                        <span>🇹🇭 เลขไทย ๐-๙</span>
-                        {arabicDigitsFound > 0 && (
-                          <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950">
-                            {arabicDigitsFound}
-                          </span>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleConvertDigits(false)}
-                        className="px-2 py-1 text-[10px] text-emerald-700 dark:text-emerald-300 font-bold hover:bg-emerald-500/20 border-l border-emerald-500/30 transition-colors cursor-pointer"
-                        title="แปลงกลับเป็นเลขอารบิก 0-9"
-                      >
-                        0-9
-                      </button>
-                    </div>
-
-                    {/* AI Auto-Format to Saraban Toolbar Quick Action */}
-                    <div className="flex items-center bg-amber-500/10 border border-amber-500/30 rounded-lg overflow-hidden">
-                      <button
-                        onClick={() => handleAutoFormatSaraban(false)}
-                        disabled={isAutoFormatting}
-                        className="px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400 font-bold hover:bg-amber-500/20 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                        title="ตรวจทานและจัดหน้าตามระเบียบสารบรรณอัตโนมัติด้วย AI"
-                      >
-                        <Wand2 className="w-3.5 h-3.5 text-amber-500" />
-                        <span>AI จัดหน้าสารบรรณ</span>
-                      </button>
-                      <button
-                        onClick={() => handleAutoFormatSaraban(true)}
-                        disabled={isAutoFormatting}
-                        className="px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300 font-bold hover:bg-amber-500/20 border-l border-amber-500/30 transition-colors cursor-pointer disabled:opacity-50"
-                        title="จัดหน้าสารบรรณทันที (1-Click Auto-Format)"
-                      >
-                        1-Click
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* ContentEditable Document Editor Body */}
-                  <div
-                    ref={editorRef}
-                    contentEditable
-                    onInput={handleEditorInput}
-                    className="p-5 min-h-[300px] text-sm text-[var(--text-primary)] leading-relaxed outline-none focus:ring-0 custom-scrollbar bg-white dark:bg-slate-900"
-                    style={{ fontFamily: "'Sarabun', 'TH SarabunPSK', sans-serif" }}
-                  />
-
-                  {/* Signer Block */}
-                  <div className="p-4 bg-[var(--bg-elevated)] border-t border-[var(--border-light)] grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">ชื่อ-สกุล ผู้ลงนาม</label>
-                      <input
-                        type="text"
-                        value={signer}
-                        onChange={e => setSigner(e.target.value)}
-                        placeholder="เช่น นายสมชาย มุ่งมั่นพัฒนา"
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">ตำแหน่งผู้ลงนาม</label>
-                      <input
-                        type="text"
-                        value={signerPos}
-                        onChange={e => setSignerPos(e.target.value)}
-                        placeholder="เช่น หัวหน้าสำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง"
-                        className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
-                      />
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
 
             {/* RIGHT COLUMN: REALISTIC A4 LIVE SHEET PREVIEW */}
             {(viewMode === 'split' || viewMode === 'preview') && (
-              <div className={`${viewMode === 'split' ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12'} flex flex-col items-center space-y-3`}>
+              <div className={`${viewMode === 'split' ? 'lg:col-span-6 xl:col-span-5' : 'lg:col-span-12'} flex flex-col items-center space-y-3 sticky top-20`}>
                 <A4PaperPreview
                   title="ตัวอย่างหน้ากระดาษจริง (A4 Live Preview)"
-                  subtitle="รองรับการปรับสัดส่วนอัตโนมัติบนหน้าจอมือถือและเดสก์ท็อป (Real-time)"
+                  subtitle="แสดงผลตามระเบียบงานสารบรรณแบบเรียลไทม์ (Real-time)"
                   htmlContent={getCurrentDocHtml()}
                   onPrint={handlePrintDoc}
                   paperClassName="p-[20mm_20mm_20mm_25mm]"
