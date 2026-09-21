@@ -420,7 +420,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           activeDetails = 'กำลังสร้างรหัส QR Code สำหรับเอกสารราชการ';
           break;
         case 'surveys':
-          viewTitle = 'แบบสำรวจและประเมินผลสารบรรณดิจิทัล';
+          viewTitle = 'แบบสำรวจประเมินผลและแบบตอบรับดิจิทัล';
           activeDetails = 'กำลังจัดการแบบสำรวจและวิเคราะห์ผลตอบรับ';
           break;
         case 'urgent_incidents':

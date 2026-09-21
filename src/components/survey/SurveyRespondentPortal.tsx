@@ -29,7 +29,8 @@ import {
   UserCheck,
   XCircle,
   Share2,
-  Sliders
+  Sliders,
+  PauseCircle
 } from 'lucide-react';
 import { Survey, SurveyResponse, SurveyQuestion } from '../../types/survey';
 import { evaluateQuestionState, getReadableRuleDescription } from '../../utils/surveyLogicEngine';
@@ -680,6 +681,31 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
     );
   }
 
+  if (survey.settings?.isOpen === false || survey.settings?.status === 'paused') {
+    return (
+      <div className="max-w-2xl mx-auto p-8 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] shadow-xl text-center space-y-6 my-12">
+        <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mx-auto">
+          <PauseCircle className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-black text-[var(--text-primary)]">แบบสำรวจนี้ปิดรับคำตอบแล้ว</h2>
+          <p className="text-xs text-[var(--text-secondary)] max-w-md mx-auto leading-relaxed">
+            ขออภัยในความไม่สะดวก ขณะนี้ผู้ดูแลระบบได้ปิดการรับคำตอบสำหรับแบบสำรวจ "{survey.title}" เรียบร้อยแล้ว หากมีข้อสงสัยโปรดติดต่อหน่วยงานผู้จัดทำ
+          </p>
+        </div>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 transition cursor-pointer shadow-md"
+          >
+            ย้อนกลับ
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto py-6 px-3 sm:px-6 space-y-6 animate-fade-in text-left">
       {/* Top Floating Progress Bar */}
@@ -715,9 +741,9 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
         style={{ borderTopWidth: '8px', borderTopColor: primaryColor }}
       >
         <div className="flex items-center gap-4">
-          {getResolvedSurveyLogoUrl(survey.settings.headerLogoType, survey.settings.customLogoUrl) && (
+          {getResolvedSurveyLogoUrl(survey.settings.headerLogoType, survey.settings.customLogoUrl, survey.settings.resolvedLogoUrl) && (
             <img 
-              src={getResolvedSurveyLogoUrl(survey.settings.headerLogoType, survey.settings.customLogoUrl)!} 
+              src={getResolvedSurveyLogoUrl(survey.settings.headerLogoType, survey.settings.customLogoUrl, survey.settings.resolvedLogoUrl)!} 
               alt="Logo" 
               className="w-14 h-14 object-contain shrink-0" 
             />

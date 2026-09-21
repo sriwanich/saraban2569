@@ -17,6 +17,7 @@ import {
 import { Survey, SurveyResponse } from '../../types/survey';
 import { OFFICIAL_SURVEY_TEMPLATES } from '../../data/surveyTemplates';
 import { SurveyRespondentPortal } from '../survey/SurveyRespondentPortal';
+import { getResolvedSurveyLogoUrl } from '../../utils/surveyLogoHelper';
 
 export function PublicSurveyViewer() {
   const [loading, setLoading] = useState(true);
@@ -331,9 +332,13 @@ export function PublicSurveyViewer() {
       {/* Top Brand Banner */}
       <div className="max-w-3xl mx-auto mb-4 flex items-center justify-between px-2">
         <div className="flex items-center gap-2">
-          <img src="/ddpm-logo.svg" alt="DDPM" className="w-7 h-7 object-contain" />
+          <img 
+            src={getResolvedSurveyLogoUrl(survey.settings?.headerLogoType, survey.settings?.customLogoUrl, survey.settings?.resolvedLogoUrl) || '/ddpm-logo.svg'} 
+            alt="Logo" 
+            className="w-7 h-7 object-contain" 
+          />
           <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-            แบบสำรวจและประเมินผลสารบรรณดิจิทัล
+            {survey.department || 'แบบสำรวจประเมินผลและแบบตอบรับดิจิทัล'}
           </span>
         </div>
       </div>

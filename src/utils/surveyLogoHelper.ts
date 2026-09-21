@@ -50,10 +50,16 @@ export function getSystemBrandingInfo(): SystemBrandingInfo {
 
 export function getResolvedSurveyLogoUrl(
   headerLogoType?: 'garuda' | 'ddpm' | 'rayong' | 'custom' | 'none',
-  customLogoUrl?: string
+  customLogoUrl?: string,
+  resolvedLogoUrl?: string
 ): string | null {
   if (headerLogoType === 'none') {
     return null;
+  }
+
+  // If a pre-resolved logo URL is stored in survey settings (crucial for mobile cross-device view), use it first
+  if (resolvedLogoUrl && resolvedLogoUrl.trim() !== '') {
+    return resolvedLogoUrl;
   }
 
   // If a custom logo URL is explicitly provided, use it
@@ -64,21 +70,21 @@ export function getResolvedSurveyLogoUrl(
   const branding = getSystemBrandingInfo();
 
   if (headerLogoType === 'garuda') {
-    return branding.garudaLogoUrl;
+    return branding.garudaLogoUrl || DEFAULT_GARUDA;
   }
 
   if (headerLogoType === 'ddpm') {
-    return branding.ddpmLogoUrl;
+    return branding.ddpmLogoUrl || DEFAULT_DDPM_LOGO;
   }
 
   if (headerLogoType === 'rayong') {
-    return branding.rayongLogoUrl;
+    return branding.rayongLogoUrl || DEFAULT_RAYONG_SEAL;
   }
 
   if (headerLogoType === 'custom') {
-    return branding.systemOrgLogoUrl;
+    return branding.systemOrgLogoUrl || DEFAULT_RAYONG_SEAL;
   }
 
   // Default fallback
-  return branding.garudaLogoUrl;
+  return branding.garudaLogoUrl || DEFAULT_GARUDA;
 }

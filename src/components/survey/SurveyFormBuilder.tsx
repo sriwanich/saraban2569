@@ -352,7 +352,15 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
       cancelText: 'ยกเลิก'
     });
     if (!ok) return;
-    onSave({ ...survey, settings: { ...survey.settings, status: 'draft' } }, false);
+    const resolvedLogo = getResolvedSurveyLogoUrl(survey.settings?.headerLogoType, survey.settings?.customLogoUrl, survey.settings?.resolvedLogoUrl);
+    onSave({ 
+      ...survey, 
+      settings: { 
+        ...survey.settings, 
+        status: 'draft',
+        resolvedLogoUrl: resolvedLogo || undefined
+      } 
+    }, false);
   };
 
   const handlePublish = async () => {
@@ -365,7 +373,15 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
       cancelText: 'ยกเลิก'
     });
     if (!ok) return;
-    onSave({ ...survey, settings: { ...survey.settings, status: 'published' } }, true);
+    const resolvedLogo = getResolvedSurveyLogoUrl(survey.settings?.headerLogoType, survey.settings?.customLogoUrl, survey.settings?.resolvedLogoUrl);
+    onSave({ 
+      ...survey, 
+      settings: { 
+        ...survey.settings, 
+        status: 'published',
+        resolvedLogoUrl: resolvedLogo || undefined
+      } 
+    }, true);
   };
 
   const handleCancelBuilder = async () => {
@@ -1092,6 +1108,19 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
                 </label>
 
                 <div className="space-y-2.5">
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-blue-500/30 bg-blue-500/10 cursor-pointer text-xs text-[var(--text-secondary)]">
+                    <input
+                      type="checkbox"
+                      checked={survey.settings.isOpen ?? true}
+                      onChange={(e) => setSurvey(prev => ({ ...prev, settings: { ...prev.settings, isOpen: e.target.checked } }))}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-0 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-bold text-[var(--text-primary)] block">เปิดรับคำตอบแบบสำรวจ (Open for Responses)</span>
+                      <span className="text-[11px] text-[var(--text-muted)]">หากปิดสวิตช์นี้ ผู้ตอบจะเห็นข้อความแจ้งว่าแบบสำรวจปิดรับคำตอบแล้ว ไม่สามารถส่งข้อมูลเพิ่มได้</span>
+                    </div>
+                  </label>
+
                   <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-[var(--border-lighter)] bg-[var(--bg-canvas)] cursor-pointer text-xs text-[var(--text-secondary)]">
                     <input
                       type="checkbox"

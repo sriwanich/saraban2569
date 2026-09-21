@@ -71,7 +71,18 @@ export default defineConfig({
     include: ['fabric', 'pdf-lib', 'qrcode', 'echarts', 'echarts-for-react']
   },
   build: {
-    chunkSizeWarningLimit: 3000
+    chunkSizeWarningLimit: 2000,
+    sourcemap: false,
+    minify: 'esbuild',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          charts: ['echarts', 'echarts-for-react', 'recharts'],
+          utils: ['pdf-lib', 'qrcode']
+        }
+      }
+    }
   },
   server: { host: '0.0.0.0', port: 3000, allowedHosts: 'all' }
 });

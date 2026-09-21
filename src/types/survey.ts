@@ -107,6 +107,8 @@ export interface SurveyThemeConfig {
 
 export interface SurveySettings {
   status: 'draft' | 'published' | 'paused' | 'archived';
+  isOpen?: boolean; // เปิด-ปิดรับคำตอบ
+  resolvedLogoUrl?: string; // ตราสัญลักษณ์ที่เรโซลูชันแล้วสำหรับการแสดงผลบนมือถือ/อุปกรณ์อื่น
   themeColor: string;
   themeConfig?: SurveyThemeConfig;
   headerImageUrl?: string;

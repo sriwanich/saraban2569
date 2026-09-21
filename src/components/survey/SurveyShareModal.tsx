@@ -142,7 +142,7 @@ export const SurveyShareModal: React.FC<SurveyShareModalProps> = ({
             <img src="${qrDataUrl}" alt="Survey QR" />
           </div>
           <div class="scan-guide">📱 สแกน QR Code ด้วยมือถือเพื่อตอบแบบสอบถาม</div>
-          <div class="footer-note">แบบสำรวจและประเมินผลสารบรรณดิจิทัล สนง.ปภ.จังหวัดระยอง</div>
+          <div class="footer-note">แบบสำรวจประเมินผลและแบบตอบรับดิจิทัล สนง.ปภ.จังหวัดระยอง</div>
         </div>
         <script>
           window.onload = function() { window.print(); }
