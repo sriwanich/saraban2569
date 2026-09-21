@@ -48,12 +48,12 @@ function safeJsonParse<T = any>(value: any, fallback: T): T {
 
 // ==========================================
 // AI MULTI-TIER FALLBACK & EXPONENTIAL BACKOFF INFRASTRUCTURE
-// Standard Tier Sequence: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash
+// Standard Tier Sequence: gemini-3.8-flash -> gemini-flash-latest -> gemini-3.1-flash-lite
 // ==========================================
 export const DEFAULT_GEMINI_FALLBACK_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro'
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite'
 ];
 
 export function formatGeminiErrorMessage(err: any): string {
@@ -190,39 +190,123 @@ export async function callGeminiWithFallback(options: {
   throw err;
 }
 
-export async function getAppGeminiApiKey(customKey?: string): Promise<string> {
-  if (customKey && customKey.trim()) return customKey.trim();
-  
-  let apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (apiKey) return apiKey;
+export interface GeminiKeyInfo {
+  apiKey: string;
+  source: 'org_settings_db' | 'org_settings_local' | 'custom_request' | 'environment' | 'none';
+  sourceDescription: string;
+  maskedKey: string;
+}
 
-  try {
-    if (typeof pool !== 'undefined' && isMysqlOnline) {
-      // Priority 1: settings table (standard)
-      const [rows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
-      if (rows && rows.length > 0 && rows[0].geminiApiKey) {
-        apiKey = String(rows[0].geminiApiKey).trim();
-      }
-      
-      // Priority 2: system_settings table (legacy fallback)
-      if (!apiKey) {
-        try {
-          const [stRows]: any = await pool.query('SELECT geminiApiKey FROM system_settings WHERE id = 1');
-          if (stRows && stRows.length > 0 && stRows[0].geminiApiKey) {
-            apiKey = String(stRows[0].geminiApiKey).trim();
-          }
-        } catch (e) {
-          // ignore if table doesn't exist
-        }
-      }
-    } else if (typeof localDb !== 'undefined' && localDb.settings && localDb.settings.length > 0) {
-      apiKey = (localDb.settings[0].geminiApiKey || '').trim();
-    }
-  } catch (e) {
-    console.error('Error fetching Gemini API key from database:', e);
+export async function getAppGeminiApiKeyInfo(customKey?: string, options?: { forceCustom?: boolean }): Promise<GeminiKeyInfo> {
+  const mask = (k: string) => {
+    if (!k) return '';
+    return k.length > 8 ? `${k.substring(0, 6)}...${k.substring(k.length - 4)}` : '******';
+  };
+
+  // 0. Priority 0: Explicit forceCustom (e.g. testing an unsaved key in the Settings UI)
+  if (options?.forceCustom && customKey && typeof customKey === 'string' && customKey.trim()) {
+    const k = customKey.trim();
+    return {
+      apiKey: k,
+      source: 'custom_request',
+      sourceDescription: 'ระบุทดสอบจากหน้าจอการตั้งค่า',
+      maskedKey: mask(k)
+    };
   }
 
-  return apiKey;
+  // 1. TOP PRIORITY: Organization Settings from MySQL 'settings' table, column 'geminiApiKey'
+  // Strictly fulfills user requirement: "ปรับปรุง AI ทั้งระบบ ให้ใช้ Gemini API Key จาก ตั้งค่าระบบ องค์กร ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)"
+  let orgApiKey = '';
+
+  try {
+    // Check lookup cache first for fast in-memory access
+    if (typeof getLookupCached === 'function') {
+      const cached = getLookupCached<any>('settings');
+      if (cached && typeof cached.geminiApiKey === 'string' && cached.geminiApiKey.trim()) {
+        orgApiKey = cached.geminiApiKey.trim();
+      }
+    }
+
+    if (!orgApiKey && typeof pool !== 'undefined' && isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT geminiApiKey FROM settings LIMIT 1');
+        if (rows && rows.length > 0 && rows[0].geminiApiKey && String(rows[0].geminiApiKey).trim()) {
+          orgApiKey = String(rows[0].geminiApiKey).trim();
+        }
+      } catch (dbErr: any) {
+        console.warn('MySQL settings query for geminiApiKey failed:', dbErr.message);
+      }
+
+      // Legacy fallback check: system_settings table
+      if (!orgApiKey) {
+        try {
+          const [stRows]: any = await pool.query('SELECT geminiApiKey FROM system_settings WHERE id = 1');
+          if (stRows && stRows.length > 0 && stRows[0].geminiApiKey && String(stRows[0].geminiApiKey).trim()) {
+            orgApiKey = String(stRows[0].geminiApiKey).trim();
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Check localDb settings fallback
+    if (!orgApiKey && typeof localDb !== 'undefined' && localDb.settings && localDb.settings.length > 0) {
+      const localKey = (localDb.settings[0].geminiApiKey || '').trim();
+      if (localKey) {
+        return {
+          apiKey: localKey,
+          source: 'org_settings_local',
+          sourceDescription: 'ตั้งค่าองค์กร (Local Settings File)',
+          maskedKey: mask(localKey)
+        };
+      }
+    }
+  } catch (e: any) {
+    console.error('Error fetching Organization Gemini API key from database:', e?.message || e);
+  }
+
+  // If Organization Key exists in MySQL, use it as Priority #1
+  if (orgApiKey) {
+    return {
+      apiKey: orgApiKey,
+      source: 'org_settings_db',
+      sourceDescription: 'ตั้งค่าองค์กร (ฐานข้อมูล MySQL settings.geminiApiKey)',
+      maskedKey: mask(orgApiKey)
+    };
+  }
+
+  // 2. SECOND PRIORITY: Custom key provided by request (if DB does not have a key)
+  if (customKey && typeof customKey === 'string' && customKey.trim()) {
+    const k = customKey.trim();
+    return {
+      apiKey: k,
+      source: 'custom_request',
+      sourceDescription: 'ส่งผ่านคำขอ API (Request Payload)',
+      maskedKey: mask(k)
+    };
+  }
+
+  // 3. THIRD PRIORITY: Environment variable fallback
+  const envKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (envKey) {
+    return {
+      apiKey: envKey,
+      source: 'environment',
+      sourceDescription: 'ตัวแปรสภาพแวดล้อมระบบ (Settings > Secrets)',
+      maskedKey: mask(envKey)
+    };
+  }
+
+  return {
+    apiKey: '',
+    source: 'none',
+    sourceDescription: 'ยังไม่ได้ระบุ API Key',
+    maskedKey: ''
+  };
+}
+
+export async function getAppGeminiApiKey(customKey?: string, options?: { forceCustom?: boolean }): Promise<string> {
+  const info = await getAppGeminiApiKeyInfo(customKey, options);
+  return info.apiKey;
 }
 
 
@@ -1663,42 +1747,34 @@ app.post('/api/ai/remove-background', async (req, res) => {
     const ai = getGeminiClient(apiKey, req);
 
     const modelsToTry = ['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image'];
-    let resultImageBase64: string | null = null;
 
-    for (const modelName of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: base64Data,
-                },
-              },
-              {
-                text: 'Isolate the main subject or object in this image. Remove the background completely, turning all background area into transparent PNG. Return ONLY the isolated subject on a transparent background PNG image.',
-              },
-            ],
+    const { response } = await callGeminiWithFallback({
+      client: ai,
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
           },
-        });
-
-        const candidates = response.candidates;
-        if (candidates && candidates.length > 0) {
-          const parts = candidates[0].content?.parts || [];
-          for (const part of parts) {
-            if (part.inlineData && part.inlineData.data) {
-              const resMime = part.inlineData.mimeType || 'image/png';
-              resultImageBase64 = `data:${resMime};base64,${part.inlineData.data}`;
-              break;
-            }
-          }
+          {
+            text: 'Isolate the main subject or object in this image. Remove the background completely, turning all background area into transparent PNG. Return ONLY the isolated subject on a transparent background PNG image.',
+          },
+        ],
+      },
+      models: modelsToTry,
+    });
+    
+    let resultImageBase64: string | null = null;
+    if (response && response.candidates && response.candidates.length > 0) {
+      const parts = response.candidates[0].content?.parts || [];
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+          const resMime = part.inlineData.mimeType || 'image/png';
+          resultImageBase64 = `data:${resMime};base64,${part.inlineData.data}`;
+          break;
         }
-
-        if (resultImageBase64) break;
-      } catch (err: any) {
-        console.warn(`[Remove BG] Model ${modelName} failed:`, err.message || err);
       }
     }
 
@@ -3365,6 +3441,7 @@ function loadLocalDb() {
         { role: 'admin', permission_key: 'ai_assistant', is_allowed: 1 },
         { role: 'admin', permission_key: 'infographics', is_allowed: 1 },
         { role: 'admin', permission_key: 'qr_generator', is_allowed: 1 },
+        { role: 'admin', permission_key: 'surveys', is_allowed: 1 },
         { role: 'admin', permission_key: 'draft_docs', is_allowed: 1 },
         { role: 'admin', permission_key: 'digital_folders', is_allowed: 1 },
         { role: 'admin', permission_key: 'workflow_sla', is_allowed: 1 },
@@ -3387,6 +3464,7 @@ function loadLocalDb() {
         { role: 'moderator', permission_key: 'ai_assistant', is_allowed: 1 },
         { role: 'moderator', permission_key: 'infographics', is_allowed: 1 },
         { role: 'moderator', permission_key: 'qr_generator', is_allowed: 1 },
+        { role: 'moderator', permission_key: 'surveys', is_allowed: 1 },
         { role: 'moderator', permission_key: 'draft_docs', is_allowed: 1 },
         { role: 'moderator', permission_key: 'digital_folders', is_allowed: 1 },
         { role: 'moderator', permission_key: 'workflow_sla', is_allowed: 1 },
@@ -3409,6 +3487,7 @@ function loadLocalDb() {
         { role: 'user', permission_key: 'ai_assistant', is_allowed: 1 },
         { role: 'user', permission_key: 'infographics', is_allowed: 1 },
         { role: 'user', permission_key: 'qr_generator', is_allowed: 1 },
+        { role: 'user', permission_key: 'surveys', is_allowed: 1 },
         { role: 'user', permission_key: 'draft_docs', is_allowed: 1 },
         { role: 'user', permission_key: 'digital_folders', is_allowed: 1 },
         { role: 'user', permission_key: 'workflow_sla', is_allowed: 1 },
@@ -4267,6 +4346,7 @@ async function setupDatabase() {
             toPerson VARCHAR(255),
             incidentTypes LONGTEXT,
             incidentTypeOther TEXT,
+            incidentAppearance TEXT,
             severity VARCHAR(100),
             startDate VARCHAR(100),
             startTime VARCHAR(50),
@@ -4321,6 +4401,18 @@ async function setupDatabase() {
             updatedAt VARCHAR(50)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `);
+
+        // Dynamic Migration: Check and add incidentAppearance column to urgent_incidents if missing
+        try {
+          const [columns]: any = await pool.query("SHOW COLUMNS FROM urgent_incidents LIKE 'incidentAppearance'");
+          if (!columns || columns.length === 0) {
+            await pool.query("ALTER TABLE urgent_incidents ADD COLUMN incidentAppearance TEXT AFTER incidentTypeOther");
+            console.log('✅ Added column incidentAppearance to urgent_incidents table successfully');
+          }
+        } catch (colErr: any) {
+          console.warn('Note migrating incidentAppearance column:', colErr.message);
+        }
+
         console.log('✅ Pre-initialized all mandatory system tables in MySQL');
       } catch (err: any) {
         console.warn('Note pre-initializing system tables:', err.message);
@@ -4981,6 +5073,7 @@ async function setupDatabase() {
           { role: 'admin', key: 'ai_assistant', val: 1 },
           { role: 'admin', key: 'infographics', val: 1 },
           { role: 'admin', key: 'qr_generator', val: 1 },
+          { role: 'admin', key: 'surveys', val: 1 },
           { role: 'admin', key: 'draft_docs', val: 1 },
           { role: 'admin', key: 'digital_folders', val: 1 },
           { role: 'admin', key: 'workflow_sla', val: 1 },
@@ -5003,6 +5096,7 @@ async function setupDatabase() {
           { role: 'moderator', key: 'ai_assistant', val: 1 },
           { role: 'moderator', key: 'infographics', val: 1 },
           { role: 'moderator', key: 'qr_generator', val: 1 },
+          { role: 'moderator', key: 'surveys', val: 1 },
           { role: 'moderator', key: 'draft_docs', val: 1 },
           { role: 'moderator', key: 'digital_folders', val: 1 },
           { role: 'moderator', key: 'workflow_sla', val: 1 },
@@ -5025,6 +5119,7 @@ async function setupDatabase() {
           { role: 'user', key: 'ai_assistant', val: 1 },
           { role: 'user', key: 'infographics', val: 1 },
           { role: 'user', key: 'qr_generator', val: 1 },
+          { role: 'user', key: 'surveys', val: 1 },
           { role: 'user', key: 'draft_docs', val: 1 },
           { role: 'user', key: 'digital_folders', val: 1 },
           { role: 'user', key: 'workflow_sla', val: 1 },
@@ -5255,6 +5350,234 @@ async function setupDatabase() {
         console.log('✅ Initialized and verified infographics table in MySQL');
       } catch (e) {
         console.warn('Note checking/creating infographics table:', e);
+      }
+
+      // Ensure surveys and survey_responses tables exist with complete schema
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS surveys (
+            id VARCHAR(100) PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            description TEXT DEFAULT NULL,
+            category VARCHAR(100) DEFAULT 'satisfaction',
+            category_label VARCHAR(100) DEFAULT 'ความพึงพอใจ',
+            department VARCHAR(255) DEFAULT '',
+            creator_id VARCHAR(100) DEFAULT 'admin',
+            creator_name VARCHAR(255) DEFAULT 'ผู้ดูแลระบบ',
+            settings LONGTEXT,
+            questions LONGTEXT,
+            view_count INT DEFAULT 0,
+            response_count INT DEFAULT 0,
+            created_at VARCHAR(50),
+            updated_at VARCHAR(50)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS survey_responses (
+            id VARCHAR(100) PRIMARY KEY,
+            survey_id VARCHAR(100) NOT NULL,
+            respondent_name VARCHAR(255) DEFAULT NULL,
+            respondent_department VARCHAR(255) DEFAULT NULL,
+            answers LONGTEXT,
+            time_spent_seconds INT DEFAULT 0,
+            submitted_at VARCHAR(50),
+            INDEX idx_survey_id (survey_id)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `, []);
+
+        // Seed default official surveys if table is empty
+        const [surveyCountRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM surveys');
+        if (surveyCountRows && surveyCountRows[0] && surveyCountRows[0].cnt === 0) {
+          const defaultSurveys = [
+            {
+              id: 'survey_official_1',
+              title: 'แบบประเมินความพึงพอใจการให้บริการประชาชน (ก.พ.ร.)',
+              description: 'แบบสำรวจความพึงพอใจของผู้รับบริการต่อการปฏิบัติงานและการให้บริการของสำนักงาน ปภ. จังหวัดระยอง ตามเกณฑ์มาตรฐาน ก.พ.ร.',
+              category: 'satisfaction',
+              category_label: 'ความพึงพอใจการบริการ',
+              department: 'ฝ่ายบริหารทั่วไป',
+              creator_id: 'admin',
+              creator_name: 'ฝ่ายบริหารงานสารบรรณ ปภ.',
+              settings: JSON.stringify({
+                status: 'published',
+                themeColor: '#2563eb',
+                headerLogoType: 'garuda',
+                showProgressBar: true,
+                showQuestionNumbers: true,
+                allowAnonymous: true,
+                requireLogin: false,
+                thankYouTitle: 'ขอบพระคุณสำหรับข้อคิดเห็นอันมีค่ายิ่ง',
+                thankYouMessage: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง จะนำผลการประเมินไปพัฒนาและยกระดับคุณภาพการให้บริการประชาชนให้ดียิ่งขึ้นต่อไป'
+              }),
+              questions: JSON.stringify([
+                {
+                  id: 'q_service_type',
+                  type: 'single_choice',
+                  title: '1. ประเภทงานบริการที่ท่านมาติดต่อขอรับบริการในวันนี้',
+                  description: 'กรุณาเลือกงานบริการหลักที่ท่านเข้ารับบริการ',
+                  required: true,
+                  options: [
+                    { id: 'opt_1', text: 'งานขอรับความช่วยเหลือสงเคราะห์ผู้ประสบภัยพิบัติ' },
+                    { id: 'opt_2', text: 'งานฝึกอบรม/ซ้อมแผนป้องกันและระงับอัคคีภัย' },
+                    { id: 'opt_3', text: 'งานขอใช้เครื่องจักรกลสาธารณภัย / ยานพาหนะกู้ภัย' },
+                    { id: 'opt_4', text: 'งานสารบรรณ / ส่ง-รับหนังสือราชการ' },
+                    { id: 'opt_5', text: 'งานขอข้อมูลสถิติและแผนป้องกันสาธารณภัย' },
+                    { id: 'opt_6', text: 'อื่นๆ (โปรดระบุ)' }
+                  ],
+                  allowOther: true
+                },
+                {
+                  id: 'q_matrix_satisfaction',
+                  type: 'matrix_rating',
+                  title: '2. ระดับความพึงพอใจต่อขั้นตอนและการให้บริการในแต่ละมิติ',
+                  description: 'กรุณาให้คะแนนความพึงพอใจตามระดับ 1 (น้อยที่สุด) ถึง 5 (มากที่สุด)',
+                  required: true,
+                  matrixRows: [
+                    { id: 'row_step', text: '1) ขั้นตอนและกระบวนการให้บริการมีความสะดวกรวดเร็วและไม่ซับซ้อน' },
+                    { id: 'row_staff', text: '2) เจ้าหน้าที่ให้บริการด้วยความสุภาพ ยิ้มแย้ม และเต็มใจให้คำแนะนำ' },
+                    { id: 'row_info', text: '3) ข้อมูล คำอธิบาย และเอกสารเผยแพร่มีความชัดเจน ครบถ้วน ถูกต้อง' },
+                    { id: 'row_place', text: '4) สถานที่ จุดบริการ มีความสะอาด สะดวกสบาย และปลอดภัย' },
+                    { id: 'row_overall', text: '5) ภาพรวมความพึงพอใจต่อการให้บริการของสำนักงาน ปภ. จังหวัดระยอง' }
+                  ],
+                  matrixCols: [
+                    { id: 'c1', text: 'น้อยที่สุด (1)', score: 1 },
+                    { id: 'c2', text: 'น้อย (2)', score: 2 },
+                    { id: 'c3', text: 'ปานกลาง (3)', score: 3 },
+                    { id: 'c4', text: 'มาก (4)', score: 4 },
+                    { id: 'c5', text: 'มากที่สุด (5)', score: 5 }
+                  ]
+                },
+                {
+                  id: 'q_nps_score',
+                  type: 'slider_score',
+                  title: '3. ความเป็นไปได้ที่ท่านจะแนะนำการบริการของหน่วยงานแก่ผู้อื่น (Net Promoter Score)',
+                  description: 'คะแนนระดับ 0 (ไม่แนะนำแน่นอน) ถึง 10 (แนะนำอย่างยิ่ง)',
+                  required: true,
+                  minScore: 0,
+                  maxScore: 10,
+                  step: 1
+                },
+                {
+                  id: 'q_suggestions',
+                  type: 'text_long',
+                  title: '4. ข้อเสนอแนะเพื่อการปรับปรุงและพัฒนางานบริการ',
+                  description: 'ท่านมีข้อคิดเห็น คำแนะนำ หรือความต้องการเพิ่มเติมประการใดในการพัฒนาระบบบริการ',
+                  required: false,
+                  placeholder: 'พิมพ์ข้อเสนอแนะของท่านที่นี่...'
+                }
+              ]),
+              view_count: 42,
+              response_count: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            },
+            {
+              id: 'survey_official_3',
+              title: 'แบบตอบรับการเข้าร่วมฝึกอบรม/การประชุมสัมมนาและซ้อมแผนสาธารณภัย (RSVP)',
+              description: 'แบบตอบรับเข้าร่วมกิจกรรมทางราชการ และยืนยันยอดผู้เข้าร่วมการประชุม/การฝึกอบรมเชิงปฏิบัติการของสำนักงาน ปภ. จังหวัดระยอง',
+              category: 'rsvp_acknowledgment',
+              category_label: 'แบบตอบรับ/ยืนยันการเข้าร่วม',
+              department: 'กลุ่มงานป้องกันและแก้ไขปัญหาภัยพิบัติ',
+              creator_id: 'admin',
+              creator_name: 'ฝ่ายบริหารงานสารบรรณ ปภ.',
+              settings: JSON.stringify({
+                status: 'published',
+                themeColor: '#059669',
+                headerLogoType: 'ddpm',
+                showProgressBar: true,
+                showQuestionNumbers: true,
+                allowAnonymous: false,
+                requireLogin: false,
+                isRsvpForm: true,
+                rsvpEventTitle: 'การฝึกซ้อมแผนป้องกันและบรรเทาสาธารณภัยระดับจังหวัด ประจำปี พ.ศ. 2569',
+                rsvpEventDate: '28 กันยายน 2569 เวลา 08:30 - 16:30 น.',
+                rsvpEventLocation: 'ห้องประชุมศูนย์ราชการจังหวัดระยอง ชั้น 3',
+                linkedDocNumber: 'รย 0021/ว 1420',
+                thankYouTitle: 'บันทึกการตอบรับการเข้าร่วมเรียบร้อยแล้ว',
+                thankYouMessage: 'สำนักงาน ปภ. จังหวัดระยอง ได้รับข้อมูลยืนยันการเข้าร่วมกิจกรรมของท่านเรียบร้อยแล้ว ขอขอบพระคุณเป็นอย่างยิ่ง'
+              }),
+              questions: JSON.stringify([
+                {
+                  id: 'q_attend_status',
+                  type: 'single_choice',
+                  title: '1. การตอบรับเข้าร่วมกิจกรรม/การประชุม',
+                  description: 'กรุณาระบุสถานะการเข้าร่วมของหน่วยงานท่าน',
+                  required: true,
+                  options: [
+                    { id: 'opt_yes', text: 'ยินดีเข้าร่วมการประชุม/ฝึกอบรม (ตามวันและเวลาที่กำหนด)' },
+                    { id: 'opt_delegate', text: 'มอบหมายผู้แทนเข้าร่วมการประชุม' },
+                    { id: 'opt_no', text: 'มีความจำเป็นต้องขออภัย ไม่สามารถเข้าร่วมได้' }
+                  ]
+                },
+                {
+                  id: 'q_attendee_name',
+                  type: 'text_short',
+                  title: '2. ชื่อ-นามสกุล ผู้เข้าร่วมการประชุม / ผู้แทน',
+                  description: 'ระบุยศ/นาย/นาง/นางสาว พร้อมชื่อและนามสกุล',
+                  required: true,
+                  placeholder: 'เช่น นายวิชัย ใจดี'
+                },
+                {
+                  id: 'q_attendee_position',
+                  type: 'text_short',
+                  title: '3. ตำแหน่ง และหน่วยงาน/สังกัด',
+                  description: 'ระบุตำแหน่งทางราชการและชื่อหน่วยงาน',
+                  required: true,
+                  placeholder: 'เช่น หัวหน้าฝ่ายป้องกันฯ อบต.เนินพระ'
+                },
+                {
+                  id: 'q_attendee_phone',
+                  type: 'text_short',
+                  title: '4. หมายเลขโทรศัพท์ติดต่อสะดวก / LINE ID',
+                  description: 'เพื่อใช้ในการประสานงานล่วงหน้าวันจัดกิจกรรม',
+                  required: true,
+                  placeholder: 'เช่น 081-234-5678'
+                },
+                {
+                  id: 'q_dietary',
+                  type: 'single_choice',
+                  title: '5. ข้อจำกัดด้านอาหาร/ข้อกำหนดพิเศษ',
+                  description: 'เพื่อการจัดเตรียมอาหารกลางวันและอาหารว่าง',
+                  required: false,
+                  options: [
+                    { id: 'diet_normal', text: 'อาหารทั่วไป (รับประทานได้ทุกประเภท)' },
+                    { id: 'diet_halal', text: 'อาหารฮาลาล (มุสลิม)' },
+                    { id: 'diet_veg', text: 'อาหารมังสวิรัติ / เจ' }
+                  ]
+                },
+                {
+                  id: 'q_signature',
+                  type: 'signature',
+                  title: '6. ลายมือชื่อรับรองการตอบรับ',
+                  description: 'กรุณาวาดลายมือชื่ออิเล็กทรอนิกส์เพื่อใช้เป็นหลักฐานทางราชการ',
+                  required: true
+                }
+              ]),
+              view_count: 58,
+              response_count: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }
+          ];
+
+          for (const s of defaultSurveys) {
+            await pool.query(
+              `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                s.id, s.title, s.description, s.category, s.category_label, s.department,
+                s.creator_id, s.creator_name, s.settings, s.questions, s.view_count, s.response_count,
+                s.created_at, s.updated_at
+              ]
+            );
+          }
+          console.log('✅ Seeded default surveys into MySQL database');
+        }
+
+        console.log('✅ Initialized and verified surveys & survey_responses tables in MySQL');
+      } catch (e) {
+        console.warn('Note checking/creating surveys/survey_responses tables:', e);
       }
 
       // Add database indexes to heavily queried and joined tables/columns for high throughput
@@ -10076,6 +10399,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'admin', key: 'ai_assistant', val: 1 },
     { role: 'admin', key: 'infographics', val: 1 },
     { role: 'admin', key: 'qr_generator', val: 1 },
+    { role: 'admin', key: 'surveys', val: 1 },
     { role: 'admin', key: 'draft_docs', val: 1 },
     { role: 'admin', key: 'digital_folders', val: 1 },
     { role: 'admin', key: 'workflow_sla', val: 1 },
@@ -10099,6 +10423,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'moderator', key: 'ai_assistant', val: 1 },
     { role: 'moderator', key: 'infographics', val: 1 },
     { role: 'moderator', key: 'qr_generator', val: 1 },
+    { role: 'moderator', key: 'surveys', val: 1 },
     { role: 'moderator', key: 'draft_docs', val: 1 },
     { role: 'moderator', key: 'digital_folders', val: 1 },
     { role: 'moderator', key: 'workflow_sla', val: 1 },
@@ -10122,6 +10447,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'user', key: 'ai_assistant', val: 1 },
     { role: 'user', key: 'infographics', val: 1 },
     { role: 'user', key: 'qr_generator', val: 1 },
+    { role: 'user', key: 'surveys', val: 1 },
     { role: 'user', key: 'draft_docs', val: 1 },
     { role: 'user', key: 'digital_folders', val: 1 },
     { role: 'user', key: 'workflow_sla', val: 1 },
@@ -10518,36 +10844,51 @@ app.post("/api/system/test-db", async (req, res) => {
 app.post("/api/system/test-ai", async (req, res) => {
   const start = Date.now();
   try {
-    const key = await getAppGeminiApiKey();
-    const isConfigured = Boolean(key && key.trim().length > 5);
-    const latencyMs = Date.now() - start;
-    if (isConfigured) {
-      return res.json({
-        success: true,
-        message: 'เอนจินปัญญาประดิษฐ์พร้อมใช้งานสมบูรณ์',
-        latencyMs,
-        primaryModel: 'gemini-3.1-flash-lite',
-        fallbackModel: 'gemini-flash-latest',
-        apiKeyConfigured: true,
-        status: 'active'
-      });
-    } else {
-      return res.json({
-        success: true,
-        message: 'เอนจิน AI พร้อมใช้งานผ่านคอนฟิกสภาพแวดล้อม (Environment Secrets)',
-        latencyMs,
-        primaryModel: 'gemini-3.1-flash-lite',
-        fallbackModel: 'gemini-flash-latest',
-        apiKeyConfigured: true,
-        status: 'env_configured'
+    const inputKey = (req.body?.geminiApiKey || req.body?.apiKey || '').trim();
+    const keyInfo = await getAppGeminiApiKeyInfo(inputKey, { forceCustom: Boolean(inputKey) });
+
+    if (!keyInfo.apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'ยังไม่ได้ระบุ Google Gemini API Key กรุณาระบุใน "ตั้งค่าระบบ -> องค์กร -> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)"',
+        latencyMs: Date.now() - start,
+        status: 'not_configured',
+        apiKeyConfigured: false
       });
     }
+
+    // Perform live connection verification with Gemini API
+    const client = getGeminiClient(keyInfo.apiKey, req);
+    const { response, usedModel } = await callGeminiWithFallback({
+      client,
+      contents: [{ text: 'สวัสดี! ช่วยตอบสั้นๆ 1-3 คำว่า "ระบบพร้อมใช้งาน"' }],
+      models: ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'],
+      maxRetriesPerModel: 1,
+      initialDelayMs: 600
+    });
+
+    const latencyMs = Date.now() - start;
+    return res.json({
+      success: true,
+      message: 'เชื่อมต่อกับ Google Gemini API สำเร็จสมบูรณ์!',
+      aiReply: response.text ? response.text.trim() : 'ระบบพร้อมใช้งาน',
+      latencyMs,
+      usedModel,
+      source: keyInfo.source,
+      sourceDescription: keyInfo.sourceDescription,
+      maskedKey: keyInfo.maskedKey,
+      apiKeyConfigured: true,
+      status: 'active'
+    });
   } catch (err: any) {
-    return res.status(500).json({
+    const friendlyError = formatGeminiErrorMessage(err);
+    return res.status(400).json({
       success: false,
-      message: 'ล้มเหลวในการทดสอบเอนจิน AI: ' + err.message,
+      message: 'ทดสอบการเชื่อมต่อ Gemini API ล้มเหลว: ' + friendlyError,
+      rawError: err?.message || String(err),
       latencyMs: Date.now() - start,
-      status: 'error'
+      status: 'error',
+      apiKeyConfigured: false
     });
   }
 });
@@ -14551,9 +14892,10 @@ app.post('/api/documents/:id/ai-stamp-layout', async (req, res) => {
 
     // Multi-Model Gemini Vision & Layout Analysis on the REAL File
     let aiCustomZones: any[] = [];
-    if (process.env.GEMINI_API_KEY) {
+    const stampApiKey = await getAppGeminiApiKey();
+    if (stampApiKey) {
       try {
-        const client = getGeminiClient(process.env.GEMINI_API_KEY, req);
+        const client = getGeminiClient(stampApiKey, req);
         const prompt = `คุณคือระบบ AI ผู้เชี่ยวชาญด้านงานสารบรรณอิเล็กทรอนิกส์และการวิเคราะห์เอกสารราชการไทย (EDMS)
 นี่คือไฟล์เอกสารราชการจริง (ชื่อไฟล์: ${realFileName}, เรื่อง: ${doc.title || '-'}, เลขที่: ${doc.docNumber || '-'})
 จงวิเคราะห์โครงสร้างหน้าเอกสารจริงนี้ (หน้า ${targetPageIdx + 1} จากทั้งหมด ${pageCount} หน้า) ด้วยความแม่นยำสูง (ขนาดหน้ากระดาษ กว้าง ${pdfWidth.toFixed(1)} pt, สูง ${pdfHeight.toFixed(1)} pt):
@@ -17045,7 +17387,7 @@ app.post('/api/ai-scan', memoryUpload.single('file'), async (req, res) => {
     if (!apiKey) {
       return res.status(400).json({ 
         success: false, 
-        error: 'ระบบยังไม่ได้กำหนด GEMINI_API_KEY กรุณากำหนด API Key ในเมนู "ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน" หรือกำหนดใน Settings > Secrets' 
+        error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key กรุณาระบุในเมนู "ตั้งค่าระบบ -> องค์กร -> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)"' 
       });
     }
 
@@ -17507,7 +17849,7 @@ app.post('/api/ai/audit', async (req, res) => {
     if (!apiKey) {
       return res.status(400).json({
         success: false,
-        error: 'ระบบยังไม่ได้กำหนด GEMINI_API_KEY กรุณากำหนด API Key ในเมนู "ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน" หรือกำหนดใน Settings > Secrets'
+        error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key กรุณาระบุในเมนู "ตั้งค่าระบบ -> องค์กร -> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)"'
       });
     }
 
@@ -18907,7 +19249,7 @@ app.post('/api/ai/summarize-project', async (req, res) => {
     if (!apiKey) {
       return res.status(400).json({ 
         success: false, 
-        error: 'ยังไม่ได้กำหนด GEMINI_API_KEY กรุณากำหนด API Key ในการตั้งค่าระบบ' 
+        error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key กรุณาระบุในเมนู "ตั้งค่าระบบ -> องค์กร -> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)"' 
       });
     }
 
@@ -20053,12 +20395,17 @@ app.post('/api/infographics', async (req, res) => {
       );
     } catch (dbError) {
       console.warn('Full schema insert failed, retrying with basic columns:', dbError);
-      await pool.query(
-        `INSERT INTO infographics (
-          id, name, data, thumbnail, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, name || 'Infographic', data, thumbnail, nowIso, nowIso]
-      );
+      try {
+        await pool.query(
+          `INSERT INTO infographics (
+            id, name, data, thumbnail, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, name || 'Infographic', data, thumbnail, nowIso, nowIso]
+        );
+      } catch (retryError) {
+        console.error('Basic schema insert also failed:', retryError);
+        throw retryError; // Propagate the retry error
+      }
     }
     
     res.json({ 
@@ -20072,7 +20419,7 @@ app.post('/api/infographics', async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating infographic:', error);
-    res.status(500).json({ error: 'Failed to create infographic' });
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to create infographic' });
   }
 });
 
@@ -20148,12 +20495,17 @@ app.put('/api/infographics/:id', async (req, res) => {
       );
     } catch (dbError) {
       console.warn('Full schema update failed, retrying with basic columns:', dbError);
-      await pool.query(
-        `UPDATE infographics SET 
-          name = ?, data = ?, thumbnail = ?, updated_at = ? 
-        WHERE id = ?`,
-        [finalName, finalData, finalThumbnail, nowIso, req.params.id]
-      );
+      try {
+        await pool.query(
+          `UPDATE infographics SET 
+            name = ?, data = ?, thumbnail = ?, updated_at = ? 
+          WHERE id = ?`,
+          [finalName, finalData, finalThumbnail, nowIso, req.params.id]
+        );
+      } catch (retryError) {
+        console.error('Basic schema update also failed:', retryError);
+        throw retryError; // Propagate the retry error
+      }
     }
     
     res.json({ 
@@ -20178,7 +20530,7 @@ app.put('/api/infographics/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating infographic:', error);
-    res.status(500).json({ error: 'Failed to update infographic' });
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update infographic' });
   }
 });
 
@@ -20602,7 +20954,7 @@ app.post('/api/ai/infographics', async (req, res) => {
     if (!apiKey) {
       return res.status(400).json({ 
         success: false, 
-        error: 'ไม่พบรหัสคีย์ (Gemini API Key) กรุณาตั้งค่ารหัสคีย์ในเมนู "ตั้งค่าระบบ -> ตั้งค่าข้อมูลพื้นฐาน" หรือตั้งค่าในระบบก่อน' 
+        error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key กรุณาระบุในเมนู "ตั้งค่าระบบ -> องค์กร -> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)"' 
       });
     }
 
@@ -20865,12 +21217,12 @@ app.post('/api/ai/scan-urgent-incident', memoryUpload.single('file'), async (req
 
     const apiKey = await getAppGeminiApiKey(reqApiKey);
     if (!apiKey) {
-      return res.status(500).json({ success: false, error: 'ไม่พบ Gemini API Key ในระบบ กรุณากำหนด API Key ในเมนูตั้งค่าระบบ' });
+      return res.status(400).json({ success: false, error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key กรุณาระบุในเมนู "ตั้งค่าระบบ -> องค์กร -> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)"' });
     }
 
     const client = getGeminiClient(apiKey, req);
 
-    const prompt = 'คุณคือผู้ช่วยถอดความแบบรายงานเหตุด่วนสาธารณภัย (Urgent Incident Report) ของประเทศไทย\nให้ดึงข้อมูลจากเอกสารรูปภาพ หรือ PDF ที่แนบมา แล้วส่งกลับมาเป็น JSON ตาม schema ดังนี้:\n{\n  "docNumber": "เลขที่หนังสือที่ สส ... (ถ้ามี)",\n  "docDate": "วันที่หนังสือ (ถ้ามี)",\n  "fromPerson": "จากใคร (ถ้ามี/ส่วนใหญ่นายอำเภอ)",\n  "toPerson": "ถึงใคร (ถ้ามี/ส่วนใหญ่ผู้ว่าราชการจังหวัด/ผู้อำนวยการจังหวัด)",\n  "incidentTypes": ["อุทกภัย", "ความแห้งแล้ง", "วาตภัย", "อัคคีภัย", "ไฟป่า", "อุบัติภัย", "อากาศหนาว", "แผ่นดินไหว", "สารเคมีและวัตถุอันตราย", "ทุ่นระเบิด", "การป้องกันและระงับภัยทางอากาศ", "การก่อวินาศกรรม", "การอพยพประชาชนและส่วนราชการ"], // เลือกชนิดภัยที่ระบุในเอกสารเป็น array ของ string จากลิสต์ตัวเลือกนี้เท่านั้น\n  "incidentTypeOther": "ภัยอื่นๆ นอกเหนือจากตัวเลือก (ถ้ามี)",\n  "severity": "เล็กน้อย" หรือ "ปานกลาง" หรือ "รุนแรง",\n  "startDate": "วันที่เกิดภัย",\n  "startTime": "เวลาที่เกิดภัย (HH:MM)",\n  "endDate": "วันที่สิ้นสุดภัย",\n  "endTime": "เวลาที่สิ้นสุดภัย (HH:MM)",\n  "location": "สถานที่เกิดภัยแบบเต็ม",\n  "affectedPeople": "จำนวนคนเดือดร้อน (ตัวเลข)",\n  "affectedHouseholds": "จำนวนครัวเรือนที่เดือดร้อน (ตัวเลข)",\n  "injured": "บาดเจ็บกี่คน (ตัวเลข)",\n  "dead": "เสียชีวิตกี่คน (ตัวเลข)",\n  "missing": "สูญหายกี่คน (ตัวเลข)",\n  "evacuatedPeople": "อพยพกี่คน (ตัวเลข)",\n  "evacuatedHouseholds": "อพยพกี่ครัวเรือน (ตัวเลข)",\n  "damageHouses": "จำนวนบ้านเสียหาย (ตัวเลข)",\n  "damageHighRises": "จำนวนอาคารสูงเสียหาย (ตัวเลข)",\n  "damageFactories": "จำนวนโรงงานเสียหาย (ตัวเลข)",\n  "damageTemples": "จำนวนวัดเสียหาย (ตัวเลข)",\n  "damageGovBuildings": "จำนวนอาคารราชการเสียหาย (ตัวเลข)",\n  "damageOtherBuildings": "สิ่งปลูกสร้างอื่นๆ เสียหาย (ตัวเลข)",\n  "damageBuildingCost": "รวมมูลค่าสิ่งปลูกสร้างเสียหาย (ตัวเลข)",\n  "damageAgricultureCrops": "พืชไร่เสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureRice": "นาข้าวเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureOrchard": "สวนเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureFish": "บ่อปลาเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureShrimp": "บ่อกุ้งเสียหายกี่ไร่ (ตัวเลข)",\n  "damageLivestockCow": "วัวควายเสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockPig": "หมูเสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockPoultry": "เป็ดไก่เสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockOther": "สัตว์เลี้ยงอื่นๆ (ข้อความ)",\n  "damageAgricultureCost": "รวมมูลค่าเกษตรเสียหาย (ตัวเลข)",\n  "damagePublicRoads": "ถนนเสียหายกี่สาย (ตัวเลข)",\n  "damagePublicBridges": "สะพานเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicBridgeApproaches": "คอสะพานเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicWeirs": "ฝายเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicOther": "สาธารณะประโยชน์อื่นๆ (ข้อความ)",\n  "damagePublicCost": "รวมมูลค่าสาธารณประโยชน์เสียหาย (ตัวเลข)",\n  "totalDamageCost": "รวมมูลค่าความเสียหายเบื้องต้นทั้งหมด (ตัวเลข)",\n  "mitigation": "การบรรเทาภัย (ข้อความ)",\n  "toolsFireTrucks": "รถดับเพลิงกี่คัน (ตัวเลข)",\n  "toolsWaterTrucks": "รถบรรทุกน้ำกี่คัน (ตัวเลข)",\n  "toolsRescueTrucks": "รถกู้ภัยกี่คัน (ตัวเลข)",\n  "toolsFireBoats": "เรือดับเพลิงกี่ลำ (ตัวเลข)",\n  "toolsWaterPumps": "เครื่องสูบน้ำกี่เครื่อง (ตัวเลข)",\n  "toolsOther": "เครื่องมืออื่นๆ (ข้อความ)",\n  "opsGovAgencies": "ส่วนราชการช่วยเหลืออุทกภัยหรืออื่นๆ กี่หน่วยงาน (ตัวเลข)",\n  "opsPrivateSector": "ภาคเอกชนหรือประชาชนช่วยเหลือรวมกี่กลุ่ม/คน (ตัวเลข)",\n  "proposals": ["เพื่อโปรดทราบ", "เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย", "เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน"], // เลือกข้อเสนอจากลิสต์ตัวเลือกนี้เป็น array\n  "reporterName": "ชื่อผู้รายงาน",\n  "reporterPosition": "ตำแหน่งผู้รายงาน",\n  "signatureBox": [ymin, xmin, ymax, xmax], // ค้นหาตำแหน่งลายมือชื่อผู้รายงาน (ลายเซ็น) ในหน้ากระดาษ แล้วส่งค่าพิกัด Bounding Box ในสเกล 0-1000 (เช่น [820, 650, 930, 880]) หากไม่มีให้เป็น null\n  "damageBoxes": [[ymin, xmin, ymax, xmax], ...] // ค้นหาภาพประกอบภัยพิบัติ, รูปถ่ายความเสียหาย, รูปบ่อปลา, รูปบ้านพัง, รูปผู้ประสบภัยที่แนบมาในเอกสาร แล้วส่งเป็นลิสต์ของ Bounding Boxes สเกล 0-1000 หากไม่มีให้เป็น []\n}\n* หมายเหตุ: ดึงเฉพาะข้อมูลที่มีในเอกสารเท่านั้น ถ้าฟิลด์ไหนไม่มีให้เป็น string ว่าง "" หรือ array ว่าง [] หรือ null สำหรับ signatureBox\n* ห้ามตอบอย่างอื่นนอกจากโค้ด JSON (ห้ามมี markdown) แบบ raw';
+    const prompt = 'คุณคือผู้ช่วยถอดความแบบรายงานเหตุด่วนสาธารณภัย (Urgent Incident Report) ของประเทศไทย\nให้ดึงข้อมูลจากเอกสารรูปภาพ หรือ PDF ที่แนบมา แล้วส่งกลับมาเป็น JSON ตาม schema ดังนี้:\n{\n  "docNumber": "เลขที่หนังสือที่ สส ... (ถ้ามี)",\n  "docDate": "วันที่หนังสือ (ถ้ามี)",\n  "fromPerson": "จากใคร (ถ้ามี/ส่วนใหญ่นายอำเภอ)",\n  "toPerson": "ถึงใคร (ถ้ามี/ส่วนใหญ่ผู้ว่าราชการจังหวัด/ผู้อำนวยการจังหวัด)",\n  "incidentTypes": ["อุทกภัย", "ความแห้งแล้ง", "วาตภัย", "อัคคีภัย", "ไฟป่า", "อุบัติภัย", "อากาศหนาว", "แผ่นดินไหว", "สารเคมีและวัตถุอันตราย", "ทุ่นระเบิด", "การป้องกันและระงับภัยทางอากาศ", "การก่อวินาศกรรม", "การอพยพประชาชนและส่วนราชการ"], // เลือกชนิดภัยที่ระบุในเอกสารเป็น array ของ string จากลิสต์ตัวเลือกนี้เท่านั้น\n  "incidentTypeOther": "ภัยอื่นๆ นอกเหนือจากตัวเลือก (ถ้ามี)",\n  "incidentAppearance": "ลักษณะของภัย (ข้อความ เช่น ฝนตกหนักน้ำป่าไหลหลากล้นตลิ่ง หรือ ฝนทิ้งช่วงเป็นเวลานานจนอ่างเก็บน้ำแห้ง)",\n  "severity": "เล็กน้อย" หรือ "ปานกลาง" หรือ "รุนแรง",\n  "startDate": "วันที่เกิดภัย",\n  "startTime": "เวลาที่เกิดภัย (HH:MM)",\n  "endDate": "วันที่สิ้นสุดภัย",\n  "endTime": "เวลาที่สิ้นสุดภัย (HH:MM)",\n  "location": "สถานที่เกิดภัยแบบเต็ม",\n  "affectedPeople": "จำนวนคนเดือดร้อน (ตัวเลข)",\n  "affectedHouseholds": "จำนวนครัวเรือนที่เดือดร้อน (ตัวเลข)",\n  "injured": "บาดเจ็บกี่คน (ตัวเลข)",\n  "dead": "เสียชีวิตกี่คน (ตัวเลข)",\n  "missing": "สูญหายกี่คน (ตัวเลข)",\n  "evacuatedPeople": "อพยพกี่คน (ตัวเลข)",\n  "evacuatedHouseholds": "อพยพกี่ครัวเรือน (ตัวเลข)",\n  "damageHouses": "จำนวนบ้านเสียหาย (ตัวเลข)",\n  "damageHighRises": "จำนวนอาคารสูงเสียหาย (ตัวเลข)",\n  "damageFactories": "จำนวนโรงงานเสียหาย (ตัวเลข)",\n  "damageTemples": "จำนวนวัดเสียหาย (ตัวเลข)",\n  "damageGovBuildings": "จำนวนอาคารราชการเสียหาย (ตัวเลข)",\n  "damageOtherBuildings": "สิ่งปลูกสร้างอื่นๆ เสียหาย (ตัวเลข)",\n  "damageBuildingCost": "รวมมูลค่าสิ่งปลูกสร้างเสียหาย (ตัวเลข)",\n  "damageAgricultureCrops": "พืชไร่เสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureRice": "นาข้าวเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureOrchard": "สวนเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureFish": "บ่อปลาเสียหายกี่ไร่ (ตัวเลข)",\n  "damageAgricultureShrimp": "บ่อกุ้งเสียหายกี่ไร่ (ตัวเลข)",\n  "damageLivestockCow": "วัวควายเสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockPig": "หมูเสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockPoultry": "เป็ดไก่เสียหายกี่ตัว (ตัวเลข)",\n  "damageLivestockOther": "สัตว์เลี้ยงอื่นๆ (ข้อความ)",\n  "damageAgricultureCost": "รวมมูลค่าเกษตรเสียหาย (ตัวเลข)",\n  "damagePublicRoads": "ถนนเสียหายกี่สาย (ตัวเลข)",\n  "damagePublicBridges": "สะพานเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicBridgeApproaches": "คอสะพานเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicWeirs": "ฝายเสียหายกี่แห่ง (ตัวเลข)",\n  "damagePublicOther": "สาธารณะประโยชน์อื่นๆ (ข้อความ)",\n  "damagePublicCost": "รวมมูลค่าสาธารณประโยชน์เสียหาย (ตัวเลข)",\n  "totalDamageCost": "รวมมูลค่าความเสียหายเบื้องต้นทั้งหมด (ตัวเลข)",\n  "mitigation": "การบรรเทาภัย (ข้อความ)",\n  "toolsFireTrucks": "รถดับเพลิงกี่คัน (ตัวเลข)",\n  "toolsWaterTrucks": "รถบรรทุกน้ำกี่คัน (ตัวเลข)",\n  "toolsRescueTrucks": "รถกู้ภัยกี่คัน (ตัวเลข)",\n  "toolsFireBoats": "เรือดับเพลิงกี่ลำ (ตัวเลข)",\n  "toolsWaterPumps": "เครื่องสูบน้ำกี่เครื่อง (ตัวเลข)",\n  "toolsOther": "เครื่องมืออื่นๆ (ข้อความ)",\n  "opsGovAgencies": "ส่วนราชการช่วยเหลืออุทกภัยหรืออื่นๆ กี่หน่วยงาน (ตัวเลข)",\n  "opsPrivateSector": "ภาคเอกชนหรือประชาชนช่วยเหลือรวมกี่กลุ่ม/คน (ตัวเลข)",\n  "proposals": ["เพื่อโปรดทราบ", "เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย", "เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน"], // เลือกข้อเสนอจากลิสต์ตัวเลือกนี้เป็น array\n  "reporterName": "ชื่อผู้รายงาน",\n  "reporterPosition": "ตำแหน่งผู้รายงาน",\n  "signatureBox": [ymin, xmin, ymax, xmax], // ค้นหาตำแหน่งลายมือชื่อผู้รายงาน (ลายเซ็น) ในหน้ากระดาษ แล้วส่งค่าพิกัด Bounding Box ในสเกล 0-1000 (เช่น [820, 650, 930, 880]) หากไม่มีให้เป็น null\n  "damageBoxes": [[ymin, xmin, ymax, xmax], ...] // ค้นหาภาพประกอบภัยพิบัติ, รูปถ่ายความเสียหาย, รูปบ่อปลา, รูปบ้านพัง, รูปผู้ประสบภัยที่แนบมาในเอกสาร แล้วส่งเป็นลิสต์ของ Bounding Boxes สเกล 0-1000 หากไม่มีให้เป็น []\n}\n* หมายเหตุ: ดึงเฉพาะข้อมูลที่มีในเอกสารเท่านั้น ถ้าฟิลด์ไหนไม่มีให้เป็น string ว่าง "" หรือ array ว่าง [] หรือ null สำหรับ signatureBox\n* ห้ามตอบอย่างอื่นนอกจากโค้ด JSON (ห้ามมี markdown) แบบ raw';
 
     // Multi-tier Fallback: gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash with Exponential Backoff
     const { response, usedModel } = await callGeminiWithFallback({
@@ -21015,7 +21367,7 @@ app.get('/api/admin/backups', async (req, res) => {
 // ==========================================
 // ==========================================
 const URGENT_INCIDENT_COLUMNS = [
-  'id', 'docNumber', 'docDate', 'fromPerson', 'toPerson', 'incidentTypes', 'incidentTypeOther', 'severity',
+  'id', 'docNumber', 'docDate', 'fromPerson', 'toPerson', 'incidentTypes', 'incidentTypeOther', 'incidentAppearance', 'severity',
   'startDate', 'startTime', 'endDate', 'endTime', 'location', 'affectedPeople', 'affectedHouseholds',
   'injured', 'dead', 'missing', 'evacuatedPeople', 'evacuatedHouseholds', 'damageHouses', 'damageHighRises',
   'damageTemples', 'damageGovBuildings', 'damageOtherBuildings', 'damageBuildingCost', 'damageAgricultureCrops',
@@ -21458,6 +21810,461 @@ export async function notifyWorkChange(doc: any, action: 'CREATE' | 'UPDATE' | '
 // ==========================================
 // THAI OFFICIAL DOCUMENT SMART NLP ANALYZER (FALLBACK ENGINE)
 // ==========================================
+
+// ==========================================
+// SURVEYKING EVALUATION & ASSESSMENT API
+// ==========================================
+app.get('/api/surveys', async (req, res) => {
+  try {
+    let mysqlSurveys: any[] = [];
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM surveys ORDER BY created_at DESC');
+        if (rows && rows.length > 0) {
+          mysqlSurveys = rows.map((r: any) => ({
+            id: r.id,
+            title: r.title,
+            description: r.description,
+            category: r.category,
+            categoryLabel: r.category_label,
+            department: r.department,
+            creatorId: r.creator_id,
+            creatorName: r.creator_name,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+            viewCount: r.view_count || 0,
+            responseCount: r.response_count || 0,
+            settings: typeof r.settings === 'string' ? JSON.parse(r.settings) : (r.settings || {}),
+            questions: typeof r.questions === 'string' ? JSON.parse(r.questions) : (r.questions || [])
+          }));
+        }
+      } catch (err) {
+        console.warn('MySQL surveys query error, falling back to localDb:', err);
+      }
+    }
+
+    const localList = (localDb.surveys && Array.isArray(localDb.surveys)) ? localDb.surveys : [];
+
+    // Merge mysqlSurveys and localList
+    const surveyMap = new Map<string, any>();
+    localList.forEach((s: any) => surveyMap.set(s.id, s));
+    mysqlSurveys.forEach((s: any) => surveyMap.set(s.id, s));
+
+    const combined = Array.from(surveyMap.values()).sort((a, b) => 
+      new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+
+    return res.json(combined);
+  } catch (e: any) {
+    console.error('GET /api/surveys error:', e);
+    return res.status(500).json({ error: 'ไม่สามารถดึงข้อมูลแบบสำรวจได้' });
+  }
+});
+
+app.get('/api/surveys/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM surveys WHERE id = ?', [id]);
+        if (rows && rows.length > 0) {
+          const r = rows[0];
+          return res.json({
+            id: r.id,
+            title: r.title,
+            description: r.description,
+            category: r.category,
+            categoryLabel: r.category_label,
+            department: r.department,
+            creatorId: r.creator_id,
+            creatorName: r.creator_name,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+            viewCount: r.view_count || 0,
+            responseCount: r.response_count || 0,
+            settings: typeof r.settings === 'string' ? JSON.parse(r.settings) : (r.settings || {}),
+            questions: typeof r.questions === 'string' ? JSON.parse(r.questions) : (r.questions || [])
+          });
+        }
+      } catch (err) {
+        console.warn('MySQL single survey query error, falling back to localDb:', err);
+      }
+    }
+
+    const found = (localDb.surveys || []).find((s: any) => s.id === id);
+    if (!found) return res.status(404).json({ error: 'ไม่พบแบบสำรวจที่ระบุ' });
+    return res.json(found);
+  } catch (e: any) {
+    console.error('GET /api/surveys/:id error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงข้อมูลแบบสำรวจ' });
+  }
+});
+
+app.post('/api/surveys', async (req, res) => {
+  try {
+    const survey = req.body;
+    if (!survey || !survey.title) {
+      return res.status(400).json({ error: 'กรุณาระบุหัวข้อแบบสำรวจ' });
+    }
+
+    if (!survey.id) {
+      survey.id = `survey_${Date.now()}`;
+    }
+    if (!survey.createdAt) survey.createdAt = new Date().toISOString();
+    survey.updatedAt = new Date().toISOString();
+
+    if (!localDb.surveys) localDb.surveys = [];
+    localDb.surveys.unshift(survey);
+    saveLocalDb();
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query(
+          `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE title=?, description=?, category=?, category_label=?, settings=?, questions=?, updated_at=?`,
+          [
+            survey.id, survey.title, survey.description || '', survey.category || 'satisfaction', survey.categoryLabel || 'ความพึงพอใจ',
+            survey.department || '', survey.creatorId || 'admin', survey.creatorName || 'ผู้ดูแลระบบ',
+            JSON.stringify(survey.settings || {}), JSON.stringify(survey.questions || []),
+            survey.viewCount || 0, survey.responseCount || 0,
+            survey.createdAt, survey.updatedAt,
+            survey.title, survey.description || '', survey.category || 'satisfaction', survey.categoryLabel || 'ความพึงพอใจ',
+            JSON.stringify(survey.settings || {}), JSON.stringify(survey.questions || []), survey.updatedAt
+          ]
+        );
+      } catch (mysqlErr) {
+        console.warn('MySQL survey save error (fallback stored in localDb):', mysqlErr);
+      }
+    }
+
+    await addSystemLog(
+      'SURVEY_CREATE',
+      `สร้างแบบสำรวจ/แบบตอบรับใหม่ (${survey.id}): ${survey.title}`,
+      (req as any).user?.name || survey.creatorName || 'ผู้ดูแลระบบ',
+      getClientIp(req)
+    );
+
+    return res.status(201).json(survey);
+  } catch (e: any) {
+    console.error('POST /api/surveys error:', e);
+    return res.status(500).json({ error: 'ไม่สามารถบันทึกแบบสำรวจได้' });
+  }
+});
+
+app.put('/api/surveys/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    updateData.updatedAt = new Date().toISOString();
+
+    if (!localDb.surveys) localDb.surveys = [];
+    const index = localDb.surveys.findIndex((s: any) => s.id === id);
+    if (index !== -1) {
+      localDb.surveys[index] = { ...localDb.surveys[index], ...updateData };
+    } else {
+      localDb.surveys.unshift({ id, ...updateData });
+    }
+    saveLocalDb();
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query(
+          `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE title=?, description=?, category=?, category_label=?, settings=?, questions=?, updated_at=?`,
+          [
+            id, updateData.title || 'แบบสำรวจ', updateData.description || '', updateData.category || 'satisfaction', updateData.categoryLabel || 'ความพึงพอใจ',
+            updateData.department || '', updateData.creatorId || 'admin', updateData.creatorName || 'ผู้ดูแลระบบ',
+            JSON.stringify(updateData.settings || {}), JSON.stringify(updateData.questions || []),
+            updateData.viewCount || 0, updateData.responseCount || 0,
+            updateData.createdAt || new Date().toISOString(), updateData.updatedAt,
+            updateData.title || 'แบบสำรวจ', updateData.description || '', updateData.category || 'satisfaction', updateData.categoryLabel || 'ความพึงพอใจ',
+            JSON.stringify(updateData.settings || {}), JSON.stringify(updateData.questions || []), updateData.updatedAt
+          ]
+        );
+      } catch (mysqlErr) {
+        console.warn('MySQL survey update error (fallback stored in localDb):', mysqlErr);
+      }
+    }
+
+    await addSystemLog(
+      'SURVEY_UPDATE',
+      `แก้ไขปรับปรุงแบบสำรวจ/แบบตอบรับ (${id}): ${updateData.title || id}`,
+      (req as any).user?.name || 'ผู้ดูแลระบบ',
+      getClientIp(req)
+    );
+
+    return res.json({ success: true, survey: updateData });
+  } catch (e: any) {
+    console.error('PUT /api/surveys/:id error:', e);
+    return res.status(500).json({ error: 'ไม่สามารถแก้ไขแบบสำรวจได้' });
+  }
+});
+
+app.delete('/api/surveys/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (localDb.surveys) {
+      localDb.surveys = localDb.surveys.filter((s: any) => s.id !== id);
+      saveLocalDb();
+    }
+
+    if (isMysqlOnline) {
+      try {
+        await pool.query('DELETE FROM surveys WHERE id = ?', [id]);
+        await pool.query('DELETE FROM survey_responses WHERE survey_id = ?', [id]);
+      } catch (err) {
+        console.warn('MySQL delete survey error:', err);
+      }
+    }
+
+    await addSystemLog(
+      'SURVEY_DELETE',
+      `ลบแบบสำรวจ/แบบตอบรับออกจากระบบ (${id})`,
+      (req as any).user?.name || 'ผู้ดูแลระบบ',
+      getClientIp(req)
+    );
+
+    return res.json({ success: true, message: 'ลบแบบสำรวจเรียบร้อยแล้ว' });
+  } catch (e: any) {
+    console.error('DELETE /api/surveys/:id error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการลบแบบสำรวจ' });
+  }
+});
+
+app.get('/api/surveys/:id/responses', async (req, res) => {
+  try {
+    const { id } = req.params;
+    let mysqlResponses: any[] = [];
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query('SELECT * FROM survey_responses WHERE survey_id = ? ORDER BY submitted_at DESC', [id]);
+        if (rows) {
+          mysqlResponses = rows.map((r: any) => {
+            let ansObj = r.answers;
+            if (typeof ansObj === 'string') {
+              try { ansObj = JSON.parse(ansObj); } catch (_) {}
+            }
+            if (typeof ansObj === 'string') {
+              try { ansObj = JSON.parse(ansObj); } catch (_) {}
+            }
+            if (typeof ansObj !== 'object' || ansObj === null) ansObj = {};
+
+            return {
+              id: r.id,
+              surveyId: r.survey_id,
+              respondentName: r.respondent_name || undefined,
+              respondentDepartment: r.respondent_department || undefined,
+              submittedAt: r.submitted_at,
+              timeSpentSeconds: r.time_spent_seconds || 0,
+              answers: ansObj
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('MySQL survey responses query error, falling back to localDb:', err);
+      }
+    }
+
+    const localList = (localDb.survey_responses && localDb.survey_responses[id]) || [];
+    const normalizedLocalList = localList.map((r: any) => {
+      let ansObj = r.answers;
+      if (typeof ansObj === 'string') {
+        try { ansObj = JSON.parse(ansObj); } catch (_) {}
+      }
+      if (typeof ansObj === 'string') {
+        try { ansObj = JSON.parse(ansObj); } catch (_) {}
+      }
+      if (typeof ansObj !== 'object' || ansObj === null) ansObj = {};
+      return { ...r, answers: ansObj };
+    });
+
+    // Merge MySQL responses and localDb responses deduplicated by id
+    const responseMap = new Map<string, any>();
+    normalizedLocalList.forEach((r: any) => responseMap.set(r.id, r));
+    mysqlResponses.forEach((r: any) => responseMap.set(r.id, r));
+
+    const combined = Array.from(responseMap.values()).sort((a, b) => 
+      new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
+    );
+
+    return res.json(combined);
+  } catch (e: any) {
+    console.error('GET /api/surveys/:id/responses error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงรายการคำตอบ' });
+  }
+});
+
+app.post('/api/surveys/:id/responses', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const responseData = req.body;
+    if (!responseData.id) responseData.id = `resp_${Date.now()}`;
+    if (!responseData.submittedAt) responseData.submittedAt = new Date().toISOString();
+    responseData.surveyId = id;
+
+    // Clean up answers object
+    let cleanAnswers = responseData.answers || {};
+    if (typeof cleanAnswers === 'string') {
+      try { cleanAnswers = JSON.parse(cleanAnswers); } catch (_) {}
+    }
+    if (typeof cleanAnswers === 'string') {
+      try { cleanAnswers = JSON.parse(cleanAnswers); } catch (_) {}
+    }
+    if (typeof cleanAnswers !== 'object' || cleanAnswers === null) cleanAnswers = {};
+    responseData.answers = cleanAnswers;
+
+    if (!localDb.survey_responses) localDb.survey_responses = {};
+    if (!localDb.survey_responses[id]) localDb.survey_responses[id] = [];
+    localDb.survey_responses[id].unshift(responseData);
+
+    if (localDb.surveys) {
+      const sIndex = localDb.surveys.findIndex((s: any) => s.id === id);
+      if (sIndex !== -1) {
+        localDb.surveys[sIndex].responseCount = (localDb.surveys[sIndex].responseCount || 0) + 1;
+      }
+    }
+    saveLocalDb();
+
+    if (isMysqlOnline) {
+      try {
+        // 1. Ensure survey parent record exists in MySQL
+        const [surveyRows]: any = await pool.query('SELECT id FROM surveys WHERE id = ?', [id]);
+        if (!surveyRows || surveyRows.length === 0) {
+          await pool.query(
+            `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id, responseData.surveyTitle || 'แบบตอบรับ/แบบสำรวจ', 'แบบสำรวจและประเมินผล', 'rsvp_acknowledgment', 'แบบตอบรับ',
+              'สำนักงาน ปภ. จังหวัดระยอง', 'admin', 'ผู้ดูแลระบบ', '{}', '[]', 1, 1,
+              new Date().toISOString(), new Date().toISOString()
+            ]
+          );
+        } else {
+          await pool.query('UPDATE surveys SET response_count = response_count + 1 WHERE id = ?', [id]);
+        }
+
+        // 2. Insert response into survey_responses table
+        await pool.query(
+          `INSERT INTO survey_responses (id, survey_id, respondent_name, respondent_department, answers, time_spent_seconds, submitted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE respondent_name=?, respondent_department=?, answers=?, time_spent_seconds=?, submitted_at=?`,
+          [
+            responseData.id, id, responseData.respondentName || null, responseData.respondentDepartment || null,
+            JSON.stringify(responseData.answers || {}), responseData.timeSpentSeconds || 0, responseData.submittedAt,
+            responseData.respondentName || null, responseData.respondentDepartment || null,
+            JSON.stringify(responseData.answers || {}), responseData.timeSpentSeconds || 0, responseData.submittedAt
+          ]
+        );
+        console.log(`✅ MySQL survey response saved successfully for survey ${id}, response ID ${responseData.id}`);
+      } catch (mysqlErr) {
+        console.warn('MySQL survey response save error:', mysqlErr);
+      }
+    }
+
+    await addSystemLog(
+      'SURVEY_RESPONSE_SUBMIT',
+      `ส่งแบบตอบรับ/คำตอบแบบสำรวจ (${id}): ผู้ตอบ ${responseData.respondentName || 'ไม่ระบุตัวตน'}`,
+      responseData.respondentName || 'ประชาชน/ผู้ตอบแบบสำรวจ',
+      getClientIp(req)
+    );
+
+    return res.status(201).json({ success: true, response: responseData });
+  } catch (e: any) {
+    console.error('POST /api/surveys/:id/responses error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกคำตอบ' });
+  }
+});
+
+app.post('/api/surveys/ai-generate', async (req, res) => {
+  try {
+    const topic = req.body.topic || req.body.prompt;
+    const category = req.body.category || 'satisfaction';
+    const targetAudience = req.body.targetAudience || 'ประชาชนและเจ้าหน้าที่ผู้รับบริการ';
+    const questionCount = Math.min(Math.max(parseInt(req.body.questionCount) || 6, 1), 100);
+    const includeMatrix = req.body.includeMatrix !== false;
+    const includeRating = req.body.includeRating !== false;
+
+    if (!topic || typeof topic !== 'string' || !topic.trim()) {
+      return res.status(400).json({ error: 'กรุณาระบุหัวข้อแบบสำรวจที่ต้องการสร้าง' });
+    }
+
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key' });
+    }
+
+    const client = getGeminiClient(apiKey, req);
+    const aiPrompt = `คุณคือผู้เชี่ยวชาญการออกแบบแบบสอบถามและแบบประเมินผลสำหรับหน่วยงานราชการไทย และกรมป้องกันและบรรเทาสาธารณภัย (ปภ.)
+กรุณาสร้างชุดคำถามแบบสำรวจสำหรับหัวข้อ: "${topic.trim()}"
+หมวดหมู่: "${category}"
+กลุ่มเป้าหมายผู้ตอบ: "${targetAudience}"
+จำนวนข้อคำถามที่ต้องการ: ${questionCount} ข้อ (ต้องสร้างให้ครบทั้งหมด ${questionCount} ข้อ โดยเรียงหมายเลข id: "q_1", "q_2", ... "q_${questionCount}")
+${includeMatrix ? '- ให้มีคำถามประเภท matrix_rating (Likert Scale 5 ระดับ) ในชุดคำถามด้วย' : ''}
+${includeRating ? '- ให้มีคำถามประเภท rating_stars (1-5 ดาว) ในชุดคำถามด้วย' : ''}
+
+ส่งกลับมาเป็น JSON ตาม Schema ดังนี้ (ห้ามใส่ Markdown code block อื่นใด ให้ส่งเฉพาะ raw JSON):
+{
+  "title": "ชื่อหัวข้อแบบสำรวจที่เป็นทางการและกระชับ",
+  "description": "คำชี้แจงและวัตถุประสงค์ของแบบสำรวจเพื่อประโยชน์ราชการ",
+  "category": "satisfaction",
+  "categoryLabel": "ความพึงพอใจการบริการ หรือตามความเหมาะสม",
+  "settings": {
+    "themeColor": "#2563eb",
+    "headerLogoType": "garuda",
+    "showProgressBar": true,
+    "showQuestionNumbers": true,
+    "allowAnonymous": true,
+    "requireLogin": false,
+    "limitOneResponsePerDevice": false,
+    "thankYouTitle": "ขอบพระคุณสำหรับข้อมูลและการประเมิน",
+    "thankYouMessage": "ความคิดเห็นของท่านมีคุณค่ายิ่งในการนำไปพัฒนาและปรับปรุงการปฏิบัติงานให้มีประสิทธิภาพสูงสุด",
+    "showSummaryToRespondents": true
+  },
+  "questions": [
+    {
+      "id": "q_1",
+      "type": "single_choice",
+      "title": "1. ข้อมูลสถานะทั่วไปของผู้ตอบแบบสำรวจ",
+      "description": "กรุณาเลือกตัวเลือกที่ตรงกับท่านมากที่สุด",
+      "required": true,
+      "options": [
+        { "id": "opt_1", "text": "ประชาชนทั่วไป / ผู้รับบริการ" },
+        { "id": "opt_2", "text": "เจ้าหน้าที่หน่วยงานภาครัฐ" },
+        { "id": "opt_3", "text": "ตัวแทนภาคเอกชน / ผู้ประกอบการ" },
+        { "id": "opt_4", "text": "ผู้นำชุมชน / อาสาสมัคร (อปพร.)" }
+      ]
+    }
+  ]
+}`;
+
+    const { response } = await callGeminiWithFallback({
+      client,
+      contents: [{ text: aiPrompt }],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.3
+      }
+    });
+
+    let resultText = response.text || '{}';
+    resultText = resultText.replace(/^\s*```json\s*/i, '').replace(/\s*```\s*$/i, '');
+    const parsed = JSON.parse(resultText);
+
+    await addSystemLog(
+      'SURVEY_AI_GENERATE',
+      `ใช้งาน AI ช่วยสร้างแบบสำรวจหัวข้อ: ${topic}`,
+      (req as any).user?.name || 'ผู้ดูแลระบบ',
+      getClientIp(req)
+    );
+
+    return res.json({ survey: parsed });
+  } catch (e: any) {
+    console.error('AI Survey Generator error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการประมวลผล AI แบบสำรวจ' });
+  }
+});
 
 function analyzeThaiGovDocument(title: string, content: string) {
   const combined = `${title || ''} ${content || ''}`.toLowerCase();

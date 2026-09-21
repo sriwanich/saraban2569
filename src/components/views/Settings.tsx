@@ -137,6 +137,93 @@ export default function Settings(props: SettingsProps) {
   const [footerText, setFooterText] = useState<string>('© 2026 ระบบสารบรรณอิเล็กทรอนิกส์ - สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง');
   const [geminiApiKey, setGeminiApiKey] = useState<string>('');
   const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false);
+  const [isTestingGemini, setIsTestingGemini] = useState<boolean>(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{
+    success: boolean;
+    message: string;
+    latencyMs?: number;
+    usedModel?: string;
+    source?: string;
+    sourceDescription?: string;
+    maskedKey?: string;
+    aiReply?: string;
+  } | null>(null);
+  const [isSavingGeminiKey, setIsSavingGeminiKey] = useState<boolean>(false);
+  const [geminiSaveFeedback, setGeminiSaveFeedback] = useState<string>('');
+
+  const handleTestGeminiKey = async (targetKey?: string) => {
+    const keyToTest = (targetKey !== undefined ? targetKey : geminiApiKey).trim();
+    setIsTestingGemini(true);
+    setGeminiTestResult(null);
+    try {
+      const res = await fetch('/api/system/test-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geminiApiKey: keyToTest })
+      });
+      const data = await res.json();
+      setGeminiTestResult({
+        success: Boolean(data.success),
+        message: data.message || (data.success ? 'เชื่อมต่อสำเร็จ' : 'ทดสอบไม่สำเร็จ'),
+        latencyMs: data.latencyMs,
+        usedModel: data.usedModel,
+        source: data.source,
+        sourceDescription: data.sourceDescription,
+        maskedKey: data.maskedKey,
+        aiReply: data.aiReply
+      });
+    } catch (err: any) {
+      setGeminiTestResult({
+        success: false,
+        message: 'ไม่สามารถติดต่อเซิร์ฟเวอร์เพื่อทดสอบ Gemini API ได้: ' + (err?.message || String(err))
+      });
+    } finally {
+      setIsTestingGemini(false);
+    }
+  };
+
+  const handleQuickSaveGeminiKey = async () => {
+    setIsSavingGeminiKey(true);
+    setGeminiSaveFeedback('');
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentYear,
+          startSequence,
+          orgName,
+          headerOrgName,
+          logoUrl,
+          garuda15Url,
+          garuda30Url,
+          faviconUrl,
+          footerText,
+          geminiApiKey: geminiApiKey.trim(),
+          smtpHost,
+          smtpPort,
+          smtpUser,
+          smtpPassword,
+          smtpFrom,
+          enabledFeatures: JSON.stringify(enabledFeatures)
+        })
+      });
+      if (!res.ok) throw new Error('เกิดข้อผิดพลาดในการบันทึกลงฐานข้อมูล');
+      
+      const cached = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+      cached.geminiApiKey = geminiApiKey.trim();
+      localStorage.setItem('moi_settings', JSON.stringify(cached));
+      
+      if (onSettingsUpdated) onSettingsUpdated();
+      setGeminiSaveFeedback('บันทึก Google Gemini API Key ขององค์กรลงฐานข้อมูลสำเร็จ');
+      setTimeout(() => setGeminiSaveFeedback(''), 4500);
+    } catch (err: any) {
+      console.error('Quick save gemini key error:', err);
+      alert('บันทึกคีย์ล้มเหลว: ' + err.message);
+    } finally {
+      setIsSavingGeminiKey(false);
+    }
+  };
   
   const [smtpHost, setSmtpHost] = useState<string>('');
   const [smtpPort, setSmtpPort] = useState<number>(587);
@@ -3035,40 +3122,115 @@ export default function Settings(props: SettingsProps) {
               </div>
             </div>
 
-            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6">
-              <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] mb-1 flex items-center gap-2">
-                <Key className="w-5 h-5 text-[var(--primary-color)]" /> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)
-              </h3>
-              <p className="text-xs text-[var(--text-muted)] mb-4">
-                กำหนด Key จาก Google AI Studio เพื่อใช้สแกน อ่าน และถอดความเอกสารราชการโดยอัตโนมัติ ข้อมูลจะถูกจัดเก็บไว้ในฐานข้อมูล MySQL และใช้เป็น Key หลักขององค์กร
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-xl p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                <h3 className="text-lg font-sans font-medium text-[var(--text-primary)] flex items-center gap-2">
+                  <Key className="w-5 h-5 text-[var(--primary-color)]" /> ตั้งค่า องค์กร Google Gemini API Key (สำหรับ AI สแกนและถอดความเอกสาร)
+                </h3>
+                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  geminiApiKey ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                }`}>
+                  {geminiApiKey ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                  {geminiApiKey ? 'กำหนดคีย์แล้ว' : 'ยังไม่ได้ระบุคีย์'}
+                </span>
+              </div>
+              <p className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed">
+                กำหนด Google Gemini API Key เพื่อใช้ประมวลผลงาน AI ทั่วทั้งระบบ เช่น การสแกนและถอดความเอกสารราชการอัตโนมัติ (AI Scan), ตรวจจับเอกสารซ้ำซ้อน, จัดรูปแบบตามระเบียบงานสารบรรณ และช่วยร่างเอกสาร โดยระบบจะจัดเก็บไว้ในฐานข้อมูล MySQL (<code className="px-1 py-0.5 rounded bg-[var(--bg-overlay)] text-[var(--text-primary)]">settings.geminiApiKey</code>) เป็นแหล่งอ้างอิงหลักขององค์กร
               </p>
-              <div className="space-y-2">
-                <label className="text-sm text-[var(--text-secondary)] font-medium">องค์กร Google Gemini API Key</label>
-                <div className="relative flex items-center">
-                  <input 
-                    type={showGeminiKey ? "text" : "password"} 
-                    value={geminiApiKey}
-                    onChange={e => setGeminiApiKey(e.target.value)}
-                    placeholder="ระบุ Gemini API Key (เช่น AIzaSy...)"
-                    className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg pl-4 pr-24 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors font-mono text-sm"
-                  />
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm text-[var(--text-secondary)] font-medium mb-1.5 block">
+                    องค์กร Google Gemini API Key
+                  </label>
+                  <div className="relative flex items-center">
+                    <input 
+                      type={showGeminiKey ? "text" : "password"} 
+                      value={geminiApiKey}
+                      onChange={e => {
+                        setGeminiApiKey(e.target.value);
+                        if (geminiTestResult) setGeminiTestResult(null);
+                        if (geminiSaveFeedback) setGeminiSaveFeedback('');
+                      }}
+                      placeholder="ระบุ Gemini API Key (เช่น AIzaSy...)"
+                      className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg pl-4 pr-24 py-2.5 text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none transition-colors font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGeminiKey(!showGeminiKey)}
+                      className="absolute right-2 px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-md font-medium transition-colors"
+                    >
+                      {showGeminiKey ? 'ซ่อน Key' : 'แสดง Key'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => setShowGeminiKey(!showGeminiKey)}
-                    className="absolute right-2 px-3 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-md font-medium transition-colors"
+                    onClick={handleQuickSaveGeminiKey}
+                    disabled={isSavingGeminiKey}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[var(--primary-color)] text-white text-xs font-medium rounded-lg hover:opacity-90 active:scale-95 transition-all shadow-sm disabled:opacity-50"
                   >
-                    {showGeminiKey ? 'ซ่อน Key' : 'แสดง Key'}
+                    {isSavingGeminiKey ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    {isSavingGeminiKey ? 'กำลังบันทึกลงฐานข้อมูล...' : 'บันทึก Key ทันที'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTestGeminiKey()}
+                    disabled={isTestingGemini || !geminiApiKey.trim()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-primary)] text-xs font-medium rounded-lg hover:bg-[var(--bg-overlay)] active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {isTestingGemini ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-[var(--primary-color)]" /> : <Zap className="w-3.5 h-3.5 text-amber-500" />}
+                    {isTestingGemini ? 'กำลังทดสอบกับ Google Gemini...' : 'ทดสอบการเชื่อมต่อ API'}
                   </button>
                 </div>
-                {geminiApiKey ? (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mt-1.5 font-medium">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> บันทึก Gemini API Key ในระบบเรียบร้อยแล้ว
-                  </p>
-                ) : (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mt-1.5 font-medium">
-                    <AlertTriangle className="w-4 h-4 text-amber-500" /> ยังไม่ได้กำหนด API Key ในฐานข้อมูล (ระบบจะลองใช้จาก Settings &gt; Secrets เป็นลำดับถัดไป)
-                  </p>
+
+                {geminiSaveFeedback && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                    <span>{geminiSaveFeedback}</span>
+                  </div>
                 )}
+
+                {geminiTestResult && (
+                  <div className={`p-3.5 rounded-lg border text-xs ${
+                    geminiTestResult.success 
+                      ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200' 
+                      : 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      {geminiTestResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
+                      )}
+                      <div className="space-y-1">
+                        <div className="font-semibold">{geminiTestResult.message}</div>
+                        {geminiTestResult.success && (
+                          <div className="text-[11px] opacity-90 flex flex-wrap gap-x-4 gap-y-1 mt-1 font-mono">
+                            {geminiTestResult.usedModel && <span>โมเดล: {geminiTestResult.usedModel}</span>}
+                            {geminiTestResult.latencyMs !== undefined && <span>เวลาตอบสนอง: {geminiTestResult.latencyMs} ms</span>}
+                            {geminiTestResult.sourceDescription && <span>แหล่งข้อมูล: {geminiTestResult.sourceDescription}</span>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-3 pt-3 border-t border-[var(--border-lighter)] text-xs text-[var(--text-muted)] space-y-1">
+                  <p className="font-medium text-[var(--text-secondary)]">ฟังก์ชัน AI ที่ใช้ Key นี้เป็นศูนย์กลาง:</p>
+                  <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+                    <li>AI สแกนและถอดความเอกสารราชการ (นำเข้าไฟล์ภาพหรือ PDF)</li>
+                    <li>AI ตรวจจับเอกสารซ้ำซ้อนและประวัติเรื่องเดิม (Duplicate Detection)</li>
+                    <li>AI ตรวจรูปแบบระเบียบสารบรรณ คำผิด คำราชาศัพท์ และความครบถ้วน (Audit & Proofread)</li>
+                    <li>AI ช่วยร่างหนังสือราชการ คำสั่ง สุนทรพจน์ และระเบียบวาระการประชุม</li>
+                    <li>AI วิเคราะห์พื้นที่ว่างสำหรับประทับตรา QR Code อัตโนมัติ (AI Stamp Layout)</li>
+                    <li>AI ออกแบบโครงสร้างเนื้อหาภาพอินโฟกราฟิกราชการ (Infographics AI)</li>
+                  </ul>
+                </div>
               </div>
             </div>
 
@@ -4084,6 +4246,12 @@ export default function Settings(props: SettingsProps) {
                   note: 'ช่วยให้ประชาชนและเจ้าหน้าที่สแกนตรวจสอบสถานะหนังสือได้รวดเร็ว'
                 },
                 {
+                  key: 'surveys',
+                  title: 'แบบสำรวจและประเมินผลสารบรรณดิจิทัล',
+                  desc: 'สิทธิ์เข้าถึง สร้าง ออกแบบ เผยแพร่ และวิเคราะห์รายงานผลแบบสำรวจความคิดเห็น/แบบประเมินความพึงพอใจ ก.พ.ร.',
+                  note: 'รองรับการสร้างแบบสำรวจ QR Code และรายงานสถิติแบบเรียลไทม์'
+                },
+                {
                   key: 'draft_docs',
                   title: 'ระบบร่างและจัดทำหนังสือ (Draft Documents Management)',
                   desc: 'สิทธิ์ในการสร้าง บันทึกร่างหนังสือ ตรวจสอบร่าง และเสนอพิจารณาตามลำดับชั้น',
@@ -4204,7 +4372,7 @@ export default function Settings(props: SettingsProps) {
             } else {
               if (role === 'admin') isAllowed = true;
               else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs', 'manage_users', 'manage_changelog'].includes(key);
-              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
+              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'surveys', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
             }
 
             // Strict rule: Moderator and User can never have manage_users

@@ -6,6 +6,7 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import { PublicInfographicsViewer } from './components/views/PublicInfographicsViewer';
 import { PublicQrVerifyViewer } from './components/views/PublicQrVerifyViewer';
+import { PublicSurveyViewer } from './components/views/PublicSurveyViewer';
 import { useRealtimeSync } from './utils/realtimeSync';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
@@ -44,6 +45,17 @@ export default function App() {
     searchParams.has('qr') ||
     searchParams.get('view') === 'verify' ||
     searchParams.get('view') === 'qr_verify';
+
+  const isPublicSurvey = 
+    pathname.startsWith('/survey/') ||
+    pathname.startsWith('/public/survey/') ||
+    pathname.startsWith('/view/survey/') ||
+    hash.includes('/survey/') ||
+    searchParams.has('surveyId') ||
+    searchParams.has('survey') ||
+    (searchParams.has('id') && (searchParams.get('view') === 'survey' || searchParams.get('view') === 'public_survey')) ||
+    searchParams.get('view') === 'survey' ||
+    searchParams.get('view') === 'public_survey';
 
   useEffect(() => {
     const savedUser = localStorage.getItem('edms_user_data') || sessionStorage.getItem('edms_user_data');
@@ -227,6 +239,14 @@ export default function App() {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลหน้าตรวจสอบ QR Code">
         <PublicQrVerifyViewer />
+      </ErrorBoundary>
+    );
+  }
+
+  if (isPublicSurvey) {
+    return (
+      <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลหน้าแบบสำรวจ">
+        <PublicSurveyViewer />
       </ErrorBoundary>
     );
   }

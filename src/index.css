@@ -236,10 +236,10 @@
   100% { transform: translateX(200%); }
 }
 
-/* Infographics Editor System Theme Integration */
+/* Infographics Editor System Theme Harmonies */
 .light-editor {
-  background-color: var(--bg-base) !important;
-  color: var(--text-primary) !important;
+  background-color: var(--bg-base, #F8FAFC) !important;
+  color: var(--text-primary, #0F172A) !important;
 }
 
 .light-editor header,
@@ -247,55 +247,100 @@
 .light-editor .bg-\[\#18181b\],
 .light-editor .bg-\[\#141416\],
 .light-editor .bg-\[\#121214\] {
-  background-color: var(--bg-surface) !important;
-  color: var(--text-primary) !important;
-  border-color: var(--border-light) !important;
+  background-color: var(--bg-surface, #FFFFFF) !important;
+  color: var(--text-primary, #0F172A) !important;
+  border-color: var(--border-light, #E2E8F0) !important;
 }
 
 .light-editor .bg-\[\#111113\] {
-  background-color: var(--bg-base) !important;
+  background-color: var(--bg-elevated, #F1F5F9) !important;
 }
 
 .light-editor .border-\[\#27272a\],
 .light-editor .border-gray-800,
 .light-editor .border-gray-700 {
-  border-color: var(--border-light) !important;
+  border-color: var(--border-light, #E2E8F0) !important;
 }
 
 .light-editor input[type="text"],
 .light-editor input[type="number"],
 .light-editor select,
 .light-editor textarea {
-  background-color: var(--bg-elevated) !important;
-  border-color: var(--border-medium) !important;
-  color: var(--text-primary) !important;
+  background-color: var(--bg-elevated, #F1F5F9) !important;
+  border-color: var(--border-medium, #CBD5E1) !important;
+  color: var(--text-primary, #0F172A) !important;
 }
 
 .light-editor input::placeholder,
 .light-editor textarea::placeholder {
-  color: var(--text-muted) !important;
+  color: var(--text-muted, #64748B) !important;
 }
 
-.light-editor .text-gray-100,
 .light-editor .text-gray-200,
 .light-editor .text-gray-300 {
-  color: var(--text-primary) !important;
+  color: var(--text-primary, #0F172A) !important;
 }
 
 .light-editor .text-gray-400,
 .light-editor .text-gray-500 {
-  color: var(--text-secondary) !important;
+  color: var(--text-secondary, #334155) !important;
 }
 
 .light-editor .hover\:bg-gray-800:hover,
 .light-editor .hover\:bg-gray-700:hover {
-  background-color: var(--bg-elevated) !important;
-  color: var(--text-primary) !important;
+  background-color: var(--bg-elevated, #F1F5F9) !important;
+  color: var(--text-primary, #0F172A) !important;
 }
 
 .light-editor .bg-gray-800,
 .light-editor .bg-gray-900 {
-  background-color: var(--bg-elevated) !important;
-  color: var(--text-primary) !important;
+  background-color: var(--bg-elevated, #F1F5F9) !important;
+  color: var(--text-primary, #0F172A) !important;
 }
 
+/* Dark Mode EDMS System Harmonized Styles */
+.dark-editor {
+  background-color: var(--bg-base, #0B132B) !important;
+  color: var(--text-primary, #F8FAFC) !important;
+}
+
+.dark-editor header,
+.dark-editor footer,
+.dark-editor .bg-\[\#18181b\],
+.dark-editor .bg-\[\#141416\],
+.dark-editor .bg-\[\#121214\] {
+  background-color: var(--bg-surface, #101B37) !important;
+  color: var(--text-primary, #F8FAFC) !important;
+  border-color: var(--border-light, #1E2E56) !important;
+}
+
+.dark-editor .bg-\[\#111113\] {
+  background-color: var(--bg-canvas, #070D1E) !important;
+}
+
+.dark-editor .border-\[\#27272a\],
+.dark-editor .border-gray-800,
+.dark-editor .border-gray-700 {
+  border-color: var(--border-light, #1E2E56) !important;
+}
+
+.dark-editor input[type="text"],
+.dark-editor input[type="number"],
+.dark-editor select,
+.dark-editor textarea {
+  background-color: var(--bg-elevated, #18264A) !important;
+  border-color: var(--border-medium, #2C3E6E) !important;
+  color: var(--text-primary, #F8FAFC) !important;
+}
+
+.dark-editor .hover\:bg-gray-800:hover,
+.dark-editor .hover\:bg-gray-700:hover {
+  background-color: var(--bg-elevated, #18264A) !important;
+  color: var(--text-primary, #F8FAFC) !important;
+}
+
+.dark-editor .bg-gray-800,
+.dark-editor .bg-gray-900 {
+  background-color: var(--bg-elevated, #18264A) !important;
+  color: var(--text-primary, #F8FAFC) !important;
+}

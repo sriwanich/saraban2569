@@ -37,7 +37,8 @@
     "react-dom": "^18.2.0",
     "react-image-crop": "^11.1.2",
     "recharts": "^3.10.1",
-    "tar": "^7.5.22"
+    "tar": "^7.5.22",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",

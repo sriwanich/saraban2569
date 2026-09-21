@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
-import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle } from 'lucide-react';
+import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle, ClipboardCheck } from 'lucide-react';
 
 import { DocumentItem, DocType } from '../types';
 import Overview from './views/Overview';
@@ -25,6 +25,7 @@ const UrgentIncidentReportView = lazyWithRetry(() => import('./views/disaster/Ur
 const WorkflowSlaView = lazyWithRetry(() => import('./views/WorkflowSlaView'));
 const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'));
 const UserManualView = lazyWithRetry(() => import('./views/UserManualView'));
+const SurveyManagementView = lazyWithRetry(() => import('./views/SurveyManagementView').then(m => ({ default: m.SurveyManagementView })));
 import { ThemeMode } from '../App';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 import { useRealtimeSync } from '../utils/realtimeSync';
@@ -219,14 +220,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (currentUser.role === 'moderator') {
       return [
         'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
-        'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs',
+        'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'surveys', 'draft_docs',
         'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin'
       ].includes(key);
     }
     if (currentUser.role === 'user') {
       return [
         'create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator',
-        'draft_docs', 'digital_folders', 'workflow_sla'
+        'surveys', 'draft_docs', 'digital_folders', 'workflow_sla'
       ].includes(key);
     }
     return false;
@@ -417,6 +418,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         case 'qr_generator':
           viewTitle = 'สร้าง QR Code สารบรรณ';
           activeDetails = 'กำลังสร้างรหัส QR Code สำหรับเอกสารราชการ';
+          break;
+        case 'surveys':
+          viewTitle = 'แบบสำรวจและประเมินผลสารบรรณดิจิทัล';
+          activeDetails = 'กำลังจัดการแบบสำรวจและวิเคราะห์ผลตอบรับ';
           break;
         case 'urgent_incidents':
           viewTitle = 'แบบรายงานเหตุด่วนสาธารณภัย';
@@ -1089,6 +1094,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
           { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
           { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
+          { id: 'surveys', icon: ClipboardCheck, label: 'แบบสำรวจ & ประเมินผล', permKey: 'surveys' },
           { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents', badge: urgentIncidentsCount > 0 ? urgentIncidentsCount : undefined, badgeColor: 'bg-rose-500 text-white' },
           { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin', badge: recycleBinCount > 0 ? recycleBinCount : undefined, badgeColor: 'bg-slate-500 text-white' },
         ]
@@ -1245,7 +1251,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           <React.Suspense fallback={
             <LoadingIndicator fullScreen={false} message="กำลังโหลดเครื่องมือออกแบบ Infographics..." />
           }>
-            <InfographicsEditorView user={currentUser} />
+            <InfographicsEditorView user={currentUser} systemTheme={theme} />
           </React.Suspense>
         ));
       case 'favorites': {
@@ -1435,6 +1441,14 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             user={currentUser} 
             documents={documents.filter(isDocForUserDepartment)} 
             onViewDoc={handleViewDoc} 
+          />
+        ));
+      case 'surveys':
+        return renderGuardedView('surveys', 'ระบบแบบสำรวจและประเมินผล', (
+          <SurveyManagementView 
+            user={currentUser} 
+            documents={documents.filter(isDocForUserDepartment)} 
+            hasPermission={hasPermission}
           />
         ));
       case 'urgent_incidents':
@@ -1982,24 +1996,29 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         </header>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-8 scroll-smooth custom-scrollbar">
-           <div className="max-w-[1600px] w-full mx-auto">
-             <Suspense fallback={<div className="py-16 text-center"><LoadingIndicator message="กำลังโหลดโมดูลระบบ..." /></div>}>
-               {Array.from(visitedTabs).map(tabId => {
-                 const isSelected = activeTab === tabId;
-                 return (
-                   <div 
-                     key={tabId}
-                     className={isSelected ? "animate-fade-in block" : "hidden"}
-                     style={{ display: isSelected ? 'block' : 'none' }}
-                   >
-                     {renderTabContent(tabId)}
-                   </div>
-                 );
-               })}
-             </Suspense>
-           </div>
-        </div>
+        {(() => {
+          const isFullBleedTab = activeTab === 'infographics';
+          return (
+            <div className={`flex-1 min-h-0 ${isFullBleedTab ? 'overflow-hidden p-0 h-full' : 'overflow-y-auto p-3 sm:p-5 lg:p-8 scroll-smooth custom-scrollbar'}`}>
+              <div className={isFullBleedTab ? 'w-full h-full' : 'max-w-[1600px] w-full mx-auto'}>
+                <Suspense fallback={<div className="py-16 text-center"><LoadingIndicator message="กำลังโหลดโมดูลระบบ..." /></div>}>
+                  {Array.from(visitedTabs).map(tabId => {
+                    const isSelected = activeTab === tabId;
+                    return (
+                      <div 
+                        key={tabId}
+                        className={isSelected ? `animate-fade-in block ${isFullBleedTab && isSelected ? 'h-full' : ''}` : "hidden"}
+                        style={{ display: isSelected ? 'block' : 'none', height: isFullBleedTab && isSelected ? '100%' : undefined }}
+                      >
+                        {renderTabContent(tabId)}
+                      </div>
+                    );
+                  })}
+                </Suspense>
+              </div>
+            </div>
+          );
+        })()}
       </main>
 
       {/* Modals */}

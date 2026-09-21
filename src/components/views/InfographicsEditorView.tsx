@@ -19,14 +19,16 @@ import {
   Briefcase, Scale, Building2, Share2, FileSignature, QrCode, Gift, Percent,
   Coins, DollarSign, Megaphone, CheckCheck, Workflow, ShieldCheck as ShieldCheckIcon,
   Ruler, Magnet, Crosshair, Columns, EyeOff, Maximize2, Minimize2, Scaling, Expand, Shrink, Smartphone, Monitor,
-  Upload, RotateCcw, Crop, MoreHorizontal, MoreVertical, Menu, ChevronDown, AlignHorizontalSpaceAround, AlignVerticalSpaceAround,
+  Upload, RotateCcw, Crop, MoreHorizontal, MoreVertical, Menu, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, AlignHorizontalSpaceAround, AlignVerticalSpaceAround,
   Sun, Moon
 } from 'lucide-react';
 
 import { InfographicsGalleryModal } from './InfographicsGalleryModal';
+import { InfographicsExportModal } from './InfographicsExportModal';
 import { InfographicsImageGalleryModal, UploadedImageItem } from './InfographicsImageGalleryModal';
 import { InfographicsShareModal, InfographicShareSettings } from './InfographicsShareModal';
 import { InfographicsPermissionsModal, EditorUser } from './InfographicsPermissionsModal';
+import { PAPER_SIZES } from '../../data/paperSizes';
 import { ImageCropModal } from './ImageCropModal';
 import { ImageBackgroundRemovalModal } from './ImageBackgroundRemovalModal';
 import { FontSelector, ensureGoogleFontLoaded } from './FontSelector';
@@ -52,6 +54,11 @@ import {
 } from './InfographicsCanvaKit';
 import { useConfirm } from '../../context/ConfirmContext';
 
+const FABRIC_CUSTOM_PROPS = [
+  'id', 'name', 'lockMovementX', 'lockMovementY', 'lockScalingX', 'lockScalingY',
+  'lockRotation', 'hasControls', 'selectable', 'hoverCursor', 'data', 'rx', 'ry'
+];
+
 const ICON_LIBRARY = [
   { name: 'โทรศัพท์ (Phone)', tags: 'phone mobile call', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>' },
   { name: 'อีเมล (Mail)', tags: 'email mail envelope letter message', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>' },
@@ -76,33 +83,13 @@ const ICON_LIBRARY = [
 ];
 
 interface InfographicsEditorViewProps {
-  user?: any;
-  systemTheme?: 'light' | 'dark' | 'auto';
-  isSystemDark?: boolean;
+  user: any;
+  systemTheme?: 'dark' | 'light' | 'auto';
 }
 
-export default function InfographicsEditorView({ user, systemTheme = 'auto', isSystemDark }: InfographicsEditorViewProps) {
+export default function InfographicsEditorView({ user, systemTheme = 'auto' }: InfographicsEditorViewProps) {
   const { confirm } = useConfirm();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // System theme preference & synchronization
-  const [themePreference, setThemePreference] = useState<'auto' | 'dark' | 'light'>(() => {
-    return (localStorage.getItem('infographics_editor_theme_pref') as 'auto' | 'dark' | 'light') || 'auto';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('infographics_editor_theme_pref', themePreference);
-  }, [themePreference]);
-
-  const isEffectiveDark = React.useMemo(() => {
-    if (themePreference === 'dark') return true;
-    if (themePreference === 'light') return false;
-    // 'auto' mode: follow systemTheme / app theme
-    if (systemTheme === 'dark') return true;
-    if (systemTheme === 'light') return false;
-    if (isSystemDark !== undefined) return isSystemDark;
-    return typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
-  }, [themePreference, systemTheme, isSystemDark]);
   const [fabricLoaded, setFabricLoaded] = useState(false);
   const [fabricError, setFabricError] = useState<string | null>(null);
   const [canvas, setCanvas] = useState<any>(null);
@@ -144,11 +131,13 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
   // Custom uploaded images and asset lists
   const [uploadedImagesList, setUploadedImagesList] = useState<UploadedImageItem[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
 
   // Modal control states
   const [showGalleryModal, setShowGalleryModal] = useState(false);
   const [showImageGalleryModal, setShowImageGalleryModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [showCropModal, setShowCropModal] = useState(false);
   const [showBgRemovalModal, setShowBgRemovalModal] = useState(false);
@@ -161,10 +150,89 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
 
   // Toast / Notifications
   const [saveToast, setSaveToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Design Canvas settings
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 1200 });
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
+  // Theme settings: 'auto' (sync with EDMS system), 'dark', or 'light'
+  const [editorThemeSetting, setEditorThemeSetting] = useState<'auto' | 'dark' | 'light'>(() => {
+    return (localStorage.getItem('infographics_editor_theme') as 'auto' | 'dark' | 'light') || 'auto';
+  });
+  const [effectiveTheme, setEffectiveTheme] = useState<'dark' | 'light'>('dark');
+
+  useEffect(() => {
+    localStorage.setItem('infographics_editor_theme', editorThemeSetting);
+  }, [editorThemeSetting]);
+
+  useEffect(() => {
+    const computeEffectiveTheme = () => {
+      if (editorThemeSetting === 'dark') {
+        setEffectiveTheme('dark');
+      } else if (editorThemeSetting === 'light') {
+        setEffectiveTheme('light');
+      } else {
+        // Auto mode: sync with document element 'dark' class or system preferences
+        const isHtmlDark = document.documentElement.classList.contains('dark');
+        const isSystemDarkMedia = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const isDark = isHtmlDark || systemTheme === 'dark' || (systemTheme === 'auto' && isSystemDarkMedia);
+        setEffectiveTheme(isDark ? 'dark' : 'light');
+      }
+    };
+
+    computeEffectiveTheme();
+
+    // Listen to changes on root <html> element classes (EDMS global theme switches)
+    const observer = new MutationObserver(computeEffectiveTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
+    return () => observer.disconnect();
+  }, [editorThemeSetting, systemTheme]);
+
+  // Desktop / PC Layout States & Interactions
+  const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [isBottomDockOpen, setIsBottomDockOpen] = useState(true);
+  const [isZenMode, setIsZenMode] = useState(false);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto calculate and fit canvas to PC screen container
+  const handleFitToScreen = () => {
+    if (!canvasContainerRef.current) return;
+    const container = canvasContainerRef.current;
+    const availW = container.clientWidth - 56;
+    const availH = container.clientHeight - 56;
+    if (availW <= 0 || availH <= 0) return;
+    const scaleX = availW / canvasSize.width;
+    const scaleY = availH / canvasSize.height;
+    const fitScale = Math.min(scaleX, scaleY);
+    const rounded = Math.min(1.5, Math.max(0.2, Math.round(fitScale * 20) / 20));
+    setZoomLevel(rounded);
+  };
+
+  // Toggle or switch sidebar tabs on PC with seamless collapse
+  const handleTabClick = (tabKey: typeof activeSidebarTab) => {
+    if (activeSidebarTab === tabKey && isDesktopSidebarOpen) {
+      setIsDesktopSidebarOpen(false);
+    } else {
+      setActiveSidebarTab(tabKey);
+      setIsDesktopSidebarOpen(true);
+    }
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setShowMobileDrawer(true);
+    }
+  };
+
+  // Listen to Escape key to exit Zen mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isZenMode) {
+        setIsZenMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isZenMode]);
 
   // Properties form states (synchronized with selected canvas object)
   const [objX, setObjX] = useState<number | ''>('');
@@ -193,6 +261,17 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
   // Polotno-Grade Pages State (Multi-page canvas support)
   const [pagesList, setPagesList] = useState<string[]>([]);
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
+  const pagesListRef = useRef<string[]>([]);
+  const currentPageIndexRef = useRef<number>(0);
+
+  // Keep refs tightly synchronized with state
+  useEffect(() => {
+    currentPageIndexRef.current = currentPageIndex;
+  }, [currentPageIndex]);
+
+  useEffect(() => {
+    pagesListRef.current = pagesList;
+  }, [pagesList]);
 
   // AI Assistant states
   const [aiPrompt, setAiPrompt] = useState('');
@@ -251,6 +330,14 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
   const [rulerUnit, setRulerUnit] = useState<RulerUnit>('px');
   const [guideLines, setGuideLines] = useState<GuideLine[]>([]);
   const [snapToGrid, setSnapToGrid] = useState(true);
+
+  // Resize canvas when canvasSize changes
+  useEffect(() => {
+    if (canvas) {
+      canvas.setDimensions({ width: canvasSize.width, height: canvasSize.height });
+      canvas.requestRenderAll();
+    }
+  }, [canvasSize, canvas]);
 
   // CDN fabric.js import (to guarantee perfect compilation on server)
   useEffect(() => {
@@ -417,8 +504,10 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
         const parsed = JSON.parse(savedSession);
         setProjectName(parsed.name || 'โปรเจกต์ใหม่');
         if (parsed.pagesList && Array.isArray(parsed.pagesList) && parsed.pagesList.length > 0) {
+          pagesListRef.current = parsed.pagesList;
           setPagesList(parsed.pagesList);
           const activeIdx = parsed.currentPageIndex !== undefined ? parsed.currentPageIndex : 0;
+          currentPageIndexRef.current = activeIdx;
           setCurrentPageIndex(activeIdx);
           const targetJSON = parsed.pagesList[activeIdx] || parsed.canvasJSON;
           if (targetJSON) {
@@ -429,7 +518,10 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             });
           }
         } else if (parsed.canvasJSON) {
-          setPagesList([parsed.canvasJSON]);
+          const initP = [parsed.canvasJSON];
+          pagesListRef.current = initP;
+          setPagesList(initP);
+          currentPageIndexRef.current = 0;
           setCurrentPageIndex(0);
           initCanvas.loadFromJSON(parsed.canvasJSON, () => {
             initCanvas.backgroundColor = parsed.backgroundColor || '#ffffff';
@@ -438,7 +530,10 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
           });
         } else {
           // Empty starting page
-          setPagesList([JSON.stringify(initCanvas.toJSON(['id', 'name']))]);
+          const emptyInit = JSON.stringify(initCanvas.toJSON(FABRIC_CUSTOM_PROPS));
+          pagesListRef.current = [emptyInit];
+          setPagesList([emptyInit]);
+          currentPageIndexRef.current = 0;
           setCurrentPageIndex(0);
         }
         
@@ -451,7 +546,10 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
         }
       } else {
         // First initialization
-        setPagesList([JSON.stringify(initCanvas.toJSON(['id', 'name']))]);
+        const emptyInit = JSON.stringify(initCanvas.toJSON(FABRIC_CUSTOM_PROPS));
+        pagesListRef.current = [emptyInit];
+        setPagesList([emptyInit]);
+        currentPageIndexRef.current = 0;
         setCurrentPageIndex(0);
       }
     } catch (err) {
@@ -523,33 +621,52 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
   const saveHistory = (canvasInstance = canvas) => {
     if (!canvasInstance || isHistoryActionRef.current) return;
     try {
-      const state = JSON.stringify(canvasInstance.toJSON(['id', 'name']));
+      const state = JSON.stringify(canvasInstance.toJSON(FABRIC_CUSTOM_PROPS));
       const newHistory = canvasHistory.slice(0, historyIndex + 1);
       newHistory.push(state);
       setCanvasHistory(newHistory);
       setHistoryIndex(newHistory.length - 1);
 
-      // Keep pagesList updated in sync and write to session storage
-      setPagesList(prev => {
-        const updated = [...prev];
-        if (updated.length === 0) {
-          return [state];
-        }
-        updated[currentPageIndex] = state;
-        
-        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-          name: projectName,
-          canvasJSON: state,
-          canvasSize: canvasSize,
-          backgroundColor: backgroundColor,
-          pagesList: updated,
-          currentPageIndex: currentPageIndex
-        }));
-        
-        return updated;
-      });
+      // Keep pagesList updated in sync and write to session storage safely using refs
+      const activeIdx = currentPageIndexRef.current;
+      const currentPages = [...pagesListRef.current];
+      if (currentPages.length === 0) {
+        currentPages[0] = state;
+      } else {
+        currentPages[activeIdx] = state;
+      }
+      pagesListRef.current = currentPages;
+      setPagesList(currentPages);
+      
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+        name: projectName,
+        canvasJSON: state,
+        canvasSize: canvasSize,
+        backgroundColor: backgroundColor,
+        pagesList: currentPages,
+        currentPageIndex: activeIdx
+      }));
     } catch (err) {
       console.error('Error saving undo history:', err);
+    }
+  };
+
+  // Helper to sync active canvas to current page state before exporting
+  const saveCurrentCanvasToPagesList = () => {
+    if (!canvas) return;
+    try {
+      const state = JSON.stringify(canvas.toJSON(FABRIC_CUSTOM_PROPS));
+      const activeIdx = currentPageIndexRef.current;
+      const currentPages = [...pagesListRef.current];
+      if (currentPages.length === 0) {
+        currentPages[0] = state;
+      } else {
+        currentPages[activeIdx] = state;
+      }
+      pagesListRef.current = currentPages;
+      setPagesList(currentPages);
+    } catch (e) {
+      console.error('Failed to sync canvas to pagesList:', e);
     }
   };
 
@@ -923,20 +1040,23 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
     if (!canvas) return;
     setIsSaving(true);
 
-    const currentJSON = JSON.stringify(canvas.toJSON(['id', 'name']));
-    let updatedPages = [...pagesList];
-    if (updatedPages.length === 0) {
-      updatedPages = [currentJSON];
+    const currentJSON = JSON.stringify(canvas.toJSON(FABRIC_CUSTOM_PROPS));
+    const currentPages = [...pagesListRef.current];
+    const currentIdx = currentPageIndexRef.current;
+    if (currentPages.length === 0) {
+      currentPages[0] = currentJSON;
     } else {
-      updatedPages[currentPageIndex] = currentJSON;
+      currentPages[currentIdx] = currentJSON;
     }
+    pagesListRef.current = currentPages;
+    setPagesList(currentPages);
 
     const payload = {
-      canvasJSON: canvas.toJSON(['id', 'name']),
+      canvasJSON: canvas.toJSON(FABRIC_CUSTOM_PROPS),
       size: canvasSize,
       backgroundColor: backgroundColor,
-      pages: updatedPages,
-      currentPageIndex: currentPageIndex
+      pages: currentPages,
+      currentPageIndex: currentIdx
     };
 
     // Grab a fast thumbnail PNG
@@ -1023,8 +1143,10 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
       if (dbData.data) {
         const payload = JSON.parse(dbData.data);
         if (payload.pages && Array.isArray(payload.pages) && payload.pages.length > 0) {
+          pagesListRef.current = payload.pages;
           setPagesList(payload.pages);
           const activeIdx = payload.currentPageIndex !== undefined ? payload.currentPageIndex : 0;
+          currentPageIndexRef.current = activeIdx;
           setCurrentPageIndex(activeIdx);
           const pageData = payload.pages[activeIdx] || payload.canvasJSON;
           canvas.loadFromJSON(pageData, () => {
@@ -1034,7 +1156,10 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             saveHistory(canvas);
           });
         } else if (payload.canvasJSON) {
-          setPagesList([JSON.stringify(payload.canvasJSON)]);
+          const initPages = [typeof payload.canvasJSON === 'string' ? payload.canvasJSON : JSON.stringify(payload.canvasJSON)];
+          pagesListRef.current = initPages;
+          setPagesList(initPages);
+          currentPageIndexRef.current = 0;
           setCurrentPageIndex(0);
           canvas.loadFromJSON(payload.canvasJSON, () => {
             canvas.backgroundColor = payload.backgroundColor || '#ffffff';
@@ -1061,25 +1186,36 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
 
   // Polotno-Style Multi-Page Actions
   const handleSwitchPage = (index: number) => {
-    if (!canvas || index < 0 || index >= pagesList.length || index === currentPageIndex) return;
+    if (!canvas) return;
+    const currentPages = [...pagesListRef.current];
+    const currentIdx = currentPageIndexRef.current;
     
-    // Save current active page state
-    const currentJSON = JSON.stringify(canvas.toJSON(['id', 'name']));
-    const updated = [...pagesList];
-    updated[currentPageIndex] = currentJSON;
-    setPagesList(updated);
+    if (index < 0 || index >= currentPages.length || index === currentIdx) return;
     
-    // Switch active index
+    // 1. Save current active page state into pages list
+    const currentJSON = JSON.stringify(canvas.toJSON(FABRIC_CUSTOM_PROPS));
+    currentPages[currentIdx] = currentJSON;
+    
+    // 2. Update refs and state synchronously
+    pagesListRef.current = currentPages;
+    currentPageIndexRef.current = index;
+    setPagesList(currentPages);
     setCurrentPageIndex(index);
     
-    // Load targeted page JSON
-    const targetJSON = updated[index];
+    // 3. Load targeted page JSON
+    const targetJSON = currentPages[index];
+    if (!targetJSON) return;
+    
     isHistoryActionRef.current = true;
     canvas.loadFromJSON(targetJSON, () => {
-      canvas.backgroundColor = backgroundColor;
+      canvas.backgroundColor = backgroundColor || '#ffffff';
       canvas.requestRenderAll();
       syncLayersList(canvas);
       isHistoryActionRef.current = false;
+      
+      // Update history for this page
+      setCanvasHistory([targetJSON]);
+      setHistoryIndex(0);
       
       // Update sessionStorage
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
@@ -1087,7 +1223,7 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
         canvasJSON: targetJSON,
         canvasSize: canvasSize,
         backgroundColor: backgroundColor,
-        pagesList: updated,
+        pagesList: currentPages,
         currentPageIndex: index
       }));
     });
@@ -1097,83 +1233,151 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
   const handleAddPage = () => {
     if (!canvas) return;
     
-    // Save current page
-    const currentJSON = JSON.stringify(canvas.toJSON(['id', 'name']));
-    const updated = [...pagesList];
-    if (updated.length === 0) {
-      updated[0] = currentJSON;
+    // 1. Immediately save the current active canvas state into currentPages
+    const currentJSON = JSON.stringify(canvas.toJSON(FABRIC_CUSTOM_PROPS));
+    const currentPages = [...pagesListRef.current];
+    const currentIdx = currentPageIndexRef.current;
+    
+    if (currentPages.length === 0) {
+      currentPages[0] = currentJSON;
     } else {
-      updated[currentPageIndex] = currentJSON;
+      currentPages[currentIdx] = currentJSON;
     }
     
-    // Create new blank page JSON state
+    // 2. Create new blank page JSON state
     const emptyCanvas = {
-      version: "4.3.0",
+      version: "5.3.0",
       objects: [],
-      background: backgroundColor
+      background: backgroundColor || '#ffffff'
     };
     const emptyJSON = JSON.stringify(emptyCanvas);
-    updated.push(emptyJSON);
+    currentPages.push(emptyJSON);
     
-    const newIdx = updated.length - 1;
-    setPagesList(updated);
+    const newIdx = currentPages.length - 1;
+    
+    // 3. Update refs and state synchronously BEFORE touching canvas
+    pagesListRef.current = currentPages;
+    currentPageIndexRef.current = newIdx;
+    setPagesList(currentPages);
     setCurrentPageIndex(newIdx);
     
+    // 4. Reset history to the new page's initial state
+    setCanvasHistory([emptyJSON]);
+    setHistoryIndex(0);
+    
+    // 5. Clear the canvas for the new page without triggering auto-save listeners
     isHistoryActionRef.current = true;
     canvas.clear();
-    canvas.backgroundColor = backgroundColor;
+    canvas.backgroundColor = backgroundColor || '#ffffff';
     canvas.requestRenderAll();
     syncLayersList(canvas);
     isHistoryActionRef.current = false;
     
-    // Save history
-    saveHistory(canvas);
-    setSaveToast({ message: `เพิ่มแผ่นงานหน้าใหม่ (หน้า ${newIdx + 1}) เรียบร้อย`, type: 'success' });
+    // 6. Update sessionStorage with both the preserved previous page(s) and new page
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+      name: projectName,
+      canvasJSON: emptyJSON,
+      canvasSize: canvasSize,
+      backgroundColor: backgroundColor,
+      pagesList: currentPages,
+      currentPageIndex: newIdx
+    }));
+    
+    setSaveToast({ message: `เพิ่มแผ่นงานใหม่ (หน้า ${newIdx + 1}) เรียบร้อย - บันทึกหน้าเดิมแล้ว`, type: 'success' });
   };
 
-  const handleDuplicatePage = () => {
+  const handleDuplicatePage = (targetIdx?: number) => {
     if (!canvas) return;
+    const currentPages = [...pagesListRef.current];
+    const currentIdx = currentPageIndexRef.current;
+    const sourceIdx = targetIdx !== undefined ? targetIdx : currentIdx;
     
-    // Save current page
-    const currentJSON = JSON.stringify(canvas.toJSON(['id', 'name']));
-    const updated = [...pagesList];
-    updated[currentPageIndex] = currentJSON;
+    // 1. Save current active canvas
+    const currentJSON = JSON.stringify(canvas.toJSON(FABRIC_CUSTOM_PROPS));
+    if (currentPages.length === 0) {
+      currentPages[0] = currentJSON;
+    } else {
+      currentPages[currentIdx] = currentJSON;
+    }
     
-    // Duplicate current JSON state
-    updated.splice(currentPageIndex + 1, 0, currentJSON);
+    // 2. Duplicate source page
+    const sourceJSON = currentPages[sourceIdx] || currentJSON;
+    const newIdx = sourceIdx + 1;
+    currentPages.splice(newIdx, 0, sourceJSON);
     
-    const newIdx = currentPageIndex + 1;
-    setPagesList(updated);
+    // 3. Update refs and state
+    pagesListRef.current = currentPages;
+    currentPageIndexRef.current = newIdx;
+    setPagesList(currentPages);
     setCurrentPageIndex(newIdx);
     
-    setSaveToast({ message: `คัดลอกเพิ่มแผ่นงานหน้าใหม่เรียบร้อย`, type: 'success' });
+    // 4. Load duplicate onto canvas
+    isHistoryActionRef.current = true;
+    canvas.loadFromJSON(sourceJSON, () => {
+      canvas.backgroundColor = backgroundColor || '#ffffff';
+      canvas.requestRenderAll();
+      syncLayersList(canvas);
+      isHistoryActionRef.current = false;
+      
+      setCanvasHistory([sourceJSON]);
+      setHistoryIndex(0);
+      
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+        name: projectName,
+        canvasJSON: sourceJSON,
+        canvasSize: canvasSize,
+        backgroundColor: backgroundColor,
+        pagesList: currentPages,
+        currentPageIndex: newIdx
+      }));
+    });
+    
+    setSaveToast({ message: `คัดลอกเพิ่มแผ่นงานหน้าใหม่ (หน้า ${newIdx + 1}) เรียบร้อย`, type: 'success' });
   };
 
   const handleDeletePage = (index: number) => {
-    if (pagesList.length <= 1) {
+    if (!canvas) return;
+    const currentPages = [...pagesListRef.current];
+    if (currentPages.length <= 1) {
       setSaveToast({ message: `ไม่สามารถลบหน้าได้ เนื่องจากต้องมีอย่างน้อย 1 แผ่นงาน`, type: 'error' });
       return;
     }
     
-    const updated = pagesList.filter((_, idx) => idx !== index);
-    setPagesList(updated);
-    
-    // Find next index to load
-    let nextIdx = currentPageIndex;
-    if (nextIdx >= updated.length) {
-      nextIdx = updated.length - 1;
+    const updated = currentPages.filter((_, idx) => idx !== index);
+    let nextIdx = currentPageIndexRef.current;
+    if (index === nextIdx) {
+      nextIdx = Math.max(0, index - 1);
+    } else if (index < nextIdx) {
+      nextIdx = nextIdx - 1;
     }
+    
+    pagesListRef.current = updated;
+    currentPageIndexRef.current = nextIdx;
+    setPagesList(updated);
     setCurrentPageIndex(nextIdx);
     
     const targetJSON = updated[nextIdx];
-    isHistoryActionRef.current = true;
-    canvas.loadFromJSON(targetJSON, () => {
-      canvas.backgroundColor = backgroundColor;
-      canvas.requestRenderAll();
-      syncLayersList(canvas);
-      isHistoryActionRef.current = false;
-      saveHistory(canvas);
-    });
+    if (targetJSON) {
+      isHistoryActionRef.current = true;
+      canvas.loadFromJSON(targetJSON, () => {
+        canvas.backgroundColor = backgroundColor || '#ffffff';
+        canvas.requestRenderAll();
+        syncLayersList(canvas);
+        isHistoryActionRef.current = false;
+        
+        setCanvasHistory([targetJSON]);
+        setHistoryIndex(0);
+        
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+          name: projectName,
+          canvasJSON: targetJSON,
+          canvasSize: canvasSize,
+          backgroundColor: backgroundColor,
+          pagesList: updated,
+          currentPageIndex: nextIdx
+        }));
+      });
+    }
     setSaveToast({ message: `ลบแผ่นงานหน้า ${index + 1} สำเร็จ`, type: 'success' });
   };
 
@@ -1315,6 +1519,47 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
       setSaveToast({ message: 'การอัปโหลดไฟล์ล้มเหลว กรุณาเช็คอินเทอร์เน็ต', type: 'error' });
     } finally {
       setIsUploadingImage(false);
+      setTimeout(() => setSaveToast(null), 3000);
+    }
+  };
+
+  // Delete uploaded image handler
+  const handleDeleteUploadedImage = async (img: UploadedImageItem, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบไฟล์รูปภาพ',
+      message: `คุณต้องการลบรูปภาพ "${img.originalName || img.filename || 'นี้'}" ใช่หรือไม่? ไฟล์จะถูกลบออกจากคลังระบบถาวร`,
+      type: 'delete',
+      confirmText: 'ลบรูปภาพ',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    setDeletingImageId(img.id);
+    try {
+      const userId = user?.id || user?.username || 'guest';
+      const res = await fetch(`/api/infographics-assets/images?url=${encodeURIComponent(img.url)}&userId=${encodeURIComponent(userId)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setSaveToast({ message: 'ลบไฟล์รูปภาพออกจากคลังเรียบร้อยแล้ว', type: 'success' });
+          setUploadedImagesList(prev => prev.filter(item => item.id !== img.id && item.url !== img.url));
+          fetchUploadedImages();
+        } else {
+          setSaveToast({ message: data.error || 'ไม่สามารถลบรูปภาพได้', type: 'error' });
+        }
+      } else {
+        setSaveToast({ message: 'เกิดข้อผิดพลาดในการลบรูปภาพจากเซิร์ฟเวอร์', type: 'error' });
+      }
+    } catch (err) {
+      console.error('Failed to delete image:', err);
+      setSaveToast({ message: 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์', type: 'error' });
+    } finally {
+      setDeletingImageId(null);
       setTimeout(() => setSaveToast(null), 3000);
     }
   };
@@ -1520,30 +1765,295 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
     }
   };
 
-  // PNG/JPEG/SVG Image Exports
-  const handleExportFile = (type: 'png' | 'jpeg' | 'svg' | 'pdf') => {
+  // Helper to generate a 100% standalone, complete, high-fidelity SVG string
+  const generateCompleteSVG = async (
+    targetCanvas: any,
+    size: { width: number; height: number },
+    bgCol: string
+  ): Promise<string> => {
+    if (!targetCanvas) throw new Error('ไม่พบข้อมูลผืนผ้าใบ');
+
+    // 1. Temporarily discard active object selection to avoid rendering bounding boxes & selection handles
+    const activeObj = targetCanvas.getActiveObject ? targetCanvas.getActiveObject() : null;
+    if (activeObj && targetCanvas.discardActiveObject) {
+      targetCanvas.discardActiveObject();
+      targetCanvas.requestRenderAll();
+    }
+
+    try {
+      // 2. Export raw SVG with full dimensions and viewBox from Fabric
+      let svgContent = targetCanvas.toSVG({
+        suppressPreamble: false,
+        encoding: 'UTF-8',
+        width: `${size.width}px`,
+        height: `${size.height}px`,
+        viewBox: {
+          x: 0,
+          y: 0,
+          width: size.width,
+          height: size.height
+        }
+      });
+
+      // 3. Ensure proper SVG opening tag with XMLNS and viewBox
+      if (!svgContent.includes('viewBox="') && !svgContent.includes("viewBox='")) {
+        svgContent = svgContent.replace(
+          /<svg\b([^>]*)>/i,
+          `<svg$1 viewBox="0 0 ${size.width} ${size.height}">`
+        );
+      }
+      if (svgContent.includes('xlink:href') && !svgContent.includes('xmlns:xlink')) {
+        svgContent = svgContent.replace(
+          /<svg\b([^>]*)>/i,
+          '<svg$1 xmlns:xlink="http://www.w3.org/1999/xlink">'
+        );
+      }
+      if (!svgContent.includes('xml:space="preserve"')) {
+        svgContent = svgContent.replace(
+          /<svg\b([^>]*)>/i,
+          '<svg$1 xml:space="preserve">'
+        );
+      }
+
+      // 4. Extract all raster / external image URLs from xlink:href and href to convert them to Base64
+      const urlMatches = new Set<string>();
+      const hrefRegex = /(?:xlink:href|href)=["']([^"']+)["']/gi;
+      let match;
+      while ((match = hrefRegex.exec(svgContent)) !== null) {
+        const url = match[1];
+        if (url && !url.startsWith('data:') && !url.startsWith('#')) {
+          urlMatches.add(url);
+        }
+      }
+
+      if (urlMatches.size > 0) {
+        const urlMap = new Map<string, string>();
+        await Promise.all(
+          Array.from(urlMatches).map(async (url) => {
+            try {
+              // A. Check if targetCanvas has a fabric.Image object with this source loaded
+              const objects = targetCanvas.getObjects ? targetCanvas.getObjects() : [];
+              for (const obj of objects) {
+                if (obj && obj.type === 'image' && obj._element) {
+                  const elSrc = obj._element.src || (obj.getSrc ? obj.getSrc() : '');
+                  if (elSrc === url || (url.includes('/') && elSrc && elSrc.endsWith(url))) {
+                    try {
+                      const tempCvs = document.createElement('canvas');
+                      tempCvs.width = obj._element.naturalWidth || obj._element.width || 400;
+                      tempCvs.height = obj._element.naturalHeight || obj._element.height || 400;
+                      const ctx = tempCvs.getContext('2d');
+                      if (ctx) {
+                        ctx.drawImage(obj._element, 0, 0);
+                        const b64 = tempCvs.toDataURL('image/png');
+                        if (b64 && b64.startsWith('data:image')) {
+                          urlMap.set(url, b64);
+                          return;
+                        }
+                      }
+                    } catch (e) {
+                      // Canvas tainted fallback to fetch
+                    }
+                  }
+                }
+              }
+
+              // B. Fetch directly as blob and convert via FileReader
+              const res = await fetch(url, { credentials: 'same-origin' });
+              if (res.ok) {
+                const blob = await res.blob();
+                const b64 = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+                });
+                if (b64 && b64.startsWith('data:')) {
+                  urlMap.set(url, b64);
+                  return;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not inline image URL to base64 in SVG:', url, err);
+            }
+          })
+        );
+
+        // Replace each URL with Base64 Data URL
+        for (const [url, base64] of urlMap.entries()) {
+          const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const replaceRegex = new RegExp(`(xlink:href|href)=["']${escaped}["']`, 'g');
+          svgContent = svgContent.replace(replaceRegex, `$1="${base64}"`);
+        }
+      }
+
+      // 5. Embed Google Fonts and Typography styles into <defs>
+      const fontDefs = `
+    <style type="text/css">
+      @import url('https://fonts.googleapis.com/css2?family=Bai+Jamjuree:ital,wght@0,300;0,400;0,600;0,700;1,400&amp;family=Chakra+Petch:wght@400;600;700&amp;family=Kanit:ital,wght@0,300;0,400;0,600;0,700;1,400&amp;family=Krub:wght@400;600&amp;family=Mitr:wght@400;600&amp;family=Noto+Sans+Thai:wght@300;400;600;700&amp;family=Prompt:ital,wght@0,300;0,400;0,600;0,700;1,400&amp;family=Sarabun:ital,wght@0,300;0,400;0,600;0,700;1,400&amp;family=Taviraj:wght@400;600&amp;family=Trirong:wght@400;600&amp;display=swap');
+      
+      text {
+        text-rendering: geometricPrecision;
+        -webkit-font-smoothing: antialiased;
+      }
+    </style>`;
+
+      if (svgContent.includes('<defs>')) {
+        svgContent = svgContent.replace('<defs>', `<defs>${fontDefs}`);
+      } else {
+        svgContent = svgContent.replace(
+          /(<svg\b[^>]*>)/i,
+          `$1\n<defs>${fontDefs}</defs>`
+        );
+      }
+
+      // 6. Ensure Background Rect exists if backgroundColor is set and not transparent
+      const effectiveBg = bgCol && typeof bgCol === 'string' && bgCol !== 'transparent' ? bgCol : '#ffffff';
+      const hasBgRect = svgContent.includes('id="canvas-background-fill"') || 
+                        (svgContent.includes('<rect ') && (svgContent.includes(`fill="${effectiveBg}"`) || svgContent.includes(`fill: ${effectiveBg}`)));
+
+      if (!hasBgRect && effectiveBg) {
+        const bgRect = `\n\t<rect id="canvas-background-fill" x="0" y="0" width="${size.width}" height="${size.height}" fill="${effectiveBg}" stroke="none" />`;
+        if (svgContent.includes('</defs>')) {
+          svgContent = svgContent.replace('</defs>', `</defs>${bgRect}`);
+        } else {
+          svgContent = svgContent.replace(
+            /(<svg\b[^>]*>)/i,
+            `$1${bgRect}`
+          );
+        }
+      }
+
+      return svgContent;
+    } finally {
+      // Restore active selection
+      if (activeObj && targetCanvas.setActiveObject) {
+        targetCanvas.setActiveObject(activeObj);
+        targetCanvas.requestRenderAll();
+      }
+    }
+  };
+
+  // PNG/JPEG/SVG Image Exports with 100% complete SVG vector support
+  const handleExportFile = async (type: 'png' | 'jpeg' | 'svg' | 'svg-all' | 'pdf') => {
     if (!canvas) return;
 
     if (type === 'svg') {
-      const svgData = canvas.toSVG();
-      const blob = new Blob([svgData], { type: 'image/svg+xml' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `${projectName || 'infographics'}.svg`;
-      link.click();
+      setIsExporting(true);
+      setSaveToast({ message: 'กำลังประมวลผลไฟล์เวกเตอร์ SVG แบบสมบูรณ์ (ฝังฟอนต์และรูปภาพ)...', type: 'info' as any });
+      try {
+        const svgData = await generateCompleteSVG(canvas, canvasSize, backgroundColor);
+        const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        const pageSuffix = (pagesList && pagesList.length > 1) ? `_หน้า_${currentPageIndex + 1}` : '';
+        link.download = `${(projectName || 'infographics').replace(/\s+/g, '_')}${pageSuffix}.svg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        setSaveToast({ message: 'ส่งออกไฟล์ SVG แบบสมบูรณ์เรียบร้อยแล้ว (ฝังฟอนต์และรูปภาพ 100%)', type: 'success' });
+      } catch (err: any) {
+        console.error('Failed to export SVG:', err);
+        setSaveToast({ message: 'ไม่สามารถส่งออก SVG ได้: ' + (err.message || 'เกิดข้อผิดพลาด'), type: 'error' });
+      } finally {
+        setIsExporting(false);
+        setTimeout(() => setSaveToast(null), 3500);
+      }
+    } else if (type === 'svg-all') {
+      if (!pagesList || pagesList.length <= 1) {
+        return handleExportFile('svg');
+      }
+      setIsExporting(true);
+      setSaveToast({ message: `กำลังประมวลผล SVG ทุกหน้า (ทั้งหมด ${pagesList.length} หน้า)...`, type: 'info' as any });
+
+      try {
+        // Save current page state
+        const currentJSON = JSON.stringify(canvas.toJSON(['id', 'name', 'lockMovementX', 'lockMovementY', 'selectable']));
+        const allPages = [...pagesList];
+        allPages[currentPageIndex] = currentJSON;
+
+        for (let i = 0; i < allPages.length; i++) {
+          setSaveToast({ message: `กำลังสร้าง SVG หน้าที่ ${i + 1} จาก ${allPages.length}...`, type: 'info' as any });
+          let pageSvg = '';
+          if (i === currentPageIndex) {
+            pageSvg = await generateCompleteSVG(canvas, canvasSize, backgroundColor);
+          } else {
+            const tempEl = document.createElement('canvas');
+            tempEl.width = canvasSize.width;
+            tempEl.height = canvasSize.height;
+            const tempCanvas = new fabric.Canvas(tempEl, {
+              width: canvasSize.width,
+              height: canvasSize.height,
+              backgroundColor: backgroundColor
+            });
+            await new Promise<void>((resolve) => {
+              tempCanvas.loadFromJSON(allPages[i], () => {
+                tempCanvas.renderAll();
+                resolve();
+              });
+            });
+            pageSvg = await generateCompleteSVG(tempCanvas, canvasSize, backgroundColor);
+            tempCanvas.dispose();
+          }
+
+          const blob = new Blob([pageSvg], { type: 'image/svg+xml;charset=utf-8' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `${(projectName || 'infographics').replace(/\s+/g, '_')}_หน้า_${i + 1}.svg`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+
+          await new Promise((r) => setTimeout(r, 400));
+        }
+
+        setSaveToast({ message: `ส่งออกไฟล์ SVG ครบทั้ง ${allPages.length} หน้าเรียบร้อยแล้ว`, type: 'success' });
+      } catch (err: any) {
+        console.error('Failed to export all SVG pages:', err);
+        setSaveToast({ message: 'เกิดข้อผิดพลาดในการส่งออก SVG หลายหน้า: ' + (err.message || ''), type: 'error' });
+      } finally {
+        setIsExporting(false);
+        setTimeout(() => setSaveToast(null), 3500);
+      }
     } else if (type === 'png' || type === 'jpeg') {
+      const activeObj = canvas.getActiveObject ? canvas.getActiveObject() : null;
+      if (activeObj && canvas.discardActiveObject) {
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+      }
+
       const dataURL = canvas.toDataURL({
         format: type,
         quality: 1.0,
         multiplier: 2 // Output higher resolution
       });
+
+      if (activeObj && canvas.setActiveObject) {
+        canvas.setActiveObject(activeObj);
+        canvas.requestRenderAll();
+      }
+
       const link = document.createElement('a');
       link.href = dataURL;
-      link.download = `${projectName || 'infographics'}.${type}`;
+      const pageSuffix = (pagesList && pagesList.length > 1) ? `_หน้า_${currentPageIndex + 1}` : '';
+      link.download = `${(projectName || 'infographics').replace(/\s+/g, '_')}${pageSuffix}.${type}`;
       link.click();
     } else if (type === 'pdf') {
       // Create high-res PDF
+      const activeObj = canvas.getActiveObject ? canvas.getActiveObject() : null;
+      if (activeObj && canvas.discardActiveObject) {
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+      }
+
       const dataURL = canvas.toDataURL({ format: 'png', quality: 1.0, multiplier: 2 });
+
+      if (activeObj && canvas.setActiveObject) {
+        canvas.setActiveObject(activeObj);
+        canvas.requestRenderAll();
+      }
+
       const imgWidth = canvasSize.width;
       const imgHeight = canvasSize.height;
 
@@ -1555,98 +2065,153 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
           format: [imgWidth, imgHeight]
         });
         doc.addImage(dataURL, 'PNG', 0, 0, imgWidth, imgHeight);
-        doc.save(`${projectName || 'infographics'}.pdf`);
+        const pageSuffix = (pagesList && pagesList.length > 1) ? `_หน้า_${currentPageIndex + 1}` : '';
+        doc.save(`${(projectName || 'infographics').replace(/\s+/g, '_')}${pageSuffix}.pdf`);
       });
     }
   };
 
   return (
-    <div className={`flex flex-col h-screen select-none overflow-hidden font-sans transition-colors duration-200 ${
-      isEffectiveDark ? 'dark-editor bg-[#111113] text-gray-200' : 'light-editor bg-[var(--bg-base)] text-[var(--text-primary)]'
+    <div className={`flex flex-col ${isZenMode ? 'fixed inset-0 z-[100] w-screen h-screen' : 'h-full min-h-0 w-full'} select-none overflow-hidden font-sans transition-colors duration-200 ${
+      effectiveTheme === 'light' ? 'light-editor bg-[var(--bg-base,#f8fafc)] text-[var(--text-primary,#0f172a)]' : 'dark-editor bg-[var(--bg-base,#0b132b)] text-[var(--text-primary,#f8fafc)]'
     }`}>
       
-      {/* 1. TOP HEADER: Premium Penpot Branded Header */}
-      <header className="h-14 bg-[#18181b] border-b border-[#27272a] px-4 flex items-center justify-between shrink-0 select-none z-40">
+      {/* Zen Mode Banner if active */}
+      {isZenMode && (
+        <div className="h-7 bg-amber-500 text-amber-950 font-bold text-xs px-4 flex items-center justify-between z-50 shrink-0 select-none shadow-sm">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>โหมดสตูดิโอเต็มหน้าจอ (Zen Studio Mode)</span>
+          </div>
+          <button
+            onClick={() => setIsZenMode(false)}
+            className="flex items-center gap-1 px-2 py-0.5 bg-amber-950/20 hover:bg-amber-950/30 rounded text-[11px] font-black cursor-pointer"
+          >
+            <Minimize2 className="w-3 h-3" />
+            <span>ออกจากโหมดเต็มจอ (Esc)</span>
+          </button>
+        </div>
+      )}
+
+      {/* 1. TOP HEADER: Premium Responsive Header */}
+      <header className="h-14 bg-[#18181b] border-b border-[#27272a] px-2 sm:px-4 flex items-center justify-between shrink-0 select-none z-40 gap-1.5 sm:gap-2">
         
-        {/* Project Title & Controls */}
-        <div className="flex items-center gap-3">
-          {/* Project Name editable directly */}
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                placeholder="ตั้งชื่อโปรเจกต์งานออกแบบ..."
-                className="bg-transparent hover:bg-gray-800/50 focus:bg-gray-900 border border-transparent focus:border-gray-700 focus:outline-none rounded px-1.5 py-0.5 text-sm font-bold text-gray-100 placeholder-gray-500 w-44 sm:w-60 transition-all font-sans"
-              />
-              {isSaving ? (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20">
-                  <RefreshCw className="w-3 h-3 text-blue-400 animate-spin" />
-                  <span className="text-[10px] text-blue-400 font-medium">Syncing...</span>
-                </div>
-              ) : lastSavedTime ? (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  <span className="text-[10px] text-emerald-400 font-medium">Cloud Saved</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20">
-                  <AlertCircle className="w-3 h-3 text-amber-400" />
-                  <span className="text-[10px] text-amber-400 font-medium">Draft Mode</span>
-                </div>
-              )}
-            </div>
+        {/* Project Title & Status */}
+        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="ตั้งชื่อโปรเจกต์..."
+              className="bg-transparent hover:bg-gray-800/50 focus:bg-gray-900 border border-transparent focus:border-gray-700 focus:outline-none rounded px-1.5 py-0.5 text-xs sm:text-sm font-bold text-gray-100 placeholder-gray-500 w-28 xs:w-36 sm:w-60 truncate transition-all font-sans"
+            />
+            {isSaving ? (
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 shrink-0">
+                <RefreshCw className="w-2.5 h-2.5 text-blue-400 animate-spin" />
+                <span className="text-[9px] text-blue-400 font-medium hidden xs:inline">Sync...</span>
+              </div>
+            ) : lastSavedTime ? (
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                <span className="text-[9px] text-emerald-400 font-medium hidden xs:inline">Saved</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 shrink-0">
+                <AlertCircle className="w-2.5 h-2.5 text-amber-400" />
+                <span className="text-[9px] text-amber-400 font-medium hidden xs:inline">Draft</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Center: Quick Toolbar Tools (Enterprise Feature) */}
-        <div className="hidden lg:flex items-center gap-1 bg-[#121214] border border-[#27272a] rounded-xl px-1.5 py-1">
-          <button onClick={() => canvas?.undo()} className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-gray-200 rounded-lg transition-colors" title="Undo (Ctrl+Z)">
+        {/* Center: Quick Toolbar Tools (Desktop Feature) */}
+        <div className="hidden lg:flex items-center gap-1 bg-[#121214] border border-[#27272a] rounded-xl px-2 py-1">
+          <button onClick={executeUndo} disabled={historyIndex <= 0} className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-gray-200 disabled:opacity-30 rounded-lg transition-colors" title="Undo (Ctrl+Z)">
             <Undo className="w-4 h-4" />
           </button>
-          <button onClick={() => canvas?.redo()} className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-gray-200 rounded-lg transition-colors" title="Redo (Ctrl+Shift+Z)">
+          <button onClick={executeRedo} disabled={historyIndex >= canvasHistory.length - 1} className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-gray-200 disabled:opacity-30 rounded-lg transition-colors" title="Redo (Ctrl+Y)">
             <Redo className="w-4 h-4" />
           </button>
+
           <div className="w-px h-4 bg-gray-800 mx-1"></div>
-          <button onClick={() => setGridVisible(!gridVisible)} className={`p-1.5 rounded-lg transition-colors ${gridVisible ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`} title="Toggle Grid">
+
+          <button
+            onClick={handleFitToScreen}
+            className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+            title="ปรับขนาดพอดีหน้าจอ (Fit to Screen)"
+          >
+            <Maximize2 className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="text-[10px] font-bold">พอดีจอ</span>
+          </button>
+
+          <div className="flex items-center gap-0.5 bg-gray-900 px-1 py-0.5 rounded-lg text-[10px] font-bold text-gray-400">
+            <button onClick={() => setZoomLevel(Math.max(0.2, zoomLevel - 0.1))} className="p-1 hover:text-white" title="ซูมออก">
+              <Minus className="w-3 h-3" />
+            </button>
+            <span className="px-1 text-gray-300 min-w-[36px] text-center">{Math.round(zoomLevel * 100)}%</span>
+            <button onClick={() => setZoomLevel(Math.min(3, zoomLevel + 0.1))} className="p-1 hover:text-white" title="ซูมเข้า">
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+
+          <div className="w-px h-4 bg-gray-800 mx-1"></div>
+
+          <button onClick={() => setGridVisible(!gridVisible)} className={`p-1.5 rounded-lg transition-colors ${gridVisible ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`} title="เปิด/ปิด เส้นกริด">
             <Grid className="w-4 h-4" />
           </button>
-          <button onClick={() => setShowRulers(!showRulers)} className={`p-1.5 rounded-lg transition-colors ${showRulers ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`} title="Toggle Rulers">
+          <button onClick={() => setSnapToGrid(!snapToGrid)} className={`p-1.5 rounded-lg transition-colors ${snapToGrid ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`} title="เปิด/ปิด แม่เหล็กดูดเส้นกริด (Snap)">
+            <Magnet className="w-4 h-4" />
+          </button>
+          <button onClick={() => setShowRulers(!showRulers)} className={`p-1.5 rounded-lg transition-colors ${showRulers ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`} title="เปิด/ปิด ไม้บรรทัด">
             <Ruler className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-4 bg-gray-800 mx-1"></div>
+
+          <button
+            onClick={() => setIsZenMode(!isZenMode)}
+            className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${isZenMode ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+            title={isZenMode ? 'ย่อหน้าต่างกลับ (Esc)' : 'สตูดิโอเต็มจอ (Zen Mode)'}
+          >
+            {isZenMode ? <Minimize2 className="w-4 h-4" /> : <Expand className="w-4 h-4" />}
+            <span className="text-[10px] font-bold hidden xl:inline">{isZenMode ? 'ย่อจอ' : 'เต็มจอ'}</span>
           </button>
         </div>
 
-        <div className="flex-1"></div>
-
-        {/* Enterprise Collaboration & Help */}
-        <div className="flex items-center gap-2 mr-2">
-          {/* Theme Selector (Syncs with system theme by default) */}
-          <button 
+        {/* Header Actions Container */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* Theme Mode Switcher */}
+          <button
             onClick={() => {
-              const nextPref = themePreference === 'auto' ? 'light' : themePreference === 'light' ? 'dark' : 'auto';
-              setThemePreference(nextPref);
+              setEditorThemeSetting(prev => {
+                if (prev === 'auto') return 'light';
+                if (prev === 'light') return 'dark';
+                return 'auto';
+              });
             }}
-            className={`px-2.5 py-1 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold border shadow-xs cursor-pointer ${
-              isEffectiveDark 
-                ? 'bg-gray-800/80 text-gray-200 hover:bg-gray-700 border-gray-700' 
-                : 'bg-indigo-50/80 text-indigo-900 hover:bg-indigo-100 border-indigo-200'
+            className={`p-1.5 sm:px-2.5 sm:py-1 rounded-xl transition-all flex items-center gap-1 text-xs font-bold border shadow-xs cursor-pointer ${
+              editorThemeSetting === 'auto'
+                ? 'bg-indigo-600/10 text-indigo-400 border-indigo-500/30 hover:bg-indigo-600/20'
+                : editorThemeSetting === 'light'
+                ? 'bg-amber-100 text-amber-900 hover:bg-amber-200 border-amber-300'
+                : 'bg-slate-800 text-slate-200 hover:bg-slate-700 border-slate-700'
             }`}
-            title={`ธีม Infographics: ${themePreference === 'auto' ? 'ตามธีมระบบ' : themePreference === 'light' ? 'โหมดสว่าง' : 'โหมดมืด'} (คลิกเพื่อเปลี่ยน)`}
+            title="สลับโหมดธีม"
           >
-            {themePreference === 'auto' ? (
+            {editorThemeSetting === 'auto' ? (
               <>
-                <Monitor className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-[10px] hidden sm:inline">ตามระบบ</span>
+                <Monitor className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="text-[10px] hidden sm:inline">ธีมระบบ</span>
               </>
-            ) : themePreference === 'light' ? (
+            ) : editorThemeSetting === 'light' ? (
               <>
-                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <Sun className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                 <span className="text-[10px] hidden sm:inline">สว่าง</span>
               </>
             ) : (
               <>
-                <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                <Moon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                 <span className="text-[10px] hidden sm:inline">มืด</span>
               </>
             )}
@@ -1654,62 +2219,42 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
 
           <button 
             onClick={() => setShowShortcutsModal(true)}
-            className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-1"
-            title="คีย์ลัดการใช้งาน (Keyboard Shortcuts)"
+            className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-indigo-400 rounded-lg transition-colors hidden md:flex items-center gap-1"
+            title="คีย์ลัดการใช้งาน"
           >
             <Keyboard className="w-4 h-4" />
             <span className="text-[10px] font-bold hidden xl:inline">คีย์ลัด</span>
           </button>
-          <div className="w-px h-4 bg-gray-800"></div>
-        </div>
 
-        {/* Global Action Tools */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5">
-          
-          {/* Active Users (Enterprise Collaboration UI) */}
-          <div className="hidden md:flex items-center -space-x-2 mr-2">
-            <div className="w-7 h-7 rounded-full bg-indigo-500 border-2 border-[#18181b] flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-indigo-500/20" title={user?.displayName || 'คุณ'}>
-              {user?.displayName?.charAt(0) || 'U'}
-            </div>
-            <div className="w-7 h-7 rounded-full bg-emerald-500 border-2 border-[#18181b] flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-emerald-500/20" title="AI Assistant">
-              AI
-            </div>
-            <div className="w-7 h-7 rounded-full bg-gray-700 border-2 border-[#18181b] flex items-center justify-center text-[10px] font-bold text-gray-300 border-dashed" title="Invite Member">
-              <Plus className="w-3 h-3" />
-            </div>
-          </div>
-
-          <div className="h-4 w-px bg-gray-700 hidden md:block"></div>
-          
           {/* AI Generator Button */}
           <button
             onClick={() => { setActiveSidebarTab('ai'); setShowMobileDrawer(true); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-purple-500/20 transition-all cursor-pointer"
-            title="AI อัจฉริยะช่วยคิดเนื้อหาและคำไทย"
+            className="flex items-center gap-1 p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-bold shadow-md transition-all cursor-pointer"
+            title="AI อัจฉริยะ"
           >
-            <Sparkles className="w-3.5 h-3.5 text-pink-200" />
-            <span className="hidden sm:inline">AI ช่วยสร้าง</span>
+            <Sparkles className="w-3.5 h-3.5 text-pink-200 shrink-0" />
+            <span className="hidden md:inline">AI ช่วยสร้าง</span>
           </button>
 
           {/* Gallery Open */}
           <button
             onClick={() => setShowGalleryModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-bold transition-all border border-gray-700"
-            title="เปิดโปรเจกต์จากคลัง MySQL"
+            className="flex items-center gap-1 p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-bold transition-all border border-gray-700"
+            title="คลังงาน"
           >
-            <FolderOpen className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden sm:inline">คลังงาน</span>
+            <FolderOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span className="hidden md:inline">คลังงาน</span>
           </button>
 
           {/* Save to DB */}
           <button
             onClick={handleSaveToMySQL}
             disabled={isSaving}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black shadow-lg shadow-blue-500/10 transition-all cursor-pointer disabled:opacity-50"
+            className="flex items-center gap-1 px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black shadow-md transition-all cursor-pointer disabled:opacity-50 shrink-0"
             title="บันทึกลงฐานข้อมูล MySQL"
           >
-            <Save className="w-3.5 h-3.5" />
-            <span>บันทึก</span>
+            <Save className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden xs:inline">บันทึก</span>
           </button>
 
           {/* Quick Share */}
@@ -1721,61 +2266,137 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
               }
               setShowShareModal(true);
             }}
-            className="p-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl"
-            title="แชร์ลิงก์หรือรหัสคิวอาร์โค้ด"
+            className="p-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl shrink-0"
+            title="แชร์โปรเจกต์"
           >
-            <Share2 className="w-4 h-4 text-emerald-400" />
+            <Share2 className="w-3.5 h-3.5 text-emerald-400" />
           </button>
 
-          <div className="h-4 w-px bg-gray-700"></div>
-
-          {/* Export Dropdown options */}
-          <div className="relative group">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black shadow-lg shadow-indigo-500/20 transition-all">
-              <Download className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">ส่งออก</span>
-              <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+          {/* Export Dropdown & Modal trigger */}
+          <div className="relative group shrink-0">
+            <button 
+              onClick={() => {
+                saveCurrentCanvasToPagesList();
+                setShowExportModal(true);
+              }}
+              disabled={isExporting}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black shadow-md transition-all cursor-pointer disabled:opacity-60"
+              title="ส่งออกไฟล์ (เลือกหน้า หรือส่งออกทุกหน้า)"
+            >
+              {isExporting ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-200" />
+              ) : (
+                <Download className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span className="hidden sm:inline">{isExporting ? 'กำลังส่งออก...' : 'ส่งออก'}</span>
+              <ChevronDown className="w-3 h-3 opacity-60 hidden sm:inline" />
             </button>
-            <div className="absolute right-0 top-full mt-1.5 w-52 bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl py-2 hidden group-hover:block z-50 overflow-hidden">
-              <div className="px-4 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-[#27272a] mb-1">เลือกนามสกุลไฟล์</div>
-              <button onClick={() => handleExportFile('png')} className="w-full text-left px-4 py-2.5 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item">
+            <div className="absolute right-0 top-full mt-1.5 w-64 bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl py-2 hidden group-hover:block z-50 overflow-hidden">
+              <div className="px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-[#27272a] mb-1 flex items-center justify-between">
+                <span>เลือกรูปแบบการส่งออก</span>
+                <span className="text-[9px] text-indigo-400 font-mono">Export Hub</span>
+              </div>
+
+              {/* Primary: Open Custom Pages & Scope Export Modal */}
+              <button
+                onClick={() => {
+                  saveCurrentCanvasToPagesList();
+                  setShowExportModal(true);
+                }}
+                className="w-full text-left px-4 py-2.5 text-xs text-white bg-indigo-600/20 hover:bg-indigo-600 flex items-center justify-between transition-colors border-b border-[#27272a] group/hub"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center text-white shadow-xs">
+                    <Sliders className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="block font-bold text-indigo-200 group-hover/hub:text-white">
+                      เลือกหน้า & ส่งออกขั้นสูง...
+                    </span>
+                    <span className="text-[10px] text-gray-400 group-hover/hub:text-indigo-100 block">
+                      ทุกหน้า, หน้าเดียว, กำหนดช่วงหน้า
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[9px] bg-indigo-500/30 group-hover/hub:bg-white/20 px-1.5 py-0.5 rounded text-indigo-300 group-hover/hub:text-white font-bold">
+                  ตั้งค่า
+                </span>
+              </button>
+
+              {/* SVG Single / Current Page */}
+              <button 
+                onClick={() => handleExportFile('svg')} 
+                disabled={isExporting}
+                className="w-full text-left px-4 py-2 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-orange-500/20 flex items-center justify-center text-orange-400 group-hover/item:bg-white/20 group-hover/item:text-white">
+                    <Scaling className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="block font-medium">เวกเตอร์ SVG (หน้า {currentPageIndex + 1})</span>
+                    <span className="text-[10px] text-gray-400 group-hover/item:text-indigo-200 block">ฝังฟอนต์ & รูป Base64 100%</span>
+                  </div>
+                </div>
+                <span className="text-[9px] bg-orange-500/20 text-orange-300 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded font-mono">SVG</span>
+              </button>
+
+              {/* PNG */}
+              <button 
+                onClick={() => handleExportFile('png')} 
+                disabled={isExporting}
+                className="w-full text-left px-4 py-2 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item"
+              >
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 group-hover/item:bg-white/20 group-hover/item:text-white">
                     <ImageIcon className="w-4 h-4" />
                   </div>
-                  <span>รูปภาพ (PNG)</span>
+                  <div>
+                    <span className="block font-medium">รูปภาพ PNG (หน้า {currentPageIndex + 1})</span>
+                    <span className="text-[10px] text-gray-400 group-hover/item:text-indigo-200 block">ความคมชัดสูง 2x</span>
+                  </div>
                 </div>
-                <span className="text-[9px] bg-gray-800 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded text-gray-400 group-hover/item:text-white">High Res</span>
+                <span className="text-[9px] bg-gray-800 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded text-gray-400 group-hover/item:text-white">PNG</span>
               </button>
-              <button onClick={() => handleExportFile('jpeg')} className="w-full text-left px-4 py-2.5 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item">
+
+              {/* JPEG */}
+              <button 
+                onClick={() => handleExportFile('jpeg')} 
+                disabled={isExporting}
+                className="w-full text-left px-4 py-2 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item"
+              >
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-sky-500/10 flex items-center justify-center text-sky-400 group-hover/item:bg-white/20 group-hover/item:text-white">
                     <ImageIcon className="w-4 h-4" />
                   </div>
-                  <span>รูปภาพ (JPEG)</span>
-                </div>
-                <span className="text-[9px] bg-gray-800 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded text-gray-400 group-hover/item:text-white">Small Size</span>
-              </button>
-              <button onClick={() => handleExportFile('svg')} className="w-full text-left px-4 py-2.5 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-orange-500/10 flex items-center justify-center text-orange-400 group-hover/item:bg-white/20 group-hover/item:text-white">
-                    <Scaling className="w-4 h-4" />
+                  <div>
+                    <span className="block font-medium">รูปภาพ JPEG (หน้า {currentPageIndex + 1})</span>
+                    <span className="text-[10px] text-gray-400 group-hover/item:text-indigo-200 block">ขนาดไฟล์กะทัดรัด</span>
                   </div>
-                  <span>เวกเตอร์ต้นฉบับ (SVG)</span>
                 </div>
-                <span className="text-[9px] bg-gray-800 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded text-gray-400 group-hover/item:text-white">Vector</span>
+                <span className="text-[9px] bg-gray-800 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded text-gray-400 group-hover/item:text-white">JPG</span>
               </button>
-              <button onClick={() => handleExportFile('pdf')} className="w-full text-left px-4 py-2.5 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item">
+
+              {/* PDF */}
+              <button 
+                onClick={() => handleExportFile('pdf')} 
+                disabled={isExporting}
+                className="w-full text-left px-4 py-2 text-xs text-gray-200 hover:bg-indigo-600 hover:text-white flex items-center justify-between transition-colors group/item"
+              >
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400 group-hover/item:bg-white/20 group-hover/item:text-white">
                     <FileText className="w-4 h-4" />
                   </div>
-                  <span>เอกสารพร้อมพิมพ์ (PDF)</span>
+                  <div>
+                    <span className="block font-medium">เอกสาร PDF (หน้า {currentPageIndex + 1})</span>
+                    <span className="text-[10px] text-gray-400 group-hover/item:text-indigo-200 block">ความละเอียดมาตรฐาน</span>
+                  </div>
                 </div>
-                <span className="text-[9px] bg-gray-800 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded text-gray-400 group-hover/item:text-white">Document</span>
+                <span className="text-[9px] bg-gray-800 group-hover/item:bg-white/20 px-1.5 py-0.5 rounded text-gray-400 group-hover/item:text-white">PDF</span>
               </button>
-              <div className="mt-2 px-4 py-2 border-t border-[#27272a] bg-[#121214]">
-                <p className="text-[9px] text-gray-500 text-center">ไฟล์ทั้งหมดถูกตรวจสอบไวรัสแล้ว</p>
+
+              <div className="mt-1 px-4 py-1.5 border-t border-[#27272a] bg-[#121214]">
+                <p className="text-[9px] text-gray-400 text-center">คลิกปุ่ม "ส่งออก" เพื่อเปิดหน้าต่างเลือกหน้าและช่วงหน้า</p>
               </div>
             </div>
           </div>
@@ -1851,17 +2472,44 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
               </button>
             </div>
 
-            <div className="pt-2 border-t border-[#27272a] space-y-1.5">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">ส่งออกไฟล์ (Export Options)</span>
+            <div className="pt-2 border-t border-[#27272a] space-y-2">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">ส่งออกไฟล์ (Export Options)</span>
+              <button
+                onClick={() => {
+                  saveCurrentCanvasToPagesList();
+                  setShowExportModal(true);
+                  setShowMobileMoreMenu(false);
+                }}
+                className="w-full p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold text-center flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Sliders className="w-4 h-4" />
+                <span>เลือกหน้า & ตัวเลือกการส่งออกขั้นสูง...</span>
+              </button>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => { handleExportFile('png'); setShowMobileMoreMenu(false); }}
+                  disabled={isExporting}
                   className="p-2 bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white rounded-xl text-xs font-bold text-center"
                 >
                   PNG High-Res
                 </button>
                 <button
+                  onClick={() => { handleExportFile('svg'); setShowMobileMoreMenu(false); }}
+                  disabled={isExporting}
+                  className="p-2 bg-orange-600/20 hover:bg-orange-600 border border-orange-500/30 text-orange-300 hover:text-white rounded-xl text-xs font-bold text-center"
+                >
+                  SVG เวกเตอร์สมบูรณ์
+                </button>
+                <button
+                  onClick={() => { handleExportFile('jpeg'); setShowMobileMoreMenu(false); }}
+                  disabled={isExporting}
+                  className="p-2 bg-sky-600/20 hover:bg-sky-600 border border-sky-500/30 text-sky-300 hover:text-white rounded-xl text-xs font-bold text-center"
+                >
+                  JPEG กะทัดรัด
+                </button>
+                <button
                   onClick={() => { handleExportFile('pdf'); setShowMobileMoreMenu(false); }}
+                  disabled={isExporting}
                   className="p-2 bg-rose-600/20 hover:bg-rose-600 border border-rose-500/30 text-rose-300 hover:text-white rounded-xl text-xs font-bold text-center"
                 >
                   PDF Document
@@ -1971,12 +2619,12 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
         {/* ============================================================== */}
         <div className="flex shrink-0 border-r border-[#27272a] bg-[#18181b] z-10">
           
-          {/* Vertical Compact Tab Bar */}
-          <div className="w-14 bg-[#141416] flex flex-col items-center py-3 gap-2.5 shrink-0 z-20 overflow-y-auto max-h-full scrollbar-none select-none">
+          {/* Vertical Compact Tab Bar (Hidden on mobile for 100% canvas width) */}
+          <div className="hidden md:flex w-14 bg-[#141416] flex-col items-center py-3 gap-2 shrink-0 z-20 overflow-y-auto max-h-full scrollbar-none select-none">
             
             <button
-              onClick={() => { setActiveSidebarTab('layers'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'layers' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('layers')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'layers' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="เลเยอร์ & รายการวัตถุ (Layers)"
             >
               <Layers className="w-5 h-5" />
@@ -1984,8 +2632,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('pages'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'pages' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('pages')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'pages' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="แผ่นงานหลายหน้า (Pages / Slides)"
             >
               <Columns className="w-5 h-5 text-emerald-400" />
@@ -1993,8 +2641,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('shapes'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'shapes' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('shapes')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'shapes' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="รูปทรงเวกเตอร์ (Shapes)"
             >
               <Shapes className="w-5 h-5" />
@@ -2002,8 +2650,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('text'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('text')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'text' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="ตัวหนังสือ (Typography)"
             >
               <Type className="w-5 h-5" />
@@ -2011,8 +2659,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('images'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'images' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('images')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'images' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="รูปภาพและอัปโหลด (Upload Images)"
             >
               <ImageIcon className="w-5 h-5" />
@@ -2020,8 +2668,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('icons'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'icons' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('icons')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'icons' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="สัญลักษณ์และไอคอน (Icons)"
             >
               <Sticker className="w-5 h-5 text-pink-400" />
@@ -2029,8 +2677,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('background'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'background' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('background')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'background' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="สีกระดาษและพื้นหลัง (Background)"
             >
               <Palette className="w-5 h-5 text-amber-400" />
@@ -2038,8 +2686,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('graphite'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'graphite' ? 'bg-[#1e1e24] border border-[#ff8c00]/30 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('graphite')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'graphite' && isDesktopSidebarOpen ? 'bg-[#1e1e24] border border-[#ff8c00]/30 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="Graphite Node & Non-destructive Vector Effects (โนดกราไฟต์)"
             >
               <Workflow className="w-5 h-5 text-[#ff8c00]" />
@@ -2047,8 +2695,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('templates'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'templates' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('templates')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'templates' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="กล่องโมดูลเวกเตอร์พร้อมใช้"
             >
               <LayoutGrid className="w-5 h-5" />
@@ -2056,8 +2704,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('ai'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'ai' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('ai')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'ai' && isDesktopSidebarOpen ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="AI อัจฉริยะ (Smart AI Designer)"
             >
               <Sparkles className="w-5 h-5 text-purple-400" />
@@ -2065,8 +2713,8 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </button>
 
             <button
-              onClick={() => { setActiveSidebarTab('canvas-settings'); setShowMobileDrawer(true); }}
-              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 ${activeSidebarTab === 'canvas-settings' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+              onClick={() => handleTabClick('canvas-settings')}
+              className={`p-2.5 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${activeSidebarTab === 'canvas-settings' && isDesktopSidebarOpen ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
               title="ขนาดกระดาษ & พื้นหลัง (Board Presets)"
             >
               <Sliders className="w-5 h-5" />
@@ -2078,7 +2726,7 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             {/* Freeform drawing pen */}
             <button
               onClick={toggleDrawMode}
-              className="p-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full transition-all shadow-md mt-auto"
+              className="p-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full transition-all shadow-md mt-auto cursor-pointer"
               title="ปากกาเขียนหน้าจออิสระ (Pen Tool)"
             >
               <PenTool className="w-4 h-4" />
@@ -2093,10 +2741,16 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             />
           )}
 
-          {/* Drawer Sub-panel (Vary by selected tab) */}
-          <div className={`bg-[#18181b] flex flex-col shrink-0 border-r border-[#27272a] z-30 ${showMobileDrawer ? 'fixed inset-y-0 left-14 w-[calc(100vw-4.5rem)] max-w-[290px] shadow-2xl animate-in slide-in-from-left duration-200' : 'hidden md:flex w-64'}`}>
+          {/* Drawer / Docked Sub-panel: Clean docked panel on PC, floating drawer on Mobile */}
+          <div className={`bg-[#18181b] flex flex-col shrink-0 border-r border-[#27272a] z-30 transition-all duration-200 ${
+            showMobileDrawer 
+              ? 'fixed inset-y-0 left-0 w-[85vw] max-w-[320px] shadow-2xl z-40 animate-in slide-in-from-left duration-200 md:relative md:inset-auto md:shadow-none' 
+              : 'hidden md:flex'
+          } ${
+            isDesktopSidebarOpen ? 'md:w-72 lg:w-80' : 'md:w-0 md:border-r-0 md:overflow-hidden'
+          }`}>
             
-            {/* Sticky Header with Always-Visible Close Button */}
+            {/* Sticky Header with Collapse/Close Button */}
             <div className="flex items-center justify-between p-3 border-b border-[#27272a] bg-[#18181b] shrink-0 z-10">
               <span className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5 truncate">
                 <Sliders className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
@@ -2115,12 +2769,17 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
                 </span>
               </span>
               <button 
-                onClick={() => setShowMobileDrawer(false)} 
-                className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg flex items-center gap-1 text-[11px] font-bold transition-all shrink-0 ml-2 cursor-pointer"
-                title="ปิดหน้าต่าง (Close Drawer)"
+                onClick={() => {
+                  setIsDesktopSidebarOpen(false);
+                  setShowMobileDrawer(false);
+                }} 
+                className="p-1.5 hover:bg-gray-800 text-gray-400 hover:text-gray-200 rounded-lg flex items-center gap-1 text-[11px] font-bold transition-all shrink-0 ml-2 cursor-pointer"
+                title="ยุบแถบเครื่องมือ (Collapse Sidebar)"
               >
-                <X className="w-4 h-4 text-rose-400" />
-                <span>ปิด</span>
+                <ChevronLeft className="w-4 h-4 hidden md:inline" />
+                <X className="w-4 h-4 md:hidden text-rose-400" />
+                <span className="hidden md:inline text-[10px]">ยุบแถบ</span>
+                <span className="md:hidden">ปิด</span>
               </button>
             </div>
 
@@ -2655,12 +3314,23 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
                       </div>
 
                       {/* Small mock page wireframe representing Polotno thumbnail */}
-                      <div className="mt-2 h-14 bg-gray-900 rounded-lg border border-gray-800/60 overflow-hidden flex items-center justify-center text-[10px] text-gray-600 font-sans">
-                        {/* Minimal geometric representation of canvas layout */}
-                        <div className="space-y-1 w-full px-4 text-center">
-                          <div className="h-1 bg-gray-800 rounded w-2/3 mx-auto" />
-                          <div className="h-1.5 bg-gray-800 rounded w-1/2 mx-auto" />
-                        </div>
+                      <div className="mt-2 h-14 bg-gray-900 rounded-lg border border-gray-800/60 overflow-hidden flex flex-col items-center justify-center text-[10px] text-gray-400 font-sans p-2">
+                        {(() => {
+                          try {
+                            const parsed = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
+                            const count = parsed?.objects?.length || 0;
+                            return (
+                              <div className="space-y-1 w-full text-center">
+                                <span className="text-[11px] font-bold text-gray-300 block">
+                                  {count === 0 ? 'หน้าว่าง' : `${count} ชิ้นงาน`}
+                                </span>
+                                <div className="h-1 bg-gray-800 rounded w-2/3 mx-auto" />
+                              </div>
+                            );
+                          } catch {
+                            return <span>แผ่นงาน</span>;
+                          }
+                        })()}
                       </div>
 
                       {/* Hover action menu for page */}
@@ -2668,7 +3338,7 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDuplicatePage();
+                            handleDuplicatePage(idx);
                           }}
                           className="p-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
                           title="ทำซ้ำหน้านี้"
@@ -2880,12 +3550,24 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             {/* 2D: Images & Upload assets */}
             {activeSidebarTab === 'images' && (
               <div className="space-y-4 flex flex-col h-full">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">อัปโหลดรูปภาพประกอบ</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    อัปโหลดรูปภาพประกอบ
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={fetchUploadedImages}
+                    className="p-1 hover:bg-gray-800 text-gray-500 hover:text-gray-300 rounded transition-colors cursor-pointer"
+                    title="รีเฟรชคลังภาพ"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
                 
-                <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-700 hover:border-indigo-500 rounded-2xl p-4 cursor-pointer text-center hover:bg-gray-800/40 transition-all">
-                  <Upload className="w-8 h-8 text-indigo-400 mb-2" />
-                  <span className="text-xs font-bold text-gray-300">กดเพื่ออัปโหลด</span>
-                  <span className="text-[10px] text-gray-500 mt-1">ไฟล์ PNG, JPG, WEBP (ไม่เกิน 5MB)</span>
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-700 hover:border-indigo-500 rounded-2xl p-4 cursor-pointer text-center hover:bg-gray-800/40 transition-all group">
+                  <Upload className="w-8 h-8 text-indigo-400 group-hover:scale-110 transition-transform mb-2" />
+                  <span className="text-xs font-bold text-gray-300 group-hover:text-white">กดเพื่ออัปโหลดไฟล์ภาพ</span>
+                  <span className="text-[10px] text-gray-500 mt-1">PNG, JPG, WEBP, SVG (ไม่เกิน 5MB)</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -2896,34 +3578,91 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
                 </label>
 
                 {isUploadingImage && (
-                  <div className="flex items-center justify-center gap-2 text-xs text-amber-500 py-1 font-sans">
+                  <div className="flex items-center justify-center gap-2 text-xs text-amber-400 py-1.5 px-3 bg-amber-500/10 border border-amber-500/20 rounded-xl font-sans">
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    กำลังประมวลผลรูปภาพประกอบ...
+                    กำลังประมวลผลและจัดเก็บภาพ...
                   </div>
                 )}
 
-                <div className="h-px bg-gray-800"></div>
+                <button
+                  type="button"
+                  onClick={() => setShowImageGalleryModal(true)}
+                  className="w-full py-2 px-3 bg-gray-800/60 hover:bg-gray-800 border border-gray-700/70 hover:border-indigo-500 rounded-xl text-xs font-bold text-gray-200 flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
+                >
+                  <FolderOpen className="w-4 h-4 text-indigo-400" />
+                  <span>คลังรูปภาพขนาดใหญ่ ({uploadedImagesList.length})</span>
+                </button>
+
+                <div className="h-px bg-gray-800/80"></div>
 
                 <div className="flex-1 overflow-y-auto space-y-2">
-                  <span className="text-[10px] font-bold text-gray-400">คลังภาพที่อัปโหลดแล้ว:</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
+                      รูปภาพในคลัง ({uploadedImagesList.length})
+                    </span>
+                    <span className="text-[9px] text-gray-500">คลิกเพื่อแทรกภาพ</span>
+                  </div>
+
                   {uploadedImagesList.length === 0 ? (
-                    <div className="text-center py-6 text-[11px] text-gray-500">
-                      ยังไม่ได้อัปโหลดภาพ
+                    <div className="text-center py-8 text-[11px] text-gray-500 bg-[#121214] rounded-xl border border-gray-800/80 p-4 space-y-1">
+                      <ImageIcon className="w-8 h-8 text-gray-600 mx-auto mb-2 opacity-50" />
+                      <p className="font-semibold text-gray-400">ยังไม่มีรูปภาพที่อัปโหลด</p>
+                      <p className="text-[10px] text-gray-600">อัปโหลดไฟล์ภาพด้านบนเพื่อเริ่มใช้งาน</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
-                      {uploadedImagesList.map((img) => (
-                        <div
-                          key={img.id}
-                          onClick={() => handleAddImageToCanvas(img.url)}
-                          className="relative group rounded-lg overflow-hidden border border-gray-800 hover:border-indigo-500 cursor-pointer bg-gray-900 transition-all"
-                        >
-                          <img src={img.url} className="w-full h-16 object-cover" alt="" />
-                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                            <span className="text-[9px] bg-indigo-600 px-1.5 py-0.5 rounded text-white">วางรูปภาพ</span>
+                      {uploadedImagesList.map((img) => {
+                        const isDeletingThis = deletingImageId === img.id;
+                        return (
+                          <div
+                            key={img.id}
+                            className="relative group rounded-xl overflow-hidden border border-gray-800 hover:border-indigo-500/60 bg-[#121214] transition-all flex flex-col"
+                          >
+                            {/* Image Preview & Click to Insert */}
+                            <div
+                              onClick={() => !isDeletingThis && handleAddImageToCanvas(img.url)}
+                              className="relative w-full h-20 bg-black/30 flex items-center justify-center overflow-hidden cursor-pointer p-1"
+                              title={`คลิกเพื่อวาง "${img.originalName || img.filename}" ลงบนกระดาษ`}
+                            >
+                              <img
+                                src={img.url}
+                                className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-200"
+                                alt={img.originalName || ''}
+                                loading="lazy"
+                              />
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
+                                <span className="text-[9px] bg-indigo-600 font-bold px-2 py-0.5 rounded text-white shadow-xs">
+                                  วางรูปภาพ
+                                </span>
+                              </div>
+                              {isDeletingThis && (
+                                <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
+                                  <RefreshCw className="w-4 h-4 text-rose-400 animate-spin" />
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Bottom bar with Name & Delete Action */}
+                            <div className="px-2 py-1.5 bg-[#18181b] border-t border-gray-800/80 flex items-center justify-between gap-1">
+                              <span 
+                                className="text-[9px] text-gray-400 truncate flex-1 font-sans" 
+                                title={img.originalName || img.filename}
+                              >
+                                {img.originalName || img.filename || 'รูปภาพ'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteUploadedImage(img, e)}
+                                disabled={isDeletingThis}
+                                className="p-1 text-gray-400 hover:text-rose-400 hover:bg-rose-500/15 rounded transition-colors cursor-pointer shrink-0 disabled:opacity-40"
+                                title="ลบไฟล์รูปภาพออกจากระบบ"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -3085,30 +3824,15 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
                   <div>
                     <label className="text-[10px] text-gray-500 font-bold block mb-1">เลือกขนาดมาตรฐาน:</label>
                     <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => handleUpdateCanvasSize(800, 1200)}
-                        className={`py-2 px-1 text-center rounded-lg border text-[10px] ${canvasSize.width === 800 && canvasSize.height === 1200 ? 'bg-indigo-600/10 border-indigo-500 text-indigo-400' : 'bg-[#121214] border-gray-800 text-gray-400'}`}
-                      >
-                        A4 แนวตั้ง (800x1200)
-                      </button>
-                      <button
-                        onClick={() => handleUpdateCanvasSize(1200, 800)}
-                        className={`py-2 px-1 text-center rounded-lg border text-[10px] ${canvasSize.width === 1200 && canvasSize.height === 800 ? 'bg-indigo-600/10 border-indigo-500 text-indigo-400' : 'bg-[#121214] border-gray-800 text-gray-400'}`}
-                      >
-                        A4 แนวนอน (1200x800)
-                      </button>
-                      <button
-                        onClick={() => handleUpdateCanvasSize(800, 800)}
-                        className={`py-2 px-1 text-center rounded-lg border text-[10px] ${canvasSize.width === 800 && canvasSize.height === 800 ? 'bg-indigo-600/10 border-indigo-500 text-indigo-400' : 'bg-[#121214] border-gray-800 text-gray-400'}`}
-                      >
-                        สี่เหลี่ยมจัตุรัส (800x800)
-                      </button>
-                      <button
-                        onClick={() => handleUpdateCanvasSize(1080, 1920)}
-                        className={`py-2 px-1 text-center rounded-lg border text-[10px] ${canvasSize.width === 1080 && canvasSize.height === 1920 ? 'bg-indigo-600/10 border-indigo-500 text-indigo-400' : 'bg-[#121214] border-gray-800 text-gray-400'}`}
-                      >
-                        โทรศัพท์แนวตั้ง (1080x1920)
-                      </button>
+                      {PAPER_SIZES.map((size) => (
+                        <button
+                          key={size.name}
+                          onClick={() => handleUpdateCanvasSize(size.width, size.height)}
+                          className={`py-2 px-1 text-center rounded-lg border text-[10px] ${canvasSize.width === size.width && canvasSize.height === size.height ? 'bg-indigo-600/10 border-indigo-500 text-indigo-400' : 'bg-[#121214] border-gray-800 text-gray-400'}`}
+                        >
+                          {size.name} ({size.width}x{size.height})
+                        </button>
+                      ))}
                     </div>
                   </div>
 
@@ -3201,14 +3925,14 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
         {/* ============================================================== */}
         <div className="flex-1 flex flex-col overflow-hidden bg-[#111113] relative select-none">
           
-          {/* Action Navigation Strip (Zoom triggers and undo redo) */}
-          <div className="h-10 bg-[#141416] border-b border-[#27272a] px-4 flex items-center justify-between select-none">
+          {/* Action Navigation Strip (Zoom triggers, page navigation, panel toggles) */}
+          <div className="h-10 bg-[#141416] border-b border-[#27272a] px-3 sm:px-4 flex items-center justify-between select-none shrink-0 z-10">
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               <button
                 onClick={executeUndo}
                 disabled={historyIndex <= 0}
-                className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
+                className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                 title="ย้อนกลับ (Undo - Ctrl+Z)"
               >
                 <Undo className="w-4 h-4" />
@@ -3217,7 +3941,7 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
               <button
                 onClick={executeRedo}
                 disabled={historyIndex >= canvasHistory.length - 1}
-                className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent"
+                className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                 title="ทำซ้ำ (Redo - Ctrl+Y)"
               >
                 <Redo className="w-4 h-4" />
@@ -3225,19 +3949,33 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
 
               <div className="h-4 w-px bg-gray-800 mx-1"></div>
 
-              <span className="text-xs text-gray-500">ซูม: {Math.round(zoomLevel * 100)}%</span>
+              <button
+                onClick={handleFitToScreen}
+                className="px-2 py-1 bg-gray-800/60 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                title="ขยาย/ย่อให้พอดีกับหน้าจอ PC อัตโนมัติ"
+              >
+                <Maximize2 className="w-3 h-3 text-indigo-400" />
+                <span className="hidden sm:inline">พอดีจอ</span>
+              </button>
+
+              <span className="text-[10px] font-mono text-gray-500 bg-gray-900 px-2 py-0.5 rounded border border-gray-800 hidden md:inline">
+                {canvasSize.width} × {canvasSize.height}
+              </span>
             </div>
 
-            {/* Polotno Style Central Multi-Page Quick Picker */}
+            {/* Central Multi-Page Quick Picker */}
             {pagesList.length > 0 && (
-              <div className="hidden sm:flex items-center gap-1 bg-[#1c1c1f] p-1 rounded-lg border border-gray-800/40">
-                <span className="text-[10px] text-gray-500 font-bold px-1.5 uppercase tracking-wide">หน้า:</span>
+              <div className="flex items-center gap-1 bg-[#1c1c1f] p-1 rounded-lg border border-gray-800/60">
+                <span className="text-[10px] text-gray-400 font-bold px-1.5 uppercase tracking-wide hidden sm:inline">
+                  หน้า {currentPageIndex + 1}/{pagesList.length}
+                </span>
                 <div className="flex items-center gap-1">
                   {pagesList.map((_, idx) => (
                     <button
                       key={idx}
                       onClick={() => handleSwitchPage(idx)}
-                      className={`px-2.5 py-0.5 text-[10px] font-black rounded transition-all ${currentPageIndex === idx ? 'bg-indigo-600 text-white' : 'bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+                      className={`w-6 h-6 text-[10px] font-bold rounded transition-all cursor-pointer ${currentPageIndex === idx ? 'bg-indigo-600 text-white shadow-xs' : 'bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+                      title={`สลับไปหน้า ${idx + 1}`}
                     >
                       {idx + 1}
                     </button>
@@ -3245,51 +3983,82 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
                   
                   <button
                     onClick={handleAddPage}
-                    className="p-1 hover:bg-gray-800 text-emerald-400 hover:text-emerald-300 rounded"
-                    title="เพิ่มหน้าใหม่"
+                    className="w-6 h-6 hover:bg-gray-800 text-emerald-400 hover:text-emerald-300 rounded flex items-center justify-center cursor-pointer transition-colors"
+                    title="เพิ่มหน้ากระดาษใหม่"
                   >
-                    <Plus className="w-3 h-3" />
+                    <Plus className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
             )}
 
-            <div className="flex items-center gap-1.5">
+            {/* Right Tools: Zoom Level & Panel Toggles */}
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setZoomLevel(Math.max(0.2, zoomLevel - 0.1))}
+                  className="p-1 rounded hover:bg-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                  title="ซูมออก"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setZoomLevel(1)}
+                  className="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded bg-gray-800 hover:bg-gray-700 text-gray-300 cursor-pointer min-w-[42px] text-center"
+                  title="รีเซ็ตซูม 100%"
+                >
+                  {Math.round(zoomLevel * 100)}%
+                </button>
+                <button
+                  onClick={() => setZoomLevel(Math.min(3, zoomLevel + 0.1))}
+                  className="p-1 rounded hover:bg-gray-800 text-gray-400 hover:text-white cursor-pointer"
+                  title="ซูมเข้า"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="h-4 w-px bg-gray-800 mx-1 hidden lg:block"></div>
+
+              {/* Toggle Right Inspector Panel */}
               <button
-                onClick={() => setZoomLevel(Math.max(0.2, zoomLevel - 0.1))}
-                className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"
-                title="ซูมออก"
+                onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+                className={`hidden lg:flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer border ${
+                  isRightPanelOpen 
+                    ? 'bg-indigo-600/15 text-indigo-300 border-indigo-500/30' 
+                    : 'bg-[#18181b] hover:bg-gray-800 text-gray-400 border-gray-800'
+                }`}
+                title={isRightPanelOpen ? 'ซ่อนแถบคุณสมบัติขวามือ' : 'แสดงแถบคุณสมบัติขวามือ'}
               >
-                <Minus className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setZoomLevel(1)}
-                className="px-2 py-1 text-[10px] font-bold rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
-                title="ซูมมาตรฐาน 100%"
-              >
-                100%
-              </button>
-              <button
-                onClick={() => setZoomLevel(Math.min(3, zoomLevel + 0.1))}
-                className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"
-                title="ซูมเข้า"
-              >
-                <Plus className="w-3.5 h-3.5" />
+                <Sliders className="w-3 h-3 text-indigo-400" />
+                <span className="hidden xl:inline">{isRightPanelOpen ? 'ซ่อนแถบขวา' : 'แถบคุณสมบัติ'}</span>
               </button>
             </div>
           </div>
 
           {/* Central Scrollable Area */}
-          <div className="flex-1 overflow-auto relative p-6 flex justify-center items-start min-h-0 bg-[#0c0c0e]">
+          <div ref={canvasContainerRef} className="flex-1 overflow-auto relative p-4 sm:p-8 flex justify-center items-center min-h-0 bg-[#0c0c0e]">
             
+            {/* Floating button to reopen right panel when collapsed on PC */}
+            {!isRightPanelOpen && (
+              <button
+                onClick={() => setIsRightPanelOpen(true)}
+                className="hidden lg:flex absolute top-3 right-3 z-20 px-3 py-1.5 bg-[#18181b]/90 hover:bg-gray-800 text-gray-200 border border-gray-700 rounded-xl shadow-lg text-xs font-bold items-center gap-1.5 backdrop-blur-xs cursor-pointer transition-all hover:scale-105"
+                title="เปิดแถบคุณสมบัติวัตถุ"
+              >
+                <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                <span>คุณสมบัติ</span>
+              </button>
+            )}
+
             {/* Infinite Zoom container layer */}
             <div 
               style={{ 
                 transform: `scale(${zoomLevel})`, 
-                transformOrigin: 'top center',
+                transformOrigin: 'center center',
                 transition: 'transform 0.1s ease-out'
               }}
-              className="relative shadow-2xl bg-white shrink-0"
+              className="relative shadow-2xl bg-white shrink-0 my-auto"
             >
               
               {/* Optional Grid overlay */}
@@ -3308,79 +4077,127 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             </div>
           </div>
 
-          {/* 2DD: Bottom Slide Selector Carousel Dock (Polotno & Canva Style) */}
-          <div className="h-28 bg-[#141416] border-t border-[#27272a] px-4 py-2 flex items-center gap-4 select-none overflow-x-auto shrink-0 z-10">
-            <div className="flex flex-col items-start gap-1 pr-3 border-r border-gray-800">
-              <span className="text-[10px] font-black text-gray-500 uppercase tracking-wider block">สไลด์แผ่นงาน</span>
-              <button
-                onClick={handleAddPage}
-                className="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors flex items-center justify-center gap-1 text-[10px] font-bold"
-                title="เพิ่มหน้ากระดาษใหม่"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                เพิ่มหน้า
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3 overflow-x-auto py-1 flex-1">
-              {pagesList.map((pageJSON, idx) => (
-                <div
-                  key={idx}
-                  onClick={() => handleSwitchPage(idx)}
-                  className={`group relative flex-shrink-0 w-28 h-16 rounded-xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between p-2.5 ${currentPageIndex === idx ? 'bg-indigo-600/10 border-indigo-500 shadow-md ring-1 ring-indigo-500/20' : 'bg-[#121214] border-gray-800 hover:border-gray-700'}`}
+          {/* 2DD: Bottom Slide Selector Carousel Dock (Collapsible on PC) */}
+          {isBottomDockOpen ? (
+            <div className="hidden md:flex h-24 lg:h-28 bg-[#141416] border-t border-[#27272a] px-4 py-2 items-center gap-3 select-none overflow-x-auto shrink-0 z-10 transition-all duration-200">
+              <div className="flex flex-col items-start gap-1 pr-3 border-r border-gray-800 shrink-0">
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">สไลด์แผ่นงาน</span>
+                  <button
+                    onClick={() => setIsBottomDockOpen(false)}
+                    className="p-0.5 hover:bg-gray-800 text-gray-500 hover:text-gray-300 rounded cursor-pointer ml-2"
+                    title="ย่อแถบสไลด์"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <button
+                  onClick={handleAddPage}
+                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors flex items-center justify-center gap-1 text-[10px] font-bold cursor-pointer shadow-xs"
+                  title="เพิ่มหน้ากระดาษใหม่"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-gray-300">
-                      หน้ากระดาษที่ {idx + 1}
-                    </span>
-                    
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSwitchPage(idx);
-                          // Defer duplication slightly to allow active canvas state to settle
-                          setTimeout(() => {
-                            handleDuplicatePage();
-                          }, 50);
-                        }}
-                        className="p-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded transition-colors"
-                        title="คัดลอกหน้ากระดาษนี้"
-                      >
-                        <Copy className="w-2.5 h-2.5" />
-                      </button>
-                      {pagesList.length > 1 && (
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>เพิ่มหน้า</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 overflow-x-auto py-1 flex-1 scrollbar-thin">
+                {pagesList.map((pageJSON, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleSwitchPage(idx)}
+                    className={`group relative flex-shrink-0 w-28 h-16 rounded-xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between p-2.5 ${currentPageIndex === idx ? 'bg-indigo-600/15 border-indigo-500 shadow-md ring-1 ring-indigo-500/20' : 'bg-[#121214] border-gray-800 hover:border-gray-700'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-gray-300">
+                        หน้า {idx + 1}
+                      </span>
+                      
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeletePage(idx);
+                            handleDuplicatePage(idx);
                           }}
-                          className="p-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded transition-colors"
-                          title="ลบหน้ากระดาษนี้"
+                          className="p-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded transition-colors cursor-pointer"
+                          title="คัดลอกหน้ากระดาษนี้"
                         >
-                          <Trash2 className="w-2.5 h-2.5" />
+                          <Copy className="w-2.5 h-2.5" />
                         </button>
+                        {pagesList.length > 1 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeletePage(idx);
+                            }}
+                            className="p-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded transition-colors cursor-pointer"
+                            title="ลบหน้ากระดาษนี้"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[8px] text-gray-500">
+                      <span>
+                        {(() => {
+                          try {
+                            const parsed = typeof pageJSON === 'string' ? JSON.parse(pageJSON) : pageJSON;
+                            const count = parsed?.objects?.length || 0;
+                            return `${count} ชิ้นงาน`;
+                          } catch {
+                            return `แผ่นงาน ${idx + 1}`;
+                          }
+                        })()}
+                      </span>
+                      {currentPageIndex === idx && (
+                        <span className="text-[8px] text-emerald-400 font-bold uppercase tracking-widest">Active</span>
                       )}
                     </div>
                   </div>
-
-                  <div className="flex justify-between items-center text-[8px] text-gray-500">
-                    <span>เวกเตอร์ {idx + 1}/{pagesList.length}</span>
-                    {currentPageIndex === idx && (
-                      <span className="text-[8px] text-emerald-400 font-bold uppercase tracking-widest">Active</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="hidden md:flex h-8 bg-[#141416] border-t border-[#27272a] px-4 items-center justify-between select-none shrink-0 z-10 text-[11px] text-gray-400 transition-all">
+              <span className="text-gray-400 text-[10px]">
+                กำลังแก้ไข: <strong className="text-indigo-400">หน้า {currentPageIndex + 1}</strong> จาก {pagesList.length} หน้า
+              </span>
+              <button
+                onClick={() => setIsBottomDockOpen(true)}
+                className="flex items-center gap-1 text-[10px] font-bold text-indigo-400 hover:text-indigo-300 px-2 py-0.5 rounded hover:bg-indigo-500/10 transition-colors cursor-pointer"
+                title="เปิดแถบดูภาพรวมหน้าสไลด์"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+                <span>แสดงแถบสไลด์ ({pagesList.length})</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ============================================================== */}
         {/* RIGHT PROPERTY INSPECTOR PANEL (Alignment, Dimension & Stroke) */}
         {/* ============================================================== */}
-        <div className="w-72 border-l border-[#27272a] bg-[#18181b] p-4 flex flex-col overflow-y-auto shrink-0 hidden lg:flex z-10">
+        <div className={`border-l border-[#27272a] bg-[#18181b] flex flex-col overflow-y-auto shrink-0 hidden lg:flex z-10 transition-all duration-200 ${
+          isRightPanelOpen ? 'w-72 xl:w-80 p-4' : 'w-0 p-0 border-l-0 overflow-hidden'
+        }`}>
           
+          {/* Header with Title and Collapse Button */}
+          <div className="flex items-center justify-between pb-3 border-b border-gray-800 shrink-0 mb-4">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{selectedObject ? 'คุณสมบัติวัตถุ' : 'ตั้งค่าผืนผ้าใบ'}</span>
+            </span>
+            <button
+              onClick={() => setIsRightPanelOpen(false)}
+              className="p-1 hover:bg-gray-800 text-gray-500 hover:text-gray-300 rounded-lg transition-colors cursor-pointer"
+              title="ยุบแถบคุณสมบัติ"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
           {selectedObject ? (
             <div className="space-y-5">
               
@@ -3704,13 +4521,166 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
 
             </div>
           ) : (
-            <div className="h-full flex flex-col justify-center items-center text-center py-10 space-y-3">
-              <Move className="w-10 h-10 text-gray-600 animate-pulse" />
-              <div>
-                <p className="text-xs font-bold text-gray-400">ยังไม่ได้เลือกวัตถุใด ๆ</p>
-                <p className="text-[10px] text-gray-500 mt-1 font-sans px-4 leading-normal">
-                  คลิกเลือกรูปภาพ อักขระ หรือรูปร่างเวกเตอร์ บนกระดาษเพื่อเปิดเมนูตั้งค่าและคุณสมบัติปรับแต่ง
-                </p>
+            <div className="space-y-4 text-gray-200">
+              {/* Paper & Page Meta Header */}
+              <div className="pb-3 border-b border-gray-800/80">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-300">ผืนผ้าใบหน้า {currentPageIndex + 1}</span>
+                  <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full font-bold border border-indigo-500/20">
+                    {Math.round(zoomLevel * 100)}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <div className="flex-1 bg-[#121214] border border-[#27272a] rounded-xl px-2.5 py-1.5 flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500 font-bold">กว้าง</span>
+                    <span className="text-xs font-mono font-bold text-gray-200">{canvasSize.width} px</span>
+                  </div>
+                  <div className="flex-1 bg-[#121214] border border-[#27272a] rounded-xl px-2.5 py-1.5 flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500 font-bold">สูง</span>
+                    <span className="text-xs font-mono font-bold text-gray-200">{canvasSize.height} px</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Insert Actions */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">เพิ่มวัตถุด่วน (Quick Insert)</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => handleInsertText('h1')}
+                    className="p-2 bg-[#121214] hover:bg-gray-800 border border-gray-800 hover:border-indigo-500 rounded-xl text-left transition-all flex items-center gap-2 group cursor-pointer"
+                  >
+                    <Type className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span className="text-xs font-bold text-gray-300 group-hover:text-white">หัวข้อ</span>
+                  </button>
+                  <button
+                    onClick={() => handleInsertText('body')}
+                    className="p-2 bg-[#121214] hover:bg-gray-800 border border-gray-800 hover:border-indigo-500 rounded-xl text-left transition-all flex items-center gap-2 group cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="text-xs font-bold text-gray-300 group-hover:text-white">ข้อความ</span>
+                  </button>
+                  <button
+                    onClick={() => handleInsertShape('rect')}
+                    className="p-2 bg-[#121214] hover:bg-gray-800 border border-gray-800 hover:border-indigo-500 rounded-xl text-left transition-all flex items-center gap-2 group cursor-pointer"
+                  >
+                    <Square className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="text-xs font-bold text-gray-300 group-hover:text-white">สี่เหลี่ยม</span>
+                  </button>
+                  <button
+                    onClick={() => handleInsertShape('circle')}
+                    className="p-2 bg-[#121214] hover:bg-gray-800 border border-gray-800 hover:border-indigo-500 rounded-xl text-left transition-all flex items-center gap-2 group cursor-pointer"
+                  >
+                    <Circle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span className="text-xs font-bold text-gray-300 group-hover:text-white">วงกลม</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Background Color Palette */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">สีกระดาษ (Background)</span>
+                  <span className="text-[10px] text-gray-400 font-mono">{backgroundColor}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {['#ffffff', '#f8fafc', '#f1f5f9', '#fefce8', '#0f172a', '#18181b', '#1e3a8a', '#064e3b'].map((col) => (
+                    <button
+                      key={col}
+                      onClick={() => handleUpdateCanvasBg(col)}
+                      className={`w-6 h-6 rounded-lg border transition-all cursor-pointer ${
+                        backgroundColor === col ? 'border-indigo-500 scale-110 shadow-sm ring-2 ring-indigo-500/40' : 'border-gray-700 hover:scale-105'
+                      }`}
+                      style={{ backgroundColor: col }}
+                      title={col}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    value={backgroundColor.startsWith('#') ? backgroundColor : '#ffffff'}
+                    onChange={(e) => handleUpdateCanvasBg(e.target.value)}
+                    className="w-6 h-6 rounded-lg border border-gray-700 cursor-pointer p-0 bg-transparent shrink-0"
+                    title="เลือกสีเอง"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Preset Dimensions */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">ขนาดมาตรฐาน</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { name: 'Infographic มาตรฐาน', w: 800, h: 1200 },
+                    { name: 'A4 แนวตั้ง', w: 794, h: 1123 },
+                    { name: 'A4 แนวนอน', w: 1123, h: 794 },
+                    { name: 'Facebook Banner', w: 1200, h: 630 },
+                    { name: 'Square (จัตุรัส)', w: 1080, h: 1080 },
+                    { name: 'Presentation 16:9', w: 1920, h: 1080 },
+                  ].map((preset) => {
+                    const isCurrent = canvasSize.width === preset.w && canvasSize.height === preset.h;
+                    return (
+                      <button
+                        key={preset.name}
+                        onClick={() => handleUpdateCanvasSize(preset.w, preset.h)}
+                        className={`p-2 rounded-xl text-left border transition-all text-xs cursor-pointer ${
+                          isCurrent
+                            ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 font-bold'
+                            : 'bg-[#121214] border-gray-800 hover:border-gray-700 text-gray-400 hover:text-gray-200'
+                        }`}
+                      >
+                        <div className="font-semibold truncate text-[11px]">{preset.name}</div>
+                        <div className="text-[9px] text-gray-500">{preset.w} × {preset.h} px</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Guides & Grid Toggles */}
+              <div className="space-y-2 pt-2 border-t border-gray-800">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">เครื่องมือจัดหน้า</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => setGridVisible(!gridVisible)}
+                    className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-between cursor-pointer ${
+                      gridVisible ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-[#121214] border-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <span>เส้นกริด</span>
+                    <Grid className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setSnapToGrid(!snapToGrid)}
+                    className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-between cursor-pointer ${
+                      snapToGrid ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-[#121214] border-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <span>แม่เหล็กดูด</span>
+                    <Magnet className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setShowRulers(!showRulers)}
+                    className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-between cursor-pointer ${
+                      showRulers ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' : 'bg-[#121214] border-gray-800 text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    <span>ไม้บรรทัด</span>
+                    <Ruler className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={handleFitToScreen}
+                    className="p-2 rounded-xl text-xs font-bold border bg-[#121214] border-gray-800 text-gray-400 hover:text-gray-200 hover:border-indigo-500 transition-all flex items-center justify-between cursor-pointer"
+                  >
+                    <span>พอดีหน้าจอ</span>
+                    <Maximize2 className="w-3.5 h-3.5 text-indigo-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Usage Tip */}
+              <div className="p-2.5 bg-indigo-950/20 border border-indigo-500/20 rounded-xl text-[10px] text-gray-400 leading-relaxed">
+                <span className="font-bold text-indigo-300 block mb-0.5">💡 คำแนะนำ:</span>
+                คลิกเลือกวัตถุบนหน้ากระดาษเพื่อเปิดเครื่องมือจัดตำแหน่ง สี ฟอนต์ หรือกด <kbd className="px-1 py-0.5 bg-gray-800 text-gray-300 font-mono rounded text-[9px]">Del</kbd> เพื่อลบ
               </div>
             </div>
           )}
@@ -3899,33 +4869,131 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
       )}
 
       {mobileTab === 'properties' && (
-        <div className="fixed inset-x-0 bottom-14 top-1/3 bg-[#18181b]/95 backdrop-blur-md z-30 p-4 border-t border-[#27272a] shadow-2xl overflow-y-auto animate-slideUp space-y-4">
-          <div className="flex justify-between items-center">
-            <span className="text-xs font-bold text-gray-200">ปรับแต่งคุณสมบัติเวกเตอร์</span>
-            <button onClick={() => setMobileTab('canvas')} className="p-1 hover:bg-gray-800 rounded">
+        <div className="fixed inset-x-0 bottom-14 max-h-[75vh] bg-[#18181b]/95 backdrop-blur-md z-40 p-4 border-t border-[#27272a] shadow-2xl overflow-y-auto animate-slideUp space-y-4">
+          <div className="flex justify-between items-center pb-2 border-b border-gray-800">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-indigo-400" />
+              <span className="text-xs font-bold text-gray-200">ปรับแต่งคุณสมบัติวัตถุ</span>
+            </div>
+            <button onClick={() => setMobileTab('canvas')} className="p-1 hover:bg-gray-800 rounded text-gray-400">
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {selectedObject ? (
-            <div className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs font-sans">
+              
+              {/* Quick Actions & Delete */}
+              <div className="flex items-center justify-between bg-[#121214] p-2 rounded-xl border border-gray-800">
+                <span className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider">
+                  {selectedObject.type === 'i-text' || selectedObject.type === 'textbox' ? '🔤 ข้อความ' : selectedObject.type === 'image' ? '🖼️ รูปภาพ' : '📐 รูปทรงเวกเตอร์'}
+                </span>
+                <button
+                  onClick={() => {
+                    if (!canvas) return;
+                    const active = canvas.getActiveObject();
+                    if (active) {
+                      if (active.type === 'activeSelection') {
+                        active.forEachObject((obj: any) => canvas.remove(obj));
+                        canvas.discardActiveObject();
+                      } else {
+                        canvas.remove(active);
+                      }
+                      canvas.requestRenderAll();
+                      syncLayersList();
+                      saveHistory();
+                      setSelectedObject(null);
+                      setMobileTab('canvas');
+                    }
+                  }}
+                  className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg flex items-center gap-1 text-[10px] font-bold transition-all"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>ลบวัตถุ</span>
+                </button>
+              </div>
+
+              {/* Alignments */}
+              <div>
+                <span className="text-[10px] font-bold text-gray-400 block mb-1.5 uppercase">การจัดตำแหน่ง (Align)</span>
+                <div className="grid grid-cols-6 gap-1 bg-[#121214] p-1.5 rounded-xl border border-gray-800">
+                  <button onClick={() => handleAlignSelected('left')} className="p-2 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg flex items-center justify-center" title="ชิดซ้าย"><AlignLeft className="w-4 h-4" /></button>
+                  <button onClick={() => handleAlignSelected('center')} className="p-2 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg flex items-center justify-center" title="กึ่งกลางแนวนอน"><AlignCenter className="w-4 h-4" /></button>
+                  <button onClick={() => handleAlignSelected('right')} className="p-2 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg flex items-center justify-center" title="ชิดขวา"><AlignRight className="w-4 h-4" /></button>
+                  <button onClick={() => handleAlignSelected('top')} className="p-2 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg flex items-center justify-center" title="ชิดบน"><BringToFront className="w-4 h-4 rotate-90" /></button>
+                  <button onClick={() => handleAlignSelected('middle')} className="p-2 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg flex items-center justify-center" title="กึ่งกลางแนวตั้ง"><SendToBack className="w-4 h-4 rotate-90" /></button>
+                  <button onClick={() => handleAlignSelected('bottom')} className="p-2 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg flex items-center justify-center" title="ชิดล่าง"><SendToBack className="w-4 h-4" /></button>
+                </div>
+              </div>
+
+              {/* Dimensions */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <span>พิกัด X</span>
-                  <input type="number" value={objX} onChange={(e) => handleGeometryChange('left', Number(e.target.value))} className="w-full bg-[#121214] p-1.5 rounded" />
+                  <label className="text-[10px] text-gray-400 block mb-1">ความกว้าง (Width)</label>
+                  <input type="number" value={objW} onChange={(e) => handleGeometryChange('width', Number(e.target.value))} className="w-full bg-[#121214] border border-gray-800 p-2 rounded-xl text-gray-200" />
                 </div>
                 <div>
-                  <span>พิกัด Y</span>
-                  <input type="number" value={objY} onChange={(e) => handleGeometryChange('top', Number(e.target.value))} className="w-full bg-[#121214] p-1.5 rounded" />
+                  <label className="text-[10px] text-gray-400 block mb-1">ความสูง (Height)</label>
+                  <input type="number" value={objH} onChange={(e) => handleGeometryChange('height', Number(e.target.value))} className="w-full bg-[#121214] border border-gray-800 p-2 rounded-xl text-gray-200" />
                 </div>
               </div>
-              <div>
-                <span>สีเติมภายใน</span>
-                <input type="color" value={objFill} onChange={(e) => handleAppearanceChange('fill', e.target.value)} className="w-full h-8 cursor-pointer rounded" />
+
+              {/* Coordinates */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">พิกัด X</label>
+                  <input type="number" value={objX} onChange={(e) => handleGeometryChange('left', Number(e.target.value))} className="w-full bg-[#121214] border border-gray-800 p-2 rounded-xl text-gray-200" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">พิกัด Y</label>
+                  <input type="number" value={objY} onChange={(e) => handleGeometryChange('top', Number(e.target.value))} className="w-full bg-[#121214] border border-gray-800 p-2 rounded-xl text-gray-200" />
+                </div>
               </div>
+
+              {/* Colors */}
+              {selectedObject.type !== 'image' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">สีเติมภายใน (Fill)</label>
+                    <div className="flex items-center gap-1.5 bg-[#121214] border border-gray-800 p-1 rounded-xl">
+                      <input type="color" value={objFill.startsWith('#') && objFill.length === 7 ? objFill : '#4f46e5'} onChange={(e) => handleAppearanceChange('fill', e.target.value)} className="w-7 h-7 rounded-lg cursor-pointer bg-transparent border-0 shrink-0" />
+                      <span className="font-mono text-[10px] text-gray-300 truncate">{objFill}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">สีเส้นขอบ (Stroke)</label>
+                    <div className="flex items-center gap-1.5 bg-[#121214] border border-gray-800 p-1 rounded-xl">
+                      <input type="color" value={objStroke.startsWith('#') && objStroke.length === 7 ? objStroke : '#1e3a8a'} onChange={(e) => handleAppearanceChange('stroke', e.target.value)} className="w-7 h-7 rounded-lg cursor-pointer bg-transparent border-0 shrink-0" />
+                      <span className="font-mono text-[10px] text-gray-300 truncate">{objStroke}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Opacity */}
+              <div>
+                <div className="flex justify-between items-center text-[10px] text-gray-400 mb-1">
+                  <span>ความโปร่งใส (Opacity)</span>
+                  <span className="font-mono">{Math.round(objOpacity * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={objOpacity}
+                  onChange={(e) => handleAppearanceChange('opacity', Number(e.target.value))}
+                  className="w-full accent-indigo-500 bg-gray-800 rounded-lg appearance-none h-1 cursor-pointer"
+                />
+              </div>
+
             </div>
           ) : (
-            <div className="text-center py-10 text-gray-500">กรุณาเลือกวัตถุบนกระดาษก่อนทำรายการ</div>
+            <div className="text-center py-8 text-gray-500 space-y-2">
+              <Move className="w-8 h-8 text-gray-600 mx-auto animate-pulse" />
+              <p className="text-xs font-bold text-gray-400">ยังไม่ได้เลือกวัตถุใด ๆ บนกระดาษ</p>
+              <p className="text-[10px]">แตะเลือกข้อความ หรือรูปทรงเพื่อเปิดเมนูปรับแต่ง</p>
+            </div>
           )}
         </div>
       )}
@@ -3957,6 +5025,13 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
             ownerName: ownerName || `${user?.firstName || ''} ${user?.lastName || ''}`.trim(),
             ownerDepartment: ownerDepartment || user?.department
           }}
+          onExportPng={() => handleExportFile('png')}
+          onExportPdf={() => handleExportFile('pdf')}
+          onExportSvg={() => handleExportFile('svg')}
+          onOpenExportModal={() => {
+            saveCurrentCanvasToPagesList();
+            setShowExportModal(true);
+          }}
           onUpdateSettings={async (updated) => {
             if (updated.scope) setScope(updated.scope === 'central' ? 'central' : 'department');
             await fetch(`/api/infographics/${currentProjectId}`, {
@@ -3970,6 +5045,39 @@ export default function InfographicsEditorView({ user, systemTheme = 'auto', isS
                 allowDownload: updated.allowDownload ? 1 : 0
               })
             });
+          }}
+        />
+      )}
+
+      {showExportModal && (
+        <InfographicsExportModal
+          isOpen={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          projectName={projectName}
+          pagesList={pagesList}
+          currentPageIndex={currentPageIndex}
+          canvas={canvas}
+          canvasSize={canvasSize}
+          backgroundColor={backgroundColor}
+          generateCompleteSVG={generateCompleteSVG}
+          onShowToast={(msg, type) => setSaveToast({ message: msg, type: type === 'error' ? 'error' : 'success' })}
+          onSaveCurrentPageToMemory={saveCurrentCanvasToPagesList}
+        />
+      )}
+
+      {showImageGalleryModal && (
+        <InfographicsImageGalleryModal
+          currentUser={user}
+          onClose={() => {
+            setShowImageGalleryModal(false);
+            fetchUploadedImages();
+          }}
+          onSelectImage={(imageUrl) => {
+            handleAddImageToCanvas(imageUrl);
+            setShowImageGalleryModal(false);
+          }}
+          onUploadNew={() => {
+            fetchUploadedImages();
           }}
         />
       )}

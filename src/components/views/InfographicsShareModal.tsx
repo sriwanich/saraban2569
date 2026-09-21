@@ -3,7 +3,7 @@ import {
   Share2, Copy, Check, ExternalLink, Code2, ShieldCheck, Download,
   Lock, Unlock, Eye, Sparkles, Globe, QrCode as QrCodeIcon,
   MessageCircle, Send, Mail, X, Smartphone, Monitor, Sliders,
-  Layers, RefreshCw, FileText, CheckCircle2, AlertCircle, Printer, FileDown, Maximize2
+  Layers, RefreshCw, FileText, CheckCircle2, AlertCircle, Printer, FileDown, Maximize2, Scaling
 } from 'lucide-react';
 import QRCode from 'qrcode';
 
@@ -42,6 +42,7 @@ interface InfographicsShareModalProps {
   onExportPdf?: () => void;
   onExportSvg?: () => void;
   onExportJson?: () => void;
+  onOpenExportModal?: () => void;
 }
 
 export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
@@ -52,7 +53,8 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
   onExportPng,
   onExportPdf,
   onExportSvg,
-  onExportJson
+  onExportJson,
+  onOpenExportModal
 }) => {
   const [activeTab, setActiveTab] = useState<'link' | 'embed' | 'security' | 'export'>('link');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -1045,9 +1047,34 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
           {/* TAB 4: Multi-Format Full Exports */}
           {activeTab === 'export' && (
             <div className="space-y-5">
-              <span className="font-bold text-slate-800 dark:text-slate-200 block text-sm">
-                เลือกรูปแบบการส่งออกไฟล์เพื่อนำไปใช้งาน (Export Formats)
-              </span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-blue-500/10 dark:from-indigo-950/40 dark:via-purple-950/40 dark:to-blue-950/40 p-4 rounded-2xl border border-indigo-200 dark:border-indigo-800">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wider">
+                      ระบบใหม่
+                    </span>
+                    <span className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+                      เลือกหน้าและกำหนดช่วงหน้าที่จะส่งออก (Granular Page Export)
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    สามารถเลือกส่งออกทุกหน้า, หน้าเดียว, หรือกำหนดช่วงหน้า (เช่น 1-3 หรือ 1, 2) เป็น SVG, PNG, JPEG หรือรวมเล่ม PDF หลายหน้า
+                  </p>
+                </div>
+                {onOpenExportModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenExportModal();
+                    }}
+                    className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    <span>เลือกหน้าส่งออกขั้นสูง...</span>
+                  </button>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* High-Res PNG Card */}
@@ -1116,6 +1143,31 @@ export const InfographicsShareModal: React.FC<InfographicsShareModalProps> = ({
                       className="w-full py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
                     >
                       <Download className="w-4 h-4" /> ดาวน์โหลดเอกสาร PDF
+                    </button>
+                  </div>
+                </div>
+
+                {/* SVG Vector Standalone Export */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 flex flex-col justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                        <Scaling className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-slate-800 dark:text-slate-200 block">เวกเตอร์ต้นฉบับ (Complete SVG)</span>
+                        <span className="text-[11px] text-slate-500">ฝังฟอนต์ภาษาไทยและรูปภาพ Base64 100% เปิดได้ทุกโปรแกรม</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => onExportSvg && onExportSvg()}
+                      className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Download className="w-4 h-4" /> ดาวน์โหลดไฟล์เวกเตอร์ SVG
                     </button>
                   </div>
                 </div>

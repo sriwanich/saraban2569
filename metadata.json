@@ -1,6 +1,6 @@
 {
-  "name": "EDMS Creative Studio",
-  "description": "ระบบออกแบบอินโฟกราฟิกและสื่อประชาสัมพันธ์ระดับองค์กร สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง",
+  "name": "ระบบแบบสำรวจและประเมินผลอัจฉริยะ (Smart Survey & Analytics)",
+  "description": "ระบบบริหารจัดการแบบสำรวจ สถิติ และรายงานผลระดับ Enterprise สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

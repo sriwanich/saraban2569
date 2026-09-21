@@ -16,6 +16,7 @@ export interface UrgentIncident {
   toPerson: string;
   incidentTypes: string[];
   incidentTypeOther: string;
+  incidentAppearance: string;
   severity: string;
   startDate: string;
   startTime: string;
@@ -76,7 +77,7 @@ export interface UrgentIncident {
 
 const initialFormState: Omit<UrgentIncident, 'id' | 'createdAt' | 'createdBy'> = {
   docNumber: '', docDate: '', fromPerson: 'นายอำเภอ', toPerson: 'ผู้ว่าราชการจังหวัด/ผู้อำนวยการจังหวัด',
-  incidentTypes: [], incidentTypeOther: '', severity: 'เล็กน้อย',
+  incidentTypes: [], incidentTypeOther: '', incidentAppearance: '', severity: 'เล็กน้อย',
   startDate: '', startTime: '', endDate: '', endTime: '', location: '',
   amphoe: '', tambon: '', muban: '',
   affectedPeople: '', affectedHouseholds: '', injured: '', dead: '', missing: '', evacuatedPeople: '', evacuatedHouseholds: '',
@@ -883,331 +884,412 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
     };
 
     // Helper function to format dotted lines
-    const fill = (text, length = 20) => {
-      if (!text || String(text).trim() === '') {
-        return '<span class="dotted-line" style="width: ' + length + 'px; display: inline-block; border-bottom: 1px dotted #000; height: 0.85em; vertical-align: baseline; margin: 0;"></span>';
+    const fill = (text: any, placeholderWidthPx: number = 100) => {
+      const val = text !== undefined && text !== null ? String(text).trim() : '';
+      if (!val) {
+        return `<span class="dotted-line" style="width: ${placeholderWidthPx}px;"></span>`;
       }
-      return '<span class="filled-text" style="border-bottom: 1px dotted #000; font-weight: normal; padding: 0 1px; color: #000; display: inline-block; vertical-align: baseline; line-height: 1.15; margin: 0;">' + text + '</span>';
+      return `<span class="filled-text">${toThai(val)}</span>`;
     };
 
-    const html = `
-      <html>
-        <head>
-          <title>แบบรายงานเหตุด่วนสาธารณภัย</title>
-          <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
-          <style>
-            @font-face {
-              font-family: 'TH Sarabun New';
-              src: local('TH Sarabun New'), local('THSarabunNew'),
-                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew-webfont.woff') format('woff');
-              font-weight: 400;
-              font-style: normal;
-            }
-            @font-face {
-              font-family: 'TH Sarabun New';
-              src: local('TH Sarabun New Bold'), local('THSarabunNew-Bold'),
-                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew_bold-webfont.woff') format('woff');
-              font-weight: 700;
-              font-style: normal;
-            }
-            @font-face {
-              font-family: 'TH SarabunPSK';
-              src: local('TH SarabunPSK'), local('THSarabunPSK'), local('TH Sarabun New'),
-                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew-webfont.woff') format('woff');
-              font-weight: 400;
-              font-style: normal;
-            }
-            @font-face {
-              font-family: 'TH SarabunPSK';
-              src: local('TH SarabunPSK Bold'), local('THSarabunPSK-Bold'), local('TH Sarabun New Bold'),
-                   url('https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew_bold-webfont.woff') format('woff');
-              font-weight: 700;
-              font-style: normal;
-            }
-            @page { 
-              size: A4; 
-              margin: 8mm 12mm 5mm 15mm; 
-            }
-            body { 
-              font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif; 
-              font-size: 14pt; 
-              line-height: 1.1; 
-              color: #000; 
-              max-width: 210mm; 
-              margin: 0 auto;
-              padding: 0;
-            }
-            * { box-sizing: border-box; }
-            .urgent-stamp { color: red; font-size: 20pt; font-weight: bold; line-height: 1; display: inline-block; font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif; }
-            .mb-1 { margin-bottom: 1px; }
-            .mb-2 { margin-bottom: 2px; }
-            .indent-1 { padding-left: 2.5em; }
-            
-            .checkbox { 
-              display: inline-flex; 
-              align-items: center;
-              justify-content: center;
-              width: 12px; 
-              height: 12px; 
-              border: 1px solid #000; 
-              margin-right: 4px; 
-              position: relative; 
-              vertical-align: middle;
-              top: -1px;
-            }
-            .checked::after { 
-              content: '✓'; 
-              position: absolute; 
-              top: -8px; 
-              left: 1px; 
-              font-size: 13px; 
-              font-weight: bold; 
-              color: #000;
-            }
-            
-            .dotted-line {
-              display: inline-block;
-              border-bottom: 1px dotted #000;
-              height: 0.85em;
-            }
-            
-            .row { display: flex; flex-wrap: wrap; align-items: baseline; }
-            .item { margin-right: 12px; white-space: nowrap; font-weight: normal; }
-            .signature-box { margin-top: 8px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px; }
-            .text-center { text-align: center; }
-          </style>
-        </head>
-        <body onload="window.print()">
-          <table style="width: 100%; border: none; border-collapse: collapse; margin-bottom: 6px;">
-            <tr>
-              <td style="width: 35%; vertical-align: bottom; text-align: left; padding: 0;">
-                <span style="font-weight: normal; font-size: 13pt;">ความเร่งด่วน </span><span class="urgent-stamp">ด่วนที่สุด</span>
-              </td>
-              <td style="width: 40%; vertical-align: bottom; text-align: center; padding: 0;">
-                <div style="font-size: 16pt; font-weight: bold;">แบบรายงานเหตุด่วนสาธารณภัย</div>
-              </td>
-              <td style="width: 25%; vertical-align: bottom; text-align: right; padding: 0;">
-                <div>วันที่ ${fill(toThai(report.docDate), 160)}</div>
-              </td>
-            </tr>
-          </table>
-          
-          <div class="row mb-1">
-            <div style="width: 50%;">ที่ ${fill(toThai(report.docNumber?.replace(/^ที่\s*/, '')), 200)}</div>
-          </div>
-          <div class="row mb-1">
-            จาก ${fill(report.fromPerson, 450)}
-          </div>
-          <div class="row mb-2" style="margin-bottom: 10px;">
-            ถึง ${fill(report.toPerson, 450)}
+    const renderCheckbox = (isChecked: boolean) => {
+      return `<span class="doc-checkbox">${isChecked ? '✓' : ''}</span>`;
+    };
+
+    const incidentTypes1 = ['อุทกภัย', 'วาตภัย', 'ความแห้งแล้ง', 'อัคคีภัย', 'ไฟป่า', 'อากาศหนาว', 'แผ่นดินไหว'];
+    const incidentTypes2 = ['สารเคมีและวัตถุอันตราย', 'อุบัติเหตุ', 'ทุ่นระเบิด', 'การป้องกันและระงับภัยทางอากาศ'];
+    const incidentTypes3 = ['การก่อวินาศกรรม', 'การอพยพประชาชนและส่วนราชการ'];
+
+    let appendixHtml = '';
+    if (report.damageImages && report.damageImages.length > 0) {
+      const pages = [];
+      for (let i = 0; i < report.damageImages.length; i += 2) {
+        pages.push(report.damageImages.slice(i, i + 2));
+      }
+      pages.forEach((pair, pageIdx) => {
+        appendixHtml += `
+        <section class="a4-page-sheet" style="padding: 15mm; font-size: 15pt; line-height: 1.4; display: flex; flex-direction: column; align-items: center;">
+          <div style="position: absolute; top: 16px; right: 16px; font-size: 10pt; color: #777;">
+            หน้า ${toThai(pageIdx + 2)} (ภาคผนวกภาพถ่ายแนบ)
           </div>
           
-          <div class="mb-1"><strong>๑. ชนิดของภัย</strong></div>
-          <div class="indent-1 mb-1" style="line-height: 1.25;">
-            <div style="display: flex; flex-wrap: nowrap; align-items: center;">
-              ${[
-                'อุทกภัย', 'วาตภัย', 'ความแห้งแล้ง', 'อัคคีภัย', 'ไฟป่า', 'อากาศหนาว', 'แผ่นดินไหว'
-              ].map(t => {
-                const isChecked = report.incidentTypes.includes(t) || (t === 'แผ่นดินไหว' && (report.incidentTypes.includes('แผ่นดินไหวและอาคารถล่ม') || report.incidentTypes.includes('แผ่นดินไหว')));
-                return `<div class="item" style="display: inline-flex; align-items: center; margin-right: 14px; margin-bottom: 1px;"><span class="checkbox ${isChecked ? 'checked' : ''}"></span> ${t}</div>`;
-              }).join('')}
-            </div>
-            <div style="display: flex; flex-wrap: nowrap; align-items: center;">
-              <span style="margin-right: 14px;">และอาคารถล่ม</span>
-              ${[
-                'สารเคมีและวัตถุอันตราย', 'อุบัติเหตุ', 'ทุ่นระเบิด', 'การป้องกันและระงับภัยทางอากาศ'
-              ].map(t => {
-                const isChecked = report.incidentTypes.includes(t) || (t === 'อุบัติเหตุ' && report.incidentTypes.includes('อุบัติภัย'));
-                return `<div class="item" style="display: inline-flex; align-items: center; margin-right: 14px; margin-bottom: 1px;"><span class="checkbox ${isChecked ? 'checked' : ''}"></span> ${t}</div>`;
-              }).join('')}
-            </div>
-            <div style="display: flex; flex-wrap: nowrap; align-items: center;">
-              ${[
-                'การก่อวินาศกรรม', 'การอพยพประชาชนและส่วนราชการ'
-              ].map(t => {
-                const isChecked = report.incidentTypes.includes(t);
-                return `<div class="item" style="display: inline-flex; align-items: center; margin-right: 14px; margin-bottom: 1px;"><span class="checkbox ${isChecked ? 'checked' : ''}"></span> ${t}</div>`;
-              }).join('')}
-              <div class="item" style="display: inline-flex; align-items: center; margin-bottom: 1px;"><span class="checkbox ${report.incidentTypes.includes('อื่นๆ') || report.incidentTypeOther ? 'checked' : ''}"></span> อื่นๆ ${fill(toThai(report.incidentTypeOther), 240)}</div>
-            </div>
+          <div style="text-align: center; font-weight: bold; font-size: 16pt; margin-bottom: 24px; padding-top: 8px; line-height: 1.3;">
+            <div>ภาพถ่ายความเสียหายในพื้นที่</div>
+            <div style="font-size: 15pt; margin-top: 2px;">บ้าน${report.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
+            <div style="font-size: 15pt;">บ้านเลขที่ ${toThai(report.location || '')}</div>
           </div>
+
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 24px; width: 100%; max-width: 580px;">
+            ${pair.map((imgUrl, imgIdx) => {
+              const globalIdx = pageIdx * 2 + imgIdx + 1;
+              return `
+              <div style="text-align: center; width: 100%;">
+                <img 
+                  src="${imgUrl}" 
+                  alt="Damage ${globalIdx}" 
+                  style="width: 100%; height: 310px; object-fit: cover; margin: 0 auto; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); background-color: #f5f5f5;" 
+                />
+                <div style="font-size: 14pt; font-weight: bold; color: #333; margin-top: 8px;">
+                  ภาพถ่ายความเสียหาย ที่ ${toThai(globalIdx)}
+                </div>
+              </div>
+              `;
+            }).join('')}
+          </div>
+        </section>
+        `;
+      });
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>แบบรายงานเหตุด่วนสาธารณภัย - ที่ ${report.docNumber || ''}</title>
+<style>
+@font-face {
+  font-family: 'Sarabun';
+  font-weight: 400;
+  src: url(https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew-webfont.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Sarabun';
+  font-weight: 700;
+  src: url(https://cdn.jsdelivr.net/gh/Phonbopit/sarabun-webfont/fonts/thsarabunnew_bold-webfont.woff2) format('woff2');
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  color: #000000;
+  font-family: 'Sarabun', sans-serif;
+  font-size: 13pt;
+  line-height: 1.15;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+.pages { display: block; padding: 0; }
+.a4-page-sheet {
+  width: 210mm;
+  height: 297mm;
+  min-height: 297mm;
+  max-height: 297mm;
+  padding: 8mm 12mm 5mm 15mm;
+  position: relative;
+  overflow: hidden;
+  page-break-after: always;
+  break-after: page;
+  background: #ffffff;
+}
+.grid-header {
+  display: grid;
+  grid-template-cols: 1fr 1.2fr 1fr;
+  align-items: end;
+  margin-bottom: 2px;
+}
+.doc-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #000;
+  margin-right: 5px;
+  position: relative;
+  font-size: 11px;
+  font-weight: bold;
+  flex-shrink: 0;
+  line-height: 10px;
+  vertical-align: middle;
+}
+.doc-item {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  margin-right: 14px;
+  margin-bottom: 2px;
+}
+.pl-indent {
+  padding-left: 2.5em;
+}
+.flex-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.dotted-line {
+  display: inline-block;
+  border-bottom: 1px dotted #000;
+  height: 0.85em;
+  vertical-align: baseline;
+  margin: 0;
+}
+.filled-text {
+  display: inline;
+  border-bottom: 1px dotted #000;
+  padding: 0 1px;
+  vertical-align: baseline;
+  color: #000000;
+  font-weight: normal;
+  line-height: 1.15;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+  }
+}
+</style>
+</head>
+<body>
+<main class="pages">
+  <!-- Page 1 -->
+  <section class="a4-page-sheet">
+    <div style="position: absolute; top: 8px; right: 16px; font-size: 9pt; color: #777;">หน้า ๑ (เอกสารแบบรายงาน)</div>
+    
+    <!-- Header section -->
+    <div class="grid-header">
+      <div style="text-align: left;">
+        <span style="font-size: 13pt; margin-right: 4px;">ความเร่งด่วน</span>
+        <span style="color: #dc2626; font-weight: bold; font-size: 20pt; letter-spacing: -0.025em; line-height: 1;">ด่วนที่สุด</span>
+      </div>
+      <div style="text-align: center;">
+        <h1 style="font-size: 16pt; font-weight: bold; margin: 0;">แบบรายงานเหตุด่วนสาธารณภัย</h1>
+      </div>
+      <div style="text-align: right;">
+        วันที่ ${fill(report.docDate, 140)}
+      </div>
+    </div>
+
+    <div style="margin-top: 4px; line-height: 1.25;">
+      <div style="display: flex; justify-content: space-between;">
+        <div>ที่ ${fill(report.docNumber?.replace(/^ที่\s*/, ''), 140)}</div>
+      </div>
+      <div>จาก ${fill(report.fromPerson, 450)}</div>
+      <div style="margin-bottom: 6px;">ถึง ${fill(report.toPerson, 450)}</div>
+
+      <!-- 1. ชนิดของภัย -->
+      <div>
+        <strong style="font-weight: bold;">๑. ชนิดของภัย</strong>
+        <div class="pl-indent" style="margin-top: 2px; line-height: 1.1;">
+          <div style="display: flex; flex-wrap: nowrap; align-items: center; margin-bottom: 2px;">
+            ${incidentTypes1.map(t => {
+              const isChecked = report.incidentTypes?.includes(t) || (t === 'แผ่นดินไหว' && (report.incidentTypes?.includes('แผ่นดินไหวและอาคารถล่ม') || report.incidentTypes?.includes('แผ่นดินไหว')));
+              return `<span class="doc-item">${renderCheckbox(isChecked)}<span>${t}</span></span>`;
+            }).join('')}
+          </div>
+          <div style="display: flex; flex-wrap: nowrap; align-items: center; margin-bottom: 2px;">
+            <span style="margin-right: 14px;">และอาคารถล่ม</span>
+            ${incidentTypes2.map(t => {
+              const isChecked = report.incidentTypes?.includes(t) || (t === 'อุบัติเหตุ' && report.incidentTypes?.includes('อุบัติภัย'));
+              return `<span class="doc-item">${renderCheckbox(isChecked)}<span>${t}</span></span>`;
+            }).join('')}
+          </div>
+          <div style="display: flex; flex-wrap: nowrap; align-items: center; margin-bottom: 2px;">
+            ${incidentTypes3.map(t => {
+              const isChecked = report.incidentTypes?.includes(t);
+              return `<span class="doc-item">${renderCheckbox(isChecked)}<span>${t}</span></span>`;
+            }).join('')}
+            <span class="doc-item">
+              ${renderCheckbox(report.incidentTypes?.includes('อื่นๆ') || !!report.incidentTypeOther)}
+              <span>อื่นๆ ${fill(report.incidentTypeOther, 240)}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Severity and detail -->
+      <div class="pl-indent" style="line-height: 1.6; margin-bottom: 4px; display: block; word-break: break-word;">
+        <span style="margin-right: 10px;">ความรุนแรงและลักษณะของภัย</span>
+        ${['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map(sev => {
+          const isChecked = report.severity === sev;
+          return `<span style="display: inline-flex; align-items: center; margin-right: 14px; white-space: nowrap; vertical-align: middle;">${renderCheckbox(isChecked)}<span style="margin-left: 4px;">${sev}</span></span>`;
+        }).join('')}
+        <span style="margin-left: 10px; display: inline;">
+          ลักษณะของภัย ${fill(report.incidentAppearance, 220)}
+        </span>
+      </div>
+
+      <!-- 2. วันเวลาที่เกิดภัย -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๒. ภัยเกิดเมื่อ</strong> - วันที่ ${fill(report.startDate, 130)} เวลา ${fill(report.startTime, 80)} น. ภัยสิ้นสุด วันที่ ${fill(report.endDate, 130)} เวลา ${fill(report.endTime, 80)} น.
+      </div>
+
+      <!-- 3. สถานที่เกิดภัย -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๓. สถานที่เกิดภัย</strong> - ${fill(report.location, 620)}
+      </div>
+
+      <!-- 4. ราษฎรที่ประสบภัย -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๔. ราษฎรที่ประสบภัย</strong>
+        <div class="pl-indent" style="line-height: 1.1;">
+          <div style="display: flex; flex-wrap: wrap; gap: 0 8px;">
+            <span>๔.๑ ราษฎรได้รับความเดือดร้อน ${fill(report.affectedPeople, 50)} คน</span>
+            <span>${fill(report.affectedHouseholds, 50)} ครัวเรือน</span>
+            <span>๔.๒ บาดเจ็บ (เล็กน้อย) ${fill(report.injured, 50)} คน</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 0 8px;">
+            <span>๔.๓ เสียชีวิต ${fill(report.dead, 50)} คน</span>
+            <span>๔.๔ สูญหาย ${fill(report.missing, 50)} คน (ให้ระบุรายละเอียด)</span>
+            <span>๔.๕ อพยพไปที่ปลอดภัย ${fill(report.evacuatedPeople, 50)} คน ${fill(report.evacuatedHouseholds, 50)} ครัวเรือน</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. พื้นที่ประสบภัยและความเสียหาย -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๕. พื้นที่ประสบภัยและความเสียหาย</strong>
+        <div class="pl-indent" style="line-height: 1.1;">
+          <div style="display: flex; flex-wrap: wrap; gap: 0 8px;">
+            <span>๕.๑ อาคารก่อสร้าง - บ้านพักอาศัยเสียหายทั้งหลัง ${fill('', 40)} หลัง</span>
+            <span>บ้านพักอาศัยเสียหายบางส่วน ${fill(report.damageHouses, 40)} หลัง</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 0 8px; padding-left: 2.2em;">
+            <span>อาคารสูงตั้งแต่ ๒๓ เมตรขึ้นไป ${fill(report.damageHighRises, 40)} อาคาร</span>
+            <span>โรงเรียน ${fill('', 40)} แห่ง</span>
+            <span>วัด ${fill(report.damageTemples, 40)} แห่ง</span>
+            <span>สถานที่ราชการ ${fill(report.damageGovBuildings, 40)} แห่ง</span>
+            <span>อื่นๆ ${fill(report.damageOtherBuildings, 120)}</span>
+          </div>
+          <div style="padding-left: 2.2em;">มูลค่าความเสียหายประมาณ ${fill(report.damageBuildingCost, 120)} บาท</div>
           
-          <div class="indent-1 mb-2 row" style="display: flex; flex-wrap: wrap; align-items: center;">
-            <span style="margin-right: 10px;">ความรุนแรงและลักษณะของภัย</span>
-            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'เล็กน้อย' ? 'checked' : ''}"></span> เล็กน้อย</div>
-            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'ปานกลาง' ? 'checked' : ''}"></span> ปานกลาง</div>
-            <div class="item" style="display: inline-flex; align-items: center; margin-right: 10px;"><span class="checkbox ${report.severity === 'รุนแรง' ? 'checked' : ''}"></span> รุนแรง</div>
-            <span style="margin-left: 5px;">ลักษณะของภัย ${fill(toThai(report.incidentTypeOther || report.mitigation ? (report.incidentTypeOther + ' ' + report.mitigation).slice(0, 100) : ''), 250)}</span>
+          <div style="display: flex; flex-wrap: wrap; gap: 0 8px;">
+            <span>๕.๒ พื้นที่และทรัพย์สินทางการเกษตร พืชไร่ ${fill(report.damageAgricultureCrops, 40)} ไร่</span>
+            <span>นาข้าว ${fill(report.damageAgricultureRice, 40)} ไร่</span>
+            <span>พืชสวน ${fill(report.damageAgricultureOrchard, 40)} ไร่</span>
+            <span>บ่อปลา ${fill(report.damageAgricultureFish, 40)} บ่อ</span>
           </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 0 8px; padding-left: 2.2em;">
+            <span>บ่อกุ้ง ${fill(report.damageAgricultureShrimp, 40)} บ่อ</span>
+            <span>สัตว์เลี้ยง (โค/กระบือ ${fill(report.damageLivestockCow, 40)} ตัว</span>
+            <span>สุกร ${fill(report.damageLivestockPig, 40)} ตัว</span>
+            <span>เป็ด/ไก่ ${fill(report.damageLivestockPoultry, 40)} ตัว)</span>
+            <span>อื่นๆ ${fill(report.damageLivestockOther, 120)}</span>
+          </div>
+          <div style="padding-left: 2.2em;">มูลค่าความเสียหายประมาณ ${fill(report.damageAgricultureCost, 120)} บาท</div>
 
-          <div class="mb-2">
-            <strong>๒. ภัยเกิดเมื่อ</strong> - วันที่ ${fill(toThai(report.startDate), 140)} เวลา ${fill(toThai(report.startTime), 70)} น. ภัยสิ้นสุด วันที่ ${fill(toThai(report.endDate), 140)} เวลา ${fill(toThai(report.endTime), 70)} น.
+          <div>
+            ๕.๓ สิ่งสาธารณประโยชน์ ถนน ${fill(report.damagePublicRoads, 60)} สาย
+            สะพาน ${fill(report.damagePublicBridges, 60)} แห่ง
+            คอสะพาน ${fill(report.damagePublicBridgeApproaches, 60)} แห่ง
+            ฝาย ${fill(report.damagePublicWeirs, 60)} แห่ง
+            อื่นๆ ${fill(report.damagePublicOther, 180)}
           </div>
-          
-          <div class="mb-2">
-            <strong>๓. สถานที่เกิดภัย</strong> - ${fill(toThai(report.location), 550)}
-          </div>
-          
-          <div class="mb-1"><strong>๔. ราษฎรที่ประสบภัย</strong></div>
-          <div class="indent-1 mb-2" style="line-height: 1.1;">
-            <div class="row">
-              <span class="item">๔.๑ ราษฎรได้รับความเดือดร้อน ${fill(toThai(report.affectedPeople), 20)} คน ${fill(toThai(report.affectedHouseholds), 20)} ครัวเรือน</span>
-              <span class="item">๔.๒ บาดเจ็บ (เล็กน้อย) ${fill(toThai(report.injured), 30)} คน</span>
-            </div>
-            <div class="row">
-              <span class="item">๔.๓ เสียชีวิต ${fill(toThai(report.dead), 20)} คน</span>
-              <span class="item">๔.๔ สูญหาย ${fill(toThai(report.missing), 20)} คน (ให้ระบุรายละเอียด)</span>
-              <span class="item">๔.๕ อพยพไปที่ปลอดภัย ${fill(toThai(report.evacuatedPeople), 20)} คน ${fill(toThai(report.evacuatedHouseholds), 20)} ครัวเรือน</span>
-            </div>
-          </div>
+          <div style="padding-left: 2.2em;">มูลค่าความเสียหายประมาณ ${fill(report.damagePublicCost, 120)} บาท</div>
+          <div>๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ ${fill(report.totalDamageCost, 160)} บาท</div>
+        </div>
+      </div>
 
-          <div class="mb-1"><strong>๕. พื้นที่ประสบภัยและความเสียหาย</strong></div>
-          <div class="indent-1 mb-2" style="line-height: 1.25;">
-            <div class="row">
-              <span class="item">๕.๑ อาคารก่อสร้าง - บ้านพักอาศัยเสียหายทั้งหลัง ${fill('', 20)} หลัง</span>
-              <span class="item">บ้านพักอาศัยเสียหายบางส่วน ${fill(toThai(report.damageHouses), 20)} หลัง</span>
-            </div>
-            <div class="row" style="padding-left: 2.2em;">
-              <span class="item">อาคารสูงตั้งแต่ ๒๓ เมตรขึ้นไป ${fill(toThai(report.damageHighRises), 20)} อาคาร</span>
-              <span class="item">โรงเรียน ${fill('', 20)} แห่ง</span>
-              <span class="item">วัด ${fill(toThai(report.damageTemples), 20)} แห่ง</span>
-              <span class="item">สถานที่ราชการ ${fill(toThai(report.damageGovBuildings), 20)} แห่ง</span>
-              <span class="item">อื่นๆ ${fill(toThai(report.damageOtherBuildings), 50)}</span>
-            </div>
-            <div class="row" style="padding-left: 2.2em;">
-              <span class="item">มูลค่าความเสียหายประมาณ ${fill(toThai(report.damageBuildingCost), 130)} บาท</span>
-            </div>
-            
-            <div class="row" style="margin-top: 2px;">
-              <span class="item">๕.๒ พื้นที่และทรัพย์สินทางการเกษตร พืชไร่ ${fill(toThai(report.damageAgricultureCrops), 20)} ไร่</span>
-              <span class="item">นาข้าว ${fill(toThai(report.damageAgricultureRice), 20)} ไร่</span>
-              <span class="item">พืชสวน ${fill(toThai(report.damageAgricultureOrchard), 20)} ไร่</span>
-              <span class="item">บ่อปลา ${fill(toThai(report.damageAgricultureFish), 20)} บ่อ</span>
-            </div>
-            <div class="row" style="padding-left: 2.2em;">
-              <span class="item">บ่อกุ้ง ${fill(toThai(report.damageAgricultureShrimp), 20)} บ่อ</span>
-              <span class="item">สัตว์เลี้ยง (โค/กระบือ ${fill(toThai(report.damageLivestockCow), 20)} ตัว</span>
-              <span class="item">สุกร ${fill(toThai(report.damageLivestockPig), 20)} ตัว</span>
-              <span class="item">เป็ด/ไก่ ${fill(toThai(report.damageLivestockPoultry), 20)} ตัว)</span>
-              <span class="item">อื่นๆ ${fill(toThai(report.damageLivestockOther), 50)}</span>
-            </div>
-            <div class="row" style="padding-left: 2.2em;">
-              <span class="item">มูลค่าความเสียหายประมาณ ${fill(toThai(report.damageAgricultureCost), 130)} บาท</span>
-            </div>
+      <!-- 6. การบรรเทาภัย -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๖. การบรรเทาภัย</strong> - ${fill(report.mitigation, 620)}
+      </div>
 
-            <div class="row" style="margin-top: 2px;">
-              <span class="item">๕.๓ สิ่งสาธารณประโยชน์ ถนน ${fill(toThai(report.damagePublicRoads), 20)} สาย</span>
-              <span class="item">สะพาน ${fill(toThai(report.damagePublicBridges), 20)} แห่ง</span>
-              <span class="item">คอสะพาน ${fill(toThai(report.damagePublicBridgeApproaches), 20)} แห่ง</span>
-              <span class="item">ฝาย ${fill(toThai(report.damagePublicWeirs), 20)} แห่ง (อื่นๆ) ${fill(toThai(report.damagePublicOther), 50)}</span>
-            </div>
-            <div class="row" style="padding-left: 2.2em;">
-              <span class="item">ความเสียหายประมาณ ${fill(toThai(report.damagePublicCost), 130)} บาท</span>
-            </div>
-            <div class="row" style="margin-top: 2px;">
-              <span class="item">๕.๔ รวมมูลค่าความเสียหายเบื้องต้นประมาณ ${fill(toThai(report.totalDamageCost), 160)} บาท</span>
-            </div>
-          </div>
+      <!-- 7. เครื่องมือ/อุปกรณ์ที่ใช้ -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong>
+        <div class="pl-indent" style="display: flex; flex-wrap: wrap; gap: 0 12px; line-height: 1.1;">
+          <span>- รถปฏิบัติการกู้ชีพ ${fill('', 40)} คัน</span>
+          <span>รถดับเพลิง จำนวน ${fill(report.toolsFireTrucks, 40)} คัน</span>
+          <span>รถยนต์บรรทุกน้ำ ${fill(report.toolsWaterTrucks, 40)} คัน</span>
+          <span>รถกู้ภัย ${fill(report.toolsRescueTrucks, 40)} คัน</span>
+          <span>เรือ ${fill(report.toolsFireBoats, 40)} ลำ</span>
+          <span>เครื่องสูบน้ำ ${fill(report.toolsWaterPumps, 40)} เครื่อง</span>
+          <span>(อื่นๆ) ${fill(report.toolsOther, 160)}</span>
+        </div>
+        <div class="pl-indent" style="display: flex; line-height: 1.1;">
+          <span>ส่วนราชการ ${fill(report.opsGovAgencies, 580)}</span>
+        </div>
+      </div>
 
-          <div class="mb-2">
-            <strong>๖. การบรรเทาภัย</strong> - ${fill(toThai(report.mitigation), 550)}
-          </div>
-          
-          <div class="mb-1"><strong>๗. เครื่องมือ/อุปกรณ์ที่ใช้</strong></div>
-          <div class="indent-1 mb-2 row" style="line-height: 1.1;">
-            <span class="item">- รถปฏิบัติการกู้ชีพ ${fill('', 20)} คัน</span>
-            <span class="item">รถดับเพลิง จำนวน ${fill(toThai(report.toolsFireTrucks), 20)} คัน</span>
-            <span class="item">รถยนต์บรรทุกน้ำ ${fill(toThai(report.toolsWaterTrucks), 20)} คัน</span>
-            <span class="item">รถกู้ภัย ${fill(toThai(report.toolsRescueTrucks), 20)} คัน</span>
-            <span class="item">เรือ ${fill(toThai(report.toolsFireBoats), 20)} ลำ</span>
-            <span class="item">เครื่องสูบน้ำ ${fill(toThai(report.toolsWaterPumps), 20)} เครื่อง</span>
-            <span class="item">(อื่นๆ) ${fill(toThai(report.toolsOther), 60)}</span>
-          </div>
-          <div class="indent-1 mb-2 row" style="line-height: 1.1;">
-            <span class="item">ส่วนราชการ ${fill(toThai(report.opsGovAgencies), 400)}</span>
-          </div>
+      <!-- 8. การดำเนินงานของส่วนราชการฯ -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong>
+        <div class="pl-indent" style="line-height: 1.1;">
+          <span class="doc-item" style="margin-right: 28px;">
+            <span class="doc-checkbox"></span>
+            <span>ส่วนราชการอื่น ${fill('', 240)}</span>
+          </span>
+          <span class="doc-item">
+            <span class="doc-checkbox"></span>
+            <span>ภาคเอกชน (ชื่อ) ${fill('', 240)}</span>
+          </span>
+        </div>
+      </div>
 
-          <div class="mb-1"><strong>๘. การดำเนินงานของส่วนราชการ หน่วยอาสาสมัคร มูลนิธิในพื้นที่</strong></div>
-          <div class="indent-1 mb-2" style="line-height: 1.25;">
-            <div class="row" style="display: inline-flex; align-items: center; margin-right: 25px;">
-              <span class="checkbox"></span> ส่วนราชการอื่น ${fill('', 300)}
+      <!-- 9. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติฯ -->
+      <div style="margin-bottom: 4px;">
+        <strong style="font-weight: bold;">๙. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติ ซึ่งเกิดความเสียหายจริง โดยมีความประสงค์</strong>
+        <div class="pl-indent" style="line-height: 1.1; margin-top: 2px;">
+          <div style="display: table; width: 100%; margin-bottom: 2px;">
+            <div style="display: table-cell; width: 22px; vertical-align: top; padding-top: 2px;">
+              ${renderCheckbox(report.proposals?.includes('เพื่อโปรดทราบ'))}
             </div>
-            <div class="row" style="display: inline-flex; align-items: center;">
-              <span class="checkbox"></span> ภาคเอกชน (ชื่อ) ${fill('', 300)}
-            </div>
-          </div>
-
-          <div class="mb-1">
-            <strong>๙. ขอรับรองว่าพื้นที่ดังกล่าวเป็นพื้นที่ประสบภัยพิบัติ ซึ่งเกิดความเสียหายจริง โดยมีความประสงค์</strong>
-          </div>
-          <div class="indent-1 mb-2" style="line-height: 1.25; display: flex; flex-direction: column; gap: 2px;">
-            <div class="row" style="display: flex; align-items: flex-start;">
-              <span class="checkbox ${report.proposals.includes('เพื่อโปรดทราบ') ? 'checked' : ''}" style="margin-top: 3px; margin-right: 8px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold;"></span> 
+            <div style="display: table-cell; vertical-align: top;">
               <span>รายงานข้อมูลเบื้องต้น เพื่อโปรดทราบ</span>
             </div>
-            <div class="row" style="display: flex; align-items: flex-start;">
-              <span class="checkbox ${report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย') ? 'checked' : ''}" style="margin-top: 3px; margin-right: 8px; flex-shrink: 0;"></span> 
+          </div>
+
+          <div style="display: table; width: 100%; margin-bottom: 2px;">
+            <div style="display: table-cell; width: 22px; vertical-align: top; padding-top: 2px;">
+              ${renderCheckbox(report.proposals?.includes('เพื่อโปรดพิจารณาประกาศเขตพื้นที่ประสบสาธารณภัย'))}
+            </div>
+            <div style="display: table-cell; vertical-align: top;">
               <span>รายงานเพื่อขอให้จังหวัดประกาศเป็นพื้นที่ประสบสาธารณภัย ตาม พ.ร.บ.ปภ. ๒๕๕๐</span>
             </div>
-            <div class="row" style="display: flex; align-items: flex-start;">
-              <span class="checkbox ${report.proposals.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน') ? 'checked' : ''}" style="margin-top: 3px; margin-right: 8px; flex-shrink: 0;"></span> 
+          </div>
+
+          <div style="display: table; width: 100%; margin-bottom: 2px;">
+            <div style="display: table-cell; width: 22px; vertical-align: top; padding-top: 2px;">
+              ${renderCheckbox(report.proposals?.includes('เพื่อโปรดพิจารณาประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน'))}
+            </div>
+            <div style="display: table-cell; vertical-align: top;">
               <span>รายงานเพื่อขอให้จังหวัดประกาศเขตการให้ความช่วยเหลือผู้ประสบภัยพิบัติกรณีฉุกเฉิน ตามระเบียบกระทรวงการคลัง ทั้งนี้ได้แนบรายละเอียดเอกสารแนบท้ายในการรายงานเหตุด่วนสาธารณภัย เพื่อประกาศภัยพิบัติจังหวัดระยองแล้ว</span>
             </div>
           </div>
+        </div>
+      </div>
 
-          <div class="signature-box" style="margin-top: 2px; display: flex; flex-direction: column; align-items: flex-end; padding-right: 40px;">
-            <div class="text-center" style="position: relative; width: 350px;">
-              <div style="margin-top: 2px; display: flex; justify-content: center; align-items: flex-end;">
-                <span>(ลงชื่อ)</span>
-                <span style="display: inline-block; width: 180px; border-bottom: 1px dotted #000; margin: 0 5px; position: relative; height: 1em;">
-                  ${report.signatureImage ? `
-                    <img src="${report.signatureImage}" style="position: absolute; bottom: 0px; left: 50%; transform: translateX(-50%); max-height: 40px; width: auto; mix-blend-mode: multiply; z-index: 10;" />
-                  ` : ''}
-                </span>
-                <span>ผู้รายงาน</span>
-              </div>
-              <div style="margin-top: 2px;">
-                (.........${fill(report.reporterName, 120)}.........)
-              </div>
-              <div style="margin-top: 2px;">
-                ........${fill(report.reporterPosition, 150)}.................
-              </div>
-            </div>
+      <!-- Signatures Area -->
+      <div style="display: flex; flex-direction: column; align-items: flex-end; padding-right: 48px; margin-top: 12px;">
+        <div style="width: 320px; text-align: center; font-size: 13pt; line-height: 1.6;">
+          <div style="position: relative; margin-bottom: 4px;">
+            <span style="vertical-align: baseline;">(ลงชื่อ)</span>
+            <span style="display: inline-block; width: 170px; border-bottom: 1px dotted #000; height: 0.85em; position: relative; margin: 0 4px; vertical-align: baseline;">
+              ${report.signatureImage ? `<img src="${report.signatureImage}" alt="Signature" style="position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); max-height: 48px; min-width: 100px; object-fit: contain; mix-blend-mode: multiply;" />` : ''}
+            </span>
+            <span style="vertical-align: baseline;">ผู้รายงาน</span>
           </div>
+          <div style="margin-bottom: 4px;">
+            ( ${fill(report.reporterName, 180)} )
+          </div>
+          <div>
+            ตำแหน่ง ${fill(report.reporterPosition, 180)}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-          ${report.damageImages && report.damageImages.length > 0 ? (() => {
-            const pages: string[][] = [];
-            for (let i = 0; i < report.damageImages.length; i += 2) {
-              pages.push(report.damageImages.slice(i, i + 2));
-            }
-            return pages.map((pair, pageIdx) => `
-              <div style="page-break-before: always; margin-top: 10mm; padding-top: 10px; font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif;">
-                <div style="text-align: right; font-size: 11pt; color: #666; margin-bottom: 6px;">หน้า ${toThai(pageIdx + 2)} (ภาคผนวกภาพถ่ายแนบ)</div>
-                <div style="text-align: center; font-size: 16pt; font-weight: bold; margin-bottom: 20px; line-height: 1.35;">
-                  <div>ภาพถ่ายความเสียหายในพื้นที่</div>
-                  <div style="font-size: 15pt; margin-top: 2px;">บ้าน${report.reporterName || 'ผู้รายงาน / ผู้ประสบภัย'}</div>
-                  <div style="font-size: 15pt;">บ้านเลขที่ ${toThai(report.location || '')}</div>
-                </div>
-                
-                <div style="display: flex; flex-direction: column; align-items: center; gap: 24px; margin-top: 10px;">
-                  ${pair.map((imgUrl, imgIdx) => {
-                    const globalIdx = pageIdx * 2 + imgIdx + 1;
-                    return `
-                      <div style="text-align: center; width: 100%; max-width: 580px; page-break-inside: avoid;">
-                        <img src="${imgUrl}" style="width: 100%; height: 310px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; display: block; margin: 0 auto;" />
-                        <div style="font-size: 14pt; font-weight: bold; margin-top: 6px; color: #111;">
-                          ภาพถ่ายความเสียหาย ที่ ${toThai(globalIdx)}
-                        </div>
-                      </div>
-                    `;
-                  }).join('')}
-                </div>
-              </div>
-            `).join('');
-          })() : ''}
-        </body>
-      </html>
-    `;
+  <!-- Appendix Pages (Page 2+) -->
+  ${appendixHtml}
+</main>
+<script>
+window.onload = function() { window.print(); window.close(); }
+</script>
+</body>
+</html>`;
     printWindow.document.write(html);
     printWindow.document.close(); fetch('/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'PRINT_URGENT_INCIDENT', details: `พิมพ์แบบรายงานเหตุด่วนสาธารณภัย: ${report.location || 'ไม่ระบุสถานที่'}`, username: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'ผู้ใช้งาน' }) }).catch(console.error);
   };
@@ -1243,13 +1325,16 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
         <span 
           className="doc-fill-line" 
           style={{ 
-            display: 'inline-block', 
+            display: 'inline', 
             borderBottom: '1px dotted #000', 
             padding: '0 1px', 
             verticalAlign: 'baseline', 
             color: '#000', 
             fontWeight: 'normal', 
-            lineHeight: '1.15' 
+            lineHeight: '1.15',
+            wordBreak: 'break-word',
+            overflowWrap: 'break-word',
+            whiteSpace: 'normal'
           }}
         >
           {toThaiNum(val)}
@@ -1431,10 +1516,10 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                   </div>
                 </div>
 
-                <div className="pl-[2.5em] font-normal flex flex-wrap items-center" style={{ lineHeight: '1.4' }}>
+                <div className="pl-[2.5em] font-normal block" style={{ lineHeight: '1.6', wordBreak: 'break-word' }}>
                   <span className="font-normal" style={{ marginRight: '10px' }}>ความรุนแรงและลักษณะของภัย</span>
                   {['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map((sev, idx) => (
-                    <span key={idx} className="doc-item" style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginRight: '14px' }}>
+                    <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap', marginRight: '14px', verticalAlign: 'middle' }}>
                       <span 
                         className="doc-checkbox"
                         style={{ 
@@ -1456,8 +1541,8 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                       <span>{sev}</span>
                     </span>
                   ))}
-                  <span className="font-normal" style={{ marginLeft: '10px' }}>
-                    ลักษณะของภัย {renderLine(previewData.incidentTypeOther || previewData.mitigation ? (previewData.incidentTypeOther + ' ' + previewData.mitigation).slice(0, 40) : '', '....................................', 220)}
+                  <span className="font-normal" style={{ marginLeft: '10px', display: 'inline' }}>
+                    ลักษณะของภัย {renderLine(previewData.incidentAppearance, '....................................', 220)}
                   </span>
                 </div>
 
@@ -1668,22 +1753,37 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
                 </div>
 
                 {/* Signatures Area */}
-                <div className="flex flex-col items-end pr-8 pt-1 font-normal">
-                  <div className="w-[320px] text-center font-normal space-y-1">
-                    <div className="flex items-end justify-center gap-1 font-normal">
-                      <span>(ลงชื่อ)</span>
-                      <span className="inline-block w-40 border-b border-dotted border-black relative" style={{ height: '1em', verticalAlign: 'bottom' }}>
+                <div className="flex flex-col items-end pr-12 pt-2 font-normal">
+                  <div className="w-[320px] text-center font-normal space-y-1" style={{ fontSize: '13pt', lineHeight: '1.6' }}>
+                    <div className="relative mb-1">
+                      <span style={{ verticalAlign: 'baseline' }}>(ลงชื่อ)</span>
+                      <span 
+                        style={{ 
+                          display: 'inline-block', 
+                          width: '170px', 
+                          borderBottom: '1px dotted #000', 
+                          height: '0.85em', 
+                          position: 'relative', 
+                          margin: '0 4px', 
+                          verticalAlign: 'baseline' 
+                        }}
+                      >
                         {previewData.signatureImage && (
-                          <img src={previewData.signatureImage} alt="Signature Preview" className="absolute bottom-[0px] left-1/2 -translate-x-1/2 max-h-[40px] object-contain mix-blend-multiply z-10 select-none pointer-events-none" style={{ minWidth: '100px' }} />
+                          <img 
+                            src={previewData.signatureImage} 
+                            alt="Signature Preview" 
+                            className="absolute bottom-[-2px] left-1/2 -translate-x-1/2 max-h-[48px] object-contain mix-blend-multiply z-10 select-none pointer-events-none" 
+                            style={{ minWidth: '100px' }} 
+                          />
                         )}
                       </span>
-                      <span>ผู้รายงาน</span>
+                      <span style={{ verticalAlign: 'baseline' }}>ผู้รายงาน</span>
                     </div>
-                    <div className="font-normal" style={{ marginTop: '2px' }}>
-                      (.........{renderLine(previewData.reporterName, '........................')}.........)
+                    <div className="font-normal" style={{ marginBottom: '4px' }}>
+                      ( {renderLine(previewData.reporterName, '........................', 180)} )
                     </div>
-                    <div className="font-normal" style={{ marginTop: '2px' }}>
-                      ........{renderLine(previewData.reporterPosition, '................................')}.................
+                    <div className="font-normal">
+                      ตำแหน่ง {renderLine(previewData.reporterPosition, '................................', 180)}
                     </div>
                   </div>
                 </div>
@@ -2363,15 +2463,27 @@ export default function UrgentIncidentReportView({ user, prefillData, onClearPre
             <input type="text" value={formData.incidentTypeOther} onChange={e => setFormData({...formData, incidentTypeOther: e.target.value})} className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded px-3 py-2 text-sm focus:border-[var(--primary-color)] outline-none mt-2" placeholder="ระบุชนิดภัยอื่นๆ..." />
           )}
           
-          <div className="mt-4">
-            <label className="block text-xs text-[var(--text-secondary)] font-medium mb-2">ความรุนแรงและลักษณะของภัย</label>
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-6">
-              {['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map(level => (
-                <label key={level} className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                  <input type="radio" name="severity" checked={formData.severity === level} onChange={() => setFormData({...formData, severity: level})} className="w-4 h-4 border-[var(--border-light)] text-red-600 focus:ring-red-500 bg-[var(--bg-overlay)]" />
-                  {level}
-                </label>
-              ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div>
+              <label className="block text-xs text-[var(--text-secondary)] font-medium mb-2">ความรุนแรงของภัย</label>
+              <div className="flex flex-row gap-3 sm:gap-6 py-2">
+                {['เล็กน้อย', 'ปานกลาง', 'รุนแรง'].map(level => (
+                  <label key={level} className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                    <input type="radio" name="severity" checked={formData.severity === level} onChange={() => setFormData({...formData, severity: level})} className="w-4 h-4 border-[var(--border-light)] text-red-600 focus:ring-red-500 bg-[var(--bg-overlay)]" />
+                    {level}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-[var(--text-secondary)] font-medium mb-2">ลักษณะของภัย (เช่น น้ำล้นตลิ่ง, ฝนแล้งทิ้งช่วง)</label>
+              <input 
+                type="text" 
+                value={formData.incidentAppearance} 
+                onChange={e => setFormData({...formData, incidentAppearance: e.target.value})} 
+                className="w-full bg-[var(--bg-overlay)] border border-[var(--border-light)] rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[var(--primary-color)] focus:border-transparent outline-none transition-all" 
+                placeholder="ระบุลักษณะของภัย เช่น ฝนทิ้งช่วง ขาดแคลนน้ำอุปโภคบริโภค..." 
+              />
             </div>
           </div>
         </section>

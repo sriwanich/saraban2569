@@ -14,6 +14,8 @@ import {
 import { DocumentItem } from '../../types';
 import { useConfirm } from '../../context/ConfirmContext';
 import AiDocumentStamperModal from '../AiDocumentStamperModal';
+import QrDesignControls from '../qr/QrDesignControls';
+import QrLivePreview from '../qr/QrLivePreview';
 
 interface QrGeneratorViewProps {
   user?: any;
@@ -100,6 +102,39 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   // EDMS Document selection
   const [selectedDocId, setSelectedDocId] = useState<string>(initialDocId || '');
   const [docSearchQuery, setDocSearchQuery] = useState('');
+  const [docCategoryFilter, setDocCategoryFilter] = useState<'all' | 'urgent' | 'command' | 'internal' | 'external'>('all');
+
+  // Contrast & Scannability Checker
+  const getContrastRatio = (fg: string, bg: string, isTransparent: boolean) => {
+    if (isTransparent) return { ratio: 21, score: 'AAA', label: 'พื้นหลังโปร่งใส (สแกนคมชัดตามเอกสาร)', isGood: true };
+    try {
+      const hexToRgb = (hex: string) => {
+        const clean = hex.replace('#', '');
+        const num = parseInt(clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean, 16);
+        return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+      };
+      const getLum = ([r, g, b]: number[]) => {
+        const a = [r, g, b].map(v => {
+          v /= 255;
+          return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        });
+        return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
+      };
+      const l1 = getLum(hexToRgb(fg));
+      const l2 = getLum(hexToRgb(bg));
+      const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      const rounded = Math.round(ratio * 10) / 10;
+      if (rounded >= 7) {
+        return { ratio: rounded, score: 'AAA', label: 'ความคมชัดระดับสูงสุด (สแกนง่าย 100%)', isGood: true };
+      } else if (rounded >= 4.5) {
+        return { ratio: rounded, score: 'AA', label: 'ความคมชัดมาตรฐานราชการ (สแกนได้ดี)', isGood: true };
+      } else {
+        return { ratio: rounded, score: 'ต่ำ', label: 'ความคมชัดต่ำ อาจสแกนได้ยากในสภาพแสงน้อย', isGood: false };
+      }
+    } catch {
+      return { ratio: 21, score: 'AAA', label: 'ผ่านเกณฑ์มาตรฐานสากล', isGood: true };
+    }
+  };
 
   // Form Fields
   const [urlInput, setUrlInput] = useState('https://rayong.popt.go.th');
@@ -264,6 +299,7 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
   const defaultGarudaUrl = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
   const GARUDA_LOGO_URL = sysSettings?.garuda30Url || sysSettings?.garuda15Url || defaultGarudaUrl;
   const DDPM_LOGO_URL = sysSettings?.logoUrl || (typeof window !== 'undefined' ? (localStorage.getItem('moi_logo') || localStorage.getItem('moi_schoolLogo')) : null) || '/ddpm-logo.svg';
+  const RAYONG_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
 
   // Preset Color Palettes
   const presetPalettes = [
@@ -2026,880 +2062,111 @@ export default function QrGeneratorView({ user, documents = [], initialDocId, on
       </div>
 
       {/* Tab 1: Design & Create Studio */}
-      {activeTab === 'create' && (
+      {activeTab === "create" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Design Controls Panel */}
-          <div className="lg:col-span-7 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 overflow-y-auto max-h-[88vh] lg:max-h-[calc(100vh-200px)] custom-scrollbar pb-16">
-            
-            {/* Generation Mode Select */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                <Sliders className="w-4 h-4 text-blue-500" />
-                <span>เทคโนโลยีการสร้าง (QR Code Technology)</span>
-              </span>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setGenerationMode('static'); setRegisteredSlug(''); }}
-                  className={`p-3.5 rounded-xl border text-left transition-all flex flex-col justify-between ${generationMode === 'static' ? 'border-amber-500 bg-amber-50/10 dark:bg-amber-900/10' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50'}`}
-                >
-                  <span className="font-bold text-xs text-slate-800 dark:text-slate-200">Static QR Code (แบบดั้งเดิม)</span>
-                  <span className="text-[10px] text-slate-500 mt-1">ข้อมูลฝังลงภาพโดยตรง สแกนแล้วเข้าลิงก์ทันที (ไม่ผ่านหน้า Verify Page ของระบบ)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setGenerationMode('dynamic');
-                    if (!registeredSlug && !isRegisteringDynamic) {
-                      await registerDynamicQr();
-                    }
-                  }}
-                  className={`p-3.5 rounded-xl border text-left transition-all flex flex-col justify-between ${generationMode === 'dynamic' ? 'border-blue-600 bg-blue-50/10 dark:bg-blue-900/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50'}`}
-                >
-                  <span className="font-bold text-xs text-blue-600 flex items-center gap-1">
-                    <Sparkles className={`w-3.5 h-3.5 ${isRegisteringDynamic ? 'animate-spin' : ''}`} />
-                    <span>Dynamic QR + Verify Page (แนะนำ)</span>
-                  </span>
-                  <span className="text-[10px] text-slate-500 mt-1">ใช้ URL สั้นของ ปภ. เพื่อแสดงหน้าตรวจสอบความปลอดภัยก่อน Redirect และเก็บสถิติได้</span>
-                </button>
-              </div>
+          <QrDesignControls
+            generationMode={generationMode}
+            setGenerationMode={setGenerationMode}
+            registeredSlug={registeredSlug}
+            setRegisteredSlug={setRegisteredSlug}
+            isRegisteringDynamic={isRegisteringDynamic}
+            registerDynamicQr={registerDynamicQr}
+            qrType={qrType}
+            setQrType={setQrType}
+            documents={documents}
+            selectedDocId={selectedDocId}
+            setSelectedDocId={setSelectedDocId}
+            selectedDoc={selectedDoc}
+            docSearchQuery={docSearchQuery}
+            setDocSearchQuery={setDocSearchQuery}
+            docCategoryFilter={docCategoryFilter}
+            setDocCategoryFilter={setDocCategoryFilter}
+            urlInput={urlInput}
+            setUrlInput={setUrlInput}
+            customTitle={customTitle}
+            setCustomTitle={setCustomTitle}
+            textInput={textInput}
+            setTextInput={setTextInput}
+            vcard={vcard}
+            setVcard={setVcard}
+            wifi={wifi}
+            setWifi={setWifi}
+            promptPay={promptPay}
+            setPromptPay={setPromptPay}
+            presetPalettes={presetPalettes}
+            fgColor={fgColor}
+            setFgColor={setFgColor}
+            bgColor={bgColor}
+            setBgColor={setBgColor}
+            transparentBg={transparentBg}
+            setTransparentBg={setTransparentBg}
+            gradientType={gradientType}
+            setGradientType={setGradientType}
+            gradientColor2={gradientColor2}
+            setGradientColor2={setGradientColor2}
+            gradientAngle={gradientAngle}
+            setGradientAngle={setGradientAngle}
+            errorCorrection={errorCorrection}
+            setErrorCorrection={setErrorCorrection}
+            qrMargin={qrMargin}
+            setQrMargin={setQrMargin}
+            logoType={logoType}
+            setLogoType={setLogoType}
+            customLogoUrl={customLogoUrl}
+            setCustomLogoUrl={setCustomLogoUrl}
+            logoScale={logoScale}
+            setLogoScale={setLogoScale}
+            GARUDA_LOGO_URL={GARUDA_LOGO_URL}
+            DDPM_LOGO_URL={DDPM_LOGO_URL}
+            RAYONG_LOGO_URL={RAYONG_LOGO_URL}
+            isDragging={isDragging}
+            handleDragOver={handleDragOver}
+            handleDragLeave={handleDragLeave}
+            handleDrop={handleDrop}
+            handleLogoUpload={handleLogoUpload}
+            frameType={frameType}
+            setFrameType={setFrameType}
+            frameText={frameText}
+            setFrameText={setFrameText}
+            frameTextBottom={frameTextBottom}
+            setFrameTextBottom={setFrameTextBottom}
+            frameColor={frameColor}
+            setFrameColor={setFrameColor}
+            frameTextColor={frameTextColor}
+            setFrameTextColor={setFrameTextColor}
+            savedTemplates={savedTemplates}
+            selectedTemplateId={selectedTemplateId}
+            handleApplyTemplate={handleApplyTemplate}
+            handleOpenSaveModal={handleOpenSaveModal}
+            setActiveTab={setActiveTab}
+            getComputedPayload={getComputedPayload}
+            getContrastRatio={getContrastRatio}
+            showToast={showToast}
+            handleQuickAiStamp={handleQuickAiStamp}
+            isSavingToDoc={isSavingToDoc}
+            setIsAiStamperOpen={setIsAiStamperOpen}
+          />
 
-              {/* Dynamic QR registration status feedback card */}
-              {generationMode === 'dynamic' && !registeredSlug && (
-                <div className="p-3.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-800 dark:text-amber-400">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
-                    <div>
-                      <div className="font-bold text-amber-900 dark:text-amber-300">ต้องการลงทะเบียน Dynamic Link บนเซิร์ฟเวอร์หรือไม่?</div>
-                      <div className="text-[11px] text-amber-700 dark:text-amber-400">กดปุ่มลงทะเบียนเพื่อรับ URL สั้นสถิติสำหรับ QR Code นี้</div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => registerDynamicQr()}
-                    disabled={isRegisteringDynamic}
-                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 shrink-0 self-end sm:self-center"
-                  >
-                    {isRegisteringDynamic ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>กำลังลงทะเบียน...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>ลงทะเบียนเพื่อรับ URL สั้น</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {generationMode === 'dynamic' && registeredSlug && (
-                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-emerald-800 dark:text-emerald-400">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="font-bold text-emerald-900 dark:text-emerald-300">เชื่อมโยงกับ Dynamic URL สั้นสำเร็จ!</div>
-                      <div className="font-mono text-[11px] text-emerald-700 dark:text-emerald-400 truncate">
-                        {window.location.origin}/qr/{registeredSlug}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const shortUrl = `${window.location.origin}/qr/${registeredSlug}`;
-                        try {
-                          await navigator.clipboard.writeText(shortUrl);
-                          showToast('success', 'คัดลอก URL สั้นเรียบร้อยแล้ว!');
-                        } catch (_) {
-                          showToast('info', `URL สั้น: ${shortUrl}`);
-                        }
-                      }}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 transition-colors"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>คัดลอก URL สั้น</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRegisteredSlug('');
-                        setGenerationMode('static');
-                        showToast('info', 'ยกเลิกการลงทะเบียน Dynamic Link แล้ว');
-                      }}
-                      className="text-[11px] text-slate-500 hover:text-rose-600 underline"
-                    >
-                      ยกเลิกลงทะเบียน
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Quick Templates & Presets Bar */}
-            <div className="p-4 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50 dark:from-slate-900 dark:to-slate-900/60 rounded-2xl border border-blue-100 dark:border-blue-900/40 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <Bookmark className="w-4 h-4 text-blue-600" />
-                  <span>แม่แบบสไตล์ (QR Templates):</span>
-                  {selectedTemplateId && (
-                    <span className="text-[10px] px-2 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-semibold rounded-full flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>{savedTemplates.find((t: any) => t.id === selectedTemplateId)?.name || 'แม่แบบที่เลือก'}</span>
-                    </span>
-                  )}
-                </span>
-                
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleOpenSaveModal}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
-                    title="บันทึกการตั้งค่าสี โลโก้ และกรอบปัจจุบันเป็นแม่แบบใหม่"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>บันทึกเป็นแม่แบบ</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('templates')}
-                    className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-all flex items-center gap-1"
-                    title="จัดการแม่แบบทั้งหมดในไลบรารี"
-                  >
-                    <span>คลังแม่แบบ ({savedTemplates.length})</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Template chips */}
-              <div className="flex flex-wrap items-center gap-1.5">
-                {savedTemplates.slice(0, 7).map((t: any) => {
-                  const isSelected = selectedTemplateId === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => handleApplyTemplate(t, false)}
-                      className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all flex items-center gap-1.5 ${
-                        isSelected 
-                          ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-400/40' 
-                          : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      {t.isDefault && <Star className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />}
-                      <span className="truncate max-w-[140px]">{t.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Main Tabs for QR Type */}
-            <div className="border-b border-slate-200 dark:border-slate-800 pb-3">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
-                {[
-                  { id: 'edms', label: 'เอกสาร EDMS', icon: FileText },
-                  { id: 'url', label: 'เว็บไซต์ (URL)', icon: Globe },
-                  { id: 'text', label: 'ข้อความทั่วไป', icon: Sparkles },
-                  { id: 'vcard', label: 'นามบัตรข้าราชการ', icon: User },
-                  { id: 'wifi', label: 'Wi-Fi สำนักงาน', icon: Wifi },
-                  { id: 'promptpay', label: 'พร้อมเพย์ ปภ.', icon: CreditCard }
-                ].map((tab) => {
-                  const Icon = tab.icon;
-                  const isSelected = qrType === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setQrType(tab.id as any)}
-                      className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center sm:justify-start gap-2 transition-all ${
-                        isSelected 
-                          ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500/30' 
-                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/60'
-                      }`}
-                    >
-                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-white' : 'text-blue-500'}`} />
-                      <span className="truncate">{tab.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Conditional Form Inputs */}
-            <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-4 text-xs text-left">
-              
-              {qrType === 'edms' && (
-                <div className="space-y-3">
-                  <label className="block font-bold text-slate-700 dark:text-slate-300">
-                    เลือกหนังสือราชการ หรือเอกสารในสารบรรณ:
-                  </label>
-                  
-                  {/* Search Document Input with SVG Search Icon */}
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                    <input
-                      type="text"
-                      placeholder="ค้นหาตามเลขที่หนังสือ หรือเรื่อง..."
-                      value={docSearchQuery}
-                      onChange={(e) => setDocSearchQuery(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
-                    />
-                  </div>
-
-                  {/* Document List Selector */}
-                  <div className="max-h-36 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-slate-800 rounded-lg p-2 bg-white dark:bg-slate-900">
-                    {documents
-                      .filter(d => 
-                        d.title.toLowerCase().includes(docSearchQuery.toLowerCase()) || 
-                        (d.docNumber && d.docNumber.toLowerCase().includes(docSearchQuery.toLowerCase()))
-                      )
-                      .map((doc) => (
-                        <button
-                          key={doc.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedDocId(doc.id);
-                            if (doc.title) {
-                              setCustomTitle(doc.title);
-                              setFrameText(`ตรวจเลขหนังสือ: ${doc.docNumber || doc.id}`);
-                            }
-                          }}
-                          className={`w-full text-left p-2 rounded-lg transition-all flex flex-col gap-0.5 ${selectedDocId === doc.id ? 'bg-blue-500/10 border-l-4 border-blue-500' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-                        >
-                          <span className="font-bold text-slate-800 dark:text-slate-200">{doc.docNumber || 'ไม่มีเลขหนังสือ'}</span>
-                          <span className="text-[10px] text-slate-500 truncate">{doc.title}</span>
-                        </button>
-                      ))}
-                  </div>
-
-                  {selectedDoc && (
-                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-2.5">
-                      <div className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                          <span>เลือกหนังสือสำเร็จ พร้อมประทับตรา AI:</span>
-                        </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold">
-                          AI Auto-Fit
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-600 dark:text-slate-400 break-all font-mono">{getComputedPayload()}</div>
-
-                      {/* Quick AI Stamping Actions inside EDMS tab */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={handleQuickAiStamp}
-                          disabled={isSavingToDoc}
-                          className="py-2 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 active:scale-98 disabled:opacity-40"
-                        >
-                          <Wand2 className="w-3.5 h-3.5 shrink-0" />
-                          <span>⚡ ประทับตราอัตโนมัติด้วย AI</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsAiStamperOpen(true)}
-                          className="py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs"
-                        >
-                          <Scan className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          <span>ปรับขนาด & เลือกตำแหน่ง</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {qrType === 'url' && (
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <label className="block font-bold text-slate-700 dark:text-slate-300">
-                      ระบุลิงก์ปลายทาง (Target URL):
-                    </label>
-                    <input
-                      type="url"
-                      value={urlInput}
-                      onChange={(e) => setUrlInput(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
-                      placeholder="https://rayong.popt.go.th"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="block font-bold text-slate-700 dark:text-slate-300">
-                      เนื้อหา / ชื่อเรื่อง ที่แสดงบนหน้าต่างตรวจสอบ (Title / Subject):
-                    </label>
-                    <input
-                      type="text"
-                      value={customTitle}
-                      onChange={(e) => setCustomTitle(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-xs"
-                      placeholder="เช่น สนง.ปภ.ระยอง หรือ ข่าวสารประชาสัมพันธ์"
-                    />
-                    <p className="text-[10px] text-slate-400">
-                      * ข้อความนี้จะแสดงในช่อง "เนื้อหา / ชื่อเรื่อง" บนหน้าต่างยืนยันความถูกต้องเมื่อสแกน QR Code
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {qrType === 'text' && (
-                <div className="space-y-2">
-                  <label className="block font-bold text-slate-700 dark:text-slate-300">ระบุข้อความที่ต้องการฝัง:</label>
-                  <textarea
-                    rows={3}
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-sans outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="พิมพ์ประกาศหรือรายละเอียดข้อความ..."
-                  />
-                </div>
-              )}
-
-              {qrType === 'vcard' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">ชื่อ-นามสกุล:</label>
-                    <input type="text" value={vcard.name} onChange={(e) => setVcard({...vcard, name: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">ตำแหน่งงาน:</label>
-                    <input type="text" value={vcard.title} onChange={(e) => setVcard({...vcard, title: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">สังกัดองค์กร:</label>
-                    <input type="text" value={vcard.org} onChange={(e) => setVcard({...vcard, org: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">เบอร์โทรติดต่อ:</label>
-                    <input type="text" value={vcard.phone} onChange={(e) => setVcard({...vcard, phone: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">อีเมล:</label>
-                    <input type="email" value={vcard.email} onChange={(e) => setVcard({...vcard, email: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              )}
-
-              {qrType === 'wifi' && (
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2 space-y-1">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">ชื่อเครือข่าย Wi-Fi (SSID):</label>
-                    <input type="text" value={wifi.ssid} onChange={(e) => setWifi({...wifi, ssid: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">ประเภทการเข้ารหัส:</label>
-                    <select value={wifi.encryption} onChange={(e) => setWifi({...wifi, encryption: e.target.value as any})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="WPA">WPA/WPA2</option>
-                      <option value="WEP">WEP</option>
-                      <option value="nopass">No Password</option>
-                    </select>
-                  </div>
-                  <div className="col-span-3 space-y-1">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">รหัสผ่านอินเทอร์เน็ต:</label>
-                    <input type="password" value={wifi.password} onChange={(e) => setWifi({...wifi, password: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              )}
-
-              {qrType === 'promptpay' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1 col-span-2">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">เลขบัตร/เบอร์โทรศัพท์ (PromptPay ID):</label>
-                    <input type="text" value={promptPay.id} onChange={(e) => setPromptPay({...promptPay, id: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <label className="block font-bold text-slate-600 dark:text-slate-400">ระบุจำนวนเงินฝาก (บาท):</label>
-                    <input type="number" value={promptPay.amount} onChange={(e) => setPromptPay({...promptPay, amount: e.target.value})} className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              )}
-
-            </div>
-
-            {/* Custom Styling Controls */}
-            <div className="space-y-4 border-t border-slate-200 dark:border-slate-800 pt-5">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Palette className="w-4 h-4 text-purple-500" />
-                <span>ปรับแต่งสีและเอฟเฟกต์สีรหัส (Gradients & Colors)</span>
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-left">
-                
-                {/* Palette Select */}
-                <div className="space-y-1.5 col-span-3">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">จานสีมาตรฐานองค์กร (Brand Color Preset):</label>
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-                    {presetPalettes.map((p, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => {
-                          setFgColor(p.fg);
-                          setBgColor(p.bg);
-                          setFrameColor(p.frame);
-                          setGradientType(p.gradType as any);
-                          setGradientColor2(p.col2);
-                        }}
-                        className="p-1 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded text-[9px] hover:bg-slate-100 dark:hover:bg-slate-800 flex flex-col items-center gap-1 font-semibold transition-colors"
-                      >
-                        <div className="flex gap-0.5 w-full h-3.5 rounded overflow-hidden">
-                          <div className="flex-1" style={{ backgroundColor: p.fg }} />
-                          <div className="flex-1" style={{ backgroundColor: p.col2 }} />
-                          <div className="flex-1" style={{ backgroundColor: p.bg }} />
-                        </div>
-                        <span className="truncate max-w-full text-slate-700 dark:text-slate-300">{p.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Color Fill Mode */}
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">รูปแบบการลงสี:</label>
-                  <select
-                    value={gradientType}
-                    onChange={(e) => setGradientType(e.target.value as any)}
-                    className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="solid">สีเดี่ยว (Solid Color)</option>
-                    <option value="linear">ไล่เฉดสีตรง (Linear Gradient)</option>
-                    <option value="radial">ไล่เฉดสีวงกลม (Radial Gradient)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">สีหลัก (Foreground):</label>
-                  <div className="flex gap-2">
-                    <input type="color" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="w-10 h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
-                    <input type="text" value={fgColor} onChange={(e) => setFgColor(e.target.value)} className="w-full px-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded font-mono text-xs outline-none focus:ring-1 focus:ring-blue-500" />
-                  </div>
-                </div>
-
-                {gradientType !== 'solid' && (
-                  <div className="space-y-1">
-                    <label className="font-semibold text-slate-600 dark:text-slate-400">สีเฉดเฉลี่ย (Gradient Color):</label>
-                    <div className="flex gap-2">
-                      <input type="color" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="w-10 h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
-                      <input type="text" value={gradientColor2} onChange={(e) => setGradientColor2(e.target.value)} className="w-full px-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded font-mono text-xs outline-none focus:ring-1 focus:ring-blue-500" />
-                    </div>
-                  </div>
-                )}
-
-              </div>
-
-              {/* Gradient angle */}
-              {gradientType === 'linear' && (
-                <div className="space-y-1.5 text-xs text-left">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">ทิศทางไล่สีคิวอาร์:</label>
-                  <div className="flex gap-2">
-                    {[
-                      { l: 'ซ้ายไปขวา (0°)', v: 0 },
-                      { l: 'ล่างซ้ายขึ้นขวา (45°)', v: 45 },
-                      { l: 'ล่างขึ้นบน (90°)', v: 90 },
-                      { l: 'บนซ้ายลงล่างขวา (135°)', v: 135 }
-                    ].map(ang => (
-                      <button
-                        key={ang.v}
-                        onClick={() => setGradientAngle(ang.v)}
-                        className={`px-2 py-1 rounded border text-[10px] font-semibold transition-colors ${gradientAngle === ang.v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
-                      >
-                        {ang.l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Background Color & Margin */}
-              <div className="grid grid-cols-2 gap-4 text-xs text-left">
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">สีพื้นหลังคิวอาร์ (Background Color):</label>
-                  <div className="flex items-center gap-3">
-                    <input type="color" value={bgColor} disabled={transparentBg} onChange={(e) => setBgColor(e.target.value)} className="w-10 h-8 border rounded cursor-pointer disabled:opacity-40" />
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                      <input type="checkbox" checked={transparentBg} onChange={(e) => setTransparentBg(e.target.checked)} className="rounded text-blue-500" />
-                      <span>พื้นหลังโปร่งใส (Transparent)</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">ขนาดขอบขาว (Quiet Zone Margin):</label>
-                  <div className="flex items-center gap-2">
-                    <input type="range" min="1" max="6" step="1" value={qrMargin} onChange={(e) => setQrMargin(parseInt(e.target.value))} className="w-full" />
-                    <span className="font-mono font-bold">{qrMargin}px</span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Logo Emblem Overlay */}
-            <div className="space-y-4 border-t border-slate-200 dark:border-slate-800 pt-5">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <ImageIcon className="w-4 h-4 text-indigo-500" />
-                <span>โลโก้ หรือตราสัญลักษณ์ตรงกลาง (Center Logo Overlay)</span>
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-left">
-                <div className="space-y-1 w-full sm:col-span-2">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">เลือกโลโก้มาตรฐาน:</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLogoType('none')}
-                      className={`p-2 border rounded-xl text-center font-bold transition-colors ${logoType === 'none' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
-                    >
-                      ไม่มีโลโก้
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLogoType('garuda')}
-                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 transition-colors ${logoType === 'garuda' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
-                    >
-                      <img src={GARUDA_LOGO_URL} className="w-5 h-5 object-contain" alt="ครุฑ" />
-                      <span>ตราครุฑสารบรรณ</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLogoType('ddpm')}
-                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 transition-colors ${logoType === 'ddpm' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
-                    >
-                      <img src={DDPM_LOGO_URL} className="w-5 h-5 object-contain" alt="ปภ" />
-                      <span>ตราสัญลักษณ์ ปภ.</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLogoType('custom');
-                        if (!customLogoUrl) {
-                          setCustomLogoUrl('https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png');
-                        }
-                      }}
-                      className={`p-2 border rounded-xl text-center font-bold flex flex-col items-center justify-center gap-1 transition-colors ${logoType === 'custom' ? 'border-indigo-600 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'}`}
-                    >
-                      <img src={customLogoUrl || 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png'} className="w-5 h-5 object-contain" alt="จังหวัด" />
-                      <span>ตราโลโก้อื่นๆ</span>
-                    </button>
-                  </div>
-                </div>
-
-                {logoType === 'custom' && (
-                  <div className="space-y-2">
-                    <label className="font-semibold text-slate-600 dark:text-slate-400">อัปโหลดไฟล์ภาพโลโก้ของคุณ (Custom Emblem):</label>
-                    
-                    <div
-                      onDragOver={handleDragOver}
-                      onDragLeave={handleDragLeave}
-                      onDrop={handleDrop}
-                      onClick={() => {
-                        const fileInput = document.getElementById('logo-file-input');
-                        if (fileInput) fileInput.click();
-                      }}
-                      className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-2 ${
-                        isDragging 
-                          ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/20 scale-[1.02]' 
-                          : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50/50 dark:border-slate-800 dark:hover:border-indigo-500/50'
-                      }`}
-                    >
-                      <input
-                        id="logo-file-input"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleLogoUpload}
-                        className="hidden"
-                      />
-                      
-                      {customLogoUrl ? (
-                        <div className="flex flex-col items-center gap-2">
-                          <img 
-                            src={customLogoUrl} 
-                            alt="Custom Logo Preview" 
-                            className="w-16 h-16 object-contain rounded-lg border border-slate-100 dark:border-slate-700 p-1 bg-white"
-                          />
-                          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">ลากไฟล์ใหม่มาวางที่นี่ หรือคลิกเพื่อเปลี่ยนรูป</span>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center gap-1">
-                          <ImageIcon className="w-8 h-8 text-slate-400 animate-pulse" />
-                          <span className="text-xs text-slate-600 dark:text-slate-400 font-semibold">ลากและวางไฟล์รูปภาพของคุณที่นี่</span>
-                          <span className="text-[10px] text-slate-400">หรือคลิกเพื่อค้นหาจากคอมพิวเตอร์ของคุณ</span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">รองรับนามสกุล PNG, JPG หรือ SVG และปรับขนาดให้พอดีอัตโนมัติ</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Frame Banner Texts */}
-            <div className="space-y-4 border-t border-slate-200 dark:border-slate-800 pt-5">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-emerald-500" />
-                <span>การใส่เฟรมแบรนด์หนังสือราชการ (Custom Frame & Labels)</span>
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-left">
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-600 dark:text-slate-400">สไตล์รูปแบบเฟรม:</label>
-                  <select
-                    value={frameType}
-                    onChange={(e) => setFrameType(e.target.value as any)}
-                    className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="none">ไม่มีกรอบ (เฉพาะภาพ QR)</option>
-                    <option value="top-bottom">หัวกระดาษแถบสีและสโลแกนใต้ (Official Corporate Banner)</option>
-                    <option value="card">กรอบรูปการ์ดสวยงาม (Document Card Mode)</option>
-                    <option value="badge">ริบบอนโค้งเน้นข้อความใต้ (Badge Ribbon Overlay)</option>
-                    <option value="official-garuda">สไตล์ตราครุฑทางการ (Official Garuda Frame)</option>
-                    <option value="modern-border">ขอบโมเดิร์นเน้นมุม (Modern Corner Border)</option>
-                    <option value="label-side">ฉลากแนวตั้งด้านข้าง (Vertical Side Label)</option>
-                  </select>
-                </div>
-
-                {frameType !== 'none' && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="font-semibold text-slate-600 dark:text-slate-400">ข้อความหลักแสดงด้านบนเฟรม:</label>
-                      <input
-                        type="text"
-                        value={frameText}
-                        onChange={(e) => setFrameText(e.target.value)}
-                        className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-bold text-xs outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="เช่น สแกนเพื่อตรวจสอบความสมบูรณ์"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-semibold text-slate-600 dark:text-slate-400">ข้อความเสริมแสดงด้านล่างเฟรม:</label>
-                      <input
-                        type="text"
-                        value={frameTextBottom}
-                        onChange={(e) => setFrameTextBottom(e.target.value)}
-                        className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-medium text-xs outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="เช่น สำนักงาน ปภ. จังหวัดระยอง"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {frameType !== 'none' && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="font-semibold text-slate-600 dark:text-slate-400">สีแบคกราวด์แถบเฟรม (Frame Color):</label>
-                      <input type="color" value={frameColor} onChange={(e) => setFrameColor(e.target.value)} className="w-full h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-semibold text-slate-600 dark:text-slate-400">สีฟอนต์ตัวหนังสือเฟรม (Text Color):</label>
-                      <input type="color" value={frameTextColor} onChange={(e) => setFrameTextColor(e.target.value)} className="w-full h-8 border border-slate-200 dark:border-slate-700 rounded cursor-pointer" />
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-          </div>
-
-          {/* Right Side: QR Real-time Render Result */}
-          <div className="lg:col-span-5 lg:sticky lg:top-4 bg-[var(--bg-overlay)] backdrop-blur-2xl border border-[var(--border-light)] rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col items-center justify-between min-h-[400px]">
-            <div className="space-y-1.5 text-center w-full">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[11px] font-semibold">
-                <Eye className="w-3.5 h-3.5" />
-                <span>ตัวอย่างตราประทับสด (Live Preview)</span>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                การปรับสไตล์ สี กรอบ และตราสัญลักษณ์จะอัปเดตแบบเรียลไทม์ทันที
-              </p>
-            </div>
-
-            {/* Main Canvas Display */}
-            <div className="relative my-5 max-w-full overflow-hidden p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-inner flex items-center justify-center">
-              <canvas
-                ref={canvasRef}
-                style={{ width: '100%', maxWidth: '300px', height: 'auto' }}
-                className="rounded-lg shadow-sm bg-white"
-              />
-              {isGenerating && (
-                <div className="absolute inset-0 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-xs font-bold text-blue-600">
-                  <RefreshCw className="w-8 h-8 animate-spin" />
-                  <span>กำลังประมวลผลความละเอียดสูง...</span>
-                </div>
-              )}
-            </div>
-
-            {/* Enterprise Quick Operations */}
-            <div className="w-full space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={downloadPNG}
-                  className="flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>บันทึก PNG (300DPI)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadSVG}
-                  className="flex items-center justify-center gap-2 py-3 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold shadow-sm transition-all"
-                >
-                  <FileDown className="w-4 h-4 text-slate-500" />
-                  <span>ดาวน์โหลด SVG</span>
-                </button>
-              </div>
-
-              {generationMode === 'dynamic' && registeredSlug && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800/60 rounded-xl flex items-center gap-3">
-                  <div className="bg-blue-600 text-white p-2 rounded-lg shrink-0">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 text-left min-w-0">
-                    <div className="font-bold text-xs text-blue-800 dark:text-blue-300">Dynamic QR พร้อมใช้งาน</div>
-                    <div className="text-[11px] text-blue-600 dark:text-blue-400 font-mono truncate">/qr/{registeredSlug}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/qr/${registeredSlug}`);
-                      showToast('success', 'คัดลอกลิงก์สั้นสแกนสำเร็จ!');
-                    }}
-                    className="p-2 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/50 rounded-lg transition-colors shrink-0"
-                    title="คัดลอก URL สั้น"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* AI Document Stamping Section */}
-              <div className="p-3.5 bg-gradient-to-br from-indigo-50/70 via-blue-50/40 to-slate-50 dark:from-slate-800/90 dark:via-indigo-950/25 dark:to-slate-900 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-lg shadow-xs">
-                      <Wand2 className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <div className="font-bold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                        <span>ประทับลงหนังสือ EDMS ด้วย AI</span>
-                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
-                          Auto-Fit
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                        ค้นหาพื้นที่ว่างปลอดภัย ไม่ทับตัวหนังสือหรือตราทางการ
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {selectedDoc ? (
-                  <div className="p-2 bg-white dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-750 flex items-center justify-between text-xs">
-                    <div className="min-w-0 pr-2">
-                      <div className="font-bold text-[11px] text-slate-800 dark:text-slate-200 truncate">
-                        {selectedDoc.docNumber || 'ไม่มีเลขที่หนังสือ'}
-                      </div>
-                      <div className="text-[10px] text-slate-500 truncate">
-                        {selectedDoc.title}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsAiStamperOpen(true)}
-                      className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline shrink-0"
-                    >
-                      เลือกจุดประทับ
-                    </button>
-                  </div>
-                ) : (
-                  <div className="p-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl text-[11px] text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                    <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    <span>กรุณาเลือกหนังสือในแถบ 'หนังสือ EDMS' ก่อนประทับ</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={handleQuickAiStamp}
-                    disabled={!selectedDocId || isSavingToDoc}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all disabled:opacity-40"
-                  >
-                    {isSavingToDoc ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                    ) : stampSuccess ? (
-                      <Check className="w-3.5 h-3.5 text-white shrink-0" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                    )}
-                    <span>{stampSuccess ? 'ประทับสำเร็จ!' : '⚡ ประทับตราทันทีด้วย AI'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!selectedDocId) {
-                        showToast('info', 'กรุณาเลือกหนังสือราชการก่อน');
-                        setQrType('edms');
-                        return;
-                      }
-                      setIsAiStamperOpen(true);
-                    }}
-                    disabled={!selectedDocId}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
-                  >
-                    <Scan className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                    <span>ตรวจพื้นที่ & ปรับขนาด</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Quick Print and Action buttons */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleStampToDocument}
-                  disabled={!selectedDocId || isSavingToDoc}
-                  className="flex items-center justify-center gap-2 p-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-xs text-amber-800 dark:text-amber-400 font-bold transition-all disabled:opacity-40"
-                >
-                  <Bookmark className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>ประทับมาตรฐาน (เดิม)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!generatedDataUrl) {
-                      showToast('error', 'กรุณารอภาพ QR Code ให้พร้อม');
-                      return;
-                    }
-                    const win = window.open('', '_blank');
-                    if (win) {
-                      win.document.write(`<!DOCTYPE html><html><head><title>พิมพ์ QR Code</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:320px;height:auto;}</style></head><body><img src="${generatedDataUrl}" onload="window.print();" /></body></html>`);
-                      win.document.close();
-                    }
-                  }}
-                  className="flex items-center justify-center gap-2 p-2.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-300 font-bold transition-all"
-                >
-                  <Printer className="w-4 h-4 text-slate-500 shrink-0" />
-                  <span>สั่งพิมพ์ด่วน (Print)</span>
-                </button>
-              </div>
-
-              {/* Details of code string */}
-              <div className="p-3 border-t border-slate-100 dark:border-slate-800 text-left space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase block">ค่าฝังรหัสจริง (Current QR Payload string):</span>
-                <div className="p-2.5 bg-slate-100 dark:bg-slate-900 border rounded-lg font-mono text-[10px] text-slate-600 dark:text-slate-400 break-all max-h-20 overflow-y-auto">
-                  {rawQrPayload}
-                </div>
-              </div>
-
-            </div>
-          </div>
+          <QrLivePreview
+            canvasRef={canvasRef}
+            isGenerating={isGenerating}
+            generatedDataUrl={generatedDataUrl}
+            downloadPNG={downloadPNG}
+            downloadSVG={downloadSVG}
+            generationMode={generationMode}
+            registeredSlug={registeredSlug}
+            selectedDoc={selectedDoc}
+            selectedDocId={selectedDocId}
+            isSavingToDoc={isSavingToDoc}
+            stampSuccess={stampSuccess}
+            handleQuickAiStamp={handleQuickAiStamp}
+            setIsAiStamperOpen={setIsAiStamperOpen}
+            handleStampToDocument={handleStampToDocument}
+            rawQrPayload={rawQrPayload}
+            showToast={showToast}
+            setQrType={setQrType}
+            contrastInfo={getContrastRatio(fgColor, bgColor, transparentBg)}
+          />
         </div>
       )}
 
