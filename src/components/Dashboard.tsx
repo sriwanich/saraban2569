@@ -3,12 +3,14 @@ import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, 
 
 import { DocumentItem, DocType } from '../types';
 import Overview from './views/Overview';
-import DocumentFormModal from './DocumentModal';
-import DocumentDetailModal from './DocumentDetailModal';
-import ChangelogModal from './ChangelogModal';
 import VersionBadge from './VersionBadge';
 import { LoadingIndicator } from './LoadingIndicator';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
+
+// Lazy-loaded heavy modals on demand to drastically minimize dashboard bundle size
+const DocumentFormModal = lazyWithRetry(() => import('./DocumentModal'));
+const DocumentDetailModal = lazyWithRetry(() => import('./DocumentDetailModal'));
+const ChangelogModal = lazyWithRetry(() => import('./ChangelogModal'));
 
 const DocumentList = lazyWithRetry(() => import('./views/DocumentList'));
 const Settings = lazyWithRetry(() => import('./views/Settings'));
@@ -2022,39 +2024,41 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       </main>
 
       {/* Modals */}
-      {isCreateModalOpen && (
-        <DocumentFormModal 
-          initialData={docToEdit || undefined}
-          defaultType={createDocType}
-          documents={documents}
-          currentYear={currentYear}
-          user={currentUser}
-          onClose={() => {
-            setIsCreateModalOpen(false);
-            setDocToEdit(null);
-          }} 
-          onSave={handleSaveDoc} 
-        />
-      )}
+      <Suspense fallback={null}>
+        {isCreateModalOpen && (
+          <DocumentFormModal 
+            initialData={docToEdit || undefined}
+            defaultType={createDocType}
+            documents={documents}
+            currentYear={currentYear}
+            user={currentUser}
+            onClose={() => {
+              setIsCreateModalOpen(false);
+              setDocToEdit(null);
+            }} 
+            onSave={handleSaveDoc} 
+          />
+        )}
 
-      {selectedDoc && (
-        <DocumentDetailModal 
-          doc={selectedDoc} 
-          allDocuments={documents}
-          user={currentUser}
-          onStatusUpdated={refreshData}
-          onSelectDoc={(docToSelect) => setSelectedDoc(docToSelect)}
-          onEdit={(docToEdit) => {
-            setSelectedDoc(null);
-            setDocToEdit(docToEdit);
-            setIsCreateModalOpen(true);
-          }}
-          onClose={() => {
-            setSelectedDoc(null);
-            refreshData();
-          }} 
-        />
-      )}
+        {selectedDoc && (
+          <DocumentDetailModal 
+            doc={selectedDoc} 
+            allDocuments={documents}
+            user={currentUser}
+            onStatusUpdated={refreshData}
+            onSelectDoc={(docToSelect) => setSelectedDoc(docToSelect)}
+            onEdit={(docToEdit) => {
+              setSelectedDoc(null);
+              setDocToEdit(docToEdit);
+              setIsCreateModalOpen(true);
+            }}
+            onClose={() => {
+              setSelectedDoc(null);
+              refreshData();
+            }} 
+          />
+        )}
+      </Suspense>
 
       {/* Profile Modal */}
       {isProfileModalOpen && (
@@ -2315,12 +2319,16 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       )}
 
       {/* Changelog & Release Notes Modal */}
-      <ChangelogModal
-        isOpen={isChangelogModalOpen}
-        onClose={() => setIsChangelogModalOpen(false)}
-        currentUser={currentUser}
-        hasPermission={hasPermission}
-      />
+      {isChangelogModalOpen && (
+        <Suspense fallback={null}>
+          <ChangelogModal
+            isOpen={isChangelogModalOpen}
+            onClose={() => setIsChangelogModalOpen(false)}
+            currentUser={currentUser}
+            hasPermission={hasPermission}
+          />
+        </Suspense>
+      )}
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {

@@ -44,11 +44,17 @@ export default function FoldersView({ documents, onViewDoc, onRefreshDocs, user,
       const res = await fetch(`/api/folders?department=${encodeURIComponent(user?.department || '')}&role=${user?.role || ''}`);
       if (res.ok) {
         const data = await res.json();
-        setFolders(data);
+        setFolders(Array.isArray(data) ? data : []);
+        try { localStorage.setItem('edms_folders_cache', JSON.stringify(data)); } catch (_) {}
+        return;
       }
     } catch (err) {
-      console.error('Error fetching folders:', err);
+      console.warn('Folders fetch fallback to cache:', err);
     }
+    try {
+      const cached = localStorage.getItem('edms_folders_cache');
+      if (cached) setFolders(JSON.parse(cached));
+    } catch (_) {}
   };
 
   const fetchDepartments = async () => {

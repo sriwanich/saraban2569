@@ -1162,7 +1162,10 @@ app.use((req, res, next) => {
   // console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`); // Silenced to prevent user confusion
   next();
 });
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+  maxAge: '1d',
+  etag: true
+}));
 
 // Secure file download helper that restores the original filename
 app.get('/api/files/download', async (req, res) => {
@@ -21553,13 +21556,17 @@ app.delete('/api/urgent-incidents/:id', async (req, res) => {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, {
-      etag: false,
-      lastModified: false,
-      setHeaders: (res) => {
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-        res.setHeader('Surrogate-Control', 'no-store');
+      etag: true,
+      lastModified: true,
+      setHeaders: (res, filePath) => {
+        if (filePath.includes('/assets/') || filePath.includes('\\assets\\')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+          res.setHeader('Surrogate-Control', 'no-store');
+        }
       }
     }));
     app.get('*all', (req, res) => {

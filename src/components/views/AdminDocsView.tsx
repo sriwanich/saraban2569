@@ -39,18 +39,30 @@ export default function AdminDocsView({ documents, user, onViewDoc, onCreateDoc,
 
   // Fetch folders list for filtering and labeling
   useEffect(() => {
+    let isMounted = true;
     const fetchFolders = async () => {
       try {
         const res = await fetch('/api/folders?all=1');
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
-          setFolders(data);
+          setFolders(Array.isArray(data) ? data : []);
+          try { localStorage.setItem('edms_folders_cache', JSON.stringify(data)); } catch (_) {}
+          return;
         }
       } catch (err) {
-        console.error('Error fetching folders:', err);
+        console.warn('Folders fetch fallback to local cache:', err);
       }
+      try {
+        const cached = localStorage.getItem('edms_folders_cache');
+        if (cached && isMounted) {
+          setFolders(JSON.parse(cached));
+        }
+      } catch (_) {}
     };
     fetchFolders();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const adminDocs = documents.filter(d => d.type === 'admin');

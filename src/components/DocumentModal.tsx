@@ -714,11 +714,17 @@ export default function DocumentFormModal({ initialData, defaultType, documents,
         const res = await fetch(`/api/folders?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
-          setFolders(data);
+          setFolders(Array.isArray(data) ? data : []);
+          try { localStorage.setItem('edms_folders_cache', JSON.stringify(data)); } catch (_) {}
+          return;
         }
       } catch (err) {
-        console.error('Error fetching folders:', err);
+        console.warn('Folders fetch fallback to cache in modal:', err);
       }
+      try {
+        const cached = localStorage.getItem('edms_folders_cache');
+        if (cached) setFolders(JSON.parse(cached));
+      } catch (_) {}
     };
     fetchFolders();
   }, [user]);

@@ -48,26 +48,34 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   const [isLoadingWorkflow, setIsLoadingWorkflow] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchWorkflow = async () => {
+      if (!doc?.id) return;
       setIsLoadingWorkflow(true);
       try {
         const res = await fetch('/api/workflows/instances');
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
           if (Array.isArray(data)) {
             const matched = data.find((inst: any) => String(inst.docId) === String(doc.id));
-            if (matched) {
+            if (matched && isMounted) {
               setWorkflowInstance(matched);
             }
           }
         }
       } catch (err) {
-        console.error('Error fetching workflow instance in detail:', err);
+        // Soft fallback without throwing console errors during navigation or warmups
+        console.warn('Workflow instance fetch skipped or offline fallback:', err);
       } finally {
-        setIsLoadingWorkflow(false);
+        if (isMounted) {
+          setIsLoadingWorkflow(false);
+        }
       }
     };
     fetchWorkflow();
+    return () => {
+      isMounted = false;
+    };
   }, [doc.id]);
 
   // Attachments State & Deletion
@@ -153,24 +161,25 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   const [readsFilter, setReadsFilter] = useState<'all' | 'read' | 'reading' | 'sent'>('all');
 
   const fetchReads = async () => {
+    if (!doc?.id) return;
     setIsFetchingReads(true);
     try {
       const res = await fetch(`/api/documents/${doc.id}/reads`);
       if (res.ok) {
         const data = await res.json();
-        if (data.reads) {
+        if (data && Array.isArray(data.reads)) {
           setReadsList(data.reads);
         }
       }
     } catch (err) {
-      console.error('Error fetching reads:', err);
+      console.warn('Failed to fetch reads (using empty fallback):', err);
     } finally {
       setIsFetchingReads(false);
     }
   };
 
   const markAsReading = async () => {
-    if (!user?.username) return;
+    if (!user?.username || !doc?.id) return;
     try {
       await fetch(`/api/documents/${doc.id}/reads`, {
         method: 'POST',
@@ -184,25 +193,31 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
       });
       fetchReads();
     } catch (err) {
-      console.error('Error marking as reading:', err);
+      console.warn('Mark as reading skipped:', err);
     }
   };
 
   const markAsRead = async () => {
-    if (!user?.username) return;
+    if (!user?.username || !doc?.id) return;
     try {
-      await fetch(`/api/documents/${doc.id}/reads`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: user.username,
-          fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
-          status: 'read',
-          docType: doc.type
-        })
+      // Use sendBeacon if available during navigation or unload, otherwise normal fetch with soft catch
+      const payload = JSON.stringify({
+        username: user.username,
+        fullName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username,
+        status: 'read',
+        docType: doc.type
       });
+      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        navigator.sendBeacon(`/api/documents/${doc.id}/reads`, new Blob([payload], { type: 'application/json' }));
+      } else {
+        await fetch(`/api/documents/${doc.id}/reads`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload
+        });
+      }
     } catch (err) {
-      console.error('Error marking as read:', err);
+      console.warn('Mark as read completed or cancelled:', err);
     }
   };
 
@@ -222,19 +237,21 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
   const [docVerifyUrl, setDocVerifyUrl] = useState<string>('');
 
   const fetchDocQrCode = async () => {
+    if (!doc?.id) return;
     try {
       const res = await fetch(`/api/documents/${doc.id}/qr-code`);
       if (res.ok) {
         const data = await res.json();
-        setDocQrCode(data.qrCodeDataUrl);
-        setDocVerifyUrl(data.verifyUrl);
+        setDocQrCode(data.qrCodeDataUrl || '');
+        setDocVerifyUrl(data.verifyUrl || '');
       }
     } catch (err) {
-      console.error('Error fetching general document QR verification code:', err);
+      console.warn('Document QR verification fetch skipped or unavailable:', err);
     }
   };
 
   const fetchDocSignatures = async () => {
+    if (!doc?.id) return;
     try {
       const res = await fetch(`/api/digital-signatures/doc/${doc.id}`);
       if (res.ok) {
@@ -250,21 +267,33 @@ export default function DocumentDetailModal({ doc, allDocuments, onClose, user, 
 
   // Fetch folders and departments
   useEffect(() => {
+    let isMounted = true;
     const fetchFolders = async () => {
       try {
         const res = await fetch('/api/folders?all=1');
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
-          setFolders(data);
+          setFolders(Array.isArray(data) ? data : []);
+          try { localStorage.setItem('edms_folders_cache', JSON.stringify(data)); } catch (_) {}
+          return;
         }
       } catch (err) {
-        console.error('Error fetching folders:', err);
+        console.warn('Folders fetch fallback to cache:', err);
       }
+      try {
+        const cached = localStorage.getItem('edms_folders_cache');
+        if (cached && isMounted) {
+          setFolders(JSON.parse(cached));
+        }
+      } catch (_) {}
     };
     fetchFolders();
     fetchDocSignatures();
     fetchDocQrCode();
     handleRunAiCrossRef();
+    return () => {
+      isMounted = false;
+    };
   }, [doc.id]);
 
   // Handle marking as reading on load and marking as read on unmount

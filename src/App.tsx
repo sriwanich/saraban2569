@@ -1,13 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConfirmProvider } from './context/ConfirmContext';
 import { LoadingIndicator } from './components/LoadingIndicator';
-import Login from './components/Login';
-import Dashboard from './components/Dashboard';
-import { PublicInfographicsViewer } from './components/views/PublicInfographicsViewer';
-import { PublicQrVerifyViewer } from './components/views/PublicQrVerifyViewer';
-import { PublicSurveyViewer } from './components/views/PublicSurveyViewer';
+import { lazyWithRetry } from './utils/lazyWithRetry';
 import { useRealtimeSync } from './utils/realtimeSync';
+
+// Structurally optimize initial bundle by lazy loading top-level views on demand
+const Login = lazyWithRetry(() => import('./components/Login'));
+const Dashboard = lazyWithRetry(() => import('./components/Dashboard'));
+const PublicInfographicsViewer = lazyWithRetry(() => 
+  import('./components/views/PublicInfographicsViewer').then(m => ({ default: m.PublicInfographicsViewer }))
+);
+const PublicQrVerifyViewer = lazyWithRetry(() => 
+  import('./components/views/PublicQrVerifyViewer').then(m => ({ default: m.PublicQrVerifyViewer }))
+);
+const PublicSurveyViewer = lazyWithRetry(() => 
+  import('./components/views/PublicSurveyViewer').then(m => ({ default: m.PublicSurveyViewer }))
+);
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -229,7 +238,9 @@ export default function App() {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลสื่อ Infographic">
         <ConfirmProvider>
-          <PublicInfographicsViewer />
+          <Suspense fallback={<LoadingIndicator message="กำลังโหลดสื่อ Infographic..." />}>
+            <PublicInfographicsViewer />
+          </Suspense>
         </ConfirmProvider>
       </ErrorBoundary>
     );
@@ -238,7 +249,9 @@ export default function App() {
   if (isPublicQrVerify) {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลหน้าตรวจสอบ QR Code">
-        <PublicQrVerifyViewer />
+        <Suspense fallback={<LoadingIndicator message="กำลังโหลดระบบตรวจสอบ QR Code..." />}>
+          <PublicQrVerifyViewer />
+        </Suspense>
       </ErrorBoundary>
     );
   }
@@ -246,7 +259,9 @@ export default function App() {
   if (isPublicSurvey) {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลหน้าแบบสำรวจ">
-        <PublicSurveyViewer />
+        <Suspense fallback={<LoadingIndicator message="กำลังโหลดแบบสำรวจประเมินผล..." />}>
+          <PublicSurveyViewer />
+        </Suspense>
       </ErrorBoundary>
     );
   }
@@ -259,7 +274,9 @@ export default function App() {
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการโหลดหน้าจอการทำงาน">
         <ConfirmProvider>
-          <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />
+          <Suspense fallback={<LoadingIndicator message="กำลังเตรียมหน้าจอการทำงานหลัก..." />}>
+            <Dashboard onLogout={handleLogout} theme={theme} setTheme={handleSetTheme} user={user} isSystemDark={isSystemDark} />
+          </Suspense>
         </ConfirmProvider>
       </ErrorBoundary>
     );
@@ -268,15 +285,17 @@ export default function App() {
   return (
     <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในหน้าต่างเข้าสู่ระบบ">
       <ConfirmProvider>
-        <Login onLogin={(u, rememberMe) => {
-          setUser(u);
-          setIsLoggedIn(true);
-          if (rememberMe) {
-            localStorage.setItem('edms_user_data', JSON.stringify(u));
-          } else {
-            sessionStorage.setItem('edms_user_data', JSON.stringify(u));
-          }
-        }} />
+        <Suspense fallback={<LoadingIndicator message="กำลังเปิดหน้าต่างเข้าสู่ระบบ..." />}>
+          <Login onLogin={(u, rememberMe) => {
+            setUser(u);
+            setIsLoggedIn(true);
+            if (rememberMe) {
+              localStorage.setItem('edms_user_data', JSON.stringify(u));
+            } else {
+              sessionStorage.setItem('edms_user_data', JSON.stringify(u));
+            }
+          }} />
+        </Suspense>
       </ConfirmProvider>
     </ErrorBoundary>
   );
