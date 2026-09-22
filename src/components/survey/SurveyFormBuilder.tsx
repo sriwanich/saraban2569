@@ -114,7 +114,7 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
       settings: {
         status: 'draft',
         themeColor: '#2563eb',
-        headerLogoType: 'garuda',
+        headerLogoType: 'ddpm',
         showProgressBar: true,
         showQuestionNumbers: true,
         allowAnonymous: true,

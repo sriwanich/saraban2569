@@ -19,6 +19,7 @@ import crypto from 'crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
+import { OFFICIAL_SURVEY_TEMPLATES } from './src/data/surveyTemplates';
 
 const execFileAsync = promisify(execFile);
 
@@ -5357,6 +5358,7 @@ async function setupDatabase() {
 
       // Ensure surveys and survey_responses tables exist with complete schema
       try {
+        // 1. Create or update surveys table
         await pool.query(`
           CREATE TABLE IF NOT EXISTS surveys (
             id VARCHAR(100) PRIMARY KEY,
@@ -5367,218 +5369,207 @@ async function setupDatabase() {
             department VARCHAR(255) DEFAULT '',
             creator_id VARCHAR(100) DEFAULT 'admin',
             creator_name VARCHAR(255) DEFAULT 'ผู้ดูแลระบบ',
+            status VARCHAR(50) DEFAULT 'published',
             settings LONGTEXT,
             questions LONGTEXT,
             view_count INT DEFAULT 0,
             response_count INT DEFAULT 0,
             created_at VARCHAR(50),
-            updated_at VARCHAR(50)
+            updated_at VARCHAR(50),
+            INDEX idx_category (category),
+            INDEX idx_status (status)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `, []);
 
+        // 2. Create or update survey_responses table
         await pool.query(`
           CREATE TABLE IF NOT EXISTS survey_responses (
             id VARCHAR(100) PRIMARY KEY,
             survey_id VARCHAR(100) NOT NULL,
+            survey_title VARCHAR(255) DEFAULT NULL,
             respondent_name VARCHAR(255) DEFAULT NULL,
             respondent_department VARCHAR(255) DEFAULT NULL,
-            answers LONGTEXT,
+            respondent_position VARCHAR(255) DEFAULT NULL,
+            respondent_phone VARCHAR(50) DEFAULT NULL,
+            respondent_email VARCHAR(255) DEFAULT NULL,
+            respondent_ip VARCHAR(100) DEFAULT NULL,
+            device_info VARCHAR(255) DEFAULT NULL,
             time_spent_seconds INT DEFAULT 0,
+            total_score DECIMAL(10,2) DEFAULT NULL,
+            answers LONGTEXT,
             submitted_at VARCHAR(50),
-            INDEX idx_survey_id (survey_id)
+            INDEX idx_survey_id (survey_id),
+            INDEX idx_submitted_at (submitted_at)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `, []);
 
-        // Seed default official surveys if table is empty
-        const [surveyCountRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM surveys');
-        if (surveyCountRows && surveyCountRows[0] && surveyCountRows[0].cnt === 0) {
-          const defaultSurveys = [
+        // 3. Auto-migrate missing columns for existing tables
+        try {
+          const [surveyCols]: any = await pool.query("SHOW COLUMNS FROM surveys LIKE 'status'");
+          if (!surveyCols || surveyCols.length === 0) {
+            await pool.query("ALTER TABLE surveys ADD COLUMN status VARCHAR(50) DEFAULT 'published' AFTER creator_name");
+          }
+        } catch (_) {}
+
+        const responseColsToAdd = [
+          { name: 'survey_title', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'respondent_position', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'respondent_phone', type: 'VARCHAR(50) DEFAULT NULL' },
+          { name: 'respondent_email', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'respondent_ip', type: 'VARCHAR(100) DEFAULT NULL' },
+          { name: 'device_info', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'total_score', type: 'DECIMAL(10,2) DEFAULT NULL' }
+        ];
+
+        for (const col of responseColsToAdd) {
+          try {
+            const [c]: any = await pool.query(`SHOW COLUMNS FROM survey_responses LIKE '${col.name}'`);
+            if (!c || c.length === 0) {
+              await pool.query(`ALTER TABLE survey_responses ADD COLUMN ${col.name} ${col.type}`);
+            }
+          } catch (_) {}
+        }
+
+        // 4. Seed all Official Survey Templates from single source of truth
+        if (Array.isArray(OFFICIAL_SURVEY_TEMPLATES)) {
+          for (let i = 0; i < OFFICIAL_SURVEY_TEMPLATES.length; i++) {
+            const tpl = OFFICIAL_SURVEY_TEMPLATES[i];
+            const tplId = `survey_official_${i + 1}`;
+            const [chkRows]: any = await pool.query('SELECT id FROM surveys WHERE id = ?', [tplId]);
+            if (!chkRows || chkRows.length === 0) {
+              const now = new Date(Date.now() - (i * 86400000 * 2)).toISOString();
+              await pool.query(
+                `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, status, settings, questions, view_count, response_count, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  tplId,
+                  tpl.title,
+                  tpl.description || '',
+                  tpl.category || 'satisfaction',
+                  tpl.categoryLabel || 'ความพึงพอใจ',
+                  tpl.department || 'ฝ่ายบริหารทั่วไป',
+                  'admin',
+                  'ฝ่ายบริหารงานสารบรรณ ปภ.',
+                  tpl.settings?.status || 'published',
+                  JSON.stringify(tpl.settings || {}),
+                  JSON.stringify(tpl.questions || []),
+                  42 + (i * 18),
+                  0,
+                  now,
+                  new Date().toISOString()
+                ]
+              );
+            }
+          }
+        }
+
+        // 5. Seed sample responses for official template 1 and recalculate count if empty
+        const [respCountRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM survey_responses WHERE survey_id = ?', ['survey_official_1']);
+        if (respCountRows && respCountRows[0] && respCountRows[0].cnt === 0) {
+          const sampleOfficialResponses = [
             {
-              id: 'survey_official_1',
-              title: 'แบบประเมินความพึงพอใจการให้บริการประชาชน (ก.พ.ร.)',
-              description: 'แบบสำรวจความพึงพอใจของผู้รับบริการต่อการปฏิบัติงานและการให้บริการของสำนักงาน ปภ. จังหวัดระยอง ตามเกณฑ์มาตรฐาน ก.พ.ร.',
-              category: 'satisfaction',
-              category_label: 'ความพึงพอใจการบริการ',
-              department: 'ฝ่ายบริหารทั่วไป',
-              creator_id: 'admin',
-              creator_name: 'ฝ่ายบริหารงานสารบรรณ ปภ.',
-              settings: JSON.stringify({
-                status: 'published',
-                themeColor: '#2563eb',
-                headerLogoType: 'garuda',
-                showProgressBar: true,
-                showQuestionNumbers: true,
-                allowAnonymous: true,
-                requireLogin: false,
-                thankYouTitle: 'ขอบพระคุณสำหรับข้อคิดเห็นอันมีค่ายิ่ง',
-                thankYouMessage: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง จะนำผลการประเมินไปพัฒนาและยกระดับคุณภาพการให้บริการประชาชนให้ดียิ่งขึ้นต่อไป'
+              id: 'resp_official_1_01',
+              survey_id: 'survey_official_1',
+              survey_title: 'แบบประเมินความพึงพอใจการให้บริการประชาชน (ก.พ.ร.)',
+              respondent_name: 'นายสมชาย รัตนโชติ',
+              respondent_department: 'ประชาชนทั่วไป / ผู้ขอรับความช่วยเหลือ',
+              respondent_position: 'ประชาชน',
+              respondent_phone: '081-998-1234',
+              respondent_email: 'somchai.r@gmail.com',
+              respondent_ip: '127.0.0.1',
+              device_info: 'Mobile (Safari/iOS)',
+              time_spent_seconds: 78,
+              total_score: 5.0,
+              answers: JSON.stringify({
+                'q_service_type': 'งานขอรับความช่วยเหลือสงเคราะห์ผู้ประสบภัยพิบัติ',
+                'q_matrix_satisfaction': {
+                  'row_step': 5,
+                  'row_staff': 5,
+                  'row_info': 5,
+                  'row_place': 5,
+                  'row_overall': 5
+                },
+                'q_nps_score': 10,
+                'q_suggestions': 'เจ้าหน้าที่ ปภ. บริการรวดเร็ว ให้คำแนะนำชัดเจนและสุภาพมากครับ'
               }),
-              questions: JSON.stringify([
-                {
-                  id: 'q_service_type',
-                  type: 'single_choice',
-                  title: '1. ประเภทงานบริการที่ท่านมาติดต่อขอรับบริการในวันนี้',
-                  description: 'กรุณาเลือกงานบริการหลักที่ท่านเข้ารับบริการ',
-                  required: true,
-                  options: [
-                    { id: 'opt_1', text: 'งานขอรับความช่วยเหลือสงเคราะห์ผู้ประสบภัยพิบัติ' },
-                    { id: 'opt_2', text: 'งานฝึกอบรม/ซ้อมแผนป้องกันและระงับอัคคีภัย' },
-                    { id: 'opt_3', text: 'งานขอใช้เครื่องจักรกลสาธารณภัย / ยานพาหนะกู้ภัย' },
-                    { id: 'opt_4', text: 'งานสารบรรณ / ส่ง-รับหนังสือราชการ' },
-                    { id: 'opt_5', text: 'งานขอข้อมูลสถิติและแผนป้องกันสาธารณภัย' },
-                    { id: 'opt_6', text: 'อื่นๆ (โปรดระบุ)' }
-                  ],
-                  allowOther: true
-                },
-                {
-                  id: 'q_matrix_satisfaction',
-                  type: 'matrix_rating',
-                  title: '2. ระดับความพึงพอใจต่อขั้นตอนและการให้บริการในแต่ละมิติ',
-                  description: 'กรุณาให้คะแนนความพึงพอใจตามระดับ 1 (น้อยที่สุด) ถึง 5 (มากที่สุด)',
-                  required: true,
-                  matrixRows: [
-                    { id: 'row_step', text: '1) ขั้นตอนและกระบวนการให้บริการมีความสะดวกรวดเร็วและไม่ซับซ้อน' },
-                    { id: 'row_staff', text: '2) เจ้าหน้าที่ให้บริการด้วยความสุภาพ ยิ้มแย้ม และเต็มใจให้คำแนะนำ' },
-                    { id: 'row_info', text: '3) ข้อมูล คำอธิบาย และเอกสารเผยแพร่มีความชัดเจน ครบถ้วน ถูกต้อง' },
-                    { id: 'row_place', text: '4) สถานที่ จุดบริการ มีความสะอาด สะดวกสบาย และปลอดภัย' },
-                    { id: 'row_overall', text: '5) ภาพรวมความพึงพอใจต่อการให้บริการของสำนักงาน ปภ. จังหวัดระยอง' }
-                  ],
-                  matrixCols: [
-                    { id: 'c1', text: 'น้อยที่สุด (1)', score: 1 },
-                    { id: 'c2', text: 'น้อย (2)', score: 2 },
-                    { id: 'c3', text: 'ปานกลาง (3)', score: 3 },
-                    { id: 'c4', text: 'มาก (4)', score: 4 },
-                    { id: 'c5', text: 'มากที่สุด (5)', score: 5 }
-                  ]
-                },
-                {
-                  id: 'q_nps_score',
-                  type: 'slider_score',
-                  title: '3. ความเป็นไปได้ที่ท่านจะแนะนำการบริการของหน่วยงานแก่ผู้อื่น (Net Promoter Score)',
-                  description: 'คะแนนระดับ 0 (ไม่แนะนำแน่นอน) ถึง 10 (แนะนำอย่างยิ่ง)',
-                  required: true,
-                  minScore: 0,
-                  maxScore: 10,
-                  step: 1
-                },
-                {
-                  id: 'q_suggestions',
-                  type: 'text_long',
-                  title: '4. ข้อเสนอแนะเพื่อการปรับปรุงและพัฒนางานบริการ',
-                  description: 'ท่านมีข้อคิดเห็น คำแนะนำ หรือความต้องการเพิ่มเติมประการใดในการพัฒนาระบบบริการ',
-                  required: false,
-                  placeholder: 'พิมพ์ข้อเสนอแนะของท่านที่นี่...'
-                }
-              ]),
-              view_count: 42,
-              response_count: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+              submitted_at: new Date(Date.now() - 3600000 * 2).toISOString()
             },
             {
-              id: 'survey_official_3',
-              title: 'แบบตอบรับการเข้าร่วมฝึกอบรม/การประชุมสัมมนาและซ้อมแผนสาธารณภัย (RSVP)',
-              description: 'แบบตอบรับเข้าร่วมกิจกรรมทางราชการ และยืนยันยอดผู้เข้าร่วมการประชุม/การฝึกอบรมเชิงปฏิบัติการของสำนักงาน ปภ. จังหวัดระยอง',
-              category: 'rsvp_acknowledgment',
-              category_label: 'แบบตอบรับ/ยืนยันการเข้าร่วม',
-              department: 'กลุ่มงานป้องกันและแก้ไขปัญหาภัยพิบัติ',
-              creator_id: 'admin',
-              creator_name: 'ฝ่ายบริหารงานสารบรรณ ปภ.',
-              settings: JSON.stringify({
-                status: 'published',
-                themeColor: '#059669',
-                headerLogoType: 'ddpm',
-                showProgressBar: true,
-                showQuestionNumbers: true,
-                allowAnonymous: false,
-                requireLogin: false,
-                isRsvpForm: true,
-                rsvpEventTitle: 'การฝึกซ้อมแผนป้องกันและบรรเทาสาธารณภัยระดับจังหวัด ประจำปี พ.ศ. 2569',
-                rsvpEventDate: '28 กันยายน 2569 เวลา 08:30 - 16:30 น.',
-                rsvpEventLocation: 'ห้องประชุมศูนย์ราชการจังหวัดระยอง ชั้น 3',
-                linkedDocNumber: 'รย 0021/ว 1420',
-                thankYouTitle: 'บันทึกการตอบรับการเข้าร่วมเรียบร้อยแล้ว',
-                thankYouMessage: 'สำนักงาน ปภ. จังหวัดระยอง ได้รับข้อมูลยืนยันการเข้าร่วมกิจกรรมของท่านเรียบร้อยแล้ว ขอขอบพระคุณเป็นอย่างยิ่ง'
+              id: 'resp_official_1_02',
+              survey_id: 'survey_official_1',
+              survey_title: 'แบบประเมินความพึงพอใจการให้บริการประชาชน (ก.พ.ร.)',
+              respondent_name: 'นางสาวกานดา วิเศษสุข',
+              respondent_department: 'อบต.เชิงเนิน',
+              respondent_position: 'เจ้าหน้าที่งานป้องกันและบรรเทาสาธารณภัย',
+              respondent_phone: '086-455-8899',
+              respondent_email: 'kanda.w@rayonglocal.go.th',
+              respondent_ip: '127.0.0.1',
+              device_info: 'Desktop (Chrome/Windows)',
+              time_spent_seconds: 92,
+              total_score: 4.8,
+              answers: JSON.stringify({
+                'q_service_type': 'งานฝึกอบรม/ซ้อมแผนป้องกันและระงับอัคคีภัย',
+                'q_matrix_satisfaction': {
+                  'row_step': 5,
+                  'row_staff': 5,
+                  'row_info': 4,
+                  'row_place': 5,
+                  'row_overall': 5
+                },
+                'q_nps_score': 9,
+                'q_suggestions': 'การฝึกซ้อมมีความเข้มข้น วิทยากรอธิบายเข้าใจง่าย นำไปประยุกต์ใช้ในพื้นที่ได้จริง'
               }),
-              questions: JSON.stringify([
-                {
-                  id: 'q_attend_status',
-                  type: 'single_choice',
-                  title: '1. การตอบรับเข้าร่วมกิจกรรม/การประชุม',
-                  description: 'กรุณาระบุสถานะการเข้าร่วมของหน่วยงานท่าน',
-                  required: true,
-                  options: [
-                    { id: 'opt_yes', text: 'ยินดีเข้าร่วมการประชุม/ฝึกอบรม (ตามวันและเวลาที่กำหนด)' },
-                    { id: 'opt_delegate', text: 'มอบหมายผู้แทนเข้าร่วมการประชุม' },
-                    { id: 'opt_no', text: 'มีความจำเป็นต้องขออภัย ไม่สามารถเข้าร่วมได้' }
-                  ]
+              submitted_at: new Date(Date.now() - 3600000 * 18).toISOString()
+            },
+            {
+              id: 'resp_official_1_03',
+              survey_id: 'survey_official_1',
+              survey_title: 'แบบประเมินความพึงพอใจการให้บริการประชาชน (ก.พ.ร.)',
+              respondent_name: 'นายธีรภัทร ชาญวิทย์',
+              respondent_department: 'เทศบาลนครระยอง',
+              respondent_position: 'นักจัดการงานทั่วไป',
+              respondent_phone: '089-112-3344',
+              respondent_email: 'theeraphat@rayongcity.go.th',
+              respondent_ip: '127.0.0.1',
+              device_info: 'Desktop (Chrome/macOS)',
+              time_spent_seconds: 64,
+              total_score: 4.6,
+              answers: JSON.stringify({
+                'q_service_type': 'งานสารบรรณ / ส่ง-รับหนังสือราชการ',
+                'q_matrix_satisfaction': {
+                  'row_step': 4,
+                  'row_staff': 5,
+                  'row_info': 5,
+                  'row_place': 4,
+                  'row_overall': 5
                 },
-                {
-                  id: 'q_attendee_name',
-                  type: 'text_short',
-                  title: '2. ชื่อ-นามสกุล ผู้เข้าร่วมการประชุม / ผู้แทน',
-                  description: 'ระบุยศ/นาย/นาง/นางสาว พร้อมชื่อและนามสกุล',
-                  required: true,
-                  placeholder: 'เช่น นายวิชัย ใจดี'
-                },
-                {
-                  id: 'q_attendee_position',
-                  type: 'text_short',
-                  title: '3. ตำแหน่ง และหน่วยงาน/สังกัด',
-                  description: 'ระบุตำแหน่งทางราชการและชื่อหน่วยงาน',
-                  required: true,
-                  placeholder: 'เช่น หัวหน้าฝ่ายป้องกันฯ อบต.เนินพระ'
-                },
-                {
-                  id: 'q_attendee_phone',
-                  type: 'text_short',
-                  title: '4. หมายเลขโทรศัพท์ติดต่อสะดวก / LINE ID',
-                  description: 'เพื่อใช้ในการประสานงานล่วงหน้าวันจัดกิจกรรม',
-                  required: true,
-                  placeholder: 'เช่น 081-234-5678'
-                },
-                {
-                  id: 'q_dietary',
-                  type: 'single_choice',
-                  title: '5. ข้อจำกัดด้านอาหาร/ข้อกำหนดพิเศษ',
-                  description: 'เพื่อการจัดเตรียมอาหารกลางวันและอาหารว่าง',
-                  required: false,
-                  options: [
-                    { id: 'diet_normal', text: 'อาหารทั่วไป (รับประทานได้ทุกประเภท)' },
-                    { id: 'diet_halal', text: 'อาหารฮาลาล (มุสลิม)' },
-                    { id: 'diet_veg', text: 'อาหารมังสวิรัติ / เจ' }
-                  ]
-                },
-                {
-                  id: 'q_signature',
-                  type: 'signature',
-                  title: '6. ลายมือชื่อรับรองการตอบรับ',
-                  description: 'กรุณาวาดลายมือชื่ออิเล็กทรอนิกส์เพื่อใช้เป็นหลักฐานทางราชการ',
-                  required: true
-                }
-              ]),
-              view_count: 58,
-              response_count: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+                'q_nps_score': 9,
+                'q_suggestions': 'ระบบรับส่งหนังสืออิเล็กทรอนิกส์สะดวกมาก ประหยัดเวลาการเดินทาง'
+              }),
+              submitted_at: new Date(Date.now() - 3600000 * 36).toISOString()
             }
           ];
 
-          for (const s of defaultSurveys) {
+          for (const resp of sampleOfficialResponses) {
             await pool.query(
-              `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO survey_responses (id, survey_id, survey_title, respondent_name, respondent_department, respondent_position, respondent_phone, respondent_email, respondent_ip, device_info, time_spent_seconds, total_score, answers, submitted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE answers = VALUES(answers)`,
               [
-                s.id, s.title, s.description, s.category, s.category_label, s.department,
-                s.creator_id, s.creator_name, s.settings, s.questions, s.view_count, s.response_count,
-                s.created_at, s.updated_at
+                resp.id, resp.survey_id, resp.survey_title, resp.respondent_name, resp.respondent_department,
+                resp.respondent_position, resp.respondent_phone, resp.respondent_email, resp.respondent_ip,
+                resp.device_info, resp.time_spent_seconds, resp.total_score, resp.answers, resp.submitted_at
               ]
             );
           }
-          console.log('✅ Seeded default surveys into MySQL database');
+
+          await pool.query(
+            'UPDATE surveys SET response_count = (SELECT COUNT(*) FROM survey_responses WHERE survey_id = ?) WHERE id = ?',
+            ['survey_official_1', 'survey_official_1']
+          );
         }
 
-        console.log('✅ Initialized and verified surveys & survey_responses tables in MySQL');
+        console.log('✅ Initialized, auto-migrated, and synchronized surveys & survey_responses tables in MySQL');
       } catch (e) {
         console.warn('Note checking/creating surveys/survey_responses tables:', e);
       }
@@ -21819,96 +21810,202 @@ export async function notifyWorkChange(doc: any, action: 'CREATE' | 'UPDATE' | '
 // ==========================================
 
 // ==========================================
-// SURVEYKING EVALUATION & ASSESSMENT API
+// SURVEY & EVALUATION INTELLIGENT API (MySQL Synchronized)
 // ==========================================
+
+// ==========================================
+// SURVEY & EVALUATION INTELLIGENT API (MySQL Exclusive)
+// ==========================================
+
+// 1. GET /api/surveys - Fetch all surveys from MySQL exclusively
 app.get('/api/surveys', async (req, res) => {
   try {
-    let mysqlSurveys: any[] = [];
-    if (isMysqlOnline) {
-      try {
-        const [rows]: any = await pool.query('SELECT * FROM surveys ORDER BY created_at DESC');
-        if (rows && rows.length > 0) {
-          mysqlSurveys = rows.map((r: any) => ({
-            id: r.id,
-            title: r.title,
-            description: r.description,
-            category: r.category,
-            categoryLabel: r.category_label,
-            department: r.department,
-            creatorId: r.creator_id,
-            creatorName: r.creator_name,
-            createdAt: r.created_at,
-            updatedAt: r.updated_at,
-            viewCount: r.view_count || 0,
-            responseCount: r.response_count || 0,
-            settings: typeof r.settings === 'string' ? JSON.parse(r.settings) : (r.settings || {}),
-            questions: typeof r.questions === 'string' ? JSON.parse(r.questions) : (r.questions || [])
-          }));
-        }
-      } catch (err) {
-        console.warn('MySQL surveys query error, falling back to localDb:', err);
-      }
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
     }
 
-    const localList = (localDb.surveys && Array.isArray(localDb.surveys)) ? localDb.surveys : [];
+    const { status, category, search } = req.query as { status?: string; category?: string; search?: string };
+    let sql = `
+      SELECT s.*, 
+        (SELECT COUNT(*) FROM survey_responses sr WHERE sr.survey_id = s.id) AS actual_response_count
+      FROM surveys s
+      WHERE 1=1
+    `;
+    const params: any[] = [];
 
-    // Merge mysqlSurveys and localList
-    const surveyMap = new Map<string, any>();
-    localList.forEach((s: any) => surveyMap.set(s.id, s));
-    mysqlSurveys.forEach((s: any) => surveyMap.set(s.id, s));
+    if (category && category !== 'all') {
+      sql += ' AND s.category = ?';
+      params.push(category);
+    }
 
-    const combined = Array.from(surveyMap.values()).sort((a, b) => 
-      new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-    );
+    if (status && status !== 'all') {
+      sql += ' AND (s.status = ? OR (s.status IS NULL AND ? = "published"))';
+      params.push(status, status);
+    }
 
-    return res.json(combined);
+    if (search && search.trim()) {
+      sql += ' AND (s.title LIKE ? OR s.description LIKE ? OR s.department LIKE ?)';
+      const term = `%${search.trim()}%`;
+      params.push(term, term, term);
+    }
+
+    sql += ' ORDER BY s.created_at DESC';
+
+    const [rows]: any = await pool.query(sql, params);
+    const surveys = (rows || []).map((r: any) => {
+      const parsedSettings = safeJsonParse(r.settings, {});
+      const parsedQuestions = safeJsonParse(r.questions, []);
+      const surveyStatus = r.status || parsedSettings.status || 'published';
+
+      return {
+        id: r.id,
+        title: r.title,
+        description: r.description || '',
+        category: r.category || 'satisfaction',
+        categoryLabel: r.category_label || 'ความพึงพอใจ',
+        department: r.department || '',
+        creatorId: r.creator_id || 'admin',
+        creatorName: r.creator_name || 'ผู้ดูแลระบบ',
+        status: surveyStatus,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+        viewCount: Number(r.view_count) || 0,
+        responseCount: Number(r.actual_response_count ?? r.response_count) || 0,
+        settings: { ...parsedSettings, status: surveyStatus },
+        questions: Array.isArray(parsedQuestions) ? parsedQuestions : []
+      };
+    });
+
+    return res.json(surveys);
   } catch (e: any) {
     console.error('GET /api/surveys error:', e);
-    return res.status(500).json({ error: 'ไม่สามารถดึงข้อมูลแบบสำรวจได้' });
+    return res.status(500).json({ error: 'ไม่สามารถดึงข้อมูลแบบสำรวจจาก MySQL ได้' });
   }
 });
 
-app.get('/api/surveys/:id', async (req, res) => {
+// 2. GET /api/surveys/stats/overview - Global statistics for Survey Dashboard from MySQL exclusively
+app.get('/api/surveys/stats/overview', async (req, res) => {
   try {
-    const { id } = req.params;
-    if (isMysqlOnline) {
-      try {
-        const [rows]: any = await pool.query('SELECT * FROM surveys WHERE id = ?', [id]);
-        if (rows && rows.length > 0) {
-          const r = rows[0];
-          return res.json({
-            id: r.id,
-            title: r.title,
-            description: r.description,
-            category: r.category,
-            categoryLabel: r.category_label,
-            department: r.department,
-            creatorId: r.creator_id,
-            creatorName: r.creator_name,
-            createdAt: r.created_at,
-            updatedAt: r.updated_at,
-            viewCount: r.view_count || 0,
-            responseCount: r.response_count || 0,
-            settings: typeof r.settings === 'string' ? JSON.parse(r.settings) : (r.settings || {}),
-            questions: typeof r.questions === 'string' ? JSON.parse(r.questions) : (r.questions || [])
-          });
-        }
-      } catch (err) {
-        console.warn('MySQL single survey query error, falling back to localDb:', err);
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
+    let totalSurveys = 0;
+    let publishedSurveys = 0;
+    let draftSurveys = 0;
+    let totalResponses = 0;
+    let totalViews = 0;
+    const categoryStats: Record<string, number> = {};
+
+    const [surveyRows]: any = await pool.query(`
+      SELECT status, category, view_count,
+        (SELECT COUNT(*) FROM survey_responses sr WHERE sr.survey_id = s.id) as resp_cnt
+      FROM surveys s
+    `);
+
+    if (surveyRows && surveyRows.length > 0) {
+      totalSurveys = surveyRows.length;
+      for (const row of surveyRows) {
+        const st = row.status || 'published';
+        if (st === 'published') publishedSurveys++;
+        else draftSurveys++;
+
+        totalViews += Number(row.view_count) || 0;
+        totalResponses += Number(row.resp_cnt) || 0;
+
+        const cat = row.category || 'satisfaction';
+        categoryStats[cat] = (categoryStats[cat] || 0) + 1;
       }
     }
 
-    const found = (localDb.surveys || []).find((s: any) => s.id === id);
-    if (!found) return res.status(404).json({ error: 'ไม่พบแบบสำรวจที่ระบุ' });
-    return res.json(found);
+    return res.json({
+      totalSurveys,
+      publishedSurveys,
+      draftSurveys,
+      totalResponses,
+      totalViews,
+      completionRate: totalViews > 0 ? Math.min(100, Math.round((totalResponses / totalViews) * 100)) : 0,
+      categoryStats
+    });
+  } catch (e: any) {
+    console.error('GET /api/surveys/stats/overview error:', e);
+    return res.status(500).json({ error: 'ไม่สามารถดึงข้อมูลสถิติภาพรวมจาก MySQL ได้' });
+  }
+});
+
+// 3. GET /api/surveys/:id - Get single survey by ID from MySQL exclusively
+app.get('/api/surveys/:id', async (req, res) => {
+  try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
+    const { id } = req.params;
+    const [rows]: any = await pool.query(`
+      SELECT s.*,
+        (SELECT COUNT(*) FROM survey_responses sr WHERE sr.survey_id = s.id) AS actual_response_count
+      FROM surveys s
+      WHERE s.id = ?
+    `, [id]);
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบแบบสำรวจที่ระบุ เนื่องจากแบบสำรวจถูกลบออกจากระบบแล้ว' });
+    }
+
+    const r = rows[0];
+    const parsedSettings = safeJsonParse(r.settings, {});
+    const parsedQuestions = safeJsonParse(r.questions, []);
+    const surveyStatus = r.status || parsedSettings.status || 'published';
+
+    return res.json({
+      id: r.id,
+      title: r.title,
+      description: r.description || '',
+      category: r.category || 'satisfaction',
+      categoryLabel: r.category_label || 'ความพึงพอใจ',
+      department: r.department || '',
+      creatorId: r.creator_id || 'admin',
+      creatorName: r.creator_name || 'ผู้ดูแลระบบ',
+      status: surveyStatus,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      viewCount: Number(r.view_count) || 0,
+      responseCount: Number(r.actual_response_count ?? r.response_count) || 0,
+      settings: { ...parsedSettings, status: surveyStatus },
+      questions: Array.isArray(parsedQuestions) ? parsedQuestions : []
+    });
   } catch (e: any) {
     console.error('GET /api/surveys/:id error:', e);
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงข้อมูลแบบสำรวจ' });
   }
 });
 
+// 4. POST /api/surveys/:id/view - Increment survey view count in MySQL exclusively
+app.post('/api/surveys/:id/view', async (req, res) => {
+  try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
+    const { id } = req.params;
+    await pool.query('UPDATE surveys SET view_count = view_count + 1 WHERE id = ?', [id]);
+    const [rows]: any = await pool.query('SELECT view_count FROM surveys WHERE id = ?', [id]);
+    const newViewCount = rows && rows.length > 0 ? Number(rows[0].view_count) || 1 : 1;
+
+    return res.json({ success: true, viewCount: newViewCount });
+  } catch (e: any) {
+    console.error('POST /api/surveys/:id/view error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกจำนวนการเข้าชม' });
+  }
+});
+
+// 5. POST /api/surveys - Create new survey in MySQL exclusively
 app.post('/api/surveys', async (req, res) => {
   try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
     const survey = req.body;
     if (!survey || !survey.title) {
       return res.status(400).json({ error: 'กรุณาระบุหัวข้อแบบสำรวจ' });
@@ -21919,31 +22016,46 @@ app.post('/api/surveys', async (req, res) => {
     }
     if (!survey.createdAt) survey.createdAt = new Date().toISOString();
     survey.updatedAt = new Date().toISOString();
+    survey.viewCount = Number(survey.viewCount) || 0;
+    survey.responseCount = Number(survey.responseCount) || 0;
 
-    if (!localDb.surveys) localDb.surveys = [];
-    localDb.surveys.unshift(survey);
-    saveLocalDb();
-
-    if (isMysqlOnline) {
-      try {
-        await pool.query(
-          `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE title=?, description=?, category=?, category_label=?, settings=?, questions=?, updated_at=?`,
-          [
-            survey.id, survey.title, survey.description || '', survey.category || 'satisfaction', survey.categoryLabel || 'ความพึงพอใจ',
-            survey.department || '', survey.creatorId || 'admin', survey.creatorName || 'ผู้ดูแลระบบ',
-            JSON.stringify(survey.settings || {}), JSON.stringify(survey.questions || []),
-            survey.viewCount || 0, survey.responseCount || 0,
-            survey.createdAt, survey.updatedAt,
-            survey.title, survey.description || '', survey.category || 'satisfaction', survey.categoryLabel || 'ความพึงพอใจ',
-            JSON.stringify(survey.settings || {}), JSON.stringify(survey.questions || []), survey.updatedAt
-          ]
-        );
-      } catch (mysqlErr) {
-        console.warn('MySQL survey save error (fallback stored in localDb):', mysqlErr);
-      }
+    const statusVal = survey.status || survey.settings?.status || 'published';
+    survey.status = statusVal;
+    if (survey.settings) {
+      survey.settings.status = statusVal;
     }
+
+    await pool.query(
+      `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, status, settings, questions, view_count, response_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE 
+         title = VALUES(title),
+         description = VALUES(description),
+         category = VALUES(category),
+         category_label = VALUES(category_label),
+         department = VALUES(department),
+         status = VALUES(status),
+         settings = VALUES(settings),
+         questions = VALUES(questions),
+         updated_at = VALUES(updated_at)`,
+      [
+        survey.id,
+        survey.title,
+        survey.description || '',
+        survey.category || 'satisfaction',
+        survey.categoryLabel || 'ความพึงพอใจ',
+        survey.department || 'ฝ่ายบริหารทั่วไป',
+        survey.creatorId || 'admin',
+        survey.creatorName || 'ผู้ดูแลระบบ',
+        statusVal,
+        JSON.stringify(survey.settings || {}),
+        JSON.stringify(survey.questions || []),
+        survey.viewCount,
+        survey.responseCount,
+        survey.createdAt,
+        survey.updatedAt
+      ]
+    );
 
     await addSystemLog(
       'SURVEY_CREATE',
@@ -21955,45 +22067,58 @@ app.post('/api/surveys', async (req, res) => {
     return res.status(201).json(survey);
   } catch (e: any) {
     console.error('POST /api/surveys error:', e);
-    return res.status(500).json({ error: 'ไม่สามารถบันทึกแบบสำรวจได้' });
+    return res.status(500).json({ error: 'ไม่สามารถบันทึกแบบสำรวจลงใน MySQL ได้' });
   }
 });
 
+// 6. PUT /api/surveys/:id - Update existing survey in MySQL exclusively
 app.put('/api/surveys/:id', async (req, res) => {
   try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
     const { id } = req.params;
     const updateData = req.body;
     updateData.updatedAt = new Date().toISOString();
 
-    if (!localDb.surveys) localDb.surveys = [];
-    const index = localDb.surveys.findIndex((s: any) => s.id === id);
-    if (index !== -1) {
-      localDb.surveys[index] = { ...localDb.surveys[index], ...updateData };
-    } else {
-      localDb.surveys.unshift({ id, ...updateData });
+    const statusVal = updateData.status || updateData.settings?.status || 'published';
+    updateData.status = statusVal;
+    if (updateData.settings) {
+      updateData.settings.status = statusVal;
     }
-    saveLocalDb();
 
-    if (isMysqlOnline) {
-      try {
-        await pool.query(
-          `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE title=?, description=?, category=?, category_label=?, settings=?, questions=?, updated_at=?`,
-          [
-            id, updateData.title || 'แบบสำรวจ', updateData.description || '', updateData.category || 'satisfaction', updateData.categoryLabel || 'ความพึงพอใจ',
-            updateData.department || '', updateData.creatorId || 'admin', updateData.creatorName || 'ผู้ดูแลระบบ',
-            JSON.stringify(updateData.settings || {}), JSON.stringify(updateData.questions || []),
-            updateData.viewCount || 0, updateData.responseCount || 0,
-            updateData.createdAt || new Date().toISOString(), updateData.updatedAt,
-            updateData.title || 'แบบสำรวจ', updateData.description || '', updateData.category || 'satisfaction', updateData.categoryLabel || 'ความพึงพอใจ',
-            JSON.stringify(updateData.settings || {}), JSON.stringify(updateData.questions || []), updateData.updatedAt
-          ]
-        );
-      } catch (mysqlErr) {
-        console.warn('MySQL survey update error (fallback stored in localDb):', mysqlErr);
-      }
-    }
+    await pool.query(
+      `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, status, settings, questions, view_count, response_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE 
+         title = VALUES(title),
+         description = VALUES(description),
+         category = VALUES(category),
+         category_label = VALUES(category_label),
+         department = VALUES(department),
+         status = VALUES(status),
+         settings = VALUES(settings),
+         questions = VALUES(questions),
+         updated_at = VALUES(updated_at)`,
+      [
+        id,
+        updateData.title || 'แบบสำรวจ',
+        updateData.description || '',
+        updateData.category || 'satisfaction',
+        updateData.categoryLabel || 'ความพึงพอใจ',
+        updateData.department || 'ฝ่ายบริหารทั่วไป',
+        updateData.creatorId || 'admin',
+        updateData.creatorName || 'ผู้ดูแลระบบ',
+        statusVal,
+        JSON.stringify(updateData.settings || {}),
+        JSON.stringify(updateData.questions || []),
+        Number(updateData.viewCount) || 0,
+        Number(updateData.responseCount) || 0,
+        updateData.createdAt || new Date().toISOString(),
+        updateData.updatedAt
+      ]
+    );
 
     await addSystemLog(
       'SURVEY_UPDATE',
@@ -22005,26 +22130,20 @@ app.put('/api/surveys/:id', async (req, res) => {
     return res.json({ success: true, survey: updateData });
   } catch (e: any) {
     console.error('PUT /api/surveys/:id error:', e);
-    return res.status(500).json({ error: 'ไม่สามารถแก้ไขแบบสำรวจได้' });
+    return res.status(500).json({ error: 'ไม่สามารถแก้ไขแบบสำรวจใน MySQL ได้' });
   }
 });
 
+// 7. DELETE /api/surveys/:id - Delete survey and related responses from MySQL exclusively
 app.delete('/api/surveys/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    if (localDb.surveys) {
-      localDb.surveys = localDb.surveys.filter((s: any) => s.id !== id);
-      saveLocalDb();
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
     }
 
-    if (isMysqlOnline) {
-      try {
-        await pool.query('DELETE FROM surveys WHERE id = ?', [id]);
-        await pool.query('DELETE FROM survey_responses WHERE survey_id = ?', [id]);
-      } catch (err) {
-        console.warn('MySQL delete survey error:', err);
-      }
-    }
+    const { id } = req.params;
+    await pool.query('DELETE FROM survey_responses WHERE survey_id = ?', [id]);
+    await pool.query('DELETE FROM surveys WHERE id = ?', [id]);
 
     await addSystemLog(
       'SURVEY_DELETE',
@@ -22033,142 +22152,118 @@ app.delete('/api/surveys/:id', async (req, res) => {
       getClientIp(req)
     );
 
-    return res.json({ success: true, message: 'ลบแบบสำรวจเรียบร้อยแล้ว' });
+    return res.json({ success: true, message: 'ลบแบบสำรวจและข้อมูลคำตอบเรียบร้อยแล้ว' });
   } catch (e: any) {
     console.error('DELETE /api/surveys/:id error:', e);
-    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการลบแบบสำรวจ' });
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการลบแบบสำรวจจาก MySQL' });
   }
 });
 
+// 8. GET /api/surveys/:id/responses - Get all responses for a survey from MySQL exclusively
 app.get('/api/surveys/:id/responses', async (req, res) => {
   try {
-    const { id } = req.params;
-    let mysqlResponses: any[] = [];
-    if (isMysqlOnline) {
-      try {
-        const [rows]: any = await pool.query('SELECT * FROM survey_responses WHERE survey_id = ? ORDER BY submitted_at DESC', [id]);
-        if (rows) {
-          mysqlResponses = rows.map((r: any) => {
-            let ansObj = r.answers;
-            if (typeof ansObj === 'string') {
-              try { ansObj = JSON.parse(ansObj); } catch (_) {}
-            }
-            if (typeof ansObj === 'string') {
-              try { ansObj = JSON.parse(ansObj); } catch (_) {}
-            }
-            if (typeof ansObj !== 'object' || ansObj === null) ansObj = {};
-
-            return {
-              id: r.id,
-              surveyId: r.survey_id,
-              respondentName: r.respondent_name || undefined,
-              respondentDepartment: r.respondent_department || undefined,
-              submittedAt: r.submitted_at,
-              timeSpentSeconds: r.time_spent_seconds || 0,
-              answers: ansObj
-            };
-          });
-        }
-      } catch (err) {
-        console.warn('MySQL survey responses query error, falling back to localDb:', err);
-      }
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
     }
 
-    const localList = (localDb.survey_responses && localDb.survey_responses[id]) || [];
-    const normalizedLocalList = localList.map((r: any) => {
-      let ansObj = r.answers;
-      if (typeof ansObj === 'string') {
-        try { ansObj = JSON.parse(ansObj); } catch (_) {}
-      }
-      if (typeof ansObj === 'string') {
-        try { ansObj = JSON.parse(ansObj); } catch (_) {}
-      }
-      if (typeof ansObj !== 'object' || ansObj === null) ansObj = {};
-      return { ...r, answers: ansObj };
-    });
-
-    // Merge MySQL responses and localDb responses deduplicated by id
-    const responseMap = new Map<string, any>();
-    normalizedLocalList.forEach((r: any) => responseMap.set(r.id, r));
-    mysqlResponses.forEach((r: any) => responseMap.set(r.id, r));
-
-    const combined = Array.from(responseMap.values()).sort((a, b) => 
-      new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
+    const { id } = req.params;
+    const [rows]: any = await pool.query(
+      'SELECT * FROM survey_responses WHERE survey_id = ? ORDER BY submitted_at DESC', 
+      [id]
     );
 
-    return res.json(combined);
+    const responses = (rows || []).map((r: any) => {
+      const ansObj = safeJsonParse(r.answers, {});
+      return {
+        id: r.id,
+        surveyId: r.survey_id,
+        surveyTitle: r.survey_title || undefined,
+        respondentName: r.respondent_name || undefined,
+        respondentDepartment: r.respondent_department || undefined,
+        respondentPosition: r.respondent_position || undefined,
+        respondentPhone: r.respondent_phone || undefined,
+        respondentEmail: r.respondent_email || undefined,
+        respondentIp: r.respondent_ip || undefined,
+        deviceInfo: r.device_info || undefined,
+        totalScore: r.total_score !== null ? Number(r.total_score) : undefined,
+        timeSpentSeconds: Number(r.time_spent_seconds) || 0,
+        answers: ansObj,
+        submittedAt: r.submitted_at
+      };
+    });
+
+    return res.json(responses);
   } catch (e: any) {
     console.error('GET /api/surveys/:id/responses error:', e);
-    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงรายการคำตอบ' });
+    return res.status(500).json({ error: 'ไม่สามารถดึงรายการคำตอบจาก MySQL ได้' });
   }
 });
 
+// 9. POST /api/surveys/:id/responses - Submit response and update response_count in MySQL exclusively
 app.post('/api/surveys/:id/responses', async (req, res) => {
   try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
     const { id } = req.params;
     const responseData = req.body;
-    if (!responseData.id) responseData.id = `resp_${Date.now()}`;
+
+    // Verify survey exists in MySQL before accepting response
+    const [surveyRows]: any = await pool.query('SELECT id FROM surveys WHERE id = ?', [id]);
+    if (!surveyRows || surveyRows.length === 0) {
+      return res.status(404).json({ error: 'ไม่สามารถส่งคำตอบได้ เนื่องจากแบบสำรวจนี้ถูกลบหรือไม่มีอยู่ในระบบแล้ว' });
+    }
+
+    if (!responseData.id) responseData.id = `resp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     if (!responseData.submittedAt) responseData.submittedAt = new Date().toISOString();
     responseData.surveyId = id;
+    responseData.answers = safeJsonParse(responseData.answers, {});
 
-    // Clean up answers object
-    let cleanAnswers = responseData.answers || {};
-    if (typeof cleanAnswers === 'string') {
-      try { cleanAnswers = JSON.parse(cleanAnswers); } catch (_) {}
-    }
-    if (typeof cleanAnswers === 'string') {
-      try { cleanAnswers = JSON.parse(cleanAnswers); } catch (_) {}
-    }
-    if (typeof cleanAnswers !== 'object' || cleanAnswers === null) cleanAnswers = {};
-    responseData.answers = cleanAnswers;
+    await pool.query(
+      `INSERT INTO survey_responses (
+        id, survey_id, survey_title, respondent_name, respondent_department, 
+        respondent_position, respondent_phone, respondent_email, respondent_ip, 
+        device_info, time_spent_seconds, total_score, answers, submitted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE 
+        survey_title = VALUES(survey_title),
+        respondent_name = VALUES(respondent_name),
+        respondent_department = VALUES(respondent_department),
+        respondent_position = VALUES(respondent_position),
+        respondent_phone = VALUES(respondent_phone),
+        respondent_email = VALUES(respondent_email),
+        respondent_ip = VALUES(respondent_ip),
+        device_info = VALUES(device_info),
+        time_spent_seconds = VALUES(time_spent_seconds),
+        total_score = VALUES(total_score),
+        answers = VALUES(answers),
+        submitted_at = VALUES(submitted_at)`,
+      [
+        responseData.id,
+        id,
+        responseData.surveyTitle || null,
+        responseData.respondentName || null,
+        responseData.respondentDepartment || null,
+        responseData.respondentPosition || null,
+        responseData.respondentPhone || null,
+        responseData.respondentEmail || null,
+        responseData.respondentIp || getClientIp(req) || null,
+        responseData.deviceInfo || req.headers['user-agent'] || null,
+        Number(responseData.timeSpentSeconds) || 0,
+        responseData.totalScore !== undefined && responseData.totalScore !== null ? Number(responseData.totalScore) : null,
+        JSON.stringify(responseData.answers || {}),
+        responseData.submittedAt
+      ]
+    );
 
-    if (!localDb.survey_responses) localDb.survey_responses = {};
-    if (!localDb.survey_responses[id]) localDb.survey_responses[id] = [];
-    localDb.survey_responses[id].unshift(responseData);
-
-    if (localDb.surveys) {
-      const sIndex = localDb.surveys.findIndex((s: any) => s.id === id);
-      if (sIndex !== -1) {
-        localDb.surveys[sIndex].responseCount = (localDb.surveys[sIndex].responseCount || 0) + 1;
-      }
-    }
-    saveLocalDb();
-
-    if (isMysqlOnline) {
-      try {
-        // 1. Ensure survey parent record exists in MySQL
-        const [surveyRows]: any = await pool.query('SELECT id FROM surveys WHERE id = ?', [id]);
-        if (!surveyRows || surveyRows.length === 0) {
-          await pool.query(
-            `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, settings, questions, view_count, response_count, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              id, responseData.surveyTitle || 'แบบตอบรับ/แบบสำรวจ', 'แบบสำรวจและประเมินผล', 'rsvp_acknowledgment', 'แบบตอบรับ',
-              'สำนักงาน ปภ. จังหวัดระยอง', 'admin', 'ผู้ดูแลระบบ', '{}', '[]', 1, 1,
-              new Date().toISOString(), new Date().toISOString()
-            ]
-          );
-        } else {
-          await pool.query('UPDATE surveys SET response_count = response_count + 1 WHERE id = ?', [id]);
-        }
-
-        // 2. Insert response into survey_responses table
-        await pool.query(
-          `INSERT INTO survey_responses (id, survey_id, respondent_name, respondent_department, answers, time_spent_seconds, submitted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE respondent_name=?, respondent_department=?, answers=?, time_spent_seconds=?, submitted_at=?`,
-          [
-            responseData.id, id, responseData.respondentName || null, responseData.respondentDepartment || null,
-            JSON.stringify(responseData.answers || {}), responseData.timeSpentSeconds || 0, responseData.submittedAt,
-            responseData.respondentName || null, responseData.respondentDepartment || null,
-            JSON.stringify(responseData.answers || {}), responseData.timeSpentSeconds || 0, responseData.submittedAt
-          ]
-        );
-        console.log(`✅ MySQL survey response saved successfully for survey ${id}, response ID ${responseData.id}`);
-      } catch (mysqlErr) {
-        console.warn('MySQL survey response save error:', mysqlErr);
-      }
-    }
+    // Recalculate and update exact response_count in surveys table
+    await pool.query(
+      `UPDATE surveys 
+       SET response_count = (SELECT COUNT(*) FROM survey_responses WHERE survey_id = ?) 
+       WHERE id = ?`,
+      [id, id]
+    );
 
     await addSystemLog(
       'SURVEY_RESPONSE_SUBMIT',
@@ -22180,7 +22275,30 @@ app.post('/api/surveys/:id/responses', async (req, res) => {
     return res.status(201).json({ success: true, response: responseData });
   } catch (e: any) {
     console.error('POST /api/surveys/:id/responses error:', e);
-    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกคำตอบ' });
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการบันทึกคำตอบลงใน MySQL' });
+  }
+});
+
+// 10. DELETE /api/surveys/:id/responses/:responseId - Delete individual response from MySQL exclusively
+app.delete('/api/surveys/:id/responses/:responseId', async (req, res) => {
+  try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
+    const { id, responseId } = req.params;
+    await pool.query('DELETE FROM survey_responses WHERE id = ? AND survey_id = ?', [responseId, id]);
+    await pool.query(
+      `UPDATE surveys 
+       SET response_count = (SELECT COUNT(*) FROM survey_responses WHERE survey_id = ?) 
+       WHERE id = ?`,
+      [id, id]
+    );
+
+    return res.json({ success: true, message: 'ลบรายการคำตอบเรียบร้อยแล้ว' });
+  } catch (e: any) {
+    console.error('DELETE /api/surveys/:id/responses/:responseId error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการลบคำตอบจาก MySQL' });
   }
 });
 

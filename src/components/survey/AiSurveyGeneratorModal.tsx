@@ -448,7 +448,7 @@ export const AiSurveyGeneratorModal: React.FC<AiSurveyGeneratorModalProps> = ({
         settings: {
           status: 'draft',
           themeColor: category === 'disaster_readiness' ? '#ea580c' : category === 'training' ? '#dc2626' : '#2563eb',
-          headerLogoType: 'garuda',
+          headerLogoType: 'ddpm',
           showProgressBar: true,
           showQuestionNumbers: true,
           allowAnonymous: true,

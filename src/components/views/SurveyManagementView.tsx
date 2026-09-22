@@ -346,7 +346,7 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
       settings: generatedData.settings || {
         status: 'draft',
         themeColor: '#2563eb',
-        headerLogoType: 'garuda',
+        headerLogoType: 'ddpm',
         showProgressBar: true,
         showQuestionNumbers: true,
         allowAnonymous: true,
@@ -459,7 +459,7 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
           </div>
 
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight">
-            ระบบแบบสำรวจและประเมินผลอัจฉริยะ (Survey & Evaluation)
+            ระบบแบบสำรวจและประเมินผลอัจฉริยะ
           </h1>
           <p className="text-xs sm:text-sm text-indigo-200/90 leading-relaxed">
             สร้าง ออกแบบ เผยแพร่ผ่าน QR Code และวิเคราะห์ผลแบบประเมินความพึงพอใจ (ก.พ.ร.), แบบประเมินความพร้อมรับมือสาธารณภัย และแบบสอบถามบุคลากร พร้อมระบบสถิติและส่งออก Excel ทันที

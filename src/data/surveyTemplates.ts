@@ -10,7 +10,7 @@ export const OFFICIAL_SURVEY_TEMPLATES: Array<Omit<Survey, 'id' | 'createdAt' | 
     settings: {
       status: 'published',
       themeColor: '#2563eb',
-      headerLogoType: 'garuda',
+      headerLogoType: 'ddpm',
       showProgressBar: true,
       showQuestionNumbers: true,
       allowAnonymous: true,
@@ -176,7 +176,7 @@ export const OFFICIAL_SURVEY_TEMPLATES: Array<Omit<Survey, 'id' | 'createdAt' | 
     settings: {
       status: 'published',
       themeColor: '#dc2626',
-      headerLogoType: 'garuda',
+      headerLogoType: 'ddpm',
       showProgressBar: true,
       showQuestionNumbers: true,
       allowAnonymous: false,
@@ -251,7 +251,7 @@ export const OFFICIAL_SURVEY_TEMPLATES: Array<Omit<Survey, 'id' | 'createdAt' | 
     settings: {
       status: 'published',
       themeColor: '#059669',
-      headerLogoType: 'garuda',
+      headerLogoType: 'ddpm',
       showProgressBar: true,
       showQuestionNumbers: true,
       allowAnonymous: true,
@@ -328,7 +328,7 @@ export const OFFICIAL_SURVEY_TEMPLATES: Array<Omit<Survey, 'id' | 'createdAt' | 
         cardShadow: 'md',
         buttonStyle: 'filled'
       },
-      headerLogoType: 'garuda',
+      headerLogoType: 'ddpm',
       showProgressBar: true,
       showQuestionNumbers: true,
       allowAnonymous: false,
