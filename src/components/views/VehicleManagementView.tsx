@@ -484,12 +484,12 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
 
     setIsUploadingImage(true);
     const formData = new FormData();
-    formData.append('files', file);
     formData.append('subfolder', 'vehicles');
     formData.append('uploadedBy', user?.username || user?.name || 'admin');
+    formData.append('files', file);
 
     try {
-      const res = await fetch('/api/upload', {
+      const res = await fetch('/api/upload?subfolder=vehicles', {
         method: 'POST',
         body: formData
       });
@@ -3922,6 +3922,7 @@ export const VehiclePrintablePaperModal: React.FC<{
     return 'รหัสแบบฟอร์ม: FM-DPM-PPO-001 | Rev.00 | วันที่บังคับใช้ 21/09/2569'; // fallback
   });
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
+  const [showMobileSettings, setShowMobileSettings] = useState<boolean>(false);
 
   const handlePrint = () => {
     window.print();
@@ -3945,10 +3946,44 @@ export const VehiclePrintablePaperModal: React.FC<{
         }
       `}</style>
 
+      {/* Mobile Sticky Actions Header */}
+      <div className="lg:hidden bg-slate-800 border-b border-slate-700 p-3 flex items-center justify-between sticky top-0 z-40 no-print">
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-2 rounded-xl bg-slate-700 text-slate-200 hover:text-white cursor-pointer"
+          title="ย้อนกลับ"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowMobileSettings(!showMobileSettings)}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+              showMobileSettings ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>{showMobileSettings ? 'ซ่อนตั้งค่า' : 'ตั้งค่าพิมพ์'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-1 shadow-sm cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span>พิมพ์ / PDF</span>
+          </button>
+        </div>
+      </div>
+
       {/* 1. Left Control Panel Sidebar */}
       <div 
         id="printable-sidebar" 
-        className="w-full lg:w-[380px] bg-slate-800 border-b lg:border-b-0 lg:border-r border-slate-700 flex flex-col overflow-y-auto shrink-0 p-5 space-y-5 no-print"
+        className={`w-full lg:w-[380px] bg-slate-800 border-b lg:border-b-0 lg:border-r border-slate-700 flex-col overflow-y-auto shrink-0 p-5 space-y-5 no-print ${
+          showMobileSettings ? 'flex' : 'hidden lg:flex'
+        }`}
       >
         <div className="flex items-center justify-between border-b border-slate-700 pb-4">
           <div className="flex items-center gap-2.5">

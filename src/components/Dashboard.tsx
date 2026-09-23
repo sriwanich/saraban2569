@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
-import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle, ClipboardCheck, Car } from 'lucide-react';
+import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle, ClipboardCheck, Car, Award } from 'lucide-react';
 
 import { DocumentItem, DocType, ThemeMode } from '../types';
 import Overview from './views/Overview';
@@ -29,6 +29,7 @@ const WorkflowSlaView = lazyWithRetry(() => import('./views/WorkflowSlaView'), '
 const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'), 'InfographicsEditorView');
 import UserManualView from './views/UserManualView';
 import { SurveyManagementView } from './views/SurveyManagementView';
+import { ECertificateModal } from './survey/ECertificateModal';
 const VehicleManagementView = lazyWithRetry(() => import('./views/VehicleManagementView'), 'VehicleManagementView');
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 import { useRealtimeSync } from '../utils/realtimeSync';
@@ -62,6 +63,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
 
   const [disasterPrefillData, setDisasterPrefillData] = useState<any>(null);
   const [isChangelogModalOpen, setIsChangelogModalOpen] = useState(false);
+  const [isCertListModalOpen, setIsCertListModalOpen] = useState(false);
+  const [userCerts, setUserCerts] = useState<any[]>([]);
+  const [isLoadingCerts, setIsLoadingCerts] = useState(false);
+  const [certSearchQuery, setCertSearchQuery] = useState<string>('');
+  const [selectedCertForView, setSelectedCertForView] = useState<any | null>(null);
   const [settingsSubTab, setSettingsSubTab] = useState<string>('system');
   const [isUserActive, setIsUserActive] = useState<boolean>(true);
 
@@ -262,6 +268,32 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         console.error('Error uploading avatar:', err);
         alert('เกิดข้อผิดพลาดในการเชื่อมต่อเพื่ออัปโหลด');
       }
+    }
+  };
+
+  const fetchUserCertificates = async (customQuery?: string) => {
+    if (!currentUser) return;
+    setIsLoadingCerts(true);
+    try {
+      let url = '/api/users/my-certificates?';
+      if (customQuery && customQuery.trim()) {
+        url += `search=${encodeURIComponent(customQuery.trim())}`;
+      } else {
+        const fullName = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim();
+        const email = currentUser.email || currentUser.username || '';
+        url += `name=${encodeURIComponent(fullName)}&email=${encodeURIComponent(email)}`;
+      }
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setUserCerts(data || []);
+      } else {
+        console.error('Failed to fetch certificates');
+      }
+    } catch (err) {
+      console.error('Error fetching certificates:', err);
+    } finally {
+      setIsLoadingCerts(false);
     }
   };
 
@@ -1980,11 +2012,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                       <button
                         onClick={() => {
                           setIsProfileDropdownOpen(false);
-                          setIsChangelogModalOpen(true);
+                          fetchUserCertificates();
+                          setIsCertListModalOpen(true);
                         }}
-                        className="w-full text-left px-4 py-2.5 text-sm text-[var(--text-primary)] hover:bg-[var(--border-lighter)] flex items-center gap-2.5 transition-colors"
+                        className="w-full text-left px-5 py-3 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] flex items-center gap-3 transition-colors"
                       >
-                        <Sparkles className="w-4 h-4 text-amber-500" /> ประวัติเวอร์ชัน & Changelog
+                        <Award className="w-4 h-4 text-emerald-500" /> ใบประกาศที่เคยได้รับ
                       </button>
                      <div className="my-1 border-t border-[var(--border-lighter)]" />
                      <button
@@ -2336,6 +2369,156 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             hasPermission={hasPermission}
           />
         </Suspense>
+      )}
+
+      {/* Certificate List Modal */}
+      {isCertListModalOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-300">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border-lighter)] rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="p-6 border-b border-[var(--border-lighter)] flex items-center justify-between bg-linear-to-r from-blue-900/10 to-indigo-900/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center text-white shadow-md">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-[var(--text-primary)] text-base sm:text-lg">เกียรติบัตรอิเล็กทรอนิกส์ของฉัน</h3>
+                  <p className="text-[10px] text-[var(--text-muted)] font-extrabold tracking-widest uppercase">My Digital Certificates ({userCerts.length})</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCertListModalOpen(false)}
+                className="w-9 h-9 rounded-xl bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] text-[var(--text-secondary)] flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Smart Search Bar */}
+            <div className="px-6 py-4 bg-[var(--bg-canvas)] border-b border-[var(--border-lighter)]">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  fetchUserCertificates(certSearchQuery);
+                }}
+                className="flex gap-2"
+              >
+                <div className="relative flex-grow">
+                  <input
+                    type="text"
+                    value={certSearchQuery}
+                    onChange={(e) => setCertSearchQuery(e.target.value)}
+                    placeholder="กรอกชื่อ-นามสกุล หรือ อีเมล ที่ใช้ทำแบบทดสอบเพื่อค้นหา..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-xs text-[var(--text-primary)] focus:outline-hidden focus:border-amber-500 font-semibold"
+                  />
+                  <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-3.5" />
+                </div>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs transition cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  ค้นหาเกียรติบัตร
+                </button>
+                {certSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCertSearchQuery('');
+                      fetchUserCertificates('');
+                    }}
+                    className="px-3 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-[var(--text-secondary)] font-extrabold text-xs transition cursor-pointer"
+                  >
+                    รีเซ็ต
+                  </button>
+                )}
+              </form>
+              <p className="text-[10px] text-[var(--text-muted)] font-semibold mt-1.5">
+                💡 หากยังไม่พบใบประกาศเนื่องจากพิมพ์สะกดต่างจากชื่อผู้ใช้งาน คุณสามารถพิมพ์ชื่อที่ใช้ตอนทำแบบทดสอบเพื่อค้นหาดึงเกียรติบัตรได้ทันทีครับ
+              </p>
+            </div>
+
+            <div className="p-6 overflow-y-auto custom-scrollbar flex-grow space-y-4">
+              {isLoadingCerts ? (
+                <div className="py-12 text-center space-y-3">
+                  <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs text-[var(--text-muted)] font-bold">กำลังดึงข้อมูลใบประกาศนียบัตรของคุณ...</p>
+                </div>
+              ) : userCerts.length === 0 ? (
+                <div className="py-12 text-center space-y-4 max-w-md mx-auto">
+                  <div className="w-16 h-16 rounded-3xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
+                    <Award className="w-8 h-8 opacity-60" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="font-black text-sm text-[var(--text-primary)]">ไม่พบใบประกาศนียบัตรที่ได้รับ</p>
+                    <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                      เกียรติบัตรจะเปิดให้ดาวน์โหลดเมื่อคุณทำแบบทดสอบวัดระดับความรู้ (Quiz Mode) ในระบบประเมินผลผ่านเกณฑ์มาตรฐานสำเร็จ
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {userCerts.map((cert) => {
+                    const formattedDate = cert.submitted_at 
+                      ? new Date(cert.submitted_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+                      : '-';
+                    return (
+                      <div 
+                        key={cert.id}
+                        className="p-4 rounded-2xl border border-[var(--border-lighter)] bg-[var(--bg-canvas)] hover:border-amber-500/30 hover:shadow-lg transition duration-250 flex flex-col justify-between space-y-3"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-600 font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-500/10">
+                              ผ่านเกณฑ์ ({cert.percentage}%)
+                            </span>
+                            <span className="text-[9px] font-mono text-[var(--text-muted)] font-semibold">
+                              {cert.id.substring(0, 15).toUpperCase()}
+                            </span>
+                          </div>
+                          <h4 className="font-extrabold text-[var(--text-primary)] text-xs sm:text-sm line-clamp-2 leading-snug">
+                            {cert.survey_title}
+                          </h4>
+                          <div className="text-[11px] text-[var(--text-muted)] font-medium space-y-0.5">
+                            <p>ผู้รับ: <span className="text-[var(--text-primary)] font-bold">{cert.respondent_name}</span></p>
+                            <p>วันที่ได้รับ: <span className="text-[var(--text-primary)] font-bold">{formattedDate}</span></p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCertForView(cert)}
+                          className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs hover:from-amber-400 hover:to-amber-500 transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm shadow-amber-500/10"
+                        >
+                          <Award className="w-4 h-4" />
+                          <span>เรียกดูใบประกาศนียบัตร</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-[var(--bg-canvas)] border-t border-[var(--border-lighter)] flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsCertListModalOpen(false)}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-[var(--text-secondary)] hover:bg-[var(--border-lighter)] transition cursor-pointer"
+              >
+                ปิดหน้าต่าง
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ECertificateModal Viewer */}
+      {selectedCertForView && (
+        <ECertificateModal
+          survey={selectedCertForView.survey}
+          response={selectedCertForView.response}
+          onClose={() => setSelectedCertForView(null)}
+        />
       )}
 
       <style>{`

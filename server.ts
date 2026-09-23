@@ -1,4 +1,7 @@
 import express from 'express';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
+
 import compression from 'compression';
 import HTMLtoDOCX from 'html-to-docx';
 import os from 'os';
@@ -1152,6 +1155,22 @@ app.use((req, res, next) => {
   // console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`); // Silenced to prevent user confusion
   next();
 });
+
+// Self-healing fallback middleware to solve vehicle folder file-mismatches
+app.use('/uploads', (req, res, next) => {
+  const filePath = path.join(process.cwd(), 'uploads', decodeURIComponent(req.path));
+  if (!fs.existsSync(filePath)) {
+    if (req.path.startsWith('/vehicles/')) {
+      const filename = decodeURIComponent(req.path).substring(10); // remove "/vehicles/"
+      const fallbackPath = path.join(process.cwd(), 'uploads', 'inbox', filename);
+      if (fs.existsSync(fallbackPath)) {
+        return res.sendFile(fallbackPath);
+      }
+    }
+  }
+  next();
+});
+
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
   maxAge: '1d',
   etag: true
@@ -22150,6 +22169,178 @@ export async function notifyWorkChange(doc: any, action: 'CREATE' | 'UPDATE' | '
 // ==========================================
 // SURVEY & EVALUATION INTELLIGENT API (MySQL Exclusive)
 // ==========================================
+
+// -1. GET /api/users/my-certificates - Fetch all certificates (passed quiz responses) for the current logged-in user
+app.get('/api/users/my-certificates', async (req, res) => {
+  try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
+    const { name, email, search } = req.query as { name?: string; email?: string; search?: string };
+    
+    const queryParts: string[] = [];
+    const params: any[] = [];
+
+    // 1. If explicit manual search text is provided
+    if (search && search.trim()) {
+      const term = `%${search.trim()}%`;
+      queryParts.push('sr.respondent_name LIKE ? OR sr.respondent_email LIKE ? OR sr.respondent_phone LIKE ?');
+      params.push(term, term, term);
+    } else {
+      // 2. Automatic matching using user profile info
+      if (name && name.trim()) {
+        const cleanName = name.trim();
+        // Strict match
+        queryParts.push('sr.respondent_name = ?');
+        params.push(cleanName);
+        
+        // Thai spacing tolerance (e.g. "ผู้ดูแล ระบบ" vs "ผู้ดูแลระบบ")
+        const nameNoSpaces = cleanName.replace(/\s+/g, '');
+        queryParts.push("REPLACE(sr.respondent_name, ' ', '') = ?");
+        params.push(nameNoSpaces);
+
+        // Firstname or lastname partial matching
+        const parts = cleanName.split(/\s+/);
+        if (parts.length > 0 && parts[0].length > 1) {
+          queryParts.push('sr.respondent_name LIKE ?');
+          params.push(`%${parts[0]}%`);
+        }
+      }
+
+      if (email && email.trim()) {
+        const cleanEmail = email.trim();
+        queryParts.push('sr.respondent_email = ?');
+        params.push(cleanEmail);
+
+        // Also extract username from email and match name or email
+        if (cleanEmail.includes('@')) {
+          const userPart = cleanEmail.split('@')[0];
+          if (userPart.length > 2) {
+            queryParts.push('sr.respondent_email LIKE ? OR sr.respondent_name LIKE ?');
+            params.push(`%${userPart}%`, `%${userPart}%`);
+          }
+        }
+      }
+    }
+
+    if (queryParts.length === 0) {
+      return res.json([]);
+    }
+
+    const sql = `
+      SELECT sr.*, s.title as survey_title, s.settings, s.questions
+      FROM survey_responses sr
+      JOIN surveys s ON sr.survey_id = s.id
+      WHERE (${queryParts.join(' OR ')})
+    `;
+
+    const [rows]: any = await pool.query(sql, params);
+    
+    const certificates = (rows || []).map((row: any) => {
+      const parsedSettings = safeJsonParse(row.settings, {});
+      const parsedQuestions = safeJsonParse(row.questions, []);
+      
+      const maxPossibleScore = parsedQuestions
+        .filter((q: any) => q.type !== 'section_header')
+        .reduce((sum: number, q: any) => sum + (parseFloat(q.points) || 1), 0);
+
+      const passingPercent = parseFloat(parsedSettings.passingScore) || 60;
+      const totalScore = parseFloat(row.total_score) || 0;
+      const percentage = maxPossibleScore > 0 ? Math.round((totalScore / maxPossibleScore) * 100) : 0;
+      const isPassed = percentage >= passingPercent;
+
+      return {
+        id: row.id,
+        survey_id: row.survey_id,
+        survey_title: row.survey_title,
+        respondent_name: row.respondent_name,
+        respondent_department: row.respondent_department,
+        respondent_position: row.respondent_position,
+        total_score: totalScore,
+        maxPossibleScore,
+        percentage,
+        passingPercent,
+        isPassed,
+        submitted_at: row.submitted_at,
+        survey: {
+          id: row.survey_id,
+          title: row.survey_title,
+          settings: parsedSettings,
+          questions: parsedQuestions
+        },
+        response: {
+          id: row.id,
+          surveyId: row.survey_id,
+          respondentName: row.respondent_name,
+          respondentDepartment: row.respondent_department,
+          respondentPosition: row.respondent_position,
+          respondentPhone: row.respondent_phone,
+          respondentEmail: row.respondent_email,
+          respondentIp: row.respondent_ip,
+          deviceInfo: row.device_info,
+          timeSpentSeconds: row.time_spent_seconds,
+          totalScore: totalScore,
+          answers: safeJsonParse(row.answers, {}),
+          submittedAt: row.submitted_at
+        }
+      };
+    }).filter((cert: any) => cert.isPassed && cert.survey.settings?.quizMode);
+
+    return res.json(certificates);
+  } catch (err: any) {
+    console.error('Failed to fetch user certificates:', err);
+    return res.status(500).json({ error: err.message || 'ไม่สามารถดึงข้อมูลใบประกาศนียบัตรได้' });
+  }
+});
+
+// 0. POST /api/surveys/seed-official - On-demand seeding of official survey templates
+app.post('/api/surveys/seed-official', async (req, res) => {
+  try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+
+    let seededCount = 0;
+    if (Array.isArray(OFFICIAL_SURVEY_TEMPLATES)) {
+      for (let i = 0; i < OFFICIAL_SURVEY_TEMPLATES.length; i++) {
+        const tpl = OFFICIAL_SURVEY_TEMPLATES[i];
+        const tplId = `survey_official_${i + 1}`;
+        const [chkRows]: any = await pool.query('SELECT id FROM surveys WHERE id = ?', [tplId]);
+        if (!chkRows || chkRows.length === 0) {
+          const now = new Date(Date.now() - (i * 86400000 * 2)).toISOString();
+          await pool.query(
+            `INSERT INTO surveys (id, title, description, category, category_label, department, creator_id, creator_name, status, settings, questions, view_count, response_count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              tplId,
+              tpl.title,
+              tpl.description || '',
+              tpl.category || 'satisfaction',
+              tpl.categoryLabel || 'ความพึงพอใจ',
+              tpl.department || 'ฝ่ายบริหารทั่วไป',
+              'admin',
+              'ฝ่ายบริหารงานสารบรรณ ปภ.',
+              tpl.settings?.status || 'published',
+              JSON.stringify(tpl.settings || {}),
+              JSON.stringify(tpl.questions || []),
+              42 + (i * 18),
+              0,
+              now,
+              new Date().toISOString()
+            ]
+          );
+          seededCount++;
+        }
+      }
+    }
+
+    return res.json({ success: true, seededCount, message: `ติดตั้งแบบสำรวจมาตรฐาน ปภ. สำเร็จจำนวน ${seededCount} รายการ` });
+  } catch (err: any) {
+    console.error('Failed to seed official surveys on-demand:', err);
+    return res.status(500).json({ error: err.message || 'ไม่สามารถติดตั้งแบบสำรวจมาตรฐานได้' });
+  }
+});
 
 // 1. GET /api/surveys - Fetch all surveys from MySQL exclusively
 app.get('/api/surveys', async (req, res) => {

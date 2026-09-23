@@ -193,6 +193,13 @@ export interface SurveyThemeConfig {
   buttonStyle?: 'filled' | 'gradient' | 'soft' | 'outline';
 }
 
+export interface CertificateDesignerConfig {
+  templateId: 'classic' | 'modern' | 'minimal';
+  logoPosition: 'top-left' | 'top-center' | 'top-right';
+  fontFamily: 'sarabun' | 'prompt' | 'kanit';
+  signatureImageUrl?: string;
+}
+
 export interface SurveySettings {
   status: 'draft' | 'published' | 'paused' | 'archived' | 'closed';
   isOpen?: boolean; // เปิด-ปิดรับคำตอบ
@@ -221,6 +228,7 @@ export interface SurveySettings {
   certificateOrgName?: string;
   certificateSignerName?: string;
   certificateSignerPosition?: string;
+  certificateDesignerConfig?: CertificateDesignerConfig;
   linkedDocId?: string;
   linkedDocNumber?: string;
   targetAudience?: string;

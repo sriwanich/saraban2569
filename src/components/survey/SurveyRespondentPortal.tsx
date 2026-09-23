@@ -73,6 +73,7 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [showCertModal, setShowCertModal] = useState<boolean>(false);
+  const [questionFilter, setQuestionFilter] = useState<'all' | 'correct' | 'incorrect'>('all');
   const [startTime] = useState<number>(Date.now());
 
   // Whitelist State
@@ -536,103 +537,223 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
 
             {/* Quiz Mode Score & Certificate Card */}
             {survey.settings?.quizMode && (
-              <div className={`mt-8 p-6 sm:p-8 rounded-3xl border text-left space-y-5 relative overflow-hidden shadow-2xl ${
+              <div className={`mt-8 p-5 sm:p-8 rounded-3xl border text-left space-y-6 relative overflow-hidden shadow-2xl transition-all ${
                 evalResults.isPassed 
-                  ? 'bg-linear-to-br from-emerald-950 via-slate-900 to-teal-950 text-white border-emerald-500/40' 
-                  : 'bg-linear-to-br from-rose-950 via-slate-900 to-amber-950 text-white border-rose-500/40'
+                  ? 'bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 text-white border-emerald-500/30' 
+                  : 'bg-gradient-to-br from-rose-950 via-slate-900 to-amber-950 text-white border-rose-500/30'
               }`}>
-                <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                  <div className="flex items-center gap-3">
+                {/* Visual Glass Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-5">
+                  <div className="flex items-start gap-3.5">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-lg ${
                       isPassed ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                     }`}>
-                      <Award className="w-7 h-7" />
+                      <Award className="w-6.5 h-6.5 animate-pulse" />
                     </div>
-                    <div>
-                      <span className="text-[10px] font-black tracking-widest uppercase text-emerald-400 block">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-black tracking-widest uppercase text-emerald-400 block opacity-90">
                         รายงานผลการทดสอบดิจิทัล (E-Assessment Result)
                       </span>
-                      <h3 className="text-base font-extrabold text-white">
+                      <h3 className="text-base sm:text-lg font-black text-white leading-tight">
                         {survey.title}
                       </h3>
                     </div>
                   </div>
-                  <div className={`px-4 py-1.5 rounded-full text-xs font-extrabold border ${
-                    isPassed ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40' : 'bg-rose-500/20 text-rose-300 border-rose-400/40'
+                  <div className={`self-start sm:self-auto px-4 py-2 rounded-2xl text-xs font-black border tracking-wide shadow-sm shrink-0 ${
+                    isPassed ? 'bg-emerald-500/25 text-emerald-300 border-emerald-400/40' : 'bg-rose-500/25 text-rose-300 border-rose-400/40'
                   }`}>
                     {isPassed ? '✓ ผ่านการทดสอบ (PASSED)' : '✕ ไม่ผ่านเกณฑ์ (FAILED)'}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
-                  <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">คะแนนที่ได้ (Earned)</span>
-                    <div className="text-2xl font-black text-amber-400 mt-1">
-                      {scoreResults.totalScore} / {scoreResults.maxPossibleScore} <span className="text-xs text-slate-400 font-normal">คะแนน</span>
+                {/* Score Stats Dashboard Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  {/* Earned Score Card */}
+                  <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/10 flex flex-col justify-between">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">คะแนนที่ได้ (Earned Score)</span>
+                    <div className="flex items-baseline gap-1.5 mt-2">
+                      <span className="text-3xl font-black text-amber-400">{scoreResults.totalScore}</span>
+                      <span className="text-xs text-slate-400 font-medium">/ {scoreResults.maxPossibleScore} คะแนน</span>
                     </div>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">คิดเป็นร้อยละ (Percentage)</span>
-                    <div className={`text-2xl font-black mt-1 ${evalResults.isPassed ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {scoreResults.percentage}%
+
+                  {/* Percentage Score Card */}
+                  <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/10 flex flex-col justify-between">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">คิดเป็นร้อยละ (Percentage)</span>
+                    <div className="flex items-baseline gap-1 mt-2">
+                      <span className={`text-3xl font-black ${evalResults.isPassed ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {scoreResults.percentage}%
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-medium ml-1">ของคะแนนทั้งหมด</span>
                     </div>
                   </div>
-                  <div className="col-span-2 sm:col-span-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold block">เกณฑ์การผ่าน (Pass Score)</span>
-                    <div className="text-2xl font-black text-slate-200 mt-1">
-                      {evalResults.passingPercent}%
+
+                  {/* Passing Threshold Card */}
+                  <div className="bg-white/5 backdrop-blur-xs p-4 rounded-2xl border border-white/10 flex flex-col justify-between">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">เกณฑ์การผ่าน (Pass Criteria)</span>
+                    <div className="flex items-baseline gap-1 mt-2">
+                      <span className="text-3xl font-black text-slate-200">{evalResults.passingPercent}%</span>
+                      <span className="text-[10px] text-slate-400 font-medium ml-1">ขึ้นไป</span>
                     </div>
                   </div>
                 </div>
 
+                {/* Visually descriptive progress bar */}
+                <div className="space-y-2 bg-white/5 p-4 rounded-2xl border border-white/10">
+                  <div className="flex justify-between text-[11px] font-bold">
+                    <span className="text-slate-400">ระดับผลการทดสอบ: <span className="text-white font-extrabold">{evalResults.levelName || 'ทั่วไป'}</span></span>
+                    <span className="text-slate-200">{scoreResults.percentage}%</span>
+                  </div>
+                  <div className="relative h-2.5 w-full bg-white/10 rounded-full overflow-hidden">
+                    {/* Passing mark line indicator */}
+                    <div 
+                      className="absolute top-0 bottom-0 w-0.5 bg-amber-400/80 z-10" 
+                      style={{ left: `${evalResults.passingPercent}%` }}
+                      title={`เกณฑ์ผ่านที่ ${evalResults.passingPercent}%`}
+                    />
+                    <div 
+                      className={`h-full rounded-full transition-all duration-1000 ${
+                        evalResults.isPassed 
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-xs shadow-emerald-500/40' 
+                          : 'bg-gradient-to-r from-rose-500 to-amber-500 shadow-xs shadow-rose-500/40'
+                      }`}
+                      style={{ width: `${scoreResults.percentage}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-slate-500 font-semibold">
+                    <span>0%</span>
+                    <span className="text-amber-400 font-extrabold">เกณฑ์ผ่าน ({evalResults.passingPercent}%)</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
                 {isPassed && (
-                  <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
+                  <div className="pt-3 border-t border-white/10 space-y-3">
                     <span className="text-[10px] uppercase font-black tracking-widest text-emerald-400 block">
-                      ขอแสดงความยินดี! คุณผ่านเกณฑ์การทดสอบสมรรถนะความรู้ความมั่นคง
+                      🎖️ ขอแสดงความยินดี! คุณผ่านเกณฑ์การทดสอบเรียบร้อยแล้ว
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowCertModal(true)}
-                      className="w-full py-3.5 px-6 rounded-2xl bg-linear-to-r from-amber-500 via-amber-600 to-amber-700 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 transition duration-200 cursor-pointer shadow-xl shadow-amber-500/20 active:scale-98"
+                      className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 transition duration-200 cursor-pointer shadow-xl shadow-amber-500/20 active:scale-98"
                     >
                       <Award className="w-5 h-5 shrink-0" />
-                      <span>ดูใบประกาศนียบัตรอิเล็กทรอนิกส์ (View e-Certificate)</span>
+                      <span>ดาวน์โหลดใบประกาศนียบัตรดิจิทัล (View e-Certificate)</span>
                     </button>
                   </div>
                 )}
 
                 {/* Explanations Key if enabled */}
                 {(survey.settings?.showScoreImmediately || survey.settings?.quizShowResultImmediate) && scoreResults.questionResults && (
-                  <div className="space-y-3 pt-3 border-t border-white/10">
-                    <span className="text-xs font-bold text-slate-300 block">รายละเอียดคำตอบและเฉลยรายข้อ:</span>
-                    <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
-                      {survey.questions.filter(q => q.type !== 'section_header').map((q, qIdx) => {
-                        const result = scoreResults.questionResults[q.id];
-                        if (!result) return null;
-                        return (
-                          <div key={q.id} className="p-3 rounded-xl bg-black/40 border border-white/10 text-xs space-y-1">
-                            <div className="flex items-center justify-between font-bold">
-                              <span className="text-slate-200 truncate max-w-[80%]">{qIdx + 1}. {q.title}</span>
-                              <span className={result.isCorrect ? 'text-emerald-400 font-extrabold' : 'text-rose-400 font-extrabold'}>
-                                {result.isCorrect ? `+${result.score} คะแนน` : '0 คะแนน'}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-400">
-                              คำตอบของคุณ: <span className={result.isCorrect ? 'text-emerald-300 font-bold' : 'text-rose-300 font-bold'}>{answers[q.id] || '(ไม่ได้ตอบ)'}</span>
-                            </div>
-                            {!result.isCorrect && (q.correctAnswer || q.correctAnswers) && (
-                              <div className="text-[11px] text-emerald-400 font-bold">
-                                เฉลยที่ถูกต้อง: {q.correctAnswer || (q.correctAnswers && q.correctAnswers.join(', '))}
+                  <div className="space-y-4 pt-4 border-t border-white/10">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <span className="text-xs font-black text-slate-200">ตรวจสอบรายละเอียดคำตอบแต่ละข้อ:</span>
+                      
+                      {/* Responsive Interactive Filter Buttons */}
+                      <div className="flex rounded-xl bg-white/5 p-1 border border-white/10 text-[11px] self-start sm:self-auto shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setQuestionFilter('all')}
+                          className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                            questionFilter === 'all' ? 'bg-white/15 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          ทั้งหมด
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQuestionFilter('correct')}
+                          className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                            questionFilter === 'correct' ? 'bg-emerald-500/25 text-emerald-300 shadow-xs' : 'text-slate-400 hover:text-emerald-300'
+                          }`}
+                        >
+                          เฉพาะที่ถูก ({Object.values(scoreResults.questionResults).filter((r: any) => r.isCorrect).length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQuestionFilter('incorrect')}
+                          className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                            questionFilter === 'incorrect' ? 'bg-rose-500/25 text-rose-300 shadow-xs' : 'text-slate-400 hover:text-rose-300'
+                          }`}
+                        >
+                          เฉพาะที่ผิด ({Object.values(scoreResults.questionResults).filter((r: any) => !r.isCorrect).length})
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filtered Question Review List */}
+                    <div className="space-y-3.5 max-h-96 overflow-y-auto custom-scrollbar pr-1.5">
+                      {survey.questions
+                        .filter(q => q.type !== 'section_header')
+                        .filter(q => {
+                          const result = scoreResults.questionResults[q.id];
+                          if (!result) return false;
+                          if (questionFilter === 'correct') return result.isCorrect;
+                          if (questionFilter === 'incorrect') return !result.isCorrect;
+                          return true;
+                        })
+                        .map((q, qIdx) => {
+                          const result = scoreResults.questionResults[q.id];
+                          if (!result) return null;
+                          return (
+                            <div 
+                              key={q.id} 
+                              className={`p-4 rounded-2xl border transition-all duration-200 text-xs space-y-2 ${
+                                result.isCorrect 
+                                  ? 'bg-emerald-500/5 border-emerald-500/20 text-slate-100' 
+                                  : 'bg-rose-500/5 border-rose-500/20 text-slate-100'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <span className="font-extrabold text-slate-200 text-xs sm:text-sm">
+                                  {qIdx + 1}. {q.title}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black tracking-wide shrink-0 ${
+                                  result.isCorrect 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                    : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                }`}>
+                                  {result.isCorrect ? `✓ +${result.score} คะแนน` : '✕ 0 คะแนน'}
+                                </span>
                               </div>
-                            )}
-                            {result.explanation && (
-                              <div className="text-[10px] text-slate-400 italic pt-0.5">
-                                คำอธิบาย: {result.explanation}
+                              
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] pt-1.5 border-t border-white/5">
+                                <div className="space-y-0.5">
+                                  <span className="text-slate-400 text-[9px] uppercase tracking-wider block">คำตอบของคุณ (Your Answer)</span>
+                                  <span className={`font-black ${result.isCorrect ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                    {answers[q.id] || '(ไม่ได้ตอบ)'}
+                                  </span>
+                                </div>
+                                {!result.isCorrect && (q.correctAnswer || q.correctAnswers) && (
+                                  <div className="space-y-0.5">
+                                    <span className="text-slate-400 text-[9px] uppercase tracking-wider block text-emerald-400">เฉลยที่ถูกต้อง (Correct Answer)</span>
+                                    <span className="font-black text-emerald-400">
+                                      {q.correctAnswer || (q.correctAnswers && q.correctAnswers.join(', '))}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
-                            )}
+
+                              {result.explanation && (
+                                <div className="text-[11px] text-slate-350 bg-black/25 p-2.5 rounded-xl border border-white/5 mt-2 flex items-start gap-2">
+                                  <span className="text-amber-400 shrink-0 font-extrabold">💡 คำอธิบาย:</span>
+                                  <span className="italic leading-relaxed">{result.explanation}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {survey.questions.filter(q => q.type !== 'section_header').filter(q => {
+                          const result = scoreResults.questionResults[q.id];
+                          if (!result) return false;
+                          if (questionFilter === 'correct') return result.isCorrect;
+                          if (questionFilter === 'incorrect') return !result.isCorrect;
+                          return true;
+                        }).length === 0 && (
+                          <div className="p-8 text-center bg-white/5 border border-white/10 rounded-2xl text-slate-400 text-[11px]">
+                            ไม่มีรายการคำตอบที่ตรงกับตัวกรองนี้
                           </div>
-                        );
-                      })}
+                        )}
                     </div>
                   </div>
                 )}

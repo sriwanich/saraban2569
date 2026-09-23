@@ -74,21 +74,24 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
   const [printableSurvey, setPrintableSurvey] = useState<Survey | null>(null);
   const [showAiModal, setShowAiModal] = useState<boolean>(false);
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Fetch surveys from server
   const fetchSurveys = async () => {
     setIsLoading(true);
+    setApiError(null);
     try {
       const res = await fetch('/api/surveys');
       if (res.ok) {
         const data = await res.json();
         setSurveys(data || []);
       } else {
-        throw new Error('ไม่สามารถดึงข้อมูลแบบสำรวจจาก MySQL ได้');
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'ไม่สามารถดึงข้อมูลแบบสำรวจจาก MySQL ได้');
       }
     } catch (e: any) {
       console.error('Failed to load surveys from MySQL API:', e);
-      // Removed localStorage fallback to satisfy "MySQL Exclusive" requirement
+      setApiError(e.message || 'เกิดข้อผิดพลาดในการติดต่อฐานข้อมูล MySQL');
       setSurveys([]);
     } finally {
       setIsLoading(false);
@@ -627,7 +630,68 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
       </div>
 
       {/* Content Rendering: Empty vs Grid vs Table */}
-      {filteredSurveys.length === 0 ? (
+      {apiError && (
+        <div className="mb-6 p-5 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-600 dark:text-rose-400 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-rose-500" />
+            <div>
+              <p className="font-black text-sm">การเชื่อมต่อฐานข้อมูล MySQL มีปัญหาระหว่างดึงข้อมูลแบบสำรวจ:</p>
+              <p className="opacity-90">{apiError}</p>
+            </div>
+          </div>
+          <button 
+            onClick={fetchSurveys}
+            className="self-start sm:self-auto px-4 py-2 rounded-xl bg-rose-500 text-white font-extrabold hover:bg-rose-600 transition shadow-xs text-xs cursor-pointer shrink-0"
+          >
+            ลองใหม่อีกครั้ง
+          </button>
+        </div>
+      )}
+
+      {surveys.length === 0 ? (
+        <div className="p-12 sm:p-16 rounded-3xl bg-blue-500/5 border border-blue-500/10 text-center space-y-5 shadow-xs max-w-2xl mx-auto my-12">
+          <div className="w-16 h-16 rounded-3xl bg-blue-500/10 text-blue-500 flex items-center justify-center mx-auto">
+            <Layers className="w-8 h-8 animate-pulse" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-lg font-black text-[var(--text-primary)]">
+              ไม่พบข้อมูลแบบสำรวจในฐานข้อมูล MySQL
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto leading-relaxed">
+              ระบบไม่พบข้อมูลแบบสำรวจใดๆ ในเซิร์ฟเวอร์ขณะนี้ คุณสามารถสั่งให้ระบบติดตั้งและสร้างแบบสำรวจมาตรฐาน ปภ. อัจฉริยะ (จำนวน 6 ฟอร์ม) ลงฐานข้อมูลได้โดยตรงทันที
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <button
+              onClick={async () => {
+                setIsLoading(true);
+                setApiError(null);
+                try {
+                  const res = await fetch('/api/surveys/seed-official', { method: 'POST' });
+                  if (res.ok) {
+                    const data = await res.json();
+                    alert(data.message || 'ติดตั้งแบบสำรวจมาตรฐานสำเร็จ!');
+                    await fetchSurveys();
+                  } else {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'ติดตั้งแบบสำรวจล้มเหลว');
+                  }
+                } catch (e: any) {
+                  alert(e.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ');
+                  setApiError(e.message);
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              disabled={isLoading}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>ติดตั้งแบบสำรวจมาตรฐาน ปภ. (6 แบบฟอร์ม)</span>
+            </button>
+          </div>
+        </div>
+      ) : filteredSurveys.length === 0 ? (
         <div className="p-12 sm:p-16 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-center space-y-4 shadow-xs">
           <div className="w-16 h-16 rounded-3xl bg-blue-500/10 text-blue-600 flex items-center justify-center mx-auto">
             <Layers className="w-8 h-8" />
