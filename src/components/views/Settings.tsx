@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Save, UserPlus, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark, Sliders, ChevronLeft, ChevronRight, ChevronDown, Check, Cpu, Server, Gauge, FileText, Radio, Globe, Laptop, Smartphone, Tablet, Clock } from 'lucide-react';
+import { Save, UserPlus, UserCheck, Phone, Shield, Settings as SettingsIcon, Building2, Plus, Lock, Key, Trash2, X, ShieldCheck, Calendar, Activity, Image, Type, Search, Filter, User as UserIcon, Crown, BadgeCheck, Briefcase, AlertTriangle, Camera, Upload, Database, Download, RefreshCw, CheckCircle2, Mail, Eye, Send, HardDrive, Files, Copy, Layers, Zap, Sparkles, Hash, Bookmark, Sliders, ChevronLeft, ChevronRight, ChevronDown, Check, Cpu, Server, Gauge, FileText, Radio, Globe, Laptop, Smartphone, Tablet, Clock, Car, FileEdit } from 'lucide-react';
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../../utils/featureFlags';
 import CustomNumberingSettings from '../CustomNumberingSettings';
 import { useConfirm } from '../../context/ConfirmContext';
 import ActiveUsersRealtimeView from './ActiveUsersRealtimeView';
 import { useRealtimeSync, realtimeSync } from '../../utils/realtimeSync';
+import { 
+  DDPM_VEHICLE_CATEGORIES, 
+  isDDPMHeavyMachinery 
+} from '../../data/ddpmVehicles';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
@@ -19,7 +23,7 @@ interface SettingsProps {
 export default function Settings(props: SettingsProps) {
   const { confirm } = useConfirm();
   const { onSettingsUpdated } = props;
-  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control' | 'vehicles'>('system');
   const [userSubTab, setUserSubTab] = useState<'list' | 'realtime'>('list');
   const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
     return typeof window !== 'undefined' ? realtimeSync.getOnlineUsers() : 0;
@@ -278,6 +282,189 @@ export default function Settings(props: SettingsProps) {
   const [isAutoRefreshHealth, setIsAutoRefreshHealth] = useState<boolean>(false);
   const [diagRunningAction, setDiagRunningAction] = useState<string | null>(null);
   const [diagActionMsg, setDiagActionMsg] = useState<{ type: 'success' | 'error' | 'info'; title: string; detail: string } | null>(null);
+
+  // Vehicle Management State
+  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [isLoadingVehicles, setIsLoadingVehicles] = useState(false);
+  const [isSavingVehicle, setIsSavingVehicle] = useState(false);
+  const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState<any>(null);
+  const [isUploadingVehicleImage, setIsUploadingVehicleImage] = useState(false);
+  const [vehicleForm, setVehicleForm] = useState({
+    license_plate: '',
+    vehicle_number: '',
+    image_url: '',
+    province: 'ระยอง',
+    brand: '',
+    model: '',
+    vehicle_type: 'รถยนต์ตรวจการณ์และสั่งการ (Command Vehicle)',
+    department: '',
+    current_mileage: 0,
+    status: 'active',
+    responsible_person: '',
+    responsible_user_id: '',
+    responsible_position: '',
+    responsible_phone: ''
+  });
+
+  const handleVehicleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      
+      if (!file.type.startsWith('image/')) {
+        alert('กรุณาเลือกไฟล์ที่เป็นรูปภาพเท่านั้น (png, jpg, jpeg, webp)');
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        alert('ขนาดไฟล์รูปภาพต้องไม่เกิน 10MB');
+        return;
+      }
+
+      setIsUploadingVehicleImage(true);
+      const formData = new FormData();
+      formData.append('subfolder', 'vehicles');
+      formData.append('uploadedBy', props.user?.username || 'admin');
+      formData.append('files', file);
+
+      try {
+        const res = await fetch(`/api/upload?subfolder=vehicles&uploadedBy=${encodeURIComponent(props.user?.username || 'admin')}`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.files && data.files.length > 0) {
+            setVehicleForm(prev => ({ ...prev, image_url: data.files[0].url }));
+          } else {
+            alert('ไม่สามารถอัปโหลดรูปภาพได้: ' + (data.error || 'เกิดข้อผิดพลาดในการรับไฟล์'));
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          alert('ไม่สามารถอัปโหลดรูปภาพได้: ' + (errData.error || 'การเชื่อมต่อขัดข้อง'));
+        }
+      } catch (err: any) {
+        console.error('Error uploading vehicle image:', err);
+        alert('เกิดข้อผิดพลาดในการเชื่อมต่ออัปโหลด: ' + err.message);
+      } finally {
+        setIsUploadingVehicleImage(false);
+      }
+    }
+  };
+
+  const handleRemoveVehicleImage = async () => {
+    const imageUrl = vehicleForm.image_url;
+    if (!imageUrl) return;
+
+    setVehicleForm(prev => ({ ...prev, image_url: '' }));
+
+    try {
+      await fetch('/api/upload/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: imageUrl,
+          username: props.user?.username || 'admin'
+        })
+      });
+    } catch (err) {
+      console.error('Error deleting physical vehicle image:', err);
+    }
+  };
+
+  const fetchVehicles = async () => {
+    setIsLoadingVehicles(true);
+    try {
+      const res = await fetch('/api/vehicles');
+      if (res.ok) {
+        const data = await res.json();
+        setVehicles(data);
+      }
+    } catch (err) {
+      console.error('Error fetching vehicles:', err);
+    } finally {
+      setIsLoadingVehicles(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'vehicles' && canManageSystem) {
+      fetchVehicles();
+      if (users.length === 0) {
+        fetchUsers();
+      }
+      if (departments.length === 0) {
+        fetchDepartments();
+      }
+    }
+  }, [activeTab]);
+
+  const handleSaveVehicle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingVehicle(true);
+    try {
+      const url = editingVehicle ? `/api/vehicles/${editingVehicle.id}` : '/api/vehicles';
+      const method = editingVehicle ? 'PUT' : 'POST';
+      
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vehicleForm)
+      });
+      
+      if (res.ok) {
+        setIsVehicleModalOpen(false);
+        setEditingVehicle(null);
+        setVehicleForm({
+          license_plate: '',
+          vehicle_number: '',
+          image_url: '',
+          province: 'ระยอง',
+          brand: '',
+          model: '',
+          vehicle_type: 'รถยนต์ตรวจการณ์และสั่งการ (Command Vehicle)',
+          department: '',
+          current_mileage: 0,
+          status: 'active',
+          responsible_person: '',
+          responsible_user_id: '',
+          responsible_position: '',
+          responsible_phone: ''
+        });
+        fetchVehicles();
+      } else {
+        const err = await res.json();
+        alert('เกิดข้อผิดพลาด: ' + (err.error || err.message));
+      }
+    } catch (err: any) {
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อ: ' + err.message);
+    } finally {
+      setIsSavingVehicle(false);
+    }
+  };
+
+  const handleDeleteVehicle = async (id: string) => {
+    const confirmed = await confirm({
+      title: 'ยืนยันการลบยานพาหนะ',
+      message: 'คุณต้องการลบข้อมูลยานพาหนะนี้ออกจากระบบใช่หรือไม่? ข้อมูลประวัติการตรวจสภาพอาจได้รับผลกระทบ',
+      type: 'delete',
+      confirmText: 'ลบข้อมูล',
+      cancelText: 'ยกเลิก'
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/vehicles/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchVehicles();
+      } else {
+        const err = await res.json();
+        alert('เกิดข้อผิดพลาด: ' + err.error);
+      }
+    } catch (err: any) {
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อ: ' + err.message);
+    }
+  };
 
   const fetchSystemHealth = async () => {
     setIsLoadingHealth(true);
@@ -1954,7 +2141,7 @@ export default function Settings(props: SettingsProps) {
   const canBackup = !props.user?.role || (props.hasPermission ? props.hasPermission('backup_restore') : props.user?.role === 'admin');
 
   interface NavItem {
-    id: 'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control';
+    id: 'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control' | 'vehicles';
     label: string;
     sublabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -1999,6 +2186,14 @@ export default function Settings(props: SettingsProps) {
           sublabel: 'การส่งแจ้งเตือน และเทมเพลต OTP',
           icon: Mail,
           visible: canManageSystem
+        },
+        {
+          id: 'vehicles',
+          label: 'ยานพาหนะ',
+          sublabel: 'จัดการทะเบียนรถ, ยี่ห้อ, รุ่น และฝ่ายที่สังกัด',
+          icon: Car,
+          visible: canManageSystem,
+          badge: vehicles.length > 0 ? `${vehicles.length}` : undefined
         }
       ]
     },
@@ -4222,6 +4417,12 @@ export default function Settings(props: SettingsProps) {
                   note: 'ครอบคลุมงานสนับสนุนและธุรการกลาง'
                 },
                 {
+                  key: 'vehicles',
+                  title: 'ระบบบริหารจัดการยานพาหนะ (Vehicle & Fleet Management)',
+                  desc: 'สิทธิ์เข้าถึงระบบบันทึก ตรวจเช็คสภาพยานพาหนะ และพิมพ์รายงานการใช้รถ (ผู้รับผิดชอบจะเห็นเฉพาะรถของตนเอง ส่วน Admin/Moderator จะเห็นทั้งหมด)',
+                  note: 'Admin/Moderator ตรวจสอบได้ทุกคัน ผู้ใช้ทั่วไปตรวจเช็คเฉพาะคันที่ตนเองรับผิดชอบ'
+                },
+                {
                   key: 'urgent_incidents',
                   title: 'แบบรายงานเหตุด่วนสาธารณภัย (Urgent Incidents)',
                   desc: 'สิทธิ์เข้าถึง สร้าง แก้ไข และลบ แบบฟอร์มรายงานเหตุด่วนสาธารณภัย และดูแดชบอร์ดสรุปผล',
@@ -4244,12 +4445,6 @@ export default function Settings(props: SettingsProps) {
                   title: 'เครื่องมือสร้าง QR Code สารบรรณ & สติ๊กเกอร์ (QR Code Studio & PDF Label)',
                   desc: 'สิทธิ์ใช้งานเครื่องมือสร้าง QR Code เอกสารสารบรรณ แทรกใน PDF และจัดพิมพ์สติ๊กเกอร์บาร์โค้ด',
                   note: 'ช่วยให้ประชาชนและเจ้าหน้าที่สแกนตรวจสอบสถานะหนังสือได้รวดเร็ว'
-                },
-                {
-                  key: 'surveys',
-                  title: 'แบบสำรวจประเมินผลและแบบตอบรับดิจิทัล',
-                  desc: 'สิทธิ์เข้าถึง สร้าง ออกแบบ เผยแพร่ และวิเคราะห์รายงานผลแบบสำรวจความคิดเห็น/แบบประเมินความพึงพอใจ ก.พ.ร.',
-                  note: 'รองรับการสร้างแบบสำรวจ QR Code และรายงานสถิติแบบเรียลไทม์'
                 },
                 {
                   key: 'draft_docs',
@@ -4372,7 +4567,7 @@ export default function Settings(props: SettingsProps) {
             } else {
               if (role === 'admin') isAllowed = true;
               else if (role === 'moderator') isAllowed = !['system_settings', 'backup_restore', 'audit_logs', 'manage_users', 'manage_changelog'].includes(key);
-              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'surveys', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
+              else if (role === 'user') isAllowed = ['create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'draft_docs', 'digital_folders', 'workflow_sla'].includes(key);
             }
 
             // Strict rule: Moderator and User can never have manage_users
@@ -6271,8 +6466,589 @@ export default function Settings(props: SettingsProps) {
             </div>
           </div>
         )}
+
+        {activeTab === 'vehicles' && (
+          <div className="space-y-6 animate-fade-in text-[var(--text-primary)]">
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl shrink-0">
+                  <Car className="w-6 h-6 sm:w-7 sm:h-7" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-lg sm:text-xl font-sans font-semibold text-[var(--text-primary)]">
+                    จัดการข้อมูลยานพาหนะ (Vehicle Fleet Management)
+                  </h3>
+                  <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
+                    เพิ่ม แก้ไข และลบข้อมูลรถยนต์ในสังกัดหน่วยงาน เพื่อใช้ในระบบบันทึกการตรวจสภาพ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingVehicle(null);
+                  setVehicleForm({
+                    license_plate: '',
+                    vehicle_number: '',
+                    image_url: '',
+                    province: 'ระยอง',
+                    brand: '',
+                    model: '',
+                    vehicle_type: 'รถยนต์ตรวจการณ์และสั่งการ (Command Vehicle)',
+                    department: (departments[0] && (typeof departments[0] === 'string' ? departments[0] : departments[0].name)) || '',
+                    current_mileage: 0,
+                    status: 'active',
+                    responsible_person: '',
+                    responsible_user_id: '',
+                    responsible_position: '',
+                    responsible_phone: ''
+                  });
+                  setIsVehicleModalOpen(true);
+                }}
+                className="py-2.5 px-4 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>เพิ่มยานพาหนะใหม่</span>
+              </button>
+            </div>
+
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-xl shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[900px]">
+                  <thead>
+                    <tr className="bg-[var(--bg-canvas)]/50 border-b border-[var(--border-light)]">
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">รูปรถ</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">หมายเลขรถ / ทะเบียน</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">ยี่ห้อ/รุ่น</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">ประเภท</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">สังกัดฝ่าย</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">ผู้รับผิดชอบ (ผู้รายงาน)</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">เลขไมล์ล่าสุด</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">สถานะ</th>
+                      <th className="px-5 py-4 text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider text-right">จัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-light)]">
+                    {isLoadingVehicles ? (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-12 text-center text-[var(--text-secondary)]">
+                          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-3 opacity-20" />
+                          <p className="text-sm font-medium">กำลังโหลดข้อมูลยานพาหนะ...</p>
+                        </td>
+                      </tr>
+                    ) : vehicles.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-12 text-center text-[var(--text-secondary)]">
+                          <Car className="w-12 h-12 mx-auto mb-3 opacity-10" />
+                          <p className="text-sm font-medium">ยังไม่มีข้อมูลยานพาหนะในระบบ</p>
+                          <button 
+                            onClick={() => setIsVehicleModalOpen(true)}
+                            className="mt-3 text-[var(--primary-color)] hover:underline text-xs font-bold"
+                          >
+                            เพิ่มรถคันแรกของคุณ
+                          </button>
+                        </td>
+                      </tr>
+                    ) : (
+                      vehicles.map((v) => (
+                        <tr key={v.id} className="hover:bg-[var(--bg-canvas)]/30 transition-colors">
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <div className="w-12 h-12 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-light)] overflow-hidden flex items-center justify-center">
+                              {v.image_url ? (
+                                <img src={v.image_url} alt="Vehicle" className="w-full h-full object-cover" />
+                              ) : (
+                                <Car className="w-6 h-6 text-[var(--text-muted)] opacity-20" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-1.5">
+                                {v.vehicle_number && (
+                                  <span className="px-1.5 py-0.5 rounded bg-blue-500 text-white text-[10px] font-bold">
+                                    #{v.vehicle_number}
+                                  </span>
+                                )}
+                                <span className="text-sm font-bold text-[var(--text-primary)]">{v.license_plate}</span>
+                              </div>
+                              <span className="text-[10px] text-[var(--text-muted)]">{v.province}</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <div className="text-sm font-medium text-[var(--text-primary)]">{v.brand}</div>
+                            <div className="text-[11px] text-[var(--text-secondary)]">{v.model}</div>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-xs text-[var(--text-secondary)]">
+                            {v.vehicle_type}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-xs text-[var(--text-secondary)]">
+                            {v.department || '-'}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            {v.responsible_person ? (
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs shrink-0">
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex flex-col min-w-0">
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-bold text-[var(--text-primary)] text-xs truncate max-w-[140px]" title={v.responsible_person}>
+                                      {v.responsible_person}
+                                    </span>
+                                    {v.responsible_phone && (
+                                      <a 
+                                        href={`tel:${v.responsible_phone}`}
+                                        className="text-emerald-500 hover:text-emerald-600"
+                                        title={`โทร: ${v.responsible_phone}`}
+                                      >
+                                        <Phone className="w-3 h-3" />
+                                      </a>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-[var(--text-muted)] truncate max-w-[140px]" title={v.responsible_position || ''}>
+                                    {v.responsible_position || 'ผู้รับผิดชอบยานพาหนะ'}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-[var(--text-muted)] italic">
+                                ยังไม่ระบุ
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <span className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                              {(v.current_mileage || 0).toLocaleString()} กม.
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${
+                              v.status === 'active' 
+                                ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
+                                : v.status === 'maintenance'
+                                ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                                : 'bg-slate-500/10 text-slate-500 border border-slate-500/20'
+                            }`}>
+                              {v.status === 'active' ? 'พร้อมใช้งาน' : v.status === 'maintenance' ? 'แจ้งซ่อม' : 'หยุดใช้งาน'}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingVehicle(v);
+                                  setVehicleForm({
+                                    license_plate: v.license_plate,
+                                    vehicle_number: v.vehicle_number || '',
+                                    image_url: v.image_url || '',
+                                    province: v.province,
+                                    brand: v.brand,
+                                    model: v.model,
+                                    vehicle_type: v.vehicle_type,
+                                    department: v.department,
+                                    current_mileage: v.current_mileage,
+                                    status: v.status,
+                                    responsible_person: v.responsible_person || '',
+                                    responsible_user_id: v.responsible_user_id || '',
+                                    responsible_position: v.responsible_position || '',
+                                    responsible_phone: v.responsible_phone || ''
+                                  });
+                                  setIsVehicleModalOpen(true);
+                                }}
+                                className="p-2 text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-colors cursor-pointer"
+                                title="แก้ไขข้อมูล"
+                              >
+                                <FileEdit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteVehicle(v.id)}
+                                className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                                title="ลบข้อมูล"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Vehicle Modal */}
+        {isVehicleModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl animate-scale-up">
+              <div className="sticky top-0 z-10 flex items-center justify-between p-4 sm:p-5 border-b border-[var(--border-light)] bg-[var(--bg-canvas)]">
+                <h3 className="font-bold text-lg text-[var(--text-primary)] flex items-center gap-2">
+                  <Car className="w-5 h-5 text-[var(--primary-color)]" /> 
+                  {editingVehicle ? 'แก้ไขข้อมูลยานพาหนะ' : 'เพิ่มยานพาหนะใหม่'}
+                </h3>
+                <button 
+                  onClick={() => setIsVehicleModalOpen(false)}
+                  className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-1.5 rounded-xl hover:bg-[var(--bg-overlay)] cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveVehicle} className="p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-[var(--text-secondary)]">รูปรถยนต์ (แนบไฟล์รูปภาพ)</label>
+                  
+                  {vehicleForm.image_url ? (
+                    <div className="relative group rounded-2xl border border-[var(--border-light)] overflow-hidden bg-[var(--bg-canvas)] aspect-video flex items-center justify-center">
+                      <img 
+                        src={vehicleForm.image_url} 
+                        alt="Vehicle Preview" 
+                        className="w-full h-full object-cover" 
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleRemoveVehicleImage}
+                          className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-rose-600/30"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>ลบรูปภาพ</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="relative flex flex-col items-center justify-center border-2 border-dashed border-[var(--border-light)] hover:border-[var(--primary-color)] transition-colors rounded-2xl p-6 cursor-pointer bg-[var(--bg-canvas)] min-h-[140px]">
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={handleVehicleImageUpload} 
+                        className="hidden" 
+                        disabled={isUploadingVehicleImage}
+                      />
+                      {isUploadingVehicleImage ? (
+                        <div className="flex flex-col items-center gap-2.5">
+                          <RefreshCw className="w-8 h-8 text-[var(--primary-color)] animate-spin" />
+                          <p className="text-xs font-medium text-[var(--text-secondary)]">กำลังอัปโหลดรูปภาพ...</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 text-center">
+                          <div className="w-10 h-10 rounded-xl bg-[var(--primary-color)]/10 text-[var(--primary-color)] flex items-center justify-center">
+                            <Upload className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-[var(--text-primary)]">คลิกเพื่อเลือกรูปรถยนต์</p>
+                            <p className="text-xs text-[var(--text-secondary)] mt-0.5">รองรับไฟล์ PNG, JPG, JPEG (ขนาดไม่เกิน 10MB)</p>
+                          </div>
+                        </div>
+                      )}
+                    </label>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">หมายเลขรถ</label>
+                    <input
+                      type="text"
+                      value={vehicleForm.vehicle_number}
+                      onChange={(e) => setVehicleForm({...vehicleForm, vehicle_number: e.target.value})}
+                      placeholder="เช่น 01"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">เลขทะเบียนรถ *</label>
+                    <input
+                      required
+                      type="text"
+                      value={vehicleForm.license_plate}
+                      onChange={(e) => setVehicleForm({...vehicleForm, license_plate: e.target.value})}
+                      placeholder="เช่น กข 1234"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">จังหวัด *</label>
+                    <input
+                      required
+                      type="text"
+                      value={vehicleForm.province}
+                      onChange={(e) => setVehicleForm({...vehicleForm, province: e.target.value})}
+                      placeholder="เช่น ระยอง"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">ยี่ห้อ *</label>
+                    <input
+                      required
+                      type="text"
+                      value={vehicleForm.brand}
+                      onChange={(e) => setVehicleForm({...vehicleForm, brand: e.target.value})}
+                      placeholder="เช่น Toyota, Isuzu, THAI RUNG"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">รุ่น *</label>
+                    <input
+                      required
+                      type="text"
+                      value={vehicleForm.model}
+                      onChange={(e) => setVehicleForm({...vehicleForm, model: e.target.value})}
+                      placeholder="เช่น Hilux Revo, TR TRANSFORMER II"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">
+                      ประเภทรถ / เครื่องจักรกลสาธารณภัย (อ้างอิง ปภ.)
+                    </label>
+                    <span className="text-[10px] text-[var(--primary-color)] font-semibold">มาตรฐาน ปภ.</span>
+                  </div>
+                  <select
+                    value={vehicleForm.vehicle_type}
+                    onChange={(e) => setVehicleForm({...vehicleForm, vehicle_type: e.target.value})}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                  >
+                    {DDPM_VEHICLE_CATEGORIES.map((cat, idx) => (
+                      <optgroup key={idx} label={`หมวด: ${cat.category}`}>
+                        {cat.types.map((t, tIdx) => (
+                          <option key={tIdx} value={t.name}>{t.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    <option value="ยานพาหนะเฉพาะกิจอื่นๆ">ยานพาหนะเฉพาะกิจอื่นๆ (ระบุเอง)</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">สังกัดฝ่าย/กลุ่มงาน *</label>
+                    <select
+                      value={vehicleForm.department}
+                      onChange={(e) => setVehicleForm({...vehicleForm, department: e.target.value})}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    >
+                      <option value="">-- เลือกฝ่าย / กลุ่มงาน --</option>
+                      {departments.map((d: any) => {
+                        const deptName = typeof d === 'string' ? d : d.name;
+                        return (
+                          <option key={d.id || deptName} value={deptName}>{deptName}</option>
+                        );
+                      })}
+                      {vehicleForm.department && !departments.some((d: any) => (typeof d === 'string' ? d : d.name) === vehicleForm.department) && (
+                        <option value={vehicleForm.department}>{vehicleForm.department}</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-[var(--text-secondary)]">
+                      {isDDPMHeavyMachinery(vehicleForm.vehicle_type) ? 'ชม.ทำงาน / เลขไมล์' : 'เลขไมล์เริ่มต้น (กม.)'}
+                    </label>
+                    <input
+                      type="number"
+                      value={vehicleForm.current_mileage}
+                      onChange={(e) => setVehicleForm({...vehicleForm, current_mileage: parseInt(e.target.value) || 0})}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-light)] bg-[var(--bg-canvas)] text-sm text-[var(--text-primary)] focus:border-[var(--primary-color)] outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Responsible Person Section */}
+                <div className="p-4 rounded-2xl bg-[var(--bg-canvas)] border border-[var(--border-light)] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                        <UserCheck className="w-4 h-4 text-[var(--primary-color)]" />
+                        <span>ผู้รับผิดชอบยานพาหนะ / พนักงานขับรถ (ผู้รายงาน)</span>
+                      </h4>
+                      <p className="text-[11px] text-[var(--text-muted)]">
+                        ดึงข้อมูลจากบัญชีบุคลากรในระบบ (User) หรือระบุชื่อและเบอร์ติดต่อผู้รับผิดชอบ
+                      </p>
+                    </div>
+
+                    {props.user && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const myFullName = `${props.user.firstName || ''} ${props.user.lastName || ''}`.trim() || props.user.username;
+                          setVehicleForm(prev => ({
+                            ...prev,
+                            responsible_user_id: String(props.user.id || props.user.username),
+                            responsible_person: myFullName,
+                            responsible_position: props.user.position || prev.responsible_position,
+                            responsible_phone: props.user.phone || prev.responsible_phone,
+                            department: props.user.department ? props.user.department : prev.department
+                          }));
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-[var(--primary-color)]/10 hover:bg-[var(--primary-color)]/20 text-[var(--primary-color)] text-[11px] font-bold transition-all flex items-center gap-1 w-fit cursor-pointer shrink-0"
+                        title="กำหนดตัวฉันเป็นผู้รับผิดชอบยานพาหนะคันนี้"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>กำหนดเป็นตัวฉัน ({props.user.firstName || props.user.username})</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {/* Select from System Users */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-[var(--text-secondary)]">
+                        เลือกจากบุคลากรในระบบ ({users.length} คน)
+                      </label>
+                      <select
+                        value={vehicleForm.responsible_user_id}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (!val) {
+                            setVehicleForm(prev => ({
+                              ...prev,
+                              responsible_user_id: '',
+                              responsible_person: '',
+                              responsible_position: ''
+                            }));
+                            return;
+                          }
+                          const found = users.find(u => String(u.id) === val || u.username === val);
+                          if (found) {
+                            const fullName = `${found.firstName || ''} ${found.lastName || ''}`.trim() || found.username;
+                            setVehicleForm(prev => ({
+                              ...prev,
+                              responsible_user_id: String(found.id || found.username),
+                              responsible_person: fullName,
+                              responsible_position: found.position || prev.responsible_position,
+                              responsible_phone: found.phone || prev.responsible_phone,
+                              department: !prev.department && found.department ? found.department : (found.department || prev.department)
+                            }));
+                          }
+                        }}
+                        className="w-full bg-[var(--bg-surface)] border border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] outline-none"
+                      >
+                        <option value="">-- เลือกบุคลากรในระบบ (User) --</option>
+                        {users.map((u) => {
+                          const uName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username;
+                          return (
+                            <option key={u.id} value={String(u.id || u.username)}>
+                              {uName} {u.position ? `(${u.position})` : ''} {u.department ? `- ${u.department}` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {/* Direct Name Input */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-[var(--text-secondary)]">
+                        ชื่อ-นามสกุล ผู้รับผิดชอบ (แก้ไขหรือระบุเพิ่มเติมได้)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="เช่น นายสมบูรณ์ ปฏิบัติการ"
+                          value={vehicleForm.responsible_person}
+                          onChange={(e) => setVehicleForm({ ...vehicleForm, responsible_person: e.target.value })}
+                          className="w-full bg-[var(--bg-surface)] border border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl px-3 py-2 pr-8 text-xs text-[var(--text-primary)] outline-none"
+                        />
+                        {vehicleForm.responsible_person && (
+                          <button
+                            type="button"
+                            onClick={() => setVehicleForm(prev => ({
+                              ...prev,
+                              responsible_user_id: '',
+                              responsible_person: '',
+                              responsible_position: '',
+                              responsible_phone: ''
+                            }))}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-rose-500"
+                            title="ล้างข้อมูลผู้รับผิดชอบ"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-[var(--text-secondary)]">
+                        ตำแหน่งผู้รับผิดชอบ / พนักงานขับรถ
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="เช่น พนักงานขับเครื่องจักรกลขนาดหนัก, เจ้าพนักงาน ปภ."
+                        value={vehicleForm.responsible_position}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, responsible_position: e.target.value })}
+                        className="w-full bg-[var(--bg-surface)] border border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-[var(--text-secondary)]">
+                        เบอร์โทรศัพท์ติดต่อ (ผู้รับผิดชอบ)
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="เช่น 081-234-5678"
+                        value={vehicleForm.responsible_phone}
+                        onChange={(e) => setVehicleForm({ ...vehicleForm, responsible_phone: e.target.value })}
+                        className="w-full bg-[var(--bg-surface)] border border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-[var(--text-secondary)]">สถานะการใช้งาน</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['active', 'maintenance', 'inactive'].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setVehicleForm({...vehicleForm, status: s})}
+                        className={`py-2 rounded-lg text-xs font-bold border transition-all ${
+                          vehicleForm.status === s 
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
+                            : 'bg-[var(--bg-canvas)] border-[var(--border-light)] text-[var(--text-secondary)] hover:border-blue-400'
+                        }`}
+                      >
+                        {s === 'active' ? 'พร้อมใช้งาน' : s === 'maintenance' ? 'แจ้งซ่อม' : 'หยุดใช้งาน'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-light)]">
+                  <button
+                    type="button"
+                    onClick={() => setIsVehicleModalOpen(false)}
+                    className="px-5 py-2.5 rounded-xl border border-[var(--border-light)] hover:bg-[var(--bg-overlay)] text-sm font-bold text-[var(--text-secondary)] transition-colors cursor-pointer"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingVehicle}
+                    className="px-6 py-2.5 rounded-xl bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white text-sm font-bold shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingVehicle ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    <span>{editingVehicle ? 'บันทึกการแก้ไข' : 'เพิ่มยานพาหนะ'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    )}
+        </div> {/* closes Active Tab Main Card */}
+      </div> {/* closes Content Section */}
 
       {/* Add User Modal */}
       {showAddModal && (

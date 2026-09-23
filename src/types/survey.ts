@@ -1,25 +1,77 @@
+export type QuestionType =
+  | 'text'
+  | 'textarea'
+  | 'radio'
+  | 'checkbox'
+  | 'dropdown'
+  | 'rating'
+  | 'matrix'
+  | 'scale'
+  | 'date'
+  | 'file'
+  | 'ranking'
+  | 'signature';
+
 export type SurveyQuestionType =
   | 'single_choice'
   | 'multiple_choice'
   | 'dropdown'
+  | 'cascading_dropdown'
   | 'text_short'
   | 'text_long'
+  | 'number_input'
   | 'rating_stars'
+  | 'nps_score'
   | 'likert_scale'
   | 'matrix_rating'
+  | 'matrix_single'
+  | 'matrix_text'
+  | 'matrix_checkbox'
   | 'slider_score'
+  | 'ranking'
   | 'date_time'
   | 'file_upload'
   | 'signature'
+  | 'gps_location'
+  | 'geo_location'
   | 'contact_info'
+  | 'quiz_answer'
   | 'rsvp_status'
-  | 'section_header';
+  | 'section_header'
+  | 'picture_choice'
+  | 'image_choice'
+  | 'checkbox'
+  | 'matrix'
+  | 'scale'
+  | 'textarea'
+  | 'rating'
+  | 'quota_choice';
+
+export interface CascadingItem {
+  id: string;
+  name: string;
+  subItems?: CascadingItem[];
+  parentId?: string;
+}
 
 export interface SurveyOption {
   id: string;
-  text: string;
+  text?: string;
   score?: number;
   imageUrl?: string;
+  quotaLimit?: number; // โควตารับจำนวนคำตอบสูงสุดของตัวเลือกนี้
+  label?: string;
+  value?: string;
+  isCorrect?: boolean;
+}
+
+export interface SurveyCascadingLevel {
+  levelName: string;
+  options: Array<{
+    id: string;
+    text: string;
+    parentId?: string;
+  }>;
 }
 
 export interface SurveyMatrixRow {
@@ -76,6 +128,7 @@ export interface SurveyQuestion {
   options?: SurveyOption[];
   matrixRows?: SurveyMatrixRow[];
   matrixCols?: SurveyMatrixCol[];
+  cascadingLevels?: SurveyCascadingLevel[];
   minScore?: number;
   maxScore?: number;
   step?: number;
@@ -86,6 +139,41 @@ export interface SurveyQuestion {
   logicRules?: SurveyLogicRule[];
   sectionIndex?: number;
   scoreWeight?: number;
+
+  // Number input specific
+  unit?: string;
+  numberUnit?: string;
+  numberMin?: number;
+  numberMax?: number;
+
+  // Quiz / Exam / Evaluation specific
+  questionScore?: number;
+  correctAnswer?: string | string[]; // ID or text of correct option(s)
+  correctAnswers?: string[];
+  scorePoints?: number;
+  isExamQuestion?: boolean;
+  points?: number;
+  rankingItems?: any[];
+  explanation?: string;
+  answerExplanation?: string;
+
+  // GPS Map specific
+  defaultAddress?: string;
+
+  // Scaling / Star label specific
+  minLabel?: string;
+  maxLabel?: string;
+  minScale?: number;
+  maxScale?: number;
+}
+
+export interface SurveyEvaluationGrade {
+  minPercent: number;
+  maxPercent: number;
+  levelName: string;
+  gradeCode: string;
+  color: string;
+  description: string;
 }
 
 export interface SurveyThemeConfig {
@@ -106,7 +194,7 @@ export interface SurveyThemeConfig {
 }
 
 export interface SurveySettings {
-  status: 'draft' | 'published' | 'paused' | 'archived';
+  status: 'draft' | 'published' | 'paused' | 'archived' | 'closed';
   isOpen?: boolean; // เปิด-ปิดรับคำตอบ
   resolvedLogoUrl?: string; // ตราสัญลักษณ์ที่เรโซลูชันแล้วสำหรับการแสดงผลบนมือถือ/อุปกรณ์อื่น
   themeColor: string;
@@ -119,6 +207,9 @@ export interface SurveySettings {
   allowAnonymous: boolean;
   requireLogin: boolean;
   limitOneResponsePerDevice: boolean;
+  oneResponsePerUser?: boolean;
+  collectIp?: boolean;
+  collectDeviceInfo?: boolean;
   passwordProtection?: string;
   maxTotalResponses?: number;
   startDate?: string;
@@ -127,9 +218,30 @@ export interface SurveySettings {
   thankYouMessage: string;
   redirectUrl?: string;
   showSummaryToRespondents: boolean;
+  certificateOrgName?: string;
+  certificateSignerName?: string;
+  certificateSignerPosition?: string;
   linkedDocId?: string;
   linkedDocNumber?: string;
   targetAudience?: string;
+
+  // Enterprise Security & Whitelist Controls
+  enableWhitelist?: boolean;
+  whitelistEntries?: string[]; // รายชื่ออีเมล, เลขประจำตัวประชาชน, หรือเบอร์โทรศัพท์ที่ได้รับอนุญาต
+
+  // Enterprise Quiz & Evaluation Mode
+  quizMode?: boolean;
+  isExamMode?: boolean;
+  passingScorePercentage?: number;
+  passingScorePercent?: number;
+  passScore?: number;
+  surveyMode?: 'exam' | 'survey' | 'rsvp' | string;
+  quizPassPercent?: number; // เปอร์เซ็นต์ผ่านเกณฑ์ เช่น 70%
+  passScorePercent?: number;
+  quizShowResultImmediate?: boolean;
+  showScoreImmediately?: boolean;
+  timeLimitMinutes?: number; // เวลาในการทำแบบสำรวจ/ข้อสอบ (นาที)
+  evaluationGrades?: SurveyEvaluationGrade[]; // เกณฑ์ตัดเกรดการประเมิน 5 ระดับ
 
   // RSVP / Acknowledgment Specific Settings
   isRsvpForm?: boolean;
@@ -145,7 +257,7 @@ export interface Survey {
   id: string;
   title: string;
   description: string;
-  category: 'satisfaction' | 'disaster_readiness' | 'training' | 'assessment' | 'public_feedback' | 'rsvp_acknowledgment' | 'general';
+  category: 'satisfaction' | 'disaster_readiness' | 'training' | 'assessment' | 'public_feedback' | 'rsvp_acknowledgment' | 'general' | 'exam_quiz';
   categoryLabel: string;
   department: string;
   creatorId: string;
@@ -173,6 +285,20 @@ export interface SurveyResponse {
   deviceInfo?: string;
   timeSpentSeconds?: number;
   totalScore?: number;
+  maxPossibleScore?: number;
+  review?: any;
+  scoreObtained?: number;
+  passedExam?: boolean;
+  geoLocation?: any;
+  examResult?: any;
+  whitelistTokenUsed?: string;
+  scorePercentage?: number;
+  evaluationResult?: {
+    gradeCode: string;
+    levelName: string;
+    color: string;
+    isPassed?: boolean;
+  };
 }
 
 export interface SurveySummaryStats {

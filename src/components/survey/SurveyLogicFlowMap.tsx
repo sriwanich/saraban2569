@@ -1,23 +1,6 @@
 import React, { useState } from 'react';
-import {
-  GitBranch,
-  Eye,
-  EyeOff,
-  FastForward,
-  CheckCircle2,
-  AlertCircle,
-  Sparkles,
-  ArrowDown,
-  ArrowRight,
-  Filter,
-  Plus,
-  Settings2
-} from 'lucide-react';
-import { SurveyQuestion, SurveyLogicRule } from '../../types/survey';
-import {
-  normalizeRule,
-  getReadableRuleDescription
-} from '../../utils/surveyLogicEngine';
+import { GitBranch, Edit3, Settings, Eye, AlertTriangle, ArrowDown, HelpCircle, CheckCircle2 } from 'lucide-react';
+import { SurveyQuestion } from '../../types/survey';
 
 interface SurveyLogicFlowMapProps {
   questions: SurveyQuestion[];
@@ -28,186 +11,187 @@ interface SurveyLogicFlowMapProps {
 export const SurveyLogicFlowMap: React.FC<SurveyLogicFlowMapProps> = ({
   questions,
   onOpenLogicModal,
-  onSelectQuestion
+  onSelectQuestion,
 }) => {
-  const [filterType, setFilterType] = useState<'all' | 'has_logic' | 'no_logic'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
 
-  const questionsWithLogic = questions.filter(q => q.logicRules && q.logicRules.length > 0);
-  const totalRulesCount = questions.reduce((acc, q) => acc + (q.logicRules?.length || 0), 0);
+  // Check for logical warnings (e.g., question referencing a future question, or missing rules)
+  const getLogicStatus = (q: SurveyQuestion, index: number) => {
+    if (!q.logicRules || q.logicRules.length === 0) {
+      return { status: 'static', message: 'แสดงตลอดเวลา (Static Node)' };
+    }
 
-  const displayedQuestions = questions.filter(q => {
-    if (filterType === 'has_logic') return q.logicRules && q.logicRules.length > 0;
-    if (filterType === 'no_logic') return !q.logicRules || q.logicRules.length === 0;
-    return true;
-  });
+    const issues: string[] = [];
+    q.logicRules.forEach((rule) => {
+      rule.conditions.forEach((cond) => {
+        const triggerIndex = questions.findIndex((t) => t.id === cond.triggerQuestionId);
+        if (triggerIndex === -1) {
+          issues.push(`อ้างอิงคำถามที่ไม่มีอยู่จริง (ID: ${cond.triggerQuestionId})`);
+        } else if (triggerIndex >= index) {
+          issues.push(`เกิดตรรกะแบบวนรอบ: อ้างอิงคำถามข้อที่ ${triggerIndex + 1} ซึ่งอยู่หลังข้อนี้`);
+        }
+      });
+    });
+
+    if (issues.length > 0) {
+      return { status: 'error', message: issues.join(', ') };
+    }
+
+    return { status: 'conditional', message: `มีตรรกะเชื่อมโยง (${q.logicRules.length} เงื่อนไข)` };
+  };
+
+  const filteredQuestions = questions.filter((q) =>
+    q.title.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-[var(--bg-canvas)] overflow-hidden text-left">
-      {/* Header Bar */}
-      <div className="p-4 bg-[var(--bg-surface)] border-b border-[var(--border-lighter)] flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-            <GitBranch className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
-              <span>แผนผังเส้นทางตรรกะ & การแตกกิ่งคำถาม (Logic Flow Map)</span>
-              <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 text-xs font-mono font-bold">
-                {totalRulesCount} กฎเงื่อนไข
-              </span>
-            </h3>
-            <p className="text-xs text-[var(--text-muted)]">
-              เห็นภาพรวมความเชื่อมโยง เงื่อนไขการแสดงผล และจุดกระโดดข้ามข้อของแบบสำรวจทั้งชุด
-            </p>
-          </div>
+    <div className="flex-1 flex flex-col bg-[var(--bg-canvas)] rounded-2xl border border-[var(--border-lighter)] overflow-hidden h-full">
+      
+      {/* Visual Header */}
+      <div className="p-4 bg-[var(--bg-surface)] border-b border-[var(--border-lighter)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div>
+          <h4 className="font-bold text-xs text-[var(--text-primary)] flex items-center gap-1.5">
+            <GitBranch className="w-4 h-4 text-orange-600" />
+            แผนผังตรรกะการข้ามและเงื่อนไข (Smart Flow Mapping)
+          </h4>
+          <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+            ตรวจสอบทิศทางการจัดส่งแบบสำรวจ ความเชื่อมโยงแบบมีเงื่อนไขของข้อคำถามทุกข้อ
+          </p>
         </div>
-
-        {/* Filter buttons */}
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)]">
-          <button
-            onClick={() => setFilterType('all')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              filterType === 'all'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            ทั้งหมด ({questions.length})
-          </button>
-          <button
-            onClick={() => setFilterType('has_logic')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              filterType === 'has_logic'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            เฉพาะข้อที่มีตรรกะ ({questionsWithLogic.length})
-          </button>
-          <button
-            onClick={() => setFilterType('no_logic')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              filterType === 'no_logic'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            ข้อทั่วไป ({questions.length - questionsWithLogic.length})
-          </button>
-        </div>
+        
+        {/* Search */}
+        <input
+          type="text"
+          placeholder="ค้นหาข้อคำถาม..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-lg px-2.5 py-1 text-xs text-[var(--text-primary)] outline-none w-full sm:w-48 placeholder:text-[var(--text-muted)]"
+        />
       </div>
 
-      {/* Main Flow Canvas */}
-      <div className="flex-1 p-6 overflow-y-auto custom-scrollbar">
-        <div className="max-w-4xl mx-auto space-y-4">
-          
-          {displayedQuestions.map((q, idx) => {
-            const rules = (q.logicRules || []).map(normalizeRule);
-            const hasRules = rules.length > 0;
-            const originalIndex = questions.findIndex(item => item.id === q.id);
+      {/* Map Content */}
+      <div className="flex-1 p-5 overflow-y-auto space-y-4 custom-scrollbar">
+        {filteredQuestions.length === 0 ? (
+          <div className="text-center py-10">
+            <p className="text-xs text-[var(--text-muted)]">ไม่พบข้อคำถามที่สอดคล้องกับการค้นหา</p>
+          </div>
+        ) : (
+          <div className="max-w-xl mx-auto space-y-3">
+            {filteredQuestions.map((q, idx) => {
+              const fullIndex = questions.findIndex((t) => t.id === q.id);
+              const { status, message } = getLogicStatus(q, fullIndex);
 
-            return (
-              <div key={q.id} className="relative">
-                {/* Connecting Line */}
-                {idx < displayedQuestions.length - 1 && (
-                  <div className="absolute left-7 top-full h-4 w-0.5 bg-slate-300 dark:bg-slate-700 -z-0" />
-                )}
-
-                <div
-                  className={`p-4 sm:p-5 rounded-3xl border transition-all ${
-                    hasRules
-                      ? 'bg-[var(--bg-surface)] border-blue-500/50 shadow-md ring-1 ring-blue-500/20'
-                      : 'bg-[var(--bg-surface)] border-[var(--border-lighter)] hover:border-slate-300 dark:hover:border-slate-700 shadow-xs'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
+              return (
+                <div key={q.id} className="flex flex-col items-center">
+                  
+                  {/* Question Node Card */}
+                  <div className="w-full bg-[var(--bg-surface)] border border-[var(--border-lighter)] hover:border-orange-500/30 rounded-xl p-3.5 shadow-sm transition flex items-start gap-3">
                     
-                    {/* Left: Question Badge & Title */}
-                    <div className="flex items-start gap-3">
-                      <div className={`w-8 h-8 rounded-2xl flex items-center justify-center font-bold text-xs shrink-0 ${
-                        hasRules
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'bg-slate-200 dark:bg-slate-800 text-[var(--text-secondary)]'
-                      }`}>
-                        {originalIndex + 1}
-                      </div>
+                    {/* Index Bullet */}
+                    <div className="w-6 h-6 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-lighter)] flex items-center justify-center font-bold text-[10px] text-[var(--text-secondary)] shrink-0 mt-0.5">
+                      Q{fullIndex + 1}
+                    </div>
 
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-[var(--text-primary)]">
-                            {q.title}
+                    {/* Details */}
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                          {q.type.replace('_', ' ')}
+                        </span>
+                        
+                        {/* Status pill */}
+                        {status === 'error' && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 font-bold text-[9px]">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            ตรรกะขัดแย้ง
                           </span>
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[var(--bg-canvas)] text-[var(--text-secondary)] border border-[var(--border-lighter)]">
-                            {q.type}
+                        )}
+                        {status === 'conditional' && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-600 font-bold text-[9px]">
+                            <GitBranch className="w-2.5 h-2.5" />
+                            แสดงตามเงื่อนไข
                           </span>
-                          {q.required && (
-                            <span className="text-xs font-bold text-rose-500">*จำเป็น</span>
-                          )}
-                        </div>
-
-                        {q.description && (
-                          <p className="text-[11px] text-[var(--text-muted)] line-clamp-1">
-                            {q.description}
-                          </p>
+                        )}
+                        {status === 'static' && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-600 font-bold text-[9px]">
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            แสดงถาวร
+                          </span>
                         )}
                       </div>
+
+                      <h5 className="font-bold text-xs text-[var(--text-primary)] truncate">
+                        {q.title}
+                      </h5>
+
+                      {/* Rule details rendering */}
+                      {q.logicRules && q.logicRules.length > 0 && (
+                        <div className="bg-[var(--bg-canvas)] rounded-lg p-2 border border-[var(--border-lighter)] text-[10px] text-[var(--text-secondary)] space-y-1">
+                          {q.logicRules.map((rule, ruleIdx) => (
+                            <div key={rule.id} className="flex flex-wrap items-center gap-1">
+                              <span className="font-bold text-orange-600">เงื่อนไข {ruleIdx + 1}:</span>
+                              <span>จะ</span>
+                              <span className="font-semibold text-[var(--text-primary)]">
+                                {rule.action === 'show' ? 'แสดง' : rule.action === 'hide' ? 'ซ่อน' : 'บังคับตอบ'}
+                              </span>
+                              <span>เมื่อ</span>
+                              {rule.conditions.map((cond, condIdx) => {
+                                const targetQIdx = questions.findIndex((t) => t.id === cond.triggerQuestionId);
+                                return (
+                                  <span key={cond.id} className="bg-black/5 dark:bg-white/5 px-1 rounded text-[9px]">
+                                    {condIdx > 0 ? ` ${rule.conditionMatch === 'all' ? 'และ' : 'หรือ'} ` : ''}
+                                    Q{targetQIdx + 1} {cond.operator === 'equals' ? '=' : cond.operator === 'not_equals' ? '≠' : cond.operator} '{cond.triggerValue}'
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Warning Message if any */}
+                      {status === 'error' && (
+                        <p className="text-[9px] text-red-500 font-medium flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          {message}
+                        </p>
+                      )}
                     </div>
 
-                    {/* Right: Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    {/* Quick actions */}
+                    <div className="flex flex-col gap-1 shrink-0">
                       <button
                         onClick={() => onOpenLogicModal(q)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                          hasRules
-                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 hover:bg-blue-500/25 border border-blue-500/30'
-                            : 'bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-blue-600 hover:bg-blue-500/10 border border-[var(--border-lighter)]'
-                        }`}
+                        className="p-1.5 rounded-lg border border-[var(--border-lighter)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-orange-600 hover:border-orange-500/20 transition"
+                        title="ตั้งค่า/แก้ไขเงื่อนไข"
                       >
-                        <GitBranch className="w-3.5 h-3.5" />
-                        <span>{hasRules ? `แก้ไขตรรกะ (${rules.length})` : '+ ตั้งตรรกะเงื่อนไข'}</span>
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => onSelectQuestion(q.id)}
+                        className="p-1.5 rounded-lg border border-[var(--border-lighter)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:text-blue-600 hover:border-blue-500/20 transition"
+                        title="แก้ไขคำถามข้อนี้"
+                      >
+                        <Settings className="w-3.5 h-3.5" />
                       </button>
                     </div>
+
                   </div>
 
-                  {/* Logic Rules Detail Card */}
-                  {hasRules && (
-                    <div className="mt-4 pt-3 border-t border-[var(--border-lighter)] space-y-2">
-                      <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">
-                        เงื่อนไขที่ทำงานกับข้อนี้ ({rules.length} กฎ):
-                      </span>
-
-                      <div className="space-y-1.5">
-                        {rules.map((rule, rIdx) => (
-                          <div
-                            key={rule.id || rIdx}
-                            className="p-2.5 rounded-2xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)] text-xs flex items-start justify-between gap-2"
-                          >
-                            <div className="flex items-start gap-2">
-                              {rule.action === 'show' && <Eye className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />}
-                              {rule.action === 'hide' && <EyeOff className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />}
-                              {rule.action === 'jump_to_question' && <FastForward className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />}
-                              {rule.action === 'jump_to_end' && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />}
-                              {rule.action === 'require' && <AlertCircle className="w-4 h-4 text-purple-500 shrink-0 mt-0.5" />}
-
-                              <span className="text-[var(--text-secondary)] leading-relaxed font-medium">
-                                {getReadableRuleDescription(rule, questions)}
-                              </span>
-                            </div>
-
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-blue-500/10 text-blue-600 shrink-0">
-                              {rule.conditionMatch === 'all' ? 'AND (ทุกข้อ)' : 'OR (ข้อใดข้อหนึ่ง)'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                  {/* Flow Arrow (only if not the last item) */}
+                  {idx < filteredQuestions.length - 1 && (
+                    <div className="py-1 flex flex-col items-center">
+                      <ArrowDown className="w-4 h-4 text-[var(--text-muted)] animate-bounce" />
                     </div>
                   )}
+
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
+
     </div>
   );
 };

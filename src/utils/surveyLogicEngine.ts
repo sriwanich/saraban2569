@@ -1,331 +1,280 @@
 import { SurveyQuestion, SurveyLogicRule, SurveyLogicCondition } from '../types/survey';
 
-/**
- * Normalizes a rule into the modern standard format with an array of conditions
- */
-export function normalizeRule(rule: SurveyLogicRule): SurveyLogicRule {
-  if (rule.conditions && Array.isArray(rule.conditions) && rule.conditions.length > 0) {
-    return {
-      ...rule,
-      id: rule.id || `rule_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      conditionMatch: rule.conditionMatch || 'all',
-      conditions: rule.conditions.map(c => ({
-        ...c,
-        id: c.id || `cond_${Math.random().toString(36).substring(2, 6)}`
-      }))
-    };
+function evaluateCondition(condition: SurveyLogicCondition, answersMap: Record<string, any>): boolean {
+  const val = answersMap[condition.triggerQuestionId];
+  const targetVal = condition.triggerValue;
+
+  switch (condition.operator) {
+    case 'equals':
+      if (Array.isArray(val)) {
+        return val.includes(targetVal);
+      }
+      return String(val ?? '') === String(targetVal ?? '');
+    case 'not_equals':
+      if (Array.isArray(val)) {
+        return !val.includes(targetVal);
+      }
+      return String(val ?? '') !== String(targetVal ?? '');
+    case 'contains':
+      if (Array.isArray(val)) {
+        return val.some(item => String(item).toLowerCase().includes(String(targetVal).toLowerCase()));
+      }
+      return String(val ?? '').toLowerCase().includes(String(targetVal ?? '').toLowerCase());
+    case 'not_contains':
+      if (Array.isArray(val)) {
+        return !val.some(item => String(item).toLowerCase().includes(String(targetVal).toLowerCase()));
+      }
+      return !String(val ?? '').toLowerCase().includes(String(targetVal ?? '').toLowerCase());
+    case 'greater_than':
+      return Number(val) > Number(targetVal);
+    case 'greater_than_or_equal':
+      return Number(val) >= Number(targetVal);
+    case 'less_than':
+      return Number(val) < Number(targetVal);
+    case 'less_than_or_equal':
+      return Number(val) <= Number(targetVal);
+    case 'is_empty':
+      return val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0);
+    case 'is_not_empty':
+    case 'is_answered':
+      return val !== undefined && val !== null && val !== '' && (!Array.isArray(val) || val.length > 0);
+    default:
+      return false;
+  }
+}
+
+function evaluateRule(rule: SurveyLogicRule, answersMap: Record<string, any>): boolean {
+  if (rule.conditions && rule.conditions.length > 0) {
+    if (rule.conditionMatch === 'any') {
+      return rule.conditions.some(cond => evaluateCondition(cond, answersMap));
+    }
+    return rule.conditions.every(cond => evaluateCondition(cond, answersMap));
   }
 
-  // Convert legacy single-condition rule
-  const legacyCondition: SurveyLogicCondition = {
-    id: `cond_${Date.now()}`,
-    triggerQuestionId: rule.triggerQuestionId || '',
-    operator: (rule.operator as any) || 'equals',
+  // Legacy fallback
+  if (rule.triggerQuestionId && rule.operator) {
+    const singleCond: SurveyLogicCondition = {
+      id: rule.id,
+      triggerQuestionId: rule.triggerQuestionId,
+      operator: rule.operator as any,
+      triggerValue: rule.triggerValue
+    };
+    return evaluateCondition(singleCond, answersMap);
+  }
+
+  return false;
+}
+
+export function evaluateQuestionState(
+  question: SurveyQuestion,
+  answersMap: Record<string, any>,
+  allQuestions: SurveyQuestion[] = []
+): { isVisible: boolean; isRequired: boolean; disabled: boolean; activeRules: SurveyLogicRule[] } {
+  let isVisible = true;
+  let isRequired = Boolean(question.required);
+  let disabled = false;
+  const activeRules: SurveyLogicRule[] = [];
+
+  if (!question.logicRules || question.logicRules.length === 0) {
+    return { isVisible, isRequired, disabled, activeRules };
+  }
+
+  for (const rule of question.logicRules) {
+    const matched = evaluateRule(rule, answersMap);
+    if (matched) {
+      activeRules.push(rule);
+      if (rule.action === 'show') {
+        isVisible = true;
+      } else if (rule.action === 'hide') {
+        isVisible = false;
+      } else if (rule.action === 'require') {
+        isRequired = true;
+      }
+    } else {
+      if (rule.action === 'show') {
+        isVisible = false;
+      }
+    }
+  }
+
+  return { isVisible, isRequired, disabled, activeRules };
+}
+
+export function getReadableRuleDescription(rule: SurveyLogicRule): string {
+  if (rule.description) return rule.description;
+  const actionText = rule.action === 'show' ? 'แสดง' : rule.action === 'hide' ? 'ซ่อน' : rule.action === 'require' ? 'บังคับตอบ' : 'ข้ามไป';
+  return `ถ้าเงื่อนไขตรงตามที่กำหนด ให้${actionText}ข้อนี้`;
+}
+
+export function normalizeRule(rule: Partial<SurveyLogicRule>): SurveyLogicRule {
+  const normalized: SurveyLogicRule = {
+    id: rule.id || `rule_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    action: rule.action || 'show',
+    conditionMatch: rule.conditionMatch || 'all',
+    conditions: rule.conditions || [],
+    targetQuestionId: rule.targetQuestionId,
+    description: rule.description,
+    triggerQuestionId: rule.triggerQuestionId,
+    operator: rule.operator as any,
     triggerValue: rule.triggerValue
   };
 
-  return {
-    id: rule.id || `rule_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    name: rule.name || 'กฎตรรกะเงื่อนไข',
-    action: rule.action || 'show',
-    conditionMatch: rule.conditionMatch || 'all',
-    conditions: [legacyCondition],
-    targetQuestionId: rule.targetQuestionId,
-    description: rule.description
-  };
+  if (normalized.conditions.length === 0 && normalized.triggerQuestionId && normalized.operator) {
+    normalized.conditions.push({
+      id: `cond_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      triggerQuestionId: normalized.triggerQuestionId,
+      operator: normalized.operator as any,
+      triggerValue: normalized.triggerValue
+    });
+  }
+
+  return normalized;
 }
 
 /**
- * Evaluates a single condition against current answers
+ * Automated Scoring & Grading Engine (Enterprise Exam Mode)
+ * Calculates scores, determines pass/fail, and generates evaluation summaries.
  */
-export function evaluateCondition(
-  condition: SurveyLogicCondition,
-  answers: Record<string, any>,
-  allQuestions: SurveyQuestion[]
-): boolean {
-  if (!condition.triggerQuestionId) return true;
-
-  const triggerQuestion = allQuestions.find(q => q.id === condition.triggerQuestionId);
-  const rawAnswer = answers[condition.triggerQuestionId];
-
-  // Handle matrix row answer
-  let answerVal = rawAnswer;
-  if (triggerQuestion?.type === 'matrix_rating' && condition.matrixRowId) {
-    answerVal = rawAnswer?.[condition.matrixRowId];
-  }
-
-  const { operator, triggerValue } = condition;
-
-  switch (operator) {
-    case 'is_empty':
-      return answerVal === undefined || answerVal === null || answerVal === '' || (Array.isArray(answerVal) && answerVal.length === 0);
-
-    case 'is_not_empty':
-    case 'is_answered':
-      return answerVal !== undefined && answerVal !== null && answerVal !== '' && (!Array.isArray(answerVal) || answerVal.length > 0);
-
-    case 'equals':
-      if (answerVal === undefined || answerVal === null) return false;
-      if (Array.isArray(answerVal)) {
-        return answerVal.length === 1 && String(answerVal[0]) === String(triggerValue);
-      }
-      return String(answerVal).trim().toLowerCase() === String(triggerValue).trim().toLowerCase();
-
-    case 'not_equals':
-      if (answerVal === undefined || answerVal === null) return true;
-      if (Array.isArray(answerVal)) {
-        return !answerVal.map(String).includes(String(triggerValue));
-      }
-      return String(answerVal).trim().toLowerCase() !== String(triggerValue).trim().toLowerCase();
-
-    case 'contains':
-      if (answerVal === undefined || answerVal === null) return false;
-      if (Array.isArray(answerVal)) {
-        return answerVal.map(String).includes(String(triggerValue));
-      }
-      return String(answerVal).toLowerCase().includes(String(triggerValue).toLowerCase());
-
-    case 'not_contains':
-      if (answerVal === undefined || answerVal === null) return true;
-      if (Array.isArray(answerVal)) {
-        return !answerVal.map(String).includes(String(triggerValue));
-      }
-      return !String(answerVal).toLowerCase().includes(String(triggerValue).toLowerCase());
-
-    case 'greater_than': {
-      const numAnswer = parseFloat(answerVal);
-      const numTarget = parseFloat(triggerValue);
-      if (isNaN(numAnswer) || isNaN(numTarget)) return false;
-      return numAnswer > numTarget;
-    }
-
-    case 'greater_than_or_equal': {
-      const numAnswer = parseFloat(answerVal);
-      const numTarget = parseFloat(triggerValue);
-      if (isNaN(numAnswer) || isNaN(numTarget)) return false;
-      return numAnswer >= numTarget;
-    }
-
-    case 'less_than': {
-      const numAnswer = parseFloat(answerVal);
-      const numTarget = parseFloat(triggerValue);
-      if (isNaN(numAnswer) || isNaN(numTarget)) return false;
-      return numAnswer < numTarget;
-    }
-
-    case 'less_than_or_equal': {
-      const numAnswer = parseFloat(answerVal);
-      const numTarget = parseFloat(triggerValue);
-      if (isNaN(numAnswer) || isNaN(numTarget)) return false;
-      return numAnswer <= numTarget;
-    }
-
-    default:
-      return true;
-  }
-}
-
-/**
- * Evaluates a rule containing one or more conditions (with AND/OR logic)
- */
-export function evaluateRule(
-  rule: SurveyLogicRule,
-  answers: Record<string, any>,
-  allQuestions: SurveyQuestion[]
-): boolean {
-  const normRule = normalizeRule(rule);
-  if (!normRule.conditions || normRule.conditions.length === 0) return true;
-
-  if (normRule.conditionMatch === 'any') {
-    // OR condition: true if ANY condition is met
-    return normRule.conditions.some(cond => evaluateCondition(cond, answers, allQuestions));
-  } else {
-    // AND condition (default): true only if ALL conditions are met
-    return normRule.conditions.every(cond => evaluateCondition(cond, answers, allQuestions));
-  }
-}
-
-/**
- * Evaluates the full question state (visibility, required, active rules)
- */
-export function evaluateQuestionState(
-  question: SurveyQuestion,
-  allQuestions: SurveyQuestion[],
-  answers: Record<string, any>
-): {
-  isVisible: boolean;
-  isRequired: boolean;
-  activeRules: SurveyLogicRule[];
-  reason?: string;
+export function calculateSurveyScore(questions: SurveyQuestion[], answers: Record<string, any>): {
+  totalScore: number;
+  maxPossibleScore: number;
+  percentage: number;
+  questionResults: Record<string, { isCorrect: boolean; score: number; maxScore: number; explanation?: string }>;
 } {
-  const rules = (question.logicRules || []).map(normalizeRule);
+  let totalScore = 0;
+  let maxPossibleScore = 0;
+  const questionResults: Record<string, { isCorrect: boolean; score: number; maxScore: number; explanation?: string }> = {};
 
-  if (rules.length === 0) {
-    return {
-      isVisible: true,
-      isRequired: question.required,
-      activeRules: []
+  questions.forEach(q => {
+    if (q.type === 'section_header') return;
+
+    // Default question score if not specified (Enterprise Standard)
+    const weight = q.scoreWeight || q.questionScore || q.points || q.scorePoints || 1;
+    let qScore = 0;
+    let isCorrect = false;
+    const ans = answers[q.id];
+
+    switch (q.type) {
+      case 'single_choice':
+      case 'dropdown':
+      case 'quiz_answer':
+        const selectedOpt = q.options?.find(opt => String(opt.id) === String(ans) || String(opt.text) === String(ans));
+        
+        // Priority 1: Option-level correct flag or score
+        if (selectedOpt && (selectedOpt.isCorrect || selectedOpt.score)) {
+          qScore = selectedOpt.score || (selectedOpt.isCorrect ? weight : 0);
+          isCorrect = selectedOpt.isCorrect || qScore >= weight;
+        } 
+        // Priority 2: Question-level correctAnswer string
+        else if (q.correctAnswer) {
+          const cleanAns = String(ans || '').trim().toLowerCase();
+          const correctStr = String(q.correctAnswer).trim().toLowerCase();
+          
+          if (cleanAns === correctStr || (selectedOpt && String(selectedOpt.text).trim().toLowerCase() === correctStr)) {
+            qScore = weight;
+            isCorrect = true;
+          }
+        }
+        break;
+
+      case 'multiple_choice':
+      case 'checkbox':
+        if (Array.isArray(ans)) {
+          const correctOpts = q.options?.filter(opt => opt.isCorrect) || [];
+          const qCorrectAnswers = q.correctAnswers || (typeof q.correctAnswer === 'string' ? [q.correctAnswer] : (Array.isArray(q.correctAnswer) ? q.correctAnswer : []));
+          
+          if (correctOpts.length > 0 || qCorrectAnswers.length > 0) {
+            const correctSet = new Set([
+              ...correctOpts.map(opt => String(opt.id).toLowerCase()),
+              ...correctOpts.map(opt => String(opt.text).toLowerCase()),
+              ...qCorrectAnswers.map(a => String(a).toLowerCase())
+            ]);
+
+            const selectedValues = ans.map(a => String(a).toLowerCase());
+            
+            // Check if all selected are in correct set AND all required correct answers are selected
+            // For simplicity in Enterprise Exam: Exact match required
+            const matches = selectedValues.filter(v => correctSet.has(v));
+            const isFullyCorrect = matches.length === selectedValues.length && (qCorrectAnswers.length > 0 ? matches.length >= qCorrectAnswers.length : matches.length === correctOpts.length);
+
+            if (isFullyCorrect) {
+              qScore = weight;
+              isCorrect = true;
+            } else if (matches.length > 0) {
+              // Partial credit
+              const totalCorrectNeeded = qCorrectAnswers.length || correctOpts.length;
+              const partial = (matches.length / totalCorrectNeeded) * weight;
+              qScore = Math.max(0, Number((partial - (selectedValues.length > totalCorrectNeeded ? 0.5 : 0)).toFixed(2)));
+            }
+          }
+        }
+        break;
+
+      case 'rating_stars':
+      case 'slider_score':
+        qScore = Number(ans) || 0;
+        isCorrect = qScore >= (q.maxScore || 5) * 0.8; // Correct if >= 80%
+        break;
+
+      case 'matrix_rating':
+        if (typeof ans === 'object' && ans !== null) {
+          let matrixSum = 0;
+          const rows = q.matrixRows || [];
+          rows.forEach(row => {
+            matrixSum += Number(ans[row.id]) || 0;
+          });
+          qScore = rows.length > 0 ? matrixSum / rows.length : 0;
+          isCorrect = qScore >= 4; // Correct if avg >= 4
+        }
+        break;
+
+      case 'text_short':
+      case 'number_input':
+        const cleanAns = String(ans || '').trim().toLowerCase();
+        const correctStr = String(q.correctAnswer || '').trim().toLowerCase();
+        if (correctStr && cleanAns === correctStr) {
+          qScore = weight;
+          isCorrect = true;
+        }
+        break;
+    }
+
+    totalScore += qScore;
+    maxPossibleScore += weight;
+    questionResults[q.id] = {
+      isCorrect,
+      score: qScore,
+      maxScore: weight,
+      explanation: q.explanation || q.answerExplanation
     };
-  }
-
-  const showRules = rules.filter(r => r.action === 'show');
-  const hideRules = rules.filter(r => r.action === 'hide');
-  const requireRules = rules.filter(r => r.action === 'require');
-
-  let isVisible = true;
-  const activeRules: SurveyLogicRule[] = [];
-
-  // If there are 'show' rules, the question is HIDDEN by default until at least one 'show' rule evaluates to true
-  if (showRules.length > 0) {
-    const showMatched = showRules.some(r => {
-      const passed = evaluateRule(r, answers, allQuestions);
-      if (passed) activeRules.push(r);
-      return passed;
-    });
-    isVisible = showMatched;
-  }
-
-  // If there are 'hide' rules, check if any hide rule is triggered
-  if (isVisible && hideRules.length > 0) {
-    const hideMatched = hideRules.some(r => {
-      const passed = evaluateRule(r, answers, allQuestions);
-      if (passed) activeRules.push(r);
-      return passed;
-    });
-    if (hideMatched) {
-      isVisible = false;
-    }
-  }
-
-  // Check dynamic requirement overrides
-  let isRequired = question.required;
-  if (requireRules.length > 0) {
-    const reqMatched = requireRules.some(r => {
-      const passed = evaluateRule(r, answers, allQuestions);
-      if (passed) activeRules.push(r);
-      return passed;
-    });
-    if (reqMatched) {
-      isRequired = true;
-    }
-  }
+  });
 
   return {
-    isVisible,
-    isRequired,
-    activeRules
+    totalScore: Number(totalScore.toFixed(2)),
+    maxPossibleScore,
+    percentage: maxPossibleScore > 0 ? Math.round((totalScore / maxPossibleScore) * 100) : 0,
+    questionResults
   };
 }
 
-/**
- * Evaluates Jump / Skip Logic after answering questions
- */
-export function evaluateJumpTargets(
-  allQuestions: SurveyQuestion[],
-  answers: Record<string, any>
-): {
-  jumpToEnd: boolean;
-  jumpTargetQuestionId?: string;
-} {
-  for (const q of allQuestions) {
-    const rules = (q.logicRules || []).map(normalizeRule);
-    for (const rule of rules) {
-      if (rule.action === 'jump_to_end' && evaluateRule(rule, answers, allQuestions)) {
-        return { jumpToEnd: true };
-      }
-      if (rule.action === 'jump_to_question' && rule.targetQuestionId && evaluateRule(rule, answers, allQuestions)) {
-        return { jumpToEnd: false, jumpTargetQuestionId: rule.targetQuestionId };
-      }
-    }
-  }
+export function getEvaluationResult(percentage: number, settings: any) {
+  const passingPercent = settings.passingScorePercentage || settings.passingScorePercent || settings.quizPassPercent || 60;
+  const isPassed = percentage >= passingPercent;
+  
+  // Default Grades if none provided
+  const grades = settings.evaluationGrades || [
+    { minPercent: 85, maxPercent: 100, levelName: 'ดีเยี่ยม (Excellent)', gradeCode: 'A', color: '#10b981' },
+    { minPercent: 70, maxPercent: 84.99, levelName: 'ดีมาก (Very Good)', gradeCode: 'B', color: '#3b82f6' },
+    { minPercent: passingPercent, maxPercent: 69.99, levelName: 'ผ่านเกณฑ์ (Pass)', gradeCode: 'C', color: '#8b5cf6' },
+    { minPercent: 0, maxPercent: passingPercent - 0.01, levelName: 'ไม่ผ่านเกณฑ์ (Fail)', gradeCode: 'F', color: '#ef4444' }
+  ];
 
-  return { jumpToEnd: false };
-}
+  const matchedGrade = grades.find((g: any) => percentage >= g.minPercent && percentage <= g.maxPercent) || grades[grades.length - 1];
 
-/**
- * Returns list of currently visible and active questions in order
- */
-export function getActiveVisibleQuestions(
-  allQuestions: SurveyQuestion[],
-  answers: Record<string, any>
-): SurveyQuestion[] {
-  return allQuestions.filter(q => {
-    const { isVisible } = evaluateQuestionState(q, allQuestions, answers);
-    return isVisible;
-  });
-}
-
-/**
- * Generates an elegant Thai readable summary for a logic rule
- */
-export function getReadableRuleDescription(
-  rule: SurveyLogicRule,
-  allQuestions: SurveyQuestion[]
-): string {
-  const normRule = normalizeRule(rule);
-  if (!normRule.conditions || normRule.conditions.length === 0) return 'ไม่มีเงื่อนไขกำหนด';
-
-  const actionText = 
-    normRule.action === 'show' ? '👁️ แสดงคำถามนี้' :
-    normRule.action === 'hide' ? '🚫 ซ่อนคำถามนี้' :
-    normRule.action === 'jump_to_question' ? `⏩ ข้ามไปยังข้อที่กำหนด` :
-    normRule.action === 'jump_to_end' ? '🏁 ข้ามไปส่งแบบสำรวจทันที' :
-    normRule.action === 'require' ? '⚠️ บังคับตอบ' : 'ดำเนินการ';
-
-  const conditionStrings = normRule.conditions.map(cond => {
-    const trigQ = allQuestions.find(q => q.id === cond.triggerQuestionId);
-    const qIndex = allQuestions.findIndex(q => q.id === cond.triggerQuestionId);
-    const qLabel = trigQ ? `[ข้อ ${qIndex + 1}. ${trigQ.title.slice(0, 25)}${trigQ.title.length > 25 ? '...' : ''}]` : `[คำถาม ID: ${cond.triggerQuestionId}]`;
-
-    // Operator in Thai
-    let opText = '';
-    let valText = String(cond.triggerValue ?? '');
-
-    // Check if trigger value is an option ID and find label
-    if (trigQ?.options && cond.triggerValue) {
-      const opt = trigQ.options.find(o => o.id === cond.triggerValue || o.text === cond.triggerValue);
-      if (opt) valText = `"${opt.text}"`;
-    }
-
-    switch (cond.operator) {
-      case 'equals':
-        opText = `เท่ากับ ${valText}`;
-        break;
-      case 'not_equals':
-        opText = `ไม่เท่ากับ ${valText}`;
-        break;
-      case 'contains':
-        opText = `เลือกหรือมีคำว่า ${valText}`;
-        break;
-      case 'not_contains':
-        opText = `ไม่เลือก ${valText}`;
-        break;
-      case 'greater_than':
-        opText = `มากกว่า ${valText}`;
-        break;
-      case 'greater_than_or_equal':
-        opText = `มากกว่าหรือเท่ากับ ${valText}`;
-        break;
-      case 'less_than':
-        opText = `น้อยกว่า ${valText}`;
-        break;
-      case 'less_than_or_equal':
-        opText = `น้อยกว่าหรือเท่ากับ ${valText}`;
-        break;
-      case 'is_empty':
-        opText = 'ไม่มีการตอบ/เว้นว่าง';
-        break;
-      case 'is_not_empty':
-      case 'is_answered':
-        opText = 'มีการตอบแล้ว';
-        break;
-      default:
-        opText = `${cond.operator} ${valText}`;
-    }
-
-    return `${qLabel} ${opText}`;
-  });
-
-  const joinWord = normRule.conditionMatch === 'any' ? ' หรือ ' : ' และ ';
-  return `${actionText} เมื่อ: ${conditionStrings.join(joinWord)}`;
+  return {
+    ...matchedGrade,
+    isPassed,
+    percentage,
+    passingPercent
+  };
 }

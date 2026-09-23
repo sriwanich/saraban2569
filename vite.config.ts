@@ -56,8 +56,7 @@ export default defineConfig({
         ]
       },
       devOptions: {
-        enabled: true,
-        type: 'module'
+        enabled: false
       }
     })
   ],
@@ -68,7 +67,7 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['fabric', 'pdf-lib', 'qrcode', 'echarts', 'echarts-for-react']
+    include: ['fabric', 'pdf-lib', 'qrcode', 'echarts', 'echarts-for-react', 'recharts']
   },
   build: {
     chunkSizeWarningLimit: 2000,

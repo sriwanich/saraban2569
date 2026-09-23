@@ -519,6 +519,196 @@ CREATE TABLE IF NOT EXISTS custom_doc_numbers (
   UNIQUE KEY unique_custom_doc (docId)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS organizations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  code VARCHAR(50),
+  address TEXT,
+  phone VARCHAR(50),
+  email VARCHAR(100),
+  type VARCHAR(50) DEFAULT 'external',
+  isActive TINYINT(1) DEFAULT 1,
+  createdAt VARCHAR(50)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS workflow_templates (
+  id VARCHAR(100) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  docType VARCHAR(100) NOT NULL,
+  description TEXT,
+  steps LONGTEXT,
+  isActive TINYINT(1) DEFAULT 1,
+  createdAt VARCHAR(50),
+  updatedAt VARCHAR(50)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS workflow_instances (
+  id VARCHAR(100) PRIMARY KEY,
+  templateId VARCHAR(100) NOT NULL,
+  templateName VARCHAR(255),
+  docId VARCHAR(255) NOT NULL,
+  docType VARCHAR(100) NOT NULL,
+  docNumber VARCHAR(255),
+  docTitle VARCHAR(255),
+  currentStepIndex INT DEFAULT 0,
+  status VARCHAR(50) DEFAULT 'in_progress',
+  steps LONGTEXT,
+  startedBy VARCHAR(255),
+  startedAt VARCHAR(50),
+  completedAt VARCHAR(50),
+  lastActionAt VARCHAR(50),
+  comments LONGTEXT,
+  INDEX idx_wfi_doc (docId, docType),
+  INDEX idx_wfi_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS digital_signatures (
+  id VARCHAR(100) PRIMARY KEY,
+  docId VARCHAR(255) NOT NULL,
+  docType VARCHAR(100) NOT NULL,
+  docTitle VARCHAR(255),
+  docNumber VARCHAR(255),
+  signerId INT,
+  signerName VARCHAR(255) NOT NULL,
+  signerPosition VARCHAR(255),
+  signerDepartment VARCHAR(255),
+  signatureImage LONGTEXT,
+  certType VARCHAR(50) DEFAULT 'self_signed',
+  signatureHash VARCHAR(255),
+  signedAt VARCHAR(50) NOT NULL,
+  ipAddress VARCHAR(100),
+  verificationUrl TEXT,
+  status VARCHAR(50) DEFAULT 'valid',
+  metadata LONGTEXT,
+  INDEX idx_sig_doc (docId, docType),
+  INDEX idx_sig_signer (signerName)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_favorites (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  userId INT NOT NULL,
+  docId VARCHAR(255) NOT NULL,
+  docType VARCHAR(100) NOT NULL,
+  createdAt VARCHAR(50),
+  UNIQUE KEY unique_user_fav (userId, docId, docType)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS document_reads (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  docId VARCHAR(255) NOT NULL,
+  docType VARCHAR(100) NOT NULL,
+  userId INT,
+  username VARCHAR(255),
+  readAt VARCHAR(50),
+  ipAddress VARCHAR(100),
+  INDEX idx_reads_doc (docId, docType),
+  INDEX idx_reads_user (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS recycle_bin (
+  id VARCHAR(255) PRIMARY KEY,
+  originalId VARCHAR(255) NOT NULL,
+  docType VARCHAR(100) NOT NULL,
+  docData LONGTEXT NOT NULL,
+  deletedBy VARCHAR(255) NOT NULL,
+  deletedAt VARCHAR(50) NOT NULL,
+  reason TEXT,
+  INDEX idx_bin_type (docType),
+  INDEX idx_bin_date (deletedAt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  role VARCHAR(50) NOT NULL,
+  permissionKey VARCHAR(100) NOT NULL,
+  isAllowed TINYINT(1) DEFAULT 1,
+  departmentOverride VARCHAR(255) DEFAULT NULL,
+  updatedBy VARCHAR(255),
+  updatedAt VARCHAR(50),
+  UNIQUE KEY unique_role_perm (role, permissionKey, departmentOverride)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS enterprise_dynamic_qrs (
+  id VARCHAR(100) PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  shortCode VARCHAR(50) UNIQUE NOT NULL,
+  targetUrl TEXT NOT NULL,
+  category VARCHAR(100) DEFAULT 'general',
+  department VARCHAR(255) DEFAULT '',
+  createdBy VARCHAR(255) DEFAULT 'ผู้ดูแลระบบ',
+  qrStyle LONGTEXT,
+  scanCount INT DEFAULT 0,
+  isActive TINYINT(1) DEFAULT 1,
+  expiresAt VARCHAR(50),
+  createdAt VARCHAR(50),
+  updatedAt VARCHAR(50),
+  INDEX idx_qr_code (shortCode),
+  INDEX idx_qr_dept (department)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS enterprise_qr_scans (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  qrId VARCHAR(100) NOT NULL,
+  shortCode VARCHAR(50) NOT NULL,
+  ipAddress VARCHAR(100),
+  userAgent TEXT,
+  deviceType VARCHAR(50) DEFAULT 'desktop',
+  os VARCHAR(50),
+  browser VARCHAR(50),
+  scannedAt VARCHAR(50),
+  INDEX idx_scan_qrid (qrId),
+  INDEX idx_scan_date (scannedAt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS enterprise_qr_templates (
+  id VARCHAR(100) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  category VARCHAR(100) DEFAULT 'general',
+  config LONGTEXT,
+  isOfficial TINYINT(1) DEFAULT 0,
+  createdAt VARCHAR(50)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS surveys (
+  id VARCHAR(100) PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  description TEXT DEFAULT NULL,
+  category VARCHAR(100) DEFAULT 'satisfaction',
+  category_label VARCHAR(100) DEFAULT 'ความพึงพอใจ',
+  department VARCHAR(255) DEFAULT '',
+  creator_id VARCHAR(100) DEFAULT 'admin',
+  creator_name VARCHAR(255) DEFAULT 'ผู้ดูแลระบบ',
+  status VARCHAR(50) DEFAULT 'published',
+  settings LONGTEXT,
+  questions LONGTEXT,
+  view_count INT DEFAULT 0,
+  response_count INT DEFAULT 0,
+  created_at VARCHAR(50),
+  updated_at VARCHAR(50),
+  INDEX idx_survey_cat (category),
+  INDEX idx_survey_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS survey_responses (
+  id VARCHAR(100) PRIMARY KEY,
+  survey_id VARCHAR(100) NOT NULL,
+  survey_title VARCHAR(255) DEFAULT NULL,
+  respondent_name VARCHAR(255) DEFAULT NULL,
+  respondent_department VARCHAR(255) DEFAULT NULL,
+  respondent_position VARCHAR(255) DEFAULT NULL,
+  respondent_phone VARCHAR(50) DEFAULT NULL,
+  respondent_email VARCHAR(255) DEFAULT NULL,
+  respondent_ip VARCHAR(100) DEFAULT NULL,
+  device_info VARCHAR(255) DEFAULT NULL,
+  time_spent_seconds INT DEFAULT 0,
+  total_score DECIMAL(10,2) DEFAULT NULL,
+  answers LONGTEXT,
+  submitted_at VARCHAR(50),
+  INDEX idx_resp_survey_id (survey_id),
+  INDEX idx_resp_submitted (submitted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS system_backups (
   id INT AUTO_INCREMENT PRIMARY KEY,
   fileName VARCHAR(255) NOT NULL,
@@ -589,5 +779,6 @@ CREATE INDEX idx_logs_created ON system_logs(createdAt);
 CREATE INDEX idx_ua_username ON user_activity(username);
 CREATE INDEX idx_ua_action ON user_activity(action);
 CREATE INDEX idx_ua_created ON user_activity(createdAt);
+
 
 

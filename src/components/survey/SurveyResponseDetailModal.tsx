@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Survey, SurveyResponse, SurveyQuestion } from '../../types/survey';
 import { SurveyResponsePrintView } from './SurveyResponsePrintView';
+import { ECertificateModal } from './ECertificateModal';
 
 const getSafeAnswers = (raw: any): Record<string, any> => {
   if (!raw) return {};
@@ -58,6 +59,32 @@ export const SurveyResponseDetailModal: React.FC<SurveyResponseDetailModalProps>
 }) => {
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [showCert, setShowCert] = useState(false);
+  const [aiEvaluation, setAiEvaluation] = useState<any | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const handleRequestAiEvaluation = async () => {
+    setIsAiLoading(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`/api/surveys/${survey.id}/responses/${response.id}/ai-evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiEvaluation(data.evaluation);
+      } else {
+        const errData = await res.json();
+        setAiError(errData.error || 'เกิดข้อผิดพลาดในการประมวลผลด้วย AI');
+      }
+    } catch (e) {
+      setAiError('ไม่สามารถติดต่อช่องทางประมวลผล AI ได้');
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   // Determine if this is an RSVP survey
   const isRsvpForm = survey.settings?.isRsvpForm || survey.category === 'rsvp_acknowledgment' || survey.title.includes('RSVP') || survey.title.includes('แบบตอบรับ');
@@ -250,6 +277,17 @@ export const SurveyResponseDetailModal: React.FC<SurveyResponseDetailModalProps>
               <Printer className="w-4 h-4" />
             </button>
 
+            {survey.settings?.quizMode && response.passedExam && (
+              <button
+                onClick={() => setShowCert(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-black shadow-md transition cursor-pointer"
+                title="ดูใบประกาศนียบัตร"
+              >
+                <Award className="w-4 h-4" />
+                <span className="hidden sm:inline">ใบประกาศฯ</span>
+              </button>
+            )}
+
             {isRsvpForm && (
               <button
                 onClick={() => setShowPrintPreview(true)}
@@ -373,6 +411,120 @@ export const SurveyResponseDetailModal: React.FC<SurveyResponseDetailModalProps>
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* AI-powered Respondent Evaluation */}
+          <div className="p-5 rounded-3xl bg-gradient-to-br from-indigo-500/5 via-blue-500/5 to-transparent border border-blue-100 dark:border-blue-900/40 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-500 animate-pulse" />
+                <div>
+                  <h4 className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+                    AI Respondent Evaluation
+                  </h4>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    วิเคราะห์หาข้อมูลเชิงลึก น้ำเสียง และประเด็นเด่นรายบุคคลด้วย Google Gemini AI
+                  </p>
+                </div>
+              </div>
+              {!aiEvaluation && !isAiLoading && (
+                <button
+                  onClick={handleRequestAiEvaluation}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>ประเมินด้วย AI</span>
+                </button>
+              )}
+            </div>
+
+            {isAiLoading && (
+              <div className="py-8 flex flex-col items-center justify-center gap-2">
+                <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-xs text-indigo-600 dark:text-indigo-400 font-bold animate-pulse">
+                  กำลังให้ Gemini สรุปและประเมินคำตอบเชิงลึก...
+                </span>
+              </div>
+            )}
+
+            {aiError && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 text-xs text-rose-600 dark:text-rose-400 font-medium">
+                ❌ {aiError}
+                <button
+                  onClick={handleRequestAiEvaluation}
+                  className="ml-2 font-bold underline text-indigo-600 hover:text-indigo-800"
+                >
+                  ลองอีกครั้ง
+                </button>
+              </div>
+            )}
+
+            {aiEvaluation && (
+              <div className="space-y-3.5 animate-fadeIn">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="md:col-span-2 p-3.5 rounded-2xl bg-white/80 dark:bg-slate-800/80 border border-indigo-100 dark:border-indigo-900/40 space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">บทสรุปความคิดเห็น</span>
+                    <p className="text-xs text-[var(--text-primary)] font-medium leading-relaxed">
+                      {aiEvaluation.summary}
+                    </p>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-slate-800/80 border border-indigo-100 dark:border-indigo-900/40 flex flex-col justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">โทนอารมณ์ความรู้สึก</span>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+                        aiEvaluation.sentiment === 'บวก' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' :
+                        aiEvaluation.sentiment === 'ลบ' ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20' :
+                        'bg-slate-500/10 text-slate-600 border border-slate-500/20'
+                      }`}>
+                        {aiEvaluation.sentiment === 'บวก' ? '😊 บวก (Positive)' :
+                         aiEvaluation.sentiment === 'ลบ' ? '⚠️ ลบ (Critical/Negative)' :
+                         '😐 เป็นกลาง (Neutral)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-950/5 border border-emerald-500/10 space-y-2">
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                      ประเด็นสำคัญ / จุดชื่นชม
+                    </span>
+                    <ul className="space-y-1 text-xs">
+                      {aiEvaluation.keyPoints?.map((pt: string, pIdx: number) => (
+                        <li key={pIdx} className="flex items-start gap-1.5 text-[var(--text-secondary)] font-medium">
+                          <span className="text-emerald-500 mt-0.5">✓</span>
+                          <span>{pt}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-indigo-500/5 dark:bg-indigo-950/5 border border-indigo-500/10 space-y-2">
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">
+                      ข้อเสนอแนะเชิงปฏิบัติสำหรับหน่วยงาน
+                    </span>
+                    <ul className="space-y-1 text-xs">
+                      {aiEvaluation.recommendations?.map((rec: string, rIdx: number) => (
+                        <li key={rIdx} className="flex items-start gap-1.5 text-[var(--text-secondary)] font-medium">
+                          <span className="text-indigo-500 mt-0.5">★</span>
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="p-3 py-2.5 rounded-2xl bg-blue-500/5 border border-blue-500/10 text-[11px] text-blue-600 dark:text-blue-400 font-bold flex items-center justify-between">
+                  <span>📊 การประเมินผลภาพรวมของผู้ตอบรายนี้: {aiEvaluation.scoreEvaluation}</span>
+                  <button
+                    onClick={() => setAiEvaluation(null)}
+                    className="text-[10px] underline hover:text-blue-800"
+                  >
+                    ล้างการวิเคราะห์
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Section: List of Questions & Answers */}
@@ -735,6 +887,14 @@ export const SurveyResponseDetailModal: React.FC<SurveyResponseDetailModalProps>
             survey={survey} 
             response={response} 
             onClose={() => setShowPrintPreview(false)} 
+          />
+        )}
+
+        {showCert && (
+          <ECertificateModal
+            survey={survey}
+            response={response}
+            onClose={() => setShowCert(false)}
           />
         )}
 

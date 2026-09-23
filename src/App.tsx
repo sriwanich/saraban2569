@@ -5,9 +5,10 @@ import { LoadingIndicator } from './components/LoadingIndicator';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import { useRealtimeSync } from './utils/realtimeSync';
 
-// Structurally optimize initial bundle by lazy loading top-level views on demand
-const Login = lazyWithRetry(() => import('./components/Login'));
-const Dashboard = lazyWithRetry(() => import('./components/Dashboard'));
+import Login from './components/Login';
+import Dashboard from './components/Dashboard';
+
+// Lazy loading for standalone public views
 const PublicInfographicsViewer = lazyWithRetry(() => 
   import('./components/views/PublicInfographicsViewer').then(m => ({ default: m.PublicInfographicsViewer }))
 );
@@ -15,10 +16,12 @@ const PublicQrVerifyViewer = lazyWithRetry(() =>
   import('./components/views/PublicQrVerifyViewer').then(m => ({ default: m.PublicQrVerifyViewer }))
 );
 const PublicSurveyViewer = lazyWithRetry(() => 
-  import('./components/views/PublicSurveyViewer').then(m => ({ default: m.PublicSurveyViewer }))
+  import('./components/views/surveys/SurveyPublicViewer')
 );
 
-export type ThemeMode = 'light' | 'dark' | 'auto';
+
+import { ThemeMode } from './types';
+export type { ThemeMode };
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -52,19 +55,15 @@ export default function App() {
     hash.includes('/verify') ||
     searchParams.has('slug') ||
     searchParams.has('qr') ||
+    searchParams.has('verify_cert') ||
     searchParams.get('view') === 'verify' ||
     searchParams.get('view') === 'qr_verify';
 
   const isPublicSurvey = 
-    pathname.startsWith('/survey/') ||
     pathname.startsWith('/public/survey/') ||
-    pathname.startsWith('/view/survey/') ||
-    hash.includes('/survey/') ||
-    searchParams.has('surveyId') ||
-    searchParams.has('survey') ||
-    (searchParams.has('id') && (searchParams.get('view') === 'survey' || searchParams.get('view') === 'public_survey')) ||
-    searchParams.get('view') === 'survey' ||
-    searchParams.get('view') === 'public_survey';
+    hash.includes('/public/survey/') ||
+    searchParams.has('survey_id');
+
 
   useEffect(() => {
     const savedUser = localStorage.getItem('edms_user_data') || sessionStorage.getItem('edms_user_data');
@@ -257,14 +256,16 @@ export default function App() {
   }
 
   if (isPublicSurvey) {
+    const sId = pathname.split('/').pop() || searchParams.get('survey_id') || '';
     return (
-      <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการแสดงผลหน้าแบบสำรวจ">
-        <Suspense fallback={<LoadingIndicator message="กำลังโหลดแบบสำรวจประเมินผล..." />}>
-          <PublicSurveyViewer />
+      <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการโหลดแบบสำรวจ">
+        <Suspense fallback={<LoadingIndicator message="กำลังโหลดแบบสำรวจ..." />}>
+          <PublicSurveyViewer surveyId={sId} />
         </Suspense>
       </ErrorBoundary>
     );
   }
+
 
   if (isCheckingAuth) {
     return <LoadingIndicator message="กำลังตรวจสอบความปลอดภัยและสิทธิ์การเข้าใช้งาน..." />;

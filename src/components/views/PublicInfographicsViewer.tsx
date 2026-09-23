@@ -1133,3 +1133,5 @@ export const PublicInfographicsViewer: React.FC = () => {
     </div>
   );
 };
+
+export default PublicInfographicsViewer;

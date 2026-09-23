@@ -249,18 +249,7 @@ export async function getAppGeminiApiKeyInfo(customKey?: string, options?: { for
       }
     }
 
-    // Check localDb settings fallback
-    if (!orgApiKey && typeof localDb !== 'undefined' && localDb.settings && localDb.settings.length > 0) {
-      const localKey = (localDb.settings[0].geminiApiKey || '').trim();
-      if (localKey) {
-        return {
-          apiKey: localKey,
-          source: 'org_settings_local',
-          sourceDescription: 'ตั้งค่าองค์กร (Local Settings File)',
-          maskedKey: mask(localKey)
-        };
-      }
-    }
+    // Removed localDb settings fallback to satisfy "MySQL Exclusive" requirement
   } catch (e: any) {
     console.error('Error fetching Organization Gemini API key from database:', e?.message || e);
   }
@@ -2209,7 +2198,10 @@ const pool = mysql.createPool({
   connectTimeout: 5000,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
-  multipleStatements: true
+  multipleStatements: true,
+  sessionVariables: {
+    sql_mode: 'STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION'
+  }
 });
 
 let isMysqlOnline = false;
@@ -3514,9 +3506,9 @@ function loadLocalDb() {
       // Ensure all standard keys exist in localDb.role_permissions
       const roles = ['admin', 'moderator', 'user'];
       const defaultAllowed: Record<string, Record<string, number>> = {
-        admin: { manage_changelog: 1, urgent_incidents: 1, admin_docs: 1 },
-        moderator: { manage_changelog: 0, urgent_incidents: 1, admin_docs: 1, manage_users: 0 },
-        user: { manage_changelog: 0, urgent_incidents: 1, admin_docs: 1, manage_users: 0 }
+        admin: { manage_changelog: 1, urgent_incidents: 1, admin_docs: 1, vehicles: 1 },
+        moderator: { manage_changelog: 0, urgent_incidents: 1, admin_docs: 1, manage_users: 0, vehicles: 1 },
+        user: { manage_changelog: 0, urgent_incidents: 1, admin_docs: 1, manage_users: 0, vehicles: 1 }
       };
       for (const r of roles) {
         if (!localDb.role_permissions.some((p: any) => p.role === r && p.permission_key === 'manage_changelog')) {
@@ -3532,6 +3524,14 @@ function loadLocalDb() {
             role: r,
             permission_key: 'urgent_incidents',
             is_allowed: defaultAllowed[r]?.urgent_incidents ?? 1
+          });
+          changed = true;
+        }
+        if (!localDb.role_permissions.some((p: any) => p.role === r && p.permission_key === 'vehicles')) {
+          localDb.role_permissions.push({
+            role: r,
+            permission_key: 'vehicles',
+            is_allowed: defaultAllowed[r]?.vehicles ?? 1
           });
           changed = true;
         }
@@ -5073,6 +5073,7 @@ async function setupDatabase() {
           { role: 'admin', key: 'approve_docs', val: 1 },
           { role: 'admin', key: 'export_docs', val: 1 },
           { role: 'admin', key: 'admin_docs', val: 1 },
+          { role: 'admin', key: 'vehicles', val: 1 },
           { role: 'admin', key: 'urgent_incidents', val: 1 },
           { role: 'admin', key: 'ai_assistant', val: 1 },
           { role: 'admin', key: 'infographics', val: 1 },
@@ -5096,6 +5097,7 @@ async function setupDatabase() {
           { role: 'moderator', key: 'approve_docs', val: 1 },
           { role: 'moderator', key: 'export_docs', val: 1 },
           { role: 'moderator', key: 'admin_docs', val: 1 },
+          { role: 'moderator', key: 'vehicles', val: 1 },
           { role: 'moderator', key: 'urgent_incidents', val: 1 },
           { role: 'moderator', key: 'ai_assistant', val: 1 },
           { role: 'moderator', key: 'infographics', val: 1 },
@@ -5119,6 +5121,7 @@ async function setupDatabase() {
           { role: 'user', key: 'approve_docs', val: 0 },
           { role: 'user', key: 'export_docs', val: 1 },
           { role: 'user', key: 'admin_docs', val: 1 },
+          { role: 'user', key: 'vehicles', val: 1 },
           { role: 'user', key: 'urgent_incidents', val: 1 },
           { role: 'user', key: 'ai_assistant', val: 1 },
           { role: 'user', key: 'infographics', val: 1 },
@@ -5432,6 +5435,7 @@ async function setupDatabase() {
 
         // 4. Seed all Official Survey Templates from single source of truth
         if (Array.isArray(OFFICIAL_SURVEY_TEMPLATES)) {
+          console.log(`📡 [Strict MySQL] Seeding ${OFFICIAL_SURVEY_TEMPLATES.length} official survey templates...`);
           for (let i = 0; i < OFFICIAL_SURVEY_TEMPLATES.length; i++) {
             const tpl = OFFICIAL_SURVEY_TEMPLATES[i];
             const tplId = `survey_official_${i + 1}`;
@@ -5459,8 +5463,10 @@ async function setupDatabase() {
                   new Date().toISOString()
                 ]
               );
+              console.log(`✅ [Strict MySQL] Seeded template: ${tpl.title}`);
             }
           }
+          console.log('🏁 [Strict MySQL] Survey template seeding completed.');
         }
 
         // 5. Seed sample responses for official template 1 and recalculate count if empty
@@ -5614,6 +5620,138 @@ async function setupDatabase() {
             // Index already exists, table doesn't exist, or not permitted
           }
         }
+
+        // --- VEHICLE SYSTEM SETUP ---
+        // 1. Vehicles Table
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS vehicles (
+            id VARCHAR(100) PRIMARY KEY,
+            license_plate VARCHAR(50) NOT NULL,
+            vehicle_number VARCHAR(100) DEFAULT NULL,
+            province VARCHAR(100) DEFAULT 'ระยอง',
+            brand VARCHAR(100) DEFAULT NULL,
+            model VARCHAR(100) DEFAULT NULL,
+            vehicle_type VARCHAR(100) DEFAULT 'รถยนต์นั่งส่วนบุคคล',
+            department VARCHAR(255) DEFAULT NULL,
+            current_mileage INT DEFAULT 0,
+            status VARCHAR(50) DEFAULT 'active',
+            image_url TEXT DEFAULT NULL,
+            year VARCHAR(10) DEFAULT NULL,
+            created_at VARCHAR(50),
+            updated_at VARCHAR(50),
+            INDEX idx_vehicle_status (status),
+            INDEX idx_vehicle_plate (license_plate)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        // Migration for vehicle_number
+        try {
+          const [cols]: any = await pool.query('SHOW COLUMNS FROM vehicles LIKE "vehicle_number"');
+          if (cols.length === 0) {
+            await pool.query('ALTER TABLE vehicles ADD COLUMN vehicle_number VARCHAR(100) DEFAULT NULL AFTER license_plate');
+            console.log('Migration: added vehicle_number to vehicles table');
+          }
+        } catch (mErr) {
+          console.warn('Migration error (vehicle_number):', mErr);
+        }
+
+        // Migration for image_url
+        try {
+          const [cols]: any = await pool.query('SHOW COLUMNS FROM vehicles LIKE "image_url"');
+          if (cols.length === 0) {
+            await pool.query('ALTER TABLE vehicles ADD COLUMN image_url TEXT DEFAULT NULL AFTER status');
+            console.log('Migration: added image_url to vehicles table');
+          }
+        } catch (mErr) {
+          console.warn('Migration error (image_url):', mErr);
+        }
+
+        // Migration for responsible person / reporter fields
+        try {
+          const [cols1]: any = await pool.query('SHOW COLUMNS FROM vehicles LIKE "responsible_person"');
+          if (cols1.length === 0) {
+            await pool.query('ALTER TABLE vehicles ADD COLUMN responsible_person VARCHAR(255) DEFAULT NULL AFTER image_url');
+            console.log('Migration: added responsible_person to vehicles table');
+          }
+          const [cols2]: any = await pool.query('SHOW COLUMNS FROM vehicles LIKE "responsible_user_id"');
+          if (cols2.length === 0) {
+            await pool.query('ALTER TABLE vehicles ADD COLUMN responsible_user_id VARCHAR(100) DEFAULT NULL AFTER responsible_person');
+            console.log('Migration: added responsible_user_id to vehicles table');
+          }
+          const [cols3]: any = await pool.query('SHOW COLUMNS FROM vehicles LIKE "responsible_position"');
+          if (cols3.length === 0) {
+            await pool.query('ALTER TABLE vehicles ADD COLUMN responsible_position VARCHAR(255) DEFAULT NULL AFTER responsible_user_id');
+            console.log('Migration: added responsible_position to vehicles table');
+          }
+          const [cols4]: any = await pool.query('SHOW COLUMNS FROM vehicles LIKE "responsible_phone"');
+          if (cols4.length === 0) {
+            await pool.query('ALTER TABLE vehicles ADD COLUMN responsible_phone VARCHAR(50) DEFAULT NULL AFTER responsible_position');
+            console.log('Migration: added responsible_phone to vehicles table');
+          }
+        } catch (mErr) {
+          console.warn('Migration error (responsible columns):', mErr);
+        }
+
+        // 2. Vehicle Inspections Table
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS vehicle_inspections (
+            id VARCHAR(100) PRIMARY KEY,
+            vehicle_id VARCHAR(100) NOT NULL,
+            inspector_id VARCHAR(100) DEFAULT NULL,
+            inspector_name VARCHAR(255) DEFAULT NULL,
+            inspector_position VARCHAR(255) DEFAULT NULL,
+            status VARCHAR(50) DEFAULT 'passed',
+            mileage INT DEFAULT 0,
+            results LONGTEXT,
+            submitted_at VARCHAR(50),
+            INDEX idx_inspection_vehicle (vehicle_id),
+            INDEX idx_inspection_date (submitted_at)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        // 3. Vehicle Maintenance Table
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+            id VARCHAR(100) PRIMARY KEY,
+            vehicle_id VARCHAR(100) NOT NULL,
+            maintenance_date VARCHAR(50) NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            cost DECIMAL(10,2) DEFAULT 0,
+            technician VARCHAR(255) DEFAULT NULL,
+            provider_garage VARCHAR(255) DEFAULT NULL,
+            mileage INT DEFAULT 0,
+            status VARCHAR(50) DEFAULT 'completed',
+            created_at VARCHAR(50),
+            updated_at VARCHAR(50),
+            INDEX idx_maint_vehicle (vehicle_id),
+            INDEX idx_maint_date (maintenance_date)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        // 3. Seed some initial vehicles if empty (Official DDPM Fleet & Disaster Machinery)
+        const [vCountRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM vehicles');
+        if (vCountRows && vCountRows[0] && vCountRows[0].cnt === 0) {
+          const sampleVehicles = [
+            { id: 'v_01', plate: '7 กบ 5108', num: 'รย 01-01', prov: 'กรุงเทพมหานคร', brand: 'THAI RUNG', model: 'TR TRANSFORMER II (4x4)', type: 'รถยนต์ตรวจการณ์และสั่งการ (Command Vehicle)', dept: 'กลุ่มงานยุทธศาสตร์และการจัดการ', mileage: 18500 },
+            { id: 'v_02', plate: '40-0258', num: 'รย 02-01', prov: 'ระยอง', brand: 'ISUZU', model: 'FVR 240 (10,000 ลิตร)', type: 'รถบรรทุกน้ำช่วยดับเพลิง (10,000 ลิตร)', dept: 'กลุ่มงานป้องกันและปฏิบัติการ', mileage: 12400 },
+            { id: 'v_03', plate: '1 นง 9999', num: 'รย 00-01', prov: 'ระยอง', brand: 'TOYOTA', model: 'Camry 2.5 HEV', type: 'รถประจำตำแหน่ง / รถรับรองผู้บริหาร', dept: 'ฝ่ายบริหารงานทั่วไป', mileage: 45200 },
+            { id: 'v_04', plate: '1 ขผ 4280', num: 'รย 02-02', prov: 'ระยอง', brand: 'TOYOTA', model: 'Hilux Revo 4x4 (FRV)', type: 'รถกู้ภัยเคลื่อนที่เร็ว (Fast Rescue Vehicle - FRV)', dept: 'กลุ่มงานป้องกันและปฏิบัติการ', mileage: 21300 },
+            { id: 'v_05', plate: '40-0312', num: 'รย 02-03', prov: 'ระยอง', brand: 'ISUZU', model: 'FTR 240 Mobile Light & Power', type: 'รถบรรทุกพร้อมเครื่องกำเนิดไฟฟ้าและส่องสว่าง', dept: 'กลุ่มงานป้องกันและปฏิบัติการ', mileage: 9500 },
+            { id: 'v_06', plate: '40-0488', num: 'รย 03-01', prov: 'ระยอง', brand: 'HINO', model: '500 Series (50,000 ลิตร/นาที)', type: 'รถสูบส่งน้ำระยะไกล (High-Pressure Long Distance)', dept: 'กลุ่มงานป้องกันและปฏิบัติการ', mileage: 6300 },
+            { id: 'v_07', plate: 'นข 8831', num: 'รย 00-02', prov: 'ระยอง', brand: 'TOYOTA', model: 'Commuter 2.8 D4D', type: 'รถยนต์ส่วนกลาง / รถตู้โดยสาร', dept: 'ฝ่ายบริหารงานทั่วไป', mileage: 54200 },
+            { id: 'v_08', plate: 'ปภ. รย-04', num: 'มค 01-01', prov: 'ระยอง', brand: 'KOMATSU', model: 'PC200-10M0 (Hydraulic Excavator)', type: 'รถขุดไฮดรอลิกตีนตะขาบ (Excavator / แบคโฮ)', dept: 'กลุ่มงานป้องกันและปฏิบัติการ', mileage: 1280 }
+          ];
+          for (const v of sampleVehicles) {
+            await pool.query(
+              `INSERT INTO vehicles (id, license_plate, vehicle_number, province, brand, model, vehicle_type, department, current_mileage, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [v.id, v.plate, v.num, v.prov, v.brand, v.model, v.type, v.dept, v.mileage, 'active', new Date().toISOString(), new Date().toISOString()]
+            );
+          }
+          console.log('✅ [Strict MySQL] Seeded official DDPM vehicles and disaster machinery.');
+        }
+
       } catch (idxSetupErr: any) {
         console.warn('Note setting up database indexes:', idxSetupErr.message);
       }
@@ -5699,12 +5837,205 @@ async function getSystemCurrentYear(): Promise<string> {
         return String(rows[0].currentYear);
       }
     }
-  } catch (e) {}
-  if (localDb.settings && localDb.settings[0] && localDb.settings[0].currentYear) {
-    return String(localDb.settings[0].currentYear);
+  } catch (e) {
+    console.error('Failed to get current year from MySQL:', e.message);
   }
+  
+  // Strictly enforce MySQL only, but provide a safe default if table is not yet ready
   return '2569';
 }
+
+// --- VEHICLE MANAGEMENT API ---
+app.get('/api/vehicles', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const [rows]: any = await pool.query('SELECT * FROM vehicles ORDER BY license_plate ASC');
+    res.json(rows || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/vehicles', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { 
+      license_plate, vehicle_number, province, brand, model, vehicle_type, 
+      department, current_mileage, status, image_url,
+      responsible_person, responsible_user_id, responsible_position, responsible_phone 
+    } = req.body;
+    const id = `v_${Date.now()}`;
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO vehicles (id, license_plate, vehicle_number, province, brand, model, vehicle_type, department, current_mileage, status, image_url, responsible_person, responsible_user_id, responsible_position, responsible_phone, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, license_plate, vehicle_number || null, province, brand, model, vehicle_type, 
+        department, current_mileage || 0, status || 'active', image_url || null, 
+        responsible_person || null, responsible_user_id || null, responsible_position || null, responsible_phone || null, 
+        now, now
+      ]
+    );
+    res.json({ id, message: 'Vehicle added successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/vehicles/:id', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    const { 
+      license_plate, vehicle_number, province, brand, model, vehicle_type, 
+      department, current_mileage, status, image_url,
+      responsible_person, responsible_user_id, responsible_position, responsible_phone 
+    } = req.body;
+    const now = new Date().toISOString();
+    await pool.query(
+      `UPDATE vehicles SET license_plate = ?, vehicle_number = ?, province = ?, brand = ?, model = ?, vehicle_type = ?, department = ?, current_mileage = ?, status = ?, image_url = ?, responsible_person = ?, responsible_user_id = ?, responsible_position = ?, responsible_phone = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        license_plate, vehicle_number || null, province, brand, model, vehicle_type, 
+        department, current_mileage, status, image_url || null, 
+        responsible_person || null, responsible_user_id || null, responsible_position || null, responsible_phone || null, 
+        now, id
+      ]
+    );
+    res.json({ message: 'Vehicle updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/vehicles/:id', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    await pool.query('DELETE FROM vehicles WHERE id = ?', [id]);
+    // Also delete inspections? Usually safe to keep or delete based on req.
+    await pool.query('DELETE FROM vehicle_inspections WHERE vehicle_id = ?', [id]);
+    res.json({ message: 'Vehicle and its inspections deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/vehicles/:id/inspections', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    const [rows]: any = await pool.query('SELECT * FROM vehicle_inspections WHERE vehicle_id = ? ORDER BY submitted_at DESC', [id]);
+    res.json(rows || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/vehicle-inspections', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { vehicle_id, inspector_id, inspector_name, inspector_position, status, mileage, results } = req.body;
+    const id = `insp_${Date.now()}`;
+    const now = new Date().toISOString();
+    
+    await pool.query(
+      `INSERT INTO vehicle_inspections (id, vehicle_id, inspector_id, inspector_name, inspector_position, status, mileage, results, submitted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, vehicle_id, inspector_id, inspector_name, inspector_position, status || 'passed', mileage || 0, JSON.stringify(results || {}), now]
+    );
+
+    // Update vehicle mileage
+    if (mileage) {
+      await pool.query('UPDATE vehicles SET current_mileage = ?, updated_at = ? WHERE id = ?', [mileage, now, vehicle_id]);
+    }
+
+    res.json({ id, message: 'Inspection report submitted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/vehicle-inspections/:id', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    await pool.query('DELETE FROM vehicle_inspections WHERE id = ?', [id]);
+    res.json({ message: 'Inspection record deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- VEHICLE MAINTENANCE APIS ---
+app.get('/api/vehicles/:id/maintenance', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    const [rows]: any = await pool.query('SELECT * FROM vehicle_maintenance WHERE vehicle_id = ? ORDER BY maintenance_date DESC, created_at DESC', [id]);
+    res.json(rows || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/vehicle-maintenance', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { vehicle_id, maintenance_date, title, description, cost, technician, provider_garage, mileage, status } = req.body;
+    const id = `maint_${Date.now()}`;
+    const now = new Date().toISOString();
+    
+    await pool.query(
+      `INSERT INTO vehicle_maintenance (id, vehicle_id, maintenance_date, title, description, cost, technician, provider_garage, mileage, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, vehicle_id, maintenance_date || now.split('T')[0], title, description || null, 
+        cost || 0, technician || null, provider_garage || null, mileage || 0, status || 'completed', 
+        now, now
+      ]
+    );
+
+    // Update vehicle mileage if mileage is provided and greater than current
+    if (mileage) {
+      await pool.query('UPDATE vehicles SET current_mileage = GREATEST(current_mileage, ?), updated_at = ? WHERE id = ?', [mileage, now, vehicle_id]);
+    }
+
+    res.json({ id, message: 'Maintenance record added successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/vehicle-maintenance/:id', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    const { maintenance_date, title, description, cost, technician, provider_garage, mileage, status } = req.body;
+    const now = new Date().toISOString();
+
+    await pool.query(
+      `UPDATE vehicle_maintenance SET maintenance_date = ?, title = ?, description = ?, cost = ?, technician = ?, provider_garage = ?, mileage = ?, status = ?, updated_at = ?
+       WHERE id = ?`,
+      [maintenance_date, title, description || null, cost || 0, technician || null, provider_garage || null, mileage || 0, status || 'completed', now, id]
+    );
+
+    res.json({ message: 'Maintenance record updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/vehicle-maintenance/:id', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    await pool.query('DELETE FROM vehicle_maintenance WHERE id = ?', [id]);
+    res.json({ message: 'Maintenance record deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // 1. Settings API Endpoints
 app.get('/api/settings', async (req, res) => {
@@ -10381,7 +10712,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
   }
 
   const logicalDefaults: Array<{ role: string; key: string; val: number }> = [
-    // Admin: 21/21 (สิทธิ์เต็ม 100%)
+    // Admin: 22/22 (สิทธิ์เต็ม 100%)
     { role: 'admin', key: 'view_all_docs', val: 1 },
     { role: 'admin', key: 'create_docs', val: 1 },
     { role: 'admin', key: 'edit_all_docs', val: 1 },
@@ -10389,6 +10720,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'admin', key: 'approve_docs', val: 1 },
     { role: 'admin', key: 'export_docs', val: 1 },
     { role: 'admin', key: 'admin_docs', val: 1 },
+    { role: 'admin', key: 'vehicles', val: 1 },
     { role: 'admin', key: 'urgent_incidents', val: 1 },
     { role: 'admin', key: 'ai_assistant', val: 1 },
     { role: 'admin', key: 'infographics', val: 1 },
@@ -10405,7 +10737,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'admin', key: 'audit_logs', val: 1 },
     { role: 'admin', key: 'manage_changelog', val: 1 },
 
-    // Moderator: 16/21 (สารบรรณกลาง / ผู้ตรวจสอบ / อนุมัติ / เครื่องมือช่วยงาน - ไม่รวมตั้งค่าโครงสร้างระบบ)
+    // Moderator: 17/22 (สารบรรณกลาง / ผู้ตรวจสอบ / อนุมัติ / เครื่องมือช่วยงาน - ไม่รวมตั้งค่าโครงสร้างระบบ)
     { role: 'moderator', key: 'view_all_docs', val: 1 },
     { role: 'moderator', key: 'create_docs', val: 1 },
     { role: 'moderator', key: 'edit_all_docs', val: 1 },
@@ -10413,6 +10745,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'moderator', key: 'approve_docs', val: 1 },
     { role: 'moderator', key: 'export_docs', val: 1 },
     { role: 'moderator', key: 'admin_docs', val: 1 },
+    { role: 'moderator', key: 'vehicles', val: 1 },
     { role: 'moderator', key: 'urgent_incidents', val: 1 },
     { role: 'moderator', key: 'ai_assistant', val: 1 },
     { role: 'moderator', key: 'infographics', val: 1 },
@@ -10429,7 +10762,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'moderator', key: 'audit_logs', val: 0 },
     { role: 'moderator', key: 'manage_changelog', val: 0 },
 
-    // User: 10/21 (เจ้าหน้าที่ผู้ปฏิบัติงาน - สร้างเอกสาร/ร่าง/เครื่องมือ/รายงานเหตุด่วน/แบบฟอร์ม - ห้ามลบ/แก้ผู้อื่น/อนุมัติ/ระบบ)
+    // User: 11/22 (เจ้าหน้าที่ผู้ปฏิบัติงาน - สร้างเอกสาร/ร่าง/เครื่องมือ/รายงานเหตุด่วน/แบบฟอร์ม/ยานพาหนะตนเอง - ห้ามลบ/แก้ผู้อื่น/อนุมัติ/ระบบ)
     { role: 'user', key: 'view_all_docs', val: 0 },
     { role: 'user', key: 'create_docs', val: 1 },
     { role: 'user', key: 'edit_all_docs', val: 0 },
@@ -10437,6 +10770,7 @@ app.post("/api/role-permissions/reset-defaults", async (req, res) => {
     { role: 'user', key: 'approve_docs', val: 0 },
     { role: 'user', key: 'export_docs', val: 1 },
     { role: 'user', key: 'admin_docs', val: 1 },
+    { role: 'user', key: 'vehicles', val: 1 },
     { role: 'user', key: 'urgent_incidents', val: 1 },
     { role: 'user', key: 'ai_assistant', val: 1 },
     { role: 'user', key: 'infographics', val: 1 },
@@ -22388,6 +22722,260 @@ ${includeRating ? '- ให้มีคำถามประเภท rating_sta
   } catch (e: any) {
     console.error('AI Survey Generator error:', e);
     return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการประมวลผล AI แบบสำรวจ' });
+  }
+});
+
+// AI 1: Individual Response Evaluation
+app.post('/api/surveys/:id/responses/:responseId/ai-evaluate', async (req, res) => {
+  try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+    const { id, responseId } = req.params;
+
+    // 1. Fetch survey
+    const [surRows]: any = await pool.query('SELECT * FROM surveys WHERE id = ?', [id]);
+    if (!surRows || surRows.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบแบบสำรวจที่ระบุ' });
+    }
+    const survey = surRows[0];
+    const parsedQuestions = safeJsonParse(survey.questions, []);
+
+    // 2. Fetch response
+    const [respRows]: any = await pool.query('SELECT * FROM survey_responses WHERE id = ? AND survey_id = ?', [responseId, id]);
+    if (!respRows || respRows.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบรายการคำตอบที่ระบุ' });
+    }
+    const responseData = respRows[0];
+    const parsedAnswers = safeJsonParse(responseData.answers, {});
+
+    // 3. Prepare AI key
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key' });
+    }
+
+    const client = getGeminiClient(apiKey, req);
+
+    // Format the questions and answers into readable text
+    let qaText = '';
+    parsedQuestions.forEach((q: any, idx: number) => {
+      if (q.type === 'section_header') {
+        qaText += `\n--- ส่วน: ${q.title} ---\n`;
+        return;
+      }
+      const ans = parsedAnswers[q.id];
+      if (ans === undefined || ans === null || ans === '') return;
+
+      qaText += `คำถามที่ ${idx + 1}: ${q.title}\n`;
+      if (q.type === 'matrix_rating' && typeof ans === 'object') {
+        q.matrixRows?.forEach((mRow: any) => {
+          const score = ans[mRow.id];
+          qaText += `  - ประเด็น "${mRow.text}": คะแนน ${score || 'ไม่ได้ตอบ'}/5\n`;
+        });
+      } else if (q.type === 'multiple_choice' && Array.isArray(ans)) {
+        qaText += `  คำตอบ: ${ans.join(', ')}\n`;
+      } else if (q.type === 'rating_stars') {
+        qaText += `  คำตอบ: ${ans} ดาว\n`;
+      } else if (q.type === 'slider_score') {
+        qaText += `  คำตอบ: ${ans} คะแนน\n`;
+      } else {
+        qaText += `  คำตอบ: ${ans}\n`;
+      }
+      const otherAns = parsedAnswers[`${q.id}_other_text`];
+      if (otherAns) {
+        qaText += `  คำตอบเพิ่มเติม (อื่นๆ): ${otherAns}\n`;
+      }
+    });
+
+    const aiPrompt = `คุณคือผู้เชี่ยวชาญการประเมินและวิเคราะห์คำตอบจากแบบสำรวจความพึงพอใจและการประเมินผลสำหรับหน่วยงานราชการไทย โดยเฉพาะหน่วยงานป้องกันและบรรเทาสาธารณภัย (ปภ.)
+กรุณาวิเคราะห์คำตอบของผู้ตอบแบบสอบถามรายนี้อย่างละเอียดจากข้อมูลต่อไปนี้:
+
+แบบสำรวจเรื่อง: ${survey.title}
+คำชี้แจง: ${survey.description}
+ผู้ตอบแบบสำรวจ: ${responseData.respondent_name || 'ประชาชน / นิรนาม'}
+ตำแหน่ง: ${responseData.respondent_position || 'ประชาชน / ทั่วไป'}
+สังกัด: ${responseData.respondent_department || 'ปภ.ระยอง'}
+
+คำถามและคำตอบทั้งหมดของผู้ตอบรายนี้:
+${qaText}
+
+กรุณาวิเคราะห์และจัดทำรายงานประเมินผลเป็นภาษาไทยอย่างเป็นทางการตามหัวข้อดังนี้ในรูปแบบ JSON:
+{
+  "summary": "สรุปความคิดเห็นหรือแนวโน้มของผู้ตอบรายนี้อย่างสั้นและกระชับ (2-3 ประโยค)",
+  "sentiment": "ประเมินโทนอารมณ์ความรู้สึกของผู้ตอบ (ตัวเลือก: 'บวก', 'เป็นกลาง', 'ลบ')",
+  "keyPoints": [
+    "ประเด็นที่ผู้ตอบให้ความสำคัญหรือชื่นชม (1-2 ประเด็น)",
+    "ปัญหาหรือจุดที่ผู้ตอบสะท้อนว่าควรได้รับการแก้ไข (1-2 ประเด็น)"
+  ],
+  "recommendations": [
+    "ข้อเสนอแนะเชิงปฏิบัติการสำหรับ ปภ. ระยอง จากคำตอบของผู้ตอบรายนี้ (2-3 ข้อ)"
+  ],
+  "scoreEvaluation": "วิเคราะห์ระดับคะแนนประเมินรวมของผู้ตอบรายนี้ เช่น มีระดับความพึงพอใจโดยรวมค่อนข้างสูง ปานกลาง หรือต้องปรับปรุงอย่างเร่งด่วน"
+}
+
+ห้ามใส่ Markdown code block ใดๆ ให้ส่งกลับมาเฉพาะข้อมูล raw JSON เท่านั้น`;
+
+    const { response } = await callGeminiWithFallback({
+      client,
+      contents: [{ text: aiPrompt }],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.2
+      }
+    });
+
+    let resultText = response.text || '{}';
+    resultText = resultText.replace(/^\s*```json\s*/i, '').replace(/\s*```\s*$/i, '');
+    const parsed = JSON.parse(resultText);
+
+    return res.json({ evaluation: parsed });
+  } catch (e: any) {
+    console.error('AI Respondent Evaluator error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการวิเคราะห์ AI คำตอบรายบุคคล' });
+  }
+});
+
+// AI 2: Global Survey Analytics Report
+app.post('/api/surveys/:id/ai-report', async (req, res) => {
+  try {
+    if (!isMysqlOnline) {
+      return res.status(500).json({ error: 'ฐานข้อมูล MySQL ไม่พร้อมใช้งาน' });
+    }
+    const { id } = req.params;
+
+    // 1. Fetch survey
+    const [surRows]: any = await pool.query('SELECT * FROM surveys WHERE id = ?', [id]);
+    if (!surRows || surRows.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบแบบสำรวจที่ระบุ' });
+    }
+    const survey = surRows[0];
+    const parsedQuestions = safeJsonParse(survey.questions, []);
+
+    // 2. Fetch responses
+    const [respRows]: any = await pool.query('SELECT * FROM survey_responses WHERE survey_id = ? ORDER BY submitted_at DESC', [id]);
+    const responsesCount = respRows.length;
+    if (responsesCount === 0) {
+      return res.status(400).json({ error: 'ยังไม่มีข้อมูลผู้ตอบแบบสำรวจในการสร้างรายงานวิเคราะห์' });
+    }
+
+    // 3. Prepare AI key
+    const apiKey = await getAppGeminiApiKey(req.body.apiKey);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'ระบบยังไม่ได้กำหนด Google Gemini API Key' });
+    }
+
+    const client = getGeminiClient(apiKey, req);
+
+    // Aggregate statistics and some text responses for qualitative analysis
+    let scoreSum = 0;
+    let scoreCount = 0;
+    const questionStats: Record<string, { title: string, type: string, ratings: number[], comments: string[] }> = {};
+
+    parsedQuestions.forEach((q: any) => {
+      if (q.type === 'section_header') return;
+      questionStats[q.id] = {
+        title: q.title,
+        type: q.type,
+        ratings: [],
+        comments: []
+      };
+    });
+
+    respRows.forEach((row: any) => {
+      const answers = safeJsonParse(row.answers, {});
+      parsedQuestions.forEach((q: any) => {
+        if (q.type === 'section_header') return;
+        const ans = answers[q.id];
+        if (ans === undefined || ans === null || ans === '') return;
+
+        if (q.type === 'rating_stars' && typeof ans === 'number') {
+          questionStats[q.id].ratings.push(ans);
+          scoreSum += (ans / (q.maxScore || 5)) * 100;
+          scoreCount++;
+        } else if (q.type === 'slider_score' && typeof ans === 'number') {
+          questionStats[q.id].ratings.push(ans);
+          const max = q.maxScore || 10;
+          const min = q.minScore || 0;
+          scoreSum += ((ans - min) / (max - min)) * 100;
+          scoreCount++;
+        } else if (q.type === 'matrix_rating' && typeof ans === 'object') {
+          Object.entries(ans).forEach(([rowId, val]: [string, any]) => {
+            if (typeof val === 'number') {
+              questionStats[q.id].ratings.push(val);
+              scoreSum += (val / 5) * 100;
+              scoreCount++;
+            }
+          });
+        } else if ((q.type === 'text_long' || q.type === 'text_short') && typeof ans === 'string') {
+          if (ans.trim().length > 2 && questionStats[q.id].comments.length < 15) {
+            questionStats[q.id].comments.push(ans.trim());
+          }
+        }
+      });
+    });
+
+    // Format aggregated summaries to AI prompt
+    let aggSummary = '';
+    Object.entries(questionStats).forEach(([qId, stats]) => {
+      aggSummary += `\nคำถาม: ${stats.title} (${stats.type})\n`;
+      if (stats.ratings.length > 0) {
+        const sum = stats.ratings.reduce((a, b) => a + b, 0);
+        const avg = (sum / stats.ratings.length).toFixed(2);
+        aggSummary += `  - คะแนนเฉลี่ย: ${avg} (จากทั้งหมด ${stats.ratings.length} รายการ)\n`;
+      }
+      if (stats.comments.length > 0) {
+        aggSummary += `  - ตัวอย่างคำตอบหรือข้อคิดเห็นเด่นๆ:\n`;
+        stats.comments.forEach((comm) => {
+          aggSummary += `    * "${comm}"\n`;
+        });
+      }
+    });
+
+    const overallAvgScore = scoreCount > 0 ? (scoreSum / scoreCount).toFixed(2) : '0.00';
+
+    const aiPrompt = `คุณคือผู้เชี่ยวชาญการวิเคราะห์ข้อมูลและเขียนรายงานสถิติแบบประเมินผลระดับ Enterprise สำหรับหน่วยงานราชการไทย
+กรุณาวิเคราะห์ข้อมูลแบบสำรวจนี้และจัดทำ "รายงานสรุปวิเคราะห์ผลอัจฉริยะระบบงานระยอง ปภ. (Smart Survey Analytics Executive Report)" เป็นภาษาไทยที่เป็นทางการและละเอียดสูง
+
+แบบสำรวจเรื่อง: ${survey.title}
+กลุ่มเป้าหมาย/คำชี้แจง: ${survey.description}
+จำนวนผู้ตอบแบบสำรวจทั้งหมด: ${responsesCount} คน
+ดัชนีคะแนนประเมินรวมเฉลี่ยภาพรวม (%): ${overallAvgScore}%
+
+ข้อมูลสถิติแยกตามข้อคำถามและความคิดเห็น:
+${aggSummary}
+
+กรุณาสรุปรายงานอย่างละเอียดและลุ่มลึก โดยส่งกลับมาเป็นรูปแบบ JSON เท่านั้น ห้ามใส่คำชี้แจงภายนอกหรือ Markdown code block ใดๆ:
+{
+  "executiveSummary": "บทสรุปผู้บริหารความยาวประมาณ 4-5 บรรทัด สรุปผลลัพธ์ภาพรวม ทิศทางความรู้สึก และจุดสำคัญที่สุด",
+  "quantitativeAnalysis": "บทวิเคราะห์สถิติตัวเลขและระดับความพึงพอใจภาพรวม เทียบกับเป้าหมายงาน ปภ. เชิงลึก",
+  "qualitativeInsights": "สรุปข้อมูลเชิงความคิดเห็น สะท้อนความพึงพอใจและเสียงสะท้อนจากประชาชน/ผู้รับบริการ และวิเคราะห์อุปสรรคเชิงระบบ",
+  "painPoints": [
+    "ระบุจุดอ่อน ปัญหาหลัก หรือความเสี่ยงที่พบจากการประเมิน 3 ประเด็นที่สำคัญที่สุด"
+  ],
+  "actionPlan": [
+    "เสนอแผนงาน/มาตรการปฏิบัติการเชิงรุก (Action Plan) ที่ ปภ. ระยอง ควรดำเนินการต่อ 4 ข้อ เพื่อแก้ไขปัญหาและเพิ่มระดับความพึงพอใจ"
+  ],
+  "scoreConclusion": "สรุปวิเคราะห์ผลลัพธ์ผ่านเกณฑ์ความพึงพอใจมาตรฐานของหน่วยงานภาครัฐหรือไม่ อย่างไร พร้อมระดับการประเมินโดยรวม (ดีเลิศ / ดีมาก / ปานกลาง / ต้องปรับปรุง)"
+}`;
+
+    const { response } = await callGeminiWithFallback({
+      client,
+      contents: [{ text: aiPrompt }],
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.3
+      }
+    });
+
+    let resultText = response.text || '{}';
+    resultText = resultText.replace(/^\s*```json\s*/i, '').replace(/\s*```\s*$/i, '');
+    const parsed = JSON.parse(resultText);
+
+    return res.json({ report: parsed });
+  } catch (e: any) {
+    console.error('AI Survey Report Generator error:', e);
+    return res.status(500).json({ error: 'เกิดข้อผิดพลาดในการประมวลผล AI รายงานภาพรวม' });
   }
 });
 

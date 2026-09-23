@@ -287,6 +287,36 @@ export default function LogsView({ user }: { user?: any }) {
             <Sparkles className="w-3.5 h-3.5 shrink-0 text-purple-600 dark:text-purple-400" /> สแกน AI ร่างเอกสาร
           </span>
         );
+      case 'CREATE_SURVEY':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" /> สร้างแบบทดสอบ / แบบสำรวจ
+          </span>
+        );
+      case 'UPDATE_SURVEY':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-500/25">
+            <FileEdit className="w-3.5 h-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" /> แก้ไขแบบทดสอบ / แบบสำรวจ
+          </span>
+        );
+      case 'DELETE_SURVEY':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/25">
+            <Trash2 className="w-3.5 h-3.5 shrink-0 text-rose-600" /> ลบแบบทดสอบ / แบบสำรวจ
+          </span>
+        );
+      case 'SUBMIT_RESPONSE':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/25">
+            <Send className="w-3.5 h-3.5 shrink-0 text-blue-600" /> ผู้สอบส่งคำตอบประเมินผล
+          </span>
+        );
+      case 'PRINT_SURVEY':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/25">
+            <Printer className="w-3.5 h-3.5 shrink-0 text-amber-600" /> พิมพ์ข้อสอบฉบับกระดาษ
+          </span>
+        );
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-500/10 text-slate-700 dark:text-slate-300 border border-slate-500/25">

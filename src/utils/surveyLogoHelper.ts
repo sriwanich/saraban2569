@@ -1,90 +1,37 @@
-export interface SystemBrandingInfo {
-  orgName: string;
-  headerOrgName: string;
-  garudaLogoUrl: string;
-  garuda30Url: string;
-  ddpmLogoUrl: string;
-  rayongLogoUrl: string;
-  systemOrgLogoUrl: string;
-  hasCustomGaruda: boolean;
-  hasCustomSystemOrgLogo: boolean;
+export function getResolvedSurveyLogoUrl(typeOrUrl?: string, customUrl?: string, resolvedUrl?: string): string {
+  if (resolvedUrl && resolvedUrl.trim()) {
+    return resolvedUrl;
+  }
+  if (customUrl && customUrl.trim()) {
+    return customUrl;
+  }
+  if (!typeOrUrl || typeOrUrl === 'default' || typeOrUrl === 'ddpm') {
+    return '/ddpm_logo.png';
+  }
+  if (typeOrUrl === 'none') {
+    return '';
+  }
+  if (typeOrUrl === 'garuda') {
+    return '/garuda_logo.png';
+  }
+  if (typeOrUrl === 'rayong') {
+    return '/rayong_logo.png';
+  }
+  if (typeOrUrl.startsWith('http://') || typeOrUrl.startsWith('https://') || typeOrUrl.startsWith('data:') || typeOrUrl.startsWith('/')) {
+    return typeOrUrl;
+  }
+  return '/ddpm_logo.png';
 }
 
-const DEFAULT_GARUDA = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
-const DEFAULT_RAYONG_SEAL = 'https://upload.wikimedia.org/wikipedia/commons/0/0a/Seal_Rayong_Province.png';
-const DEFAULT_DDPM_LOGO = '/ddpm-logo.svg';
-
-export function getSystemBrandingInfo(): SystemBrandingInfo {
-  let settings: any = {};
-  if (typeof window !== 'undefined') {
-    try {
-      settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
-    } catch (e) {
-      settings = {};
-    }
-  }
-
-  const localStorageMoiLogo = typeof window !== 'undefined' ? (localStorage.getItem('moi_logo') || localStorage.getItem('moi_schoolLogo')) : null;
-  const localStorageGaruda15 = typeof window !== 'undefined' ? (localStorage.getItem('moi_garuda15') || localStorage.getItem('moi_garudaCustom')) : null;
-  const localStorageGaruda30 = typeof window !== 'undefined' ? localStorage.getItem('moi_garuda30') : null;
-
-  const garudaLogoUrl = settings.garuda15Url || localStorageGaruda15 || DEFAULT_GARUDA;
-  const garuda30Url = settings.garuda30Url || localStorageGaruda30 || garudaLogoUrl;
-  const systemOrgLogoUrl = settings.logoUrl || localStorageMoiLogo || DEFAULT_RAYONG_SEAL;
-
-  const orgName = settings.orgName || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
-  const headerOrgName = settings.headerOrgName || orgName;
-
+export function getSystemBrandingInfo() {
   return {
-    orgName,
-    headerOrgName,
-    garudaLogoUrl,
-    garuda30Url,
-    ddpmLogoUrl: DEFAULT_DDPM_LOGO,
-    rayongLogoUrl: DEFAULT_RAYONG_SEAL,
-    systemOrgLogoUrl,
-    hasCustomGaruda: !!(settings.garuda15Url || localStorageGaruda15 || settings.garuda30Url || localStorageGaruda30),
-    hasCustomSystemOrgLogo: !!(settings.logoUrl || localStorageMoiLogo)
+    name: 'ระบบบริหารจัดการแบบสำรวจและแบบข้อสอบ (Survey & Assessment)',
+    organizationName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+    orgName: 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง',
+    logoUrl: '/ddpm_logo.png',
+    garudaLogoUrl: '/garuda_logo.png',
+    ddpmLogoUrl: '/ddpm_logo.png',
+    rayongLogoUrl: '/rayong_logo.png',
+    systemOrgLogoUrl: '/ddpm_logo.png'
   };
-}
-
-export function getResolvedSurveyLogoUrl(
-  headerLogoType?: 'garuda' | 'ddpm' | 'rayong' | 'custom' | 'none',
-  customLogoUrl?: string,
-  resolvedLogoUrl?: string
-): string | null {
-  if (headerLogoType === 'none') {
-    return null;
-  }
-
-  // If a pre-resolved logo URL is stored in survey settings (crucial for mobile cross-device view), use it first
-  if (resolvedLogoUrl && resolvedLogoUrl.trim() !== '') {
-    return resolvedLogoUrl;
-  }
-
-  // If a custom logo URL is explicitly provided, use it
-  if (customLogoUrl && customLogoUrl.trim() !== '') {
-    return customLogoUrl;
-  }
-
-  const branding = getSystemBrandingInfo();
-
-  if (headerLogoType === 'garuda') {
-    return branding.garudaLogoUrl || DEFAULT_GARUDA;
-  }
-
-  if (headerLogoType === 'ddpm') {
-    return branding.ddpmLogoUrl || DEFAULT_DDPM_LOGO;
-  }
-
-  if (headerLogoType === 'rayong') {
-    return branding.rayongLogoUrl || DEFAULT_RAYONG_SEAL;
-  }
-
-  if (headerLogoType === 'custom') {
-    return branding.systemOrgLogoUrl || DEFAULT_RAYONG_SEAL;
-  }
-
-  // Default fallback
-  return branding.garudaLogoUrl || DEFAULT_GARUDA;
 }

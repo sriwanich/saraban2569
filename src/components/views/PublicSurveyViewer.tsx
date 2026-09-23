@@ -362,3 +362,5 @@ export function PublicSurveyViewer() {
     </div>
   );
 }
+
+export default PublicSurveyViewer;

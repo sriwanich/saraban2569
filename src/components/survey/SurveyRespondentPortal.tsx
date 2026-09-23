@@ -30,10 +30,17 @@ import {
   XCircle,
   Share2,
   Sliders,
-  PauseCircle
+  PauseCircle,
+  Shield,
+  Award
 } from 'lucide-react';
 import { Survey, SurveyResponse, SurveyQuestion } from '../../types/survey';
-import { evaluateQuestionState, getReadableRuleDescription } from '../../utils/surveyLogicEngine';
+import { 
+  evaluateQuestionState, 
+  getReadableRuleDescription,
+  calculateSurveyScore,
+  getEvaluationResult
+} from '../../utils/surveyLogicEngine';
 import { 
   getMergedThemeConfig, 
   getFontFamilyClass, 
@@ -41,6 +48,7 @@ import {
   getCardShadowClass 
 } from '../../data/surveyThemes';
 import { getResolvedSurveyLogoUrl, getSystemBrandingInfo } from '../../utils/surveyLogoHelper';
+import { ECertificateModal } from './ECertificateModal';
 
 interface SurveyRespondentPortalProps {
   survey: Survey;
@@ -64,7 +72,60 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [showCertModal, setShowCertModal] = useState<boolean>(false);
   const [startTime] = useState<number>(Date.now());
+
+  // Whitelist State
+  const [whitelistInput, setWhitelistInput] = useState('');
+  const [whitelistVerified, setWhitelistVerified] = useState<boolean>(!survey.settings?.enableWhitelist);
+  const [whitelistError, setWhitelistError] = useState<string | null>(null);
+
+  // Quiz Mode Timer State
+  const timeLimitSeconds = (survey.settings?.timeLimitMinutes || 0) * 60;
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(timeLimitSeconds);
+
+  useEffect(() => {
+    if (!survey.settings?.quizMode || timeLimitSeconds <= 0 || !whitelistVerified || isSubmitted) return;
+
+    const interval = setInterval(() => {
+      setRemainingSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          // Auto submit when timer expires
+          handleSubmitAuto();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [survey.settings?.quizMode, timeLimitSeconds, whitelistVerified, isSubmitted]);
+
+  // Handle Whitelist Verification
+  const handleVerifyWhitelist = () => {
+    if (!whitelistInput.trim()) {
+      setWhitelistError('กรุณาระบุข้อมูลเพื่อตรวจสอบสิทธิ์');
+      return;
+    }
+
+    const entries = survey.settings?.whitelistEntries || [];
+    const query = whitelistInput.trim().toLowerCase();
+    const isMatched = entries.some(entry => entry.toLowerCase().includes(query) || query.includes(entry.toLowerCase()));
+
+    if (isMatched || entries.length === 0) {
+      setWhitelistVerified(true);
+      setWhitelistError(null);
+    } else {
+      setWhitelistError('ไม่พบข้อมูลของท่านในรายชื่อผู้มีสิทธิ์ทำแบบสำรวจ กรุณาตรวจสอบอีกครั้ง');
+    }
+  };
+
+  // Auto submit when time runs out
+  const handleSubmitAuto = () => {
+    const fakeEv = { preventDefault: () => {} } as React.FormEvent;
+    handleSubmit(fakeEv);
+  };
 
   // Signature canvas
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -163,12 +224,12 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
   const questionStates = useMemo(() => {
     const states: Record<string, { isVisible: boolean; isRequired: boolean; isTriggered: boolean; triggeredReason?: string }> = {};
     survey.questions.forEach(q => {
-      const res = evaluateQuestionState(q, survey.questions, answers);
+      const res = evaluateQuestionState(q, answers, survey.questions);
       states[q.id] = {
         isVisible: res.isVisible,
         isRequired: res.isRequired,
         isTriggered: res.activeRules.length > 0,
-        triggeredReason: res.activeRules.length > 0 ? getReadableRuleDescription(res.activeRules[0], survey.questions) : undefined
+        triggeredReason: res.activeRules.length > 0 ? getReadableRuleDescription(res.activeRules[0]) : undefined
       };
     });
     return states;
@@ -316,7 +377,11 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
 
     try {
       if (onSubmit) {
-        const success = await onSubmit({
+        // Calculate scores before submitting using the Enterprise Scoring Engine
+        const scoreResults = calculateSurveyScore(survey.questions, finalAnswers);
+        const evalResults = getEvaluationResult(scoreResults.percentage, survey.settings);
+
+        const responsePayload: Omit<SurveyResponse, 'id' | 'submittedAt'> = {
           surveyId: survey.id,
           surveyTitle: survey.title,
           answers: finalAnswers,
@@ -326,10 +391,37 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
           respondentPhone: contactInfo.phone || undefined,
           respondentEmail: contactInfo.email || undefined,
           timeSpentSeconds: timeSpent,
-        });
+          totalScore: scoreResults.totalScore,
+          maxPossibleScore: scoreResults.maxPossibleScore,
+          scorePercentage: scoreResults.percentage,
+          passedExam: evalResults.isPassed,
+          evaluationResult: {
+            gradeCode: evalResults.gradeCode,
+            levelName: evalResults.levelName,
+            color: evalResults.color,
+            isPassed: evalResults.isPassed
+          },
+          examResult: scoreResults.questionResults
+        };
+
+        const success = await onSubmit(responsePayload);
 
         if (success) {
           setIsSubmitted(true);
+          
+          const detailsStr = survey.settings?.quizMode
+            ? `ผู้สอบ "${derivedName || 'นิรนาม'}" ส่งแบบทดสอบ "${survey.title}" - ได้คะแนน ${scoreResults.totalScore}/${scoreResults.maxPossibleScore} (${scoreResults.percentage}%) - ${evalResults.isPassed ? 'ผ่านการทดสอบ' : 'ไม่ผ่านเกณฑ์'}`
+            : `ผู้ใช้ "${derivedName || 'นิรนาม'}" ส่งแบบประเมิน/แบบสำรวจ "${survey.title}"`;
+
+          fetch('/api/logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'SUBMIT_RESPONSE',
+              details: detailsStr,
+              username: derivedName || 'ผู้ประเมินนิรนาม'
+            })
+          }).catch(console.error);
         }
       } else {
         // Preview mode simulated submit
@@ -374,6 +466,41 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
 
   // Thank you page
   if (isSubmitted) {
+    const scoreResults = calculateSurveyScore(survey.questions, answers);
+    const evalResults = getEvaluationResult(scoreResults.percentage, survey.settings);
+    const isPassed = evalResults.isPassed;
+    const passThreshold = evalResults.passingPercent;
+
+    const resolvedNameForCert = contactInfo.name || Object.keys(answers).map(key => {
+      const q = survey.questions.find(qu => qu.id === key);
+      if (q && q.title && (q.title.includes('ชื่อ') || q.title.includes('นามสกุล') || q.title.includes('ผู้รับการ'))) {
+        return answers[key];
+      }
+      return null;
+    }).filter(Boolean)[0] || 'ประชาชนผู้รับการประเมิน';
+
+    const mockResponse: SurveyResponse = {
+      id: `resp_${Date.now()}`,
+      surveyId: survey.id,
+      surveyTitle: survey.title,
+      answers: answers,
+      respondentName: resolvedNameForCert,
+      respondentDepartment: contactInfo.dept,
+      respondentPosition: contactInfo.position,
+      submittedAt: new Date().toISOString(),
+      totalScore: scoreResults.totalScore,
+      maxPossibleScore: scoreResults.maxPossibleScore,
+      scorePercentage: scoreResults.percentage,
+      passedExam: evalResults.isPassed,
+      evaluationResult: {
+        gradeCode: evalResults.gradeCode,
+        levelName: evalResults.levelName,
+        color: evalResults.color,
+        isPassed: evalResults.isPassed
+      },
+      examResult: scoreResults.questionResults
+    };
+
     return (
       <div 
         className={`min-h-screen py-12 px-4 animate-fade-in flex flex-col items-center justify-center ${getFontFamilyClass(themeConfig.fontFamily)}`}
@@ -406,6 +533,111 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
                 <CheckCircle2 className="w-14 h-14 animate-scale-up" />
               </div>
             </div>
+
+            {/* Quiz Mode Score & Certificate Card */}
+            {survey.settings?.quizMode && (
+              <div className={`mt-8 p-6 sm:p-8 rounded-3xl border text-left space-y-5 relative overflow-hidden shadow-2xl ${
+                evalResults.isPassed 
+                  ? 'bg-linear-to-br from-emerald-950 via-slate-900 to-teal-950 text-white border-emerald-500/40' 
+                  : 'bg-linear-to-br from-rose-950 via-slate-900 to-amber-950 text-white border-rose-500/40'
+              }`}>
+                <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-lg ${
+                      isPassed ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                    }`}>
+                      <Award className="w-7 h-7" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black tracking-widest uppercase text-emerald-400 block">
+                        รายงานผลการทดสอบดิจิทัล (E-Assessment Result)
+                      </span>
+                      <h3 className="text-base font-extrabold text-white">
+                        {survey.title}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className={`px-4 py-1.5 rounded-full text-xs font-extrabold border ${
+                    isPassed ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40' : 'bg-rose-500/20 text-rose-300 border-rose-400/40'
+                  }`}>
+                    {isPassed ? '✓ ผ่านการทดสอบ (PASSED)' : '✕ ไม่ผ่านเกณฑ์ (FAILED)'}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">คะแนนที่ได้ (Earned)</span>
+                    <div className="text-2xl font-black text-amber-400 mt-1">
+                      {scoreResults.totalScore} / {scoreResults.maxPossibleScore} <span className="text-xs text-slate-400 font-normal">คะแนน</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">คิดเป็นร้อยละ (Percentage)</span>
+                    <div className={`text-2xl font-black mt-1 ${evalResults.isPassed ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {scoreResults.percentage}%
+                    </div>
+                  </div>
+                  <div className="col-span-2 sm:col-span-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">เกณฑ์การผ่าน (Pass Score)</span>
+                    <div className="text-2xl font-black text-slate-200 mt-1">
+                      {evalResults.passingPercent}%
+                    </div>
+                  </div>
+                </div>
+
+                {isPassed && (
+                  <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
+                    <span className="text-[10px] uppercase font-black tracking-widest text-emerald-400 block">
+                      ขอแสดงความยินดี! คุณผ่านเกณฑ์การทดสอบสมรรถนะความรู้ความมั่นคง
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowCertModal(true)}
+                      className="w-full py-3.5 px-6 rounded-2xl bg-linear-to-r from-amber-500 via-amber-600 to-amber-700 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 transition duration-200 cursor-pointer shadow-xl shadow-amber-500/20 active:scale-98"
+                    >
+                      <Award className="w-5 h-5 shrink-0" />
+                      <span>ดูใบประกาศนียบัตรอิเล็กทรอนิกส์ (View e-Certificate)</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Explanations Key if enabled */}
+                {(survey.settings?.showScoreImmediately || survey.settings?.quizShowResultImmediate) && scoreResults.questionResults && (
+                  <div className="space-y-3 pt-3 border-t border-white/10">
+                    <span className="text-xs font-bold text-slate-300 block">รายละเอียดคำตอบและเฉลยรายข้อ:</span>
+                    <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                      {survey.questions.filter(q => q.type !== 'section_header').map((q, qIdx) => {
+                        const result = scoreResults.questionResults[q.id];
+                        if (!result) return null;
+                        return (
+                          <div key={q.id} className="p-3 rounded-xl bg-black/40 border border-white/10 text-xs space-y-1">
+                            <div className="flex items-center justify-between font-bold">
+                              <span className="text-slate-200 truncate max-w-[80%]">{qIdx + 1}. {q.title}</span>
+                              <span className={result.isCorrect ? 'text-emerald-400 font-extrabold' : 'text-rose-400 font-extrabold'}>
+                                {result.isCorrect ? `+${result.score} คะแนน` : '0 คะแนน'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              คำตอบของคุณ: <span className={result.isCorrect ? 'text-emerald-300 font-bold' : 'text-rose-300 font-bold'}>{answers[q.id] || '(ไม่ได้ตอบ)'}</span>
+                            </div>
+                            {!result.isCorrect && (q.correctAnswer || q.correctAnswers) && (
+                              <div className="text-[11px] text-emerald-400 font-bold">
+                                เฉลยที่ถูกต้อง: {q.correctAnswer || (q.correctAnswers && q.correctAnswers.join(', '))}
+                              </div>
+                            )}
+                            {result.explanation && (
+                              <div className="text-[10px] text-slate-400 italic pt-0.5">
+                                คำอธิบาย: {result.explanation}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Header Text */}
             <div className="space-y-3 max-w-lg mx-auto">
@@ -677,29 +909,68 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
             </div>
           </div>
         </div>
+        {showCertModal && (
+          <ECertificateModal
+            survey={survey}
+            response={mockResponse}
+            onClose={() => setShowCertModal(false)}
+          />
+        )}
       </div>
     );
   }
 
-  if (survey.settings?.isOpen === false || survey.settings?.status === 'paused') {
+  if (!whitelistVerified) {
     return (
-      <div className="max-w-2xl mx-auto p-8 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] shadow-xl text-center space-y-6 my-12">
-        <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mx-auto">
-          <PauseCircle className="w-8 h-8" />
+      <div className="max-w-xl mx-auto p-8 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] shadow-2xl text-center space-y-6 my-12 animate-fade-in">
+        <div className="w-16 h-16 bg-emerald-500/10 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-500/20">
+          <Shield className="w-8 h-8" />
         </div>
         <div className="space-y-2">
-          <h2 className="text-xl font-black text-[var(--text-primary)]">แบบสำรวจนี้ปิดรับคำตอบแล้ว</h2>
-          <p className="text-xs text-[var(--text-secondary)] max-w-md mx-auto leading-relaxed">
-            ขออภัยในความไม่สะดวก ขณะนี้ผู้ดูแลระบบได้ปิดการรับคำตอบสำหรับแบบสำรวจ "{survey.title}" เรียบร้อยแล้ว หากมีข้อสงสัยโปรดติดต่อหน่วยงานผู้จัดทำ
+          <h2 className="text-xl font-extrabold text-[var(--text-primary)]">ตรวจสอบสิทธิ์การเข้าทำแบบสำรวจ (Whitelist Access)</h2>
+          <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+            แบบสำรวจนี้สงวนสิทธิ์เฉพาะผู้มีรายชื่อในระบบเท่านั้น กรุณาระบุอีเมล หมายเลขบัตรประชาชน หรือเบอร์โทรศัพท์เพื่อยืนยันตัวตน
           </p>
         </div>
+
+        <div className="space-y-3 text-left max-w-md mx-auto">
+          <label className="text-xs font-bold text-[var(--text-muted)] block">อีเมล / เลขบัตรประชาชน / เบอร์โทรศัพท์:</label>
+          <input
+            type="text"
+            value={whitelistInput}
+            onChange={(e) => {
+              setWhitelistInput(e.target.value);
+              setWhitelistError(null);
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && handleVerifyWhitelist()}
+            placeholder="เช่น somchai@rayong.go.th หรือ 0812345678"
+            className="w-full bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-2xl px-4 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-emerald-500 font-mono"
+          />
+
+          {whitelistError && (
+            <p className="text-xs text-rose-500 font-bold flex items-center gap-1.5 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{whitelistError}</span>
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleVerifyWhitelist}
+            className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>ตรวจสอบและเข้าสู่แบบสำรวจ</span>
+          </button>
+        </div>
+
         {onBack && (
           <button
             type="button"
             onClick={onBack}
-            className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 transition cursor-pointer shadow-md"
+            className="text-xs text-[var(--text-muted)] hover:underline block mx-auto pt-2"
           >
-            ย้อนกลับ
+            ← ย้อนกลับ
           </button>
         )}
       </div>
@@ -771,6 +1042,76 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
           </div>
         )}
       </div>
+
+      {/* Quiz Mode Timer Bar */}
+      {survey.settings?.quizMode && timeLimitSeconds > 0 && (
+        <div className={`sticky top-3 z-40 mb-6 p-4 sm:p-5 rounded-3xl border shadow-xl transition-all duration-300 backdrop-blur-md ${
+          remainingSeconds < 60 
+            ? 'bg-rose-950/95 border-rose-500/40 text-rose-100 shadow-rose-950/20 animate-shake' 
+            : 'bg-slate-900/95 border-blue-500/20 text-white shadow-blue-950/10'
+        }`}>
+          {/* Subtle warning glow overlay for urgent timer */}
+          {remainingSeconds < 60 && (
+            <div className="absolute inset-0 bg-rose-500/5 animate-pulse rounded-3xl pointer-events-none" />
+          )}
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 relative z-10">
+            <div className="flex items-center gap-3">
+              <div className={`p-3 rounded-2xl shrink-0 transition-transform ${
+                remainingSeconds < 60 
+                  ? 'bg-rose-500/20 text-rose-400 animate-bounce' 
+                  : 'bg-blue-500/10 text-blue-400'
+              }`}>
+                <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase tracking-widest ${
+                    remainingSeconds < 60 
+                      ? 'bg-rose-500 text-white' 
+                      : 'bg-amber-500 text-slate-950'
+                  }`}>
+                    {remainingSeconds < 60 ? '🚨 ด่วนที่สุด / Urgent' : '⏱️ แบบทดสอบจำกัดเวลา'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    DDPM Smart Exam Mode
+                  </span>
+                </div>
+                <h2 className="text-sm font-extrabold text-white mt-1 leading-snug">
+                  {remainingSeconds < 60 ? 'ใกล้หมดเวลาแล้ว! กรุณารีบตอบและกดส่งข้อมูล' : 'กรุณาตอบคำถามภายในเวลาที่กำหนด'}
+                </h2>
+                <p className="text-[11px] text-slate-300 font-light mt-0.5">
+                  ระบบจะทำการบันทึกและส่งคำตอบของท่านโดยอัตโนมัติเมื่อเข็มนาฬิกาเดินครบกำหนด
+                </p>
+              </div>
+            </div>
+
+            <div className="w-full sm:w-auto flex items-center justify-between sm:justify-end gap-3 shrink-0 self-stretch sm:self-center border-t sm:border-t-0 border-white/10 pt-2.5 sm:pt-0">
+              <span className="text-xs text-slate-400 font-semibold sm:hidden">เวลาที่เหลือ:</span>
+              <div className={`text-2xl sm:text-3xl font-black font-mono shrink-0 px-4 py-2 rounded-2xl border flex items-center gap-1 shadow-inner ${
+                remainingSeconds < 60 
+                  ? 'bg-rose-500/10 border-rose-500 text-rose-400 animate-pulse' 
+                  : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+              }`}>
+                <span>{Math.floor(remainingSeconds / 60).toString().padStart(2, '0')}</span>
+                <span className="text-base font-normal text-slate-400 animate-pulse">:</span>
+                <span>{(remainingSeconds % 60).toString().padStart(2, '0')}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3.5 w-full bg-white/10 h-2.5 rounded-full overflow-hidden relative">
+            <div 
+              className={`h-full rounded-full transition-all duration-1000 ${
+                remainingSeconds < 60 
+                  ? 'bg-gradient-to-r from-red-500 via-rose-600 to-red-500 bg-[size:200%_auto] animate-pulse' 
+                  : 'bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400'
+              }`}
+              style={{ width: `${(remainingSeconds / timeLimitSeconds) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Questions Form */}
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -1280,6 +1621,171 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
                       <span>ล้างลายเซ็น</span>
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Quiz Answer Option Selection */}
+              {q.type === 'quiz_answer' && (
+                <div className="space-y-2.5">
+                  {q.options?.map(opt => {
+                    const isSelected = currentAnswer === opt.text;
+                    return (
+                      <label
+                        key={opt.id}
+                        onClick={() => handleSetAnswer(q.id, opt.text)}
+                        className={`flex items-center gap-3 p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-amber-500/10 border-amber-500 text-amber-900 dark:text-amber-100 font-bold'
+                            : 'bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] border-[var(--border-lighter)] text-[var(--text-primary)]'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name={q.id}
+                          checked={isSelected}
+                          onChange={() => {}}
+                          className="w-4 h-4 text-amber-600 focus:ring-0 cursor-pointer"
+                        />
+                        <span className="text-xs sm:text-sm flex-1">{opt.text}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Number Input */}
+              {q.type === 'number_input' && (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min={q.minScore ?? 0}
+                    max={q.maxScore}
+                    value={currentAnswer !== undefined && currentAnswer !== null ? currentAnswer : ''}
+                    onChange={(e) => handleSetAnswer(q.id, e.target.value !== '' ? Number(e.target.value) : '')}
+                    placeholder="ระบุตัวเลข..."
+                    className="flex-1 bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-2xl p-3 text-sm text-[var(--text-primary)] outline-none focus:border-blue-500 font-bold"
+                  />
+                  {q.unit && (
+                    <span className="text-xs font-bold text-[var(--text-muted)] bg-[var(--bg-surface)] px-3 py-3 rounded-2xl border border-[var(--border-lighter)] shrink-0">
+                      {q.unit}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* NPS Score (0-10) */}
+              {q.type === 'nps_score' && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-11 gap-1.5">
+                    {Array.from({ length: 11 }).map((_, i) => {
+                      const isSelected = currentAnswer === i;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => handleSetAnswer(q.id, i)}
+                          className={`py-3 rounded-xl text-center font-bold text-xs transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-blue-600 text-white shadow-lg ring-2 ring-blue-400'
+                              : 'bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-lighter)]'
+                          }`}
+                        >
+                          {i}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between text-[11px] text-[var(--text-muted)] font-bold px-1">
+                    <span>0 = ไม่แนะนำอย่างยิ่ง</span>
+                    <span>10 = แนะนำอย่างแน่นอน</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Cascading Dropdown */}
+              {q.type === 'cascading_dropdown' && (
+                <div>
+                  <select
+                    value={currentAnswer || ''}
+                    onChange={(e) => handleSetAnswer(q.id, e.target.value)}
+                    className="w-full bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-2xl p-3 text-xs sm:text-sm text-[var(--text-primary)] outline-none focus:border-blue-500"
+                  >
+                    <option value="">-- เลือกลำดับชั้น / พื้นที่ปฏิบัติงาน --</option>
+                    {q.options?.map(opt => (
+                      <option key={opt.id} value={opt.text}>
+                        {opt.text}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* GPS Location Component */}
+              {q.type === 'gps_location' && (
+                <div className="space-y-3">
+                  <div className="p-4 rounded-2xl bg-blue-500/5 border border-blue-500/20 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-5 h-5 text-blue-500" />
+                        <span className="text-xs font-bold text-[var(--text-primary)]">
+                          {currentAnswer?.lat ? `พิกัด: ${currentAnswer.lat.toFixed(6)}, ${currentAnswer.lng.toFixed(6)}` : 'ยังไม่ได้ระบุพิกัด GPS'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (navigator.geolocation) {
+                            navigator.geolocation.getCurrentPosition(
+                              (pos) => {
+                                const lat = pos.coords.latitude;
+                                const lng = pos.coords.longitude;
+                                handleSetAnswer(q.id, { lat, lng, address: `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}` });
+                              },
+                              (err) => {
+                                alert('ไม่สามารถดึงพิกัด GPS ได้ กรุณาเปิดสิทธิ์ระบุตำแหน่งในเบราว์เซอร์');
+                              }
+                            );
+                          } else {
+                            alert('เบราว์เซอร์ของคุณไม่รองรับ GPS');
+                          }
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition cursor-pointer flex items-center gap-1.5"
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        <span>ดึงพิกัด GPS ปัจจุบัน</span>
+                      </button>
+                    </div>
+
+                    {currentAnswer?.lat && (
+                      <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5 bg-emerald-500/10 p-2.5 rounded-xl border border-emerald-500/20">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>บันทึกตำแหน่งพิกัดแล้ว: {currentAnswer.lat}, {currentAnswer.lng}</span>
+                        <a 
+                          href={`https://maps.google.com/?q=${currentAnswer.lat},${currentAnswer.lng}`} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="ml-auto underline text-blue-600"
+                        >
+                          ดูบน Google Maps
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Ranking */}
+              {q.type === 'ranking' && (
+                <div className="space-y-2">
+                  <span className="text-xs text-[var(--text-muted)] block mb-1">กดย่อหน้าเลือกเพื่อจัดอันดับความสำคัญ:</span>
+                  {q.options?.map((opt, optIdx) => (
+                    <div key={opt.id} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-canvas)] border border-[var(--border-lighter)]">
+                      <span className="w-6 h-6 rounded-full bg-indigo-500/10 text-indigo-600 font-bold text-xs flex items-center justify-center shrink-0">
+                        {optIdx + 1}
+                      </span>
+                      <span className="text-xs font-medium text-[var(--text-primary)] flex-1">{opt.text}</span>
+                    </div>
+                  ))}
                 </div>
               )}
 

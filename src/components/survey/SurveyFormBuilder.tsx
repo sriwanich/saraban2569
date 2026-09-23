@@ -36,8 +36,22 @@ import {
   GitBranch,
   FastForward,
   Upload,
+  Download,
   Link2,
-  ImageIcon
+  ImageIcon,
+  Hash,
+  BarChart3,
+  LayoutGrid,
+  Table,
+  ArrowUpDown,
+  Award,
+  MapPin,
+  Lock,
+  Clock,
+  Key,
+  Users,
+  CheckCircle2,
+  ListFilter
 } from 'lucide-react';
 import { 
   Survey, 
@@ -55,6 +69,7 @@ import { SurveyRespondentPortal } from './SurveyRespondentPortal';
 import { getReadableRuleDescription, normalizeRule } from '../../utils/surveyLogicEngine';
 import { getResolvedSurveyLogoUrl, getSystemBrandingInfo } from '../../utils/surveyLogoHelper';
 import { useConfirm } from '../../context/ConfirmContext';
+import * as XLSX from 'xlsx';
 
 interface SurveyFormBuilderProps {
   initialSurvey?: Survey | null;
@@ -74,14 +89,22 @@ const QUESTION_PALETTE_ITEMS: Array<{
   { type: 'single_choice', icon: CircleDot, label: 'เลือกตอบข้อเดียว (Radio)', category: 'choice', desc: 'ผู้ตอบเลือกได้เพียง 1 คำตอบ' },
   { type: 'multiple_choice', icon: CheckSquare, label: 'เลือกตอบหลายข้อ (Checkbox)', category: 'choice', desc: 'ผู้ตอบเลือกได้หลายคำตอบ' },
   { type: 'dropdown', icon: ListOrdered, label: 'เมนูดรอปดาวน์ (Dropdown)', category: 'choice', desc: 'เลือก 1 รายการจากเมนูพับ' },
+  { type: 'cascading_dropdown', icon: GitBranch, label: 'ดรอปดาวน์เชื่อมโยง (Cascading)', category: 'choice', desc: 'เลือกลำดับชั้น (เช่น จังหวัด -> อำเภอ -> ตำบล)' },
   { type: 'text_short', icon: Type, label: 'ข้อความสั้น (Single Line)', category: 'text', desc: 'สำหรับชื่อ, ตำแหน่ง, เลขที่' },
   { type: 'text_long', icon: AlignLeft, label: 'ข้อความยาว (Paragraph)', category: 'text', desc: 'สำหรับข้อคิดเห็น, บันทึก' },
+  { type: 'number_input', icon: Hash, label: 'ตัวเลข/จำนวน (Number Input)', category: 'text', desc: 'ระบุตัวเลขพร้อมกำหนดหน่วย (เช่น บาท/คน/ไร่)' },
   { type: 'rating_stars', icon: Star, label: 'ให้คะแนนดาว (Star Rating)', category: 'rating', desc: 'ให้คะแนนระดับ 1-5 หรือ 1-10 ดาว' },
-  { type: 'matrix_rating', icon: Grid3X3, label: 'ตารางประเมินเมทริกซ์ (Matrix Grid)', category: 'rating', desc: 'ประเมินหลายหัวข้อในตารางเดียว (Likert)' },
-  { type: 'slider_score', icon: Sliders, label: 'สไลเดอร์คะแนน (Number Slider)', category: 'rating', desc: 'เลื่อนแถบคะแนน 0-100 หรือ NPS' },
+  { type: 'nps_score', icon: BarChart3, label: 'ดัชนี NPS (0-10 Rating)', category: 'rating', desc: 'วัดระดับความพึงพอใจและความจงรักภักดี (0-10)' },
+  { type: 'matrix_rating', icon: Grid3X3, label: 'ตารางประเมินเมทริกซ์ (Matrix Likert)', category: 'rating', desc: 'ประเมินหลายหัวข้อในตารางเดียว (1-5)' },
+  { type: 'matrix_single', icon: LayoutGrid, label: 'ตารางตัวเลือกเดียว (Matrix Radio)', category: 'rating', desc: 'เลือกตัวเลือกเดียวต่อแต่ละประเด็น' },
+  { type: 'matrix_text', icon: Table, label: 'ตารางกรอกข้อความ (Matrix Text)', category: 'rating', desc: 'กรอกตัวเลข/ข้อความลงในช่องตาราง' },
+  { type: 'slider_score', icon: Sliders, label: 'สไลเดอร์คะแนน (Number Slider)', category: 'rating', desc: 'เลื่อนแถบคะแนน 0-100' },
+  { type: 'ranking', icon: ArrowUpDown, label: 'เรียงลำดับความสำคัญ (Ranking)', category: 'rating', desc: 'จัดอันดับตัวเลือกตามลำดับความสำคัญ' },
+  { type: 'quiz_answer', icon: Award, label: 'ข้อสอบ / วัดความรู้ (Quiz Mode)', category: 'advanced', desc: 'ระบุเฉลยคำตอบพร้อมคำอธิบายและน้ำหนักคะแนน' },
   { type: 'date_time', icon: Calendar, label: 'วันที่และเวลา (Date/Time)', category: 'advanced', desc: 'เลือกวันที่จัดงาน/เกิดเหตุ' },
   { type: 'file_upload', icon: UploadCloud, label: 'อัปโหลดไฟล์ (File Attachment)', category: 'advanced', desc: 'แนบภาพถ่ายหรือเอกสารประกอบ' },
   { type: 'signature', icon: PenTool, label: 'ลายมือชื่อดิจิทัล (E-Signature)', category: 'advanced', desc: 'วาดลายเซ็นรับรองข้อมูล' },
+  { type: 'gps_location', icon: MapPin, label: 'พิกัดตำแหน่ง GPS (Location)', category: 'advanced', desc: 'ปักหมุดแผนที่ หรือกดส่งพิกัดปัจจุบัน' },
   { type: 'contact_info', icon: UserCheck, label: 'ข้อมูลผู้ตอบ (Contact Info)', category: 'advanced', desc: 'รวมฟิลด์ชื่อ, โทรศัพท์, อีเมล, สังกัด' },
   { type: 'rsvp_status', icon: FileCheck, label: 'สถานะตอบรับเข้าร่วม (RSVP Choice)', category: 'advanced', desc: 'ตอบรับด้วยตนเอง / ผู้แทน / ไม่สะดวก' },
   { type: 'section_header', icon: Split, label: 'หัวข้อคั่นส่วน (Section Break)', category: 'advanced', desc: 'จัดกลุ่มคำถามเป็นตอนๆ' }
@@ -164,6 +187,131 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
     }));
   };
 
+  const handleExportQuestionsToExcel = () => {
+    const exportData = survey.questions.map((q, idx) => {
+      let optionsStr = '';
+      if (q.options) {
+        optionsStr = q.options.map(opt => opt.text).join(' | ');
+      } else if (q.type === 'matrix_rating') {
+        optionsStr = (q.matrixRows?.map(row => row.text).join(' | ')) || '';
+      }
+
+      return {
+        'ข้อที่': idx + 1,
+        'ประเภทคำถาม (Question Type)': q.type,
+        'หัวข้อคำถาม (Title)': q.title,
+        'คำอธิบายเพิ่มเติม (Description)': q.description || '',
+        'จำเป็นต้องตอบ (Required - TRUE/FALSE)': q.required ? 'TRUE' : 'FALSE',
+        'ตัวเลือก/ประเด็นย่อย (Options / Separated by | )': optionsStr
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Survey Questions");
+    XLSX.writeFile(wb, `survey-questions-${survey.id}.xlsx`);
+  };
+
+  const handleImportQuestionsFromExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = event.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet) as any[];
+
+        if (rows.length === 0) {
+          await confirm({
+            title: 'ข้อผิดพลาดการนำเข้า',
+            message: 'ไม่พบข้อมูลคำถามในไฟล์ Excel ที่เลือก',
+            type: 'warning',
+            confirmText: 'ตกลง'
+          });
+          return;
+        }
+
+        const importedQuestions: SurveyQuestion[] = rows.map((row, idx) => {
+          const type = (row['ประเภทคำถาม (Question Type)'] || 'text_short').trim() as SurveyQuestionType;
+          const title = row['หัวข้อคำถาม (Title)'] || `ข้อที่ ${idx + 1}. คำถามใหม่`;
+          const description = row['คำอธิบายเพิ่มเติม (Description)'] || '';
+          const requiredStr = String(row['จำเป็นต้องตอบ (Required - TRUE/FALSE)']).toUpperCase().trim();
+          const required = requiredStr === 'TRUE' || requiredStr === 'จริง' || requiredStr === 'YES';
+          const optionsRaw = row['ตัวเลือก/ประเด็นย่อย (Options / Separated by | )'] || '';
+
+          const qId = `q_${Date.now()}_import_${idx}_${Math.random().toString(36).substr(2, 3)}`;
+          const question: SurveyQuestion = {
+            id: qId,
+            type,
+            title,
+            description,
+            required
+          };
+
+          if (optionsRaw.trim().length > 0) {
+            const items = optionsRaw.split('|').map((item: string) => item.trim());
+            if (type === 'matrix_rating') {
+              question.matrixRows = items.map((item, rowIdx) => ({
+                id: `row_${rowIdx + 1}`,
+                text: item
+              }));
+              question.matrixCols = [
+                { id: 'col_1', text: 'ปรับปรุง' },
+                { id: 'col_2', text: 'พอใช้' },
+                { id: 'col_3', text: 'ปานกลาง' },
+                { id: 'col_4', text: 'ดี' },
+                { id: 'col_5', text: 'ดีเยี่ยม' }
+              ];
+            } else {
+              question.options = items.map((item, optIdx) => ({
+                id: `opt_${optIdx + 1}`,
+                text: item
+              }));
+            }
+          } else if (type === 'single_choice' || type === 'multiple_choice' || type === 'dropdown') {
+            question.options = [
+              { id: 'opt_1', text: 'ตัวเลือกที่ 1' },
+              { id: 'opt_2', text: 'ตัวเลือกที่ 2' }
+            ];
+          }
+
+          return question;
+        });
+
+        const isOk = await confirm({
+          title: 'ยืนยันการนำเข้าชุดคำถาม',
+          message: `พบคำถามทั้งหมด ${importedQuestions.length} ข้อในไฟล์ คุณต้องการนำเข้าไปยังแบบสำรวจนี้ใช่หรือไม่?`,
+          type: 'info',
+          confirmText: 'นำเข้าทันที',
+          cancelText: 'ยกเลิก'
+        });
+
+        if (isOk) {
+          setSurvey(prev => ({
+            ...prev,
+            questions: [...prev.questions, ...importedQuestions]
+          }));
+          setActiveQuestionId(importedQuestions[0].id);
+        }
+      } catch (err) {
+        console.error(err);
+        await confirm({
+          title: 'ข้อผิดพลาดระบบ',
+          message: 'เกิดข้อผิดพลาดในการอ่านไฟล์ Excel กรุณาตรวจสอบความถูกต้องของไฟล์',
+          type: 'warning',
+          confirmText: 'ตกลง'
+        });
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
   // Helper to add new question
   const handleAddQuestion = (type: SurveyQuestionType) => {
     const newId = `q_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
@@ -174,12 +322,39 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
       required: true
     };
 
-    if (type === 'single_choice' || type === 'multiple_choice' || type === 'dropdown') {
+    if (type === 'single_choice' || type === 'multiple_choice' || type === 'dropdown' || type === 'ranking') {
       newQ.options = [
         { id: 'opt_1', text: 'ตัวเลือกที่ 1' },
         { id: 'opt_2', text: 'ตัวเลือกที่ 2' },
         { id: 'opt_3', text: 'ตัวเลือกที่ 3' }
       ];
+    } else if (type === 'quiz_answer') {
+      newQ.title = `ข้อที่ ${survey.questions.length + 1}. คำถามวัดความรู้ / แบบทดสอบ`;
+      newQ.options = [
+        { id: 'opt_1', text: 'ตัวเลือกก. (คำตอบที่ถูกต้อง)' },
+        { id: 'opt_2', text: 'ตัวเลือกข.' },
+        { id: 'opt_3', text: 'ตัวเลือกค.' },
+        { id: 'opt_4', text: 'ตัวเลือกง.' }
+      ];
+      newQ.correctAnswer = 'ตัวเลือกก. (คำตอบที่ถูกต้อง)';
+      newQ.scoreWeight = 1;
+      newQ.explanation = 'คำอธิบายเฉลยเพิ่มเติมสำหรับข้อสอบนี้';
+    } else if (type === 'cascading_dropdown') {
+      newQ.title = `ข้อที่ ${survey.questions.length + 1}. เลือกพื้นที่ / สังกัด (ลำดับชั้น)`;
+      newQ.options = [
+        { id: 'casc_1', text: 'อำเภอเมืองระยอง / ตำบลท่าประดู่' },
+        { id: 'casc_2', text: 'อำเภอเมืองระยอง / ตำบลปากน้ำ' },
+        { id: 'casc_3', text: 'อำเภอบ้านค่าย / ตำบลบ้านค่าย' },
+        { id: 'casc_4', text: 'อำเภอแกลง / ตำบลทางเกวียน' }
+      ];
+    } else if (type === 'number_input') {
+      newQ.title = `ข้อที่ ${survey.questions.length + 1}. จำนวน / มูลค่าความเสียหาย`;
+      newQ.unit = 'บาท';
+      newQ.minScore = 0;
+    } else if (type === 'nps_score') {
+      newQ.title = `ข้อที่ ${survey.questions.length + 1}. โอกาสที่ท่านจะแนะนำบริการนี้แก่ผู้อื่น (NPS)`;
+      newQ.minScore = 0;
+      newQ.maxScore = 10;
     } else if (type === 'rsvp_status') {
       newQ.title = `ข้อที่ ${survey.questions.length + 1}. สถานะการยืนยันเข้าร่วมกิจกรรม`;
       newQ.options = [
@@ -187,7 +362,7 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
         { id: 'status_delegate', text: 'มอบหมายผู้แทนเข้าร่วมแทน' },
         { id: 'status_no', text: 'ไม่สะดวกเข้าร่วมงาน' }
       ];
-    } else if (type === 'matrix_rating') {
+    } else if (type === 'matrix_rating' || type === 'matrix_single') {
       newQ.matrixRows = [
         { id: 'r1', text: 'ประเด็นที่ 1' },
         { id: 'r2', text: 'ประเด็นที่ 2' },
@@ -200,12 +375,24 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
         { id: 'c4', text: 'มาก (4)', score: 4 },
         { id: 'c5', text: 'มากที่สุด (5)', score: 5 }
       ];
+    } else if (type === 'matrix_text') {
+      newQ.matrixRows = [
+        { id: 'r1', text: 'รายการที่ 1' },
+        { id: 'r2', text: 'รายการที่ 2' }
+      ];
+      newQ.matrixCols = [
+        { id: 'c1', text: 'จำนวน (หน่วย)' },
+        { id: 'c2', text: 'หมายเหตุ / รายละเอียด' }
+      ];
     } else if (type === 'rating_stars') {
       newQ.maxScore = 5;
     } else if (type === 'slider_score') {
       newQ.minScore = 0;
       newQ.maxScore = 10;
       newQ.step = 1;
+    } else if (type === 'gps_location') {
+      newQ.title = `ข้อที่ ${survey.questions.length + 1}. ตำแหน่งพิกัดสถานที่เกิดเหตุ / จุดปฏิบัติงาน (GPS)`;
+      newQ.placeholder = 'กดปุ่มเพื่อดึงพิกัด GPS ปัจจุบันของคุณ';
     }
 
     setSurvey(prev => ({
@@ -511,6 +698,39 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
         {/* Left Palette: Question Types Library */}
         <div className="w-full lg:w-72 bg-[var(--bg-surface)] border-r border-[var(--border-lighter)] p-4 flex flex-col overflow-y-auto custom-scrollbar shrink-0">
+          
+          {/* Excel Question Import/Export Panel */}
+          <div className="mb-4 p-3.5 rounded-2xl bg-indigo-500/5 border border-indigo-100 dark:border-indigo-900/20 space-y-2">
+            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">
+              📊 Excel Integration (นำเข้า/ส่งออก)
+            </span>
+            <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+              นำเข้าชุดคำถามจำนวนมาก หรือสำรองข้อมูลผ่านไฟล์ Excel (.xlsx) เพื่อความรวดเร็วระดับองค์กร
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleExportQuestionsToExcel}
+                className="p-2 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                title="ดาวน์โหลดโครงสร้างคำถามทั้งหมดเป็น Excel"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>ส่งออก</span>
+              </button>
+
+              <label className="p-2 py-1.5 rounded-lg bg-[var(--bg-canvas)] hover:bg-[var(--border-lighter)] border border-[var(--border-lighter)] text-[10px] font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition flex items-center justify-center gap-1 cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-indigo-500" />
+                <span>นำเข้า</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handleImportQuestionsFromExcel}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
           <div className="space-y-1 mb-3">
             <h4 className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
               <PlusCircle className="w-4 h-4 text-blue-500" />
@@ -753,7 +973,7 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
                     {/* Dynamic Question Body Preview / Editor */}
                     <div className="pt-3">
                       {/* Choice Options List */}
-                      {(q.type === 'single_choice' || q.type === 'multiple_choice' || q.type === 'dropdown') && (
+                      {(q.type === 'single_choice' || q.type === 'multiple_choice' || q.type === 'dropdown' || q.type === 'cascading_dropdown' || q.type === 'ranking') && (
                         <div className="space-y-2 pl-2">
                           {q.options?.map((opt, optIdx) => (
                             <div key={opt.id} className="flex items-center gap-2">
@@ -761,6 +981,8 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
                                 <CircleDot className="w-4 h-4 text-slate-400 shrink-0" />
                               ) : q.type === 'multiple_choice' ? (
                                 <CheckSquare className="w-4 h-4 text-slate-400 shrink-0" />
+                              ) : q.type === 'ranking' ? (
+                                <ArrowUpDown className="w-4 h-4 text-indigo-400 shrink-0" />
                               ) : (
                                 <span className="text-xs font-mono text-slate-400">{optIdx + 1}.</span>
                               )}
@@ -787,6 +1009,134 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
                             <Plus className="w-3.5 h-3.5" />
                             <span>เพิ่มตัวเลือก</span>
                           </button>
+                        </div>
+                      )}
+
+                      {/* Quiz Answer Editor */}
+                      {q.type === 'quiz_answer' && (
+                        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-3">
+                          <div className="flex items-center gap-2 pb-2 border-b border-amber-500/20">
+                            <Award className="w-4 h-4 text-amber-500" />
+                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400">ตั้งค่าเฉลยและคะแนนข้อสอบ (Quiz Answer Key)</span>
+                          </div>
+
+                          <div className="space-y-2">
+                            {q.options?.map((opt, optIdx) => {
+                              const isCorrect = q.correctAnswer === opt.text;
+                              return (
+                                <div key={opt.id} className="flex items-center gap-2">
+                                  <input
+                                    type="radio"
+                                    name={`quiz_key_${q.id}`}
+                                    checked={isCorrect}
+                                    onChange={() => handleUpdateQuestion(q.id, { correctAnswer: opt.text })}
+                                    className="w-4 h-4 text-emerald-600 focus:ring-0 cursor-pointer"
+                                    title="ทำเครื่องหมายเป็นเฉลยคำตอบที่ถูกต้อง"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={opt.text}
+                                    onChange={(e) => {
+                                      const oldText = opt.text;
+                                      handleUpdateOption(q.id, opt.id, e.target.value);
+                                      if (q.correctAnswer === oldText) {
+                                        handleUpdateQuestion(q.id, { correctAnswer: e.target.value });
+                                      }
+                                    }}
+                                    className={`flex-1 text-xs rounded-xl px-3 py-1.5 outline-none ${
+                                      isCorrect ? 'bg-emerald-500/15 border-2 border-emerald-500 font-bold text-emerald-900 dark:text-emerald-100' : 'bg-[var(--bg-canvas)] border border-[var(--border-lighter)] text-[var(--text-primary)]'
+                                    }`}
+                                  />
+                                  {isCorrect && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/20 px-2 py-0.5 rounded-md">เฉลยถูก</span>}
+                                  <button
+                                    onClick={() => handleRemoveOption(q.id, opt.id)}
+                                    className="p-1 text-slate-400 hover:text-red-500 rounded-lg"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                            <button
+                              onClick={() => handleAddOption(q.id)}
+                              className="text-xs font-bold text-amber-600 hover:underline flex items-center gap-1 pt-1"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>เพิ่มตัวเลือกข้อสอบ</span>
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-amber-500/20">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">น้ำหนักคะแนนข้อนี้ (Score Weight)</label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={q.scoreWeight || 1}
+                                onChange={(e) => handleUpdateQuestion(q.id, { scoreWeight: Number(e.target.value) || 1 })}
+                                className="w-full text-xs bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-xl px-3 py-1.5 font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">คำอธิบายเฉลยเพิ่มเติม (Explanation)</label>
+                              <input
+                                type="text"
+                                value={q.explanation || ''}
+                                onChange={(e) => handleUpdateQuestion(q.id, { explanation: e.target.value })}
+                                placeholder="เช่น อ้างอิงตามระเบียบ พ.ร.บ. ป้องกันฯ พ.ศ. 2550"
+                                className="w-full text-xs bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-xl px-3 py-1.5"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Number Input Customizer */}
+                      {q.type === 'number_input' && (
+                        <div className="p-3.5 rounded-2xl bg-slate-500/5 border border-[var(--border-lighter)] flex items-center gap-3">
+                          <Hash className="w-5 h-5 text-blue-500 shrink-0" />
+                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-[var(--text-muted)] block">หน่วยนับ (Unit Label)</label>
+                              <input
+                                type="text"
+                                value={q.unit || ''}
+                                onChange={(e) => handleUpdateQuestion(q.id, { unit: e.target.value })}
+                                placeholder="เช่น บาท, คน, ไร่, ราย"
+                                className="w-full text-xs bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-lg px-2.5 py-1 text-[var(--text-primary)]"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-[var(--text-muted)] block">ค่าขั้นต่ำ (Minimum Value)</label>
+                              <input
+                                type="number"
+                                value={q.minScore ?? 0}
+                                onChange={(e) => handleUpdateQuestion(q.id, { minScore: Number(e.target.value) })}
+                                className="w-full text-xs bg-[var(--bg-canvas)] border border-[var(--border-lighter)] rounded-lg px-2.5 py-1 text-[var(--text-primary)]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* NPS Score Preview */}
+                      {q.type === 'nps_score' && (
+                        <div className="p-3.5 rounded-2xl bg-blue-500/5 border border-blue-500/20 space-y-2">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
+                            <span>0 (ไม่แนะนำอย่างยิ่ง)</span>
+                            <span className="text-blue-600 font-extrabold">Net Promoter Score (NPS 0-10)</span>
+                            <span>10 (แนะนำอย่างแน่นอน)</span>
+                          </div>
+                          <div className="grid grid-cols-11 gap-1">
+                            {Array.from({ length: 11 }).map((_, i) => (
+                              <div key={i} className={`p-2 rounded-lg text-center text-xs font-bold border ${
+                                i <= 6 ? 'bg-rose-500/10 border-rose-500/30 text-rose-600' : i <= 8 ? 'bg-amber-500/10 border-amber-500/30 text-amber-600' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
+                              }`}>
+                                {i}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
 
@@ -886,7 +1236,7 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
                               มีตรรกะเงื่อนไข ({q.logicRules.length} กฎ):
                             </span>
                             <span className="text-[11px] text-[var(--text-secondary)] truncate max-w-md">
-                              {getReadableRuleDescription(q.logicRules[0], survey.questions)}
+                              {getReadableRuleDescription(q.logicRules[0])}
                             </span>
                           </div>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-600">
@@ -1177,6 +1527,177 @@ export const SurveyFormBuilder: React.FC<SurveyFormBuilderProps> = ({
                     <span>อนุญาตให้ผู้ตอบดูผลสรุปคะแนนภาพรวมหลังจากส่งแบบสำรวจ</span>
                   </label>
                 </div>
+              </div>
+
+              {/* Whitelist Access Control Settings */}
+              <div className="space-y-3 pt-3 border-t border-[var(--border-lighter)]">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                    <Shield className="w-4 h-4 text-emerald-500" />
+                    <span>ระบบตรวจสอบรายชื่อผู้มีสิทธิ์ตอบ (Whitelist Control)</span>
+                  </label>
+                  <input
+                    type="checkbox"
+                    checked={survey.settings.enableWhitelist ?? false}
+                    onChange={(e) => setSurvey(prev => ({
+                      ...prev,
+                      settings: { ...prev.settings, enableWhitelist: e.target.checked }
+                    }))}
+                    className="w-4 h-4 rounded text-emerald-600 cursor-pointer"
+                  />
+                </div>
+
+                {survey.settings.enableWhitelist && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 space-y-2.5 animate-fade-in">
+                    <div className="text-[11px] text-[var(--text-secondary)]">
+                      ระบุอีเมล, หมายเลขบัตรประชาชน, หรือเบอร์โทรศัพท์ของผู้มีสิทธิ์ตอบ (บรรทัดละ 1 รายการ)
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={Array.isArray(survey.settings.whitelistEntries) ? survey.settings.whitelistEntries.join('\n') : (survey.settings.whitelistEntries || '')}
+                      onChange={(e) => setSurvey(prev => ({
+                        ...prev,
+                        settings: { ...prev.settings, whitelistEntries: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) }
+                      }))}
+                      placeholder="example@rayong.go.th&#10;1219900012345&#10;0812345678"
+                      className="w-full text-xs font-mono bg-[var(--bg-canvas)] border border-emerald-500/30 rounded-xl p-2.5 outline-none"
+                    />
+                    <div className="text-[10px] text-emerald-700 dark:text-emerald-300 font-bold">
+                      ✓ ผู้ตอบจะต้องระบุข้อมูลเพื่อยืนยันสิทธิ์กับ Whitelist ก่อนทำแบบสำรวจ
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Quiz / Assessment Mode Settings */}
+              <div className="space-y-3 pt-3 border-t border-[var(--border-lighter)]">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-amber-500" />
+                    <span>โหมดแบบทดสอบ / วัดความรู้ประเมินผล (Quiz Mode)</span>
+                  </label>
+                  <input
+                    type="checkbox"
+                    checked={survey.settings.quizMode ?? false}
+                    onChange={(e) => setSurvey(prev => ({
+                      ...prev,
+                      settings: { ...prev.settings, quizMode: e.target.checked }
+                    }))}
+                    className="w-4 h-4 rounded text-amber-600 cursor-pointer"
+                  />
+                </div>
+
+                {survey.settings.quizMode && (
+                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-3 animate-fade-in">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                          เกณฑ์ผ่านคะแนน (%) Pass Threshold
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={survey.settings.passScorePercent ?? 60}
+                          onChange={(e) => setSurvey(prev => ({
+                            ...prev,
+                            settings: { ...prev.settings, passScorePercent: Number(e.target.value) || 60 }
+                          }))}
+                          className="w-full text-xs font-bold bg-[var(--bg-canvas)] border border-amber-500/30 rounded-xl px-3 py-1.5"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                          จำกัดเวลาทำข้อสอบ (นาที) Time Limit
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={300}
+                          value={survey.settings.timeLimitMinutes ?? 0}
+                          onChange={(e) => setSurvey(prev => ({
+                            ...prev,
+                            settings: { ...prev.settings, timeLimitMinutes: Number(e.target.value) || 0 }
+                          }))}
+                          placeholder="0 = ไม่จำกัดเวลา"
+                          className="w-full text-xs font-bold bg-[var(--bg-canvas)] border border-amber-500/30 rounded-xl px-3 py-1.5"
+                        />
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--text-secondary)]">
+                      <input
+                        type="checkbox"
+                        checked={survey.settings.showScoreImmediately ?? true}
+                        onChange={(e) => setSurvey(prev => ({
+                          ...prev,
+                          settings: { ...prev.settings, showScoreImmediately: e.target.checked }
+                        }))}
+                        className="rounded text-amber-600 cursor-pointer"
+                      />
+                      <span>แสดงผลคะแนน ใบประกาศการผ่าน และเฉลยทันทีหลังส่งข้อสอบ</span>
+                    </label>
+
+                    {/* Certificate Customization Fields */}
+                    <div className="pt-3 border-t border-amber-500/20 space-y-3">
+                      <div className="flex items-center gap-1.5 text-[10px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest">
+                        <Award className="w-3.5 h-3.5" />
+                        <span>ตั้งค่าข้อมูลบนใบประกาศนียบัตร (e-Certificate)</span>
+                      </div>
+                      
+                      <div className="space-y-2.5">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                            ชื่อหน่วยงานที่ออกใบประกาศฯ (Organization Name)
+                          </label>
+                          <input
+                            type="text"
+                            value={survey.settings.certificateOrgName || ''}
+                            onChange={(e) => setSurvey(prev => ({
+                              ...prev,
+                              settings: { ...prev.settings, certificateOrgName: e.target.value }
+                            }))}
+                            placeholder="เช่น กรมป้องกันและบรรเทาสาธารณภัย"
+                            className="w-full text-xs bg-[var(--bg-canvas)] border border-amber-500/30 rounded-xl px-3 py-2"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                              ชื่อ-นามสกุล ผู้ลงนาม (Signer Name)
+                            </label>
+                            <input
+                              type="text"
+                              value={survey.settings.certificateSignerName || ''}
+                              onChange={(e) => setSurvey(prev => ({
+                                ...prev,
+                                settings: { ...prev.settings, certificateSignerName: e.target.value }
+                              }))}
+                              placeholder="ระบุชื่อผู้มีอำนาจลงนาม"
+                              className="w-full text-xs bg-[var(--bg-canvas)] border border-amber-500/30 rounded-xl px-3 py-2"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                              ตำแหน่งผู้ลงนาม (Signer Position)
+                            </label>
+                            <input
+                              type="text"
+                              value={survey.settings.certificateSignerPosition || ''}
+                              onChange={(e) => setSurvey(prev => ({
+                                ...prev,
+                                settings: { ...prev.settings, certificateSignerPosition: e.target.value }
+                              }))}
+                              placeholder="ระบุตำแหน่งผู้ลงนาม"
+                              className="w-full text-xs bg-[var(--bg-canvas)] border border-amber-500/30 rounded-xl px-3 py-2"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Thank You Screen Customizer */}

@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Survey, SurveyResponse } from '../../types/survey';
 import { Printer, X, ShieldCheck, Phone, Mail, ZoomIn, Maximize2 } from 'lucide-react';
-import { getResolvedSurveyLogoUrl, getSystemBrandingInfo } from '../../utils/surveyLogoHelper';
 
 interface SurveyResponsePrintViewProps {
   survey: Survey;
   response: SurveyResponse;
   onClose: () => void;
 }
+
+const DEFAULT_GARUDA = 'https://upload.wikimedia.org/wikipedia/commons/4/4b/Seal_of_the_Ministry_of_Interior_of_Thailand.svg';
+const DEFAULT_DDPM_LOGO = '/ddpm-logo.svg';
 
 const getSafeAnswers = (raw: any): Record<string, any> => {
   if (!raw) return {};
@@ -30,13 +32,18 @@ export const SurveyResponsePrintView: React.FC<SurveyResponsePrintViewProps> = (
   const rawDept = survey.department || '';
   const cleanDepartment = rawDept.replace(/ฝ่ายบริหารทั่วไป/g, '').trim() || 'สำนักงานป้องกันและบรรเทาสาธารณภัยจังหวัดระยอง';
 
-  // Get Org Logo URL (prefers DDPM/Org Logo over Garuda)
-  const branding = getSystemBrandingInfo();
-  const logoUrl = (survey.settings.customLogoUrl && survey.settings.customLogoUrl.trim())
-    ? survey.settings.customLogoUrl
-    : (survey.settings.headerLogoType && survey.settings.headerLogoType !== 'garuda' && survey.settings.headerLogoType !== 'none')
-      ? getResolvedSurveyLogoUrl(survey.settings.headerLogoType, survey.settings.customLogoUrl) || branding.ddpmLogoUrl
-      : branding.ddpmLogoUrl;
+  // Get Org Logo URL safely
+  let logoUrl = DEFAULT_DDPM_LOGO;
+  if (survey.settings.customLogoUrl && survey.settings.customLogoUrl.trim()) {
+    logoUrl = survey.settings.customLogoUrl;
+  } else if (survey.settings.headerLogoType === 'garuda') {
+    logoUrl = DEFAULT_GARUDA;
+  } else if (typeof window !== 'undefined') {
+    try {
+      const settings = JSON.parse(localStorage.getItem('moi_settings') || '{}');
+      if (settings.logoUrl) logoUrl = settings.logoUrl;
+    } catch (_) {}
+  }
 
   // Extract common RSVP & respondent fields
   const extractData = () => {
@@ -421,3 +428,5 @@ export const SurveyResponsePrintView: React.FC<SurveyResponsePrintViewProps> = (
     </div>
   );
 };
+
+export default SurveyResponsePrintView;

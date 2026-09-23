@@ -1,34 +1,35 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
-import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle, ClipboardCheck } from 'lucide-react';
+import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle, ClipboardCheck, Car } from 'lucide-react';
 
-import { DocumentItem, DocType } from '../types';
+import { DocumentItem, DocType, ThemeMode } from '../types';
 import Overview from './views/Overview';
 import VersionBadge from './VersionBadge';
 import { LoadingIndicator } from './LoadingIndicator';
+import { ErrorBoundary } from './ErrorBoundary';
 import { lazyWithRetry } from '../utils/lazyWithRetry';
 
 // Lazy-loaded heavy modals on demand to drastically minimize dashboard bundle size
-const DocumentFormModal = lazyWithRetry(() => import('./DocumentModal'));
-const DocumentDetailModal = lazyWithRetry(() => import('./DocumentDetailModal'));
-const ChangelogModal = lazyWithRetry(() => import('./ChangelogModal'));
+const DocumentFormModal = lazyWithRetry(() => import('./DocumentModal'), 'DocumentFormModal');
+const DocumentDetailModal = lazyWithRetry(() => import('./DocumentDetailModal'), 'DocumentDetailModal');
+const ChangelogModal = lazyWithRetry(() => import('./ChangelogModal'), 'ChangelogModal');
 
-const DocumentList = lazyWithRetry(() => import('./views/DocumentList'));
-const Settings = lazyWithRetry(() => import('./views/Settings'));
-const LogsView = lazyWithRetry(() => import('./views/LogsView'));
-const AdminDocsView = lazyWithRetry(() => import('./views/AdminDocsView'));
-const FoldersView = lazyWithRetry(() => import('./views/FoldersView'));
-const DraftDocsView = lazyWithRetry(() => import('./views/DraftDocsView'));
-const SmartAiAssistantView = lazyWithRetry(() => import('./views/SmartAiAssistantView'));
-const NotificationsView = lazyWithRetry(() => import('./views/NotificationsView'));
-const DigitalSignatureView = lazyWithRetry(() => import('./DigitalSignatureView'));
-const RecycleBinView = lazyWithRetry(() => import('./views/RecycleBinView'));
-const QrGeneratorView = lazyWithRetry(() => import('./views/QrGeneratorView'));
-const UrgentIncidentReportView = lazyWithRetry(() => import('./views/disaster/UrgentIncidentReportView'));
-const WorkflowSlaView = lazyWithRetry(() => import('./views/WorkflowSlaView'));
-const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'));
-const UserManualView = lazyWithRetry(() => import('./views/UserManualView'));
-const SurveyManagementView = lazyWithRetry(() => import('./views/SurveyManagementView').then(m => ({ default: m.SurveyManagementView })));
-import { ThemeMode } from '../App';
+const DocumentList = lazyWithRetry(() => import('./views/DocumentList'), 'DocumentList');
+const Settings = lazyWithRetry(() => import('./views/Settings'), 'Settings');
+const LogsView = lazyWithRetry(() => import('./views/LogsView'), 'LogsView');
+const AdminDocsView = lazyWithRetry(() => import('./views/AdminDocsView'), 'AdminDocsView');
+const FoldersView = lazyWithRetry(() => import('./views/FoldersView'), 'FoldersView');
+const DraftDocsView = lazyWithRetry(() => import('./views/DraftDocsView'), 'DraftDocsView');
+const SmartAiAssistantView = lazyWithRetry(() => import('./views/SmartAiAssistantView'), 'SmartAiAssistantView');
+const NotificationsView = lazyWithRetry(() => import('./views/NotificationsView'), 'NotificationsView');
+const DigitalSignatureView = lazyWithRetry(() => import('./DigitalSignatureView'), 'DigitalSignatureView');
+const RecycleBinView = lazyWithRetry(() => import('./views/RecycleBinView'), 'RecycleBinView');
+const QrGeneratorView = lazyWithRetry(() => import('./views/QrGeneratorView'), 'QrGeneratorView');
+const UrgentIncidentReportView = lazyWithRetry(() => import('./views/disaster/UrgentIncidentReportView'), 'UrgentIncidentReportView');
+const WorkflowSlaView = lazyWithRetry(() => import('./views/WorkflowSlaView'), 'WorkflowSlaView');
+const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'), 'InfographicsEditorView');
+import UserManualView from './views/UserManualView';
+import { SurveyManagementView } from './views/SurveyManagementView';
+const VehicleManagementView = lazyWithRetry(() => import('./views/VehicleManagementView'), 'VehicleManagementView');
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 import { useRealtimeSync } from '../utils/realtimeSync';
 import { useConfirm } from '../context/ConfirmContext';
@@ -222,13 +223,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (currentUser.role === 'moderator') {
       return [
         'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
-        'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'surveys', 'draft_docs',
+        'admin_docs', 'vehicles', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'surveys', 'draft_docs',
         'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin'
       ].includes(key);
     }
     if (currentUser.role === 'user') {
       return [
-        'create_docs', 'export_docs', 'admin_docs', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator',
+        'create_docs', 'export_docs', 'admin_docs', 'vehicles', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator',
         'surveys', 'draft_docs', 'digital_folders', 'workflow_sla'
       ].includes(key);
     }
@@ -1096,6 +1097,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
           { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
           { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
+          { id: 'vehicles', icon: Car, label: 'ระบบจัดการยานพาหนะ', permKey: 'vehicles' },
           { id: 'surveys', icon: ClipboardCheck, label: 'แบบสำรวจ & ประเมินผล', permKey: 'surveys' },
           { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents', badge: urgentIncidentsCount > 0 ? urgentIncidentsCount : undefined, badgeColor: 'bg-rose-500 text-white' },
           { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin', badge: recycleBinCount > 0 ? recycleBinCount : undefined, badgeColor: 'bg-slate-500 text-white' },
@@ -1452,6 +1454,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             documents={documents.filter(isDocForUserDepartment)} 
             hasPermission={hasPermission}
           />
+        ));
+      case 'vehicles':
+        return renderGuardedView('vehicles', 'ระบบจัดการยานพาหนะ', (
+          <VehicleManagementView user={currentUser} hasPermission={hasPermission} />
         ));
       case 'urgent_incidents':
         return renderGuardedView('urgent_incidents', 'รายงานเหตุด่วนสาธารณภัย', (
@@ -2012,7 +2018,9 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
                         className={isSelected ? `animate-fade-in block ${isFullBleedTab && isSelected ? 'h-full' : ''}` : "hidden"}
                         style={{ display: isSelected ? 'block' : 'none', height: isFullBleedTab && isSelected ? '100%' : undefined }}
                       >
-                        {renderTabContent(tabId)}
+                        <ErrorBoundary fallbackTitle={`เกิดข้อผิดพลาดในการโหลดโมดูล (${tabId})`}>
+                          {renderTabContent(tabId)}
+                        </ErrorBoundary>
                       </div>
                     );
                   })}

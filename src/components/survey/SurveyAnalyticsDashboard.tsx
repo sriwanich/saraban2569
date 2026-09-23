@@ -44,6 +44,8 @@ import {
 } from 'recharts';
 import { Survey, SurveyResponse, SurveyQuestion } from '../../types/survey';
 import { SurveyResponseDetailModal } from './SurveyResponseDetailModal';
+import { ECertificateModal } from './ECertificateModal';
+import * as XLSX from 'xlsx';
 
 interface SurveyAnalyticsDashboardProps {
   survey: Survey;
@@ -76,9 +78,36 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
   const [filterType, setFilterType] = useState<'all' | 'identified' | 'anonymous' | 'has_feedback'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'score_high' | 'score_low'>('newest');
   const [selectedResponse, setSelectedResponse] = useState<SurveyResponse | null>(null);
+  const [selectedCertResponse, setSelectedCertResponse] = useState<SurveyResponse | null>(null);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<'analytics' | 'responses'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'responses' | 'ai_report'>('analytics');
   const [textSearchKeywords, setTextSearchKeywords] = useState<Record<string, string>>({});
+
+  const [aiReport, setAiReport] = useState<any | null>(null);
+  const [isAiReportLoading, setIsAiReportLoading] = useState(false);
+  const [aiReportError, setAiReportError] = useState<string | null>(null);
+
+  const handleGenerateAiReport = async () => {
+    setIsAiReportLoading(true);
+    setAiReportError(null);
+    try {
+      const res = await fetch(`/api/surveys/${survey.id}/ai-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiReport(data.report);
+      } else {
+        const errData = await res.json();
+        setAiReportError(errData.error || 'เกิดข้อผิดพลาดในการวิเคราะห์ AI');
+      }
+    } catch (e) {
+      setAiReportError('ไม่สามารถติดต่อช่องทางประมวลผล AI ได้');
+    } finally {
+      setIsAiReportLoading(false);
+    }
+  };
 
   // Calculate personal score for any response
   const computeResponseScore = (r: SurveyResponse) => {
@@ -272,27 +301,38 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
       return rowData;
     });
 
-    const headers = Array.from(new Set(exportRows.flatMap(row => Object.keys(row))));
-    const escapeCsvValue = (val: any) => {
-      if (val === null || val === undefined) return '""';
-      const str = String(val).replace(/"/g, '""');
-      return `"${str}"`;
-    };
+    // Export to High-Fidelity Excel (.xlsx) using the xlsx library
+    try {
+      const ws = XLSX.utils.json_to_sheet(exportRows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Survey Responses");
+      XLSX.writeFile(wb, `survey-results-${survey.id}.xlsx`);
+    } catch (err) {
+      console.error("Failed to export to Excel:", err);
+      alert("เกิดข้อผิดพลาดในการสร้างไฟล์ Excel กำลังดาวน์โหลดแบบสำรอง (CSV)...");
+      
+      const headers = Array.from(new Set(exportRows.flatMap(row => Object.keys(row))));
+      const escapeCsvValue = (val: any) => {
+        if (val === null || val === undefined) return '""';
+        const str = String(val).replace(/"/g, '""');
+        return `"${str}"`;
+      };
 
-    const csvLines = [
-      headers.map(escapeCsvValue).join(','),
-      ...exportRows.map(row => headers.map(h => escapeCsvValue(row[h] ?? '')).join(','))
-    ].join('\r\n');
+      const csvLines = [
+        headers.map(escapeCsvValue).join(','),
+        ...exportRows.map(row => headers.map(h => escapeCsvValue(row[h] ?? '')).join(','))
+      ].join('\r\n');
 
-    const blob = new Blob(['\uFEFF' + csvLines], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `survey-results-${survey.id}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      const blob = new Blob(['\uFEFF' + csvLines], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `survey-results-${survey.id}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
   };
 
   const handlePrintReport = () => {
@@ -323,7 +363,7 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg sm:text-xl font-bold text-[var(--text-primary)]">
-                สถิติและรายงานผลแบบสำรวจ (Survey Analytics)
+                จัดการผลการตอบกลับ (Analytics & Responses)
               </h2>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 border border-blue-500/20">
                 {survey.categoryLabel || 'ความพึงพอใจ'}
@@ -400,10 +440,10 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
       </div>
 
       {/* Sub-tab Navigation */}
-      <div className="flex border-b border-[var(--border-lighter)] gap-2">
+      <div className="flex border-b border-[var(--border-lighter)] gap-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab('analytics')}
-          className={`flex items-center gap-2 pb-3 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 pb-3 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer shrink-0 ${
             activeTab === 'analytics'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -413,13 +453,23 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
         </button>
         <button
           onClick={() => setActiveTab('responses')}
-          className={`flex items-center gap-2 pb-3 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 pb-3 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer shrink-0 ${
             activeTab === 'responses'
               ? 'border-blue-600 text-blue-600'
               : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
         >
-          <FileText className="w-4 h-4" /> ตารางรายการคำตอบทั้งหมด ({responses.length})
+          <Users className="w-4 h-4" /> จัดการผลการตอบกลับ (Responses - {responses.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('ai_report')}
+          className={`flex items-center gap-2 pb-3 px-4 text-xs font-bold border-b-2 transition-all cursor-pointer shrink-0 ${
+            activeTab === 'ai_report'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-[var(--text-secondary)] hover:text-indigo-600'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-indigo-500" /> รายงานสรุป AI อัจฉริยะ (AI Executive Report)
         </button>
       </div>
 
@@ -1003,8 +1053,19 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
                                   className="px-3 py-1.5 rounded-xl text-blue-600 bg-blue-500/10 hover:bg-blue-500/20 font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                  <span>ดูคำตอบฉบับเต็ม</span>
+                                  <span>ดูคำตอบ</span>
                                 </button>
+                                {survey.settings?.quizMode && r.passedExam && (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedCertResponse(r);
+                                    }}
+                                    className="p-2 rounded-xl text-amber-600 bg-amber-500/10 hover:bg-amber-500/20 transition-all cursor-pointer"
+                                    title="ดูใบประกาศนียบัตร"
+                                  >
+                                    <Award className="w-4 h-4" />
+                                  </button>
+                                )}
                                 {onDeleteResponse && (
                                   <button
                                     onClick={() => {
@@ -1128,6 +1189,161 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
         </div>
       )}
 
+      {/* ----------------- TAB 3: AI Executive Analytics Report Tab ----------------- */}
+      {activeTab === 'ai_report' && (
+        <div className="space-y-6 animate-fadeIn">
+          <div className="p-6 rounded-3xl bg-gradient-to-br from-indigo-500/5 via-blue-500/5 to-transparent border border-blue-100 dark:border-blue-900/40 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-500 animate-pulse" />
+                  <h3 className="text-base font-bold text-[var(--text-primary)]">
+                    รายงานประเมินผลอัจฉริยะ (AI Executive Analytics)
+                  </h3>
+                </div>
+                <p className="text-xs text-[var(--text-muted)] max-w-xl">
+                  ให้ Google Gemini AI ประมวลผลจากข้อมูลผู้ตอบทั้งหมดแบบเรียลไทม์ เพื่อจัดทำรายงานการประเมินเชิงรุกและข้อคิดเห็นเชิงนวัตกรรม
+                </p>
+              </div>
+
+              {!aiReport && !isAiReportLoading && (
+                <button
+                  onClick={handleGenerateAiReport}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md shrink-0 animate-pulse"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>สร้างรายงานประเมินผลอัจฉริยะ</span>
+                </button>
+              )}
+            </div>
+
+            {isAiReportLoading && (
+              <div className="py-16 flex flex-col items-center justify-center gap-3 bg-white/50 dark:bg-slate-800/30 rounded-2xl border border-dashed border-indigo-100 dark:border-indigo-900/30">
+                <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                <div className="text-center space-y-1">
+                  <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400 block animate-pulse">
+                    กำลังรวบรวมข้อมูลดิบและเรียกใช้อัลกอริทึมวิเคราะห์รายงาน...
+                  </span>
+                  <span className="text-xs text-slate-400 block">
+                    กระบวนการนี้ใช้เวลาประมาณ 10-15 วินาที เนื่องจากระบบกำลังวิเคราะห์เสียงสะท้อนเชิงสถิติและเชิงคุณภาพ
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {aiReportError && (
+              <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 space-y-2">
+                <p className="text-xs text-rose-600 dark:text-rose-400 font-bold">
+                  ❌ เกิดข้อผิดพลาด: {aiReportError}
+                </p>
+                <button
+                  onClick={handleGenerateAiReport}
+                  className="px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 text-xs font-bold transition cursor-pointer"
+                >
+                  ลองใหม่อีกครั้ง
+                </button>
+              </div>
+            )}
+
+            {aiReport && (
+              <div className="space-y-6 pt-2">
+                <div className="flex items-center justify-between border-b border-[var(--border-lighter)] pb-3">
+                  <span className="text-xs text-[var(--text-muted)] font-bold">
+                    จำนวนผู้ตอบที่เข้าร่วมประเมิน: {responses.length} ราย | วิเคราะห์โดย: Google Gemini-3.8-Flash
+                  </span>
+                  <button
+                    onClick={() => setAiReport(null)}
+                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-bold"
+                  >
+                    วิเคราะห์ข้อมูลใหม่ (Recalculate)
+                  </button>
+                </div>
+
+                {/* 1. Executive Summary */}
+                <div className="p-5 rounded-2xl bg-white/80 dark:bg-slate-800/80 border border-indigo-100 dark:border-indigo-900/40 space-y-2">
+                  <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400">
+                    <Sparkles className="w-4 h-4" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider">บทสรุปผู้บริหาร (Executive Summary)</h4>
+                  </div>
+                  <p className="text-xs sm:text-sm text-[var(--text-primary)] font-medium leading-relaxed">
+                    {aiReport.executiveSummary}
+                  </p>
+                </div>
+
+                {/* 2. Qualitative & Quantitative Analysis */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-5 rounded-2xl bg-white/80 dark:bg-slate-800/80 border border-indigo-100 dark:border-indigo-900/40 space-y-2">
+                    <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider block">
+                      การวิเคราะห์เชิงปริมาณ (Quantitative Assessment)
+                    </span>
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed font-medium">
+                      {aiReport.quantitativeAnalysis}
+                    </p>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-white/80 dark:bg-slate-800/80 border border-indigo-100 dark:border-indigo-900/40 space-y-2">
+                    <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider block">
+                      การวิเคราะห์เชิงคุณภาพ (Qualitative Insights)
+                    </span>
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed font-medium">
+                      {aiReport.qualitativeInsights}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 3. Pain Points & Action Plan */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-5 rounded-2xl bg-rose-500/5 dark:bg-rose-950/10 border border-rose-500/10 space-y-3">
+                    <span className="text-xs font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">
+                      ⚠️ ความท้าทายหลัก / ความเสี่ยง (Key Pain Points)
+                    </span>
+                    <ul className="space-y-2 text-xs">
+                      {aiReport.painPoints?.map((pt: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2 text-[var(--text-secondary)] font-medium">
+                          <span className="w-5 h-5 rounded-md bg-rose-500/10 text-rose-600 flex items-center justify-center shrink-0 text-[10px] font-bold font-mono">
+                            {idx + 1}
+                          </span>
+                          <span className="mt-0.5 leading-snug">{pt}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-950/10 border border-emerald-500/10 space-y-3">
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                      🚀 แผนมาตรการปฏิบัติการเชิงรุก (Proactive Action Plan)
+                    </span>
+                    <ul className="space-y-2 text-xs">
+                      {aiReport.actionPlan?.map((plan: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2 text-[var(--text-secondary)] font-medium">
+                          <span className="w-5 h-5 rounded-md bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0 text-[10px] font-bold font-mono">
+                            {idx + 1}
+                          </span>
+                          <span className="mt-0.5 leading-snug">{plan}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Conclusion Bar */}
+                <div className="p-4 rounded-2xl bg-indigo-600 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-indigo-200 uppercase tracking-wider block font-bold">สรุปผลประเมินตามเกณฑ์มาตรฐาน</span>
+                    <span className="text-xs sm:text-sm font-bold block">{aiReport.scoreConclusion}</span>
+                  </div>
+                  <div className="px-4 py-1.5 rounded-xl bg-white/20 border border-white/25 text-xs font-bold text-center shrink-0">
+                    ระดับภาพรวม: {aiReport.scoreConclusion?.includes('ดีเลิศ') ? '⭐ ดีเลิศ (Excellent)' : 
+                                   aiReport.scoreConclusion?.includes('ดีมาก') ? '⭐ ดีมาก (Very Good)' :
+                                   aiReport.scoreConclusion?.includes('ปานกลาง') ? '😐 ปานกลาง (Fair)' : '⚠️ ต้องปรับปรุงเร่งด่วน'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Detail Modal */}
       {selectedResponse && (
         <SurveyResponseDetailModal
@@ -1137,6 +1353,14 @@ export const SurveyAnalyticsDashboard: React.FC<SurveyAnalyticsDashboardProps> =
           onClose={() => setSelectedResponse(null)}
           onSelectResponse={(newResp) => setSelectedResponse(newResp)}
           onDeleteResponse={onDeleteResponse}
+        />
+      )}
+
+      {selectedCertResponse && (
+        <ECertificateModal
+          survey={survey}
+          response={selectedCertResponse}
+          onClose={() => setSelectedCertResponse(null)}
         />
       )}
     </div>

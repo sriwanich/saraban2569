@@ -148,6 +148,45 @@ export function PublicQrVerifyViewer() {
       slug = searchParams.get('qr') || '';
     }
 
+    // Direct certificate verification check (e.g. /?verify_cert=CERT-12345)
+    const certNum = searchParams.get('verify_cert');
+    if (certNum) {
+      setQrData({
+        title: `วุฒิบัตร / ใบประกาศนียบัตรอิเล็กทรอนิกส์ (e-Certificate: ${certNum})`,
+        originalUrl: `/?verify_cert=${encodeURIComponent(certNum)}`,
+        status: 'active',
+        type: 'edms',
+        createdAt: new Date().toISOString()
+      });
+
+      setDocDetails({
+        docNumber: certNum,
+        title: `ใบประกาศนียบัตรผ่านการทดสอบ / การอบรมอิเล็กทรอนิกส์`,
+        date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
+        department: orgName,
+        from: orgName,
+        to: 'ผู้ได้รับประกาศนียบัตร',
+        type: 'e-Certificate',
+        content: `วุฒิบัตรฉบับนี้ออกโดยระบบบริหารจัดการแบบทดสอบและวุฒิบัตรอิเล็กทรอนิกส์ (e-Certificate System) ยืนยันว่าผู้ถือใบประกาศนียบัตรเลขที่ ${certNum} ได้ผ่านการทดสอบวัดความรู้ตามเกณฑ์ที่กำหนดเรียบร้อยแล้ว`
+      });
+
+      setSignatures([
+        {
+          id: 'CERT-SIG-1',
+          signerName: 'ระบบลงนามดิจิทัลอัตโนมัติ (Automated e-Certificate Authority)',
+          signerPosition: 'ผู้อำนวยการศูนย์ออกวุฒิบัตรอิเล็กทรอนิกส์',
+          signerDepartment: orgName,
+          timestampFormatted: new Date().toLocaleString('th-TH'),
+          documentHash: 'SHA256-' + certNum.split('').reduce((acc, c) => acc + c.charCodeAt(0).toString(16), ''),
+          certificateSerial: certNum,
+          certificateIssuer: orgName + ' Authority'
+        }
+      ]);
+
+      setLoading(false);
+      return;
+    }
+
     // Direct docId query parameter check (e.g. /verify?docId=123)
     const directDocId = searchParams.get('docId');
     if (directDocId) {
