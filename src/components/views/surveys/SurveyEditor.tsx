@@ -588,6 +588,54 @@ const SurveyEditor: React.FC<SurveyEditorProps> = ({ survey, user, onClose }) =>
                       <option value="kanit">Kanit</option>
                     </select>
                   </div>
+                  
+                  {/* Signature Upload & Alignment */}
+                  <div className="space-y-4">
+                    <label className="block text-sm font-bold text-slate-700">อัปโหลดลายเซ็นผู้บริหาร</label>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setSettings({...settings, certificateDesignerConfig: { ...settings.certificateDesignerConfig!, signatureImageUrl: reader.result as string }});
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 font-medium focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-4">
+                    <label className="block text-sm font-bold text-slate-700">ตำแหน่งลายเซ็น</label>
+                    <select 
+                      value={settings.certificateDesignerConfig?.signaturePosition || 'bottom-right'}
+                      onChange={e => setSettings({...settings, certificateDesignerConfig: { ...settings.certificateDesignerConfig!, signaturePosition: e.target.value as any }})}
+                      className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 font-medium focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="bottom-left">ซ้าย</option>
+                      <option value="bottom-center">กลาง</option>
+                      <option value="bottom-right">ขวา</option>
+                    </select>
+                  </div>
+                  {/* Signature Real-time Preview */}
+                  {settings.certificateDesignerConfig?.signatureImageUrl && (
+                    <div className="col-span-1 md:col-span-2 mt-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <label className="block text-sm font-bold text-slate-700 mb-2">พรีวิวลายเซ็น</label>
+                      <div className={`flex ${
+                        settings.certificateDesignerConfig.signaturePosition === 'bottom-left' ? 'justify-start' :
+                        settings.certificateDesignerConfig.signaturePosition === 'bottom-center' ? 'justify-center' : 'justify-end'
+                      }`}>
+                        <img 
+                          src={settings.certificateDesignerConfig.signatureImageUrl} 
+                          alt="Signature Preview" 
+                          className="h-20 object-contain border border-slate-200 bg-white p-2 rounded-lg"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

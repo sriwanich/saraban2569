@@ -3284,9 +3284,57 @@ const InspectionItem: React.FC<{
   note?: string;
   onNoteChange?: (note: string) => void;
   notePlaceholder?: string;
+  photos?: string[];
+  onPhotosChange?: (photos: string[]) => void;
   children?: React.ReactNode;
-}> = ({ num, title, status, onStatusChange, note, onNoteChange, notePlaceholder, children }) => {
+}> = ({ num, title, status, onStatusChange, note, onNoteChange, notePlaceholder, photos = [], onPhotosChange, children }) => {
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const isNotNormal = status === 'not_normal';
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !onPhotosChange) return;
+
+    setUploadingPhotos(true);
+    const newPhotos = [...photos];
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file.type.startsWith('image/')) continue;
+        if (file.size > 15 * 1024 * 1024) continue;
+
+        const formData = new FormData();
+        formData.append('subfolder', 'vehicles/inspection');
+        formData.append('files', file);
+
+        const res = await fetch('/api/upload?subfolder=vehicles/inspection', {
+          method: 'POST',
+          body: formData
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const url = data.files?.[0]?.url || data.url;
+          if (url) {
+            newPhotos.push(url);
+          }
+        }
+      }
+      onPhotosChange(newPhotos);
+    } catch (err) {
+      console.error('Photo upload error:', err);
+      alert('เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ');
+    } finally {
+      setUploadingPhotos(false);
+      e.target.value = '';
+    }
+  };
+
+  const removePhoto = (index: number) => {
+    if (!onPhotosChange) return;
+    const newPhotos = photos.filter((_, i) => i !== index);
+    onPhotosChange(newPhotos);
+  };
 
   return (
     <div className={`p-4 sm:p-5 rounded-2xl shadow-xs transition-all duration-200 border ${
@@ -3346,22 +3394,76 @@ const InspectionItem: React.FC<{
 
       {children}
 
-      {/* Auto-render problem input if not normal and onNoteChange provided */}
+      {/* Auto-render problem input and photo attachments if not normal */}
       {isNotNormal && onNoteChange && (
-        <div className="mt-3.5 pt-3 border-t border-rose-200 dark:border-rose-900/40 animate-fade-in space-y-1.5">
-          <label className="flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            <span>ระบุปัญหา / อาการชำรุดที่พบ :</span>
-            <span className="text-[10px] font-medium text-rose-500/80">(ระบุรายละเอียดเพื่อแจ้งซ่อมบำรุง)</span>
-          </label>
-          <textarea 
-            rows={2}
-            placeholder={notePlaceholder || `ระบุรายละเอียดความผิดปกติหรืออาการชำรุดของ ${title}...`}
-            value={note || ''}
-            onChange={(e) => onNoteChange(e.target.value)}
-            className="w-full p-2.5 text-xs bg-[var(--bg-canvas)] border border-rose-300 dark:border-rose-800/80 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 rounded-xl outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all resize-none shadow-xs"
-            autoFocus
-          />
+        <div className="mt-3.5 pt-3 border-t border-rose-200 dark:border-rose-900/40 animate-fade-in space-y-3">
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>ระบุปัญหา / อาการชำรุดที่พบ :</span>
+              <span className="text-[10px] font-medium text-rose-500/80">(ระบุรายละเอียดเพื่อแจ้งซ่อมบำรุง)</span>
+            </label>
+            <textarea 
+              rows={2}
+              placeholder={notePlaceholder || `ระบุรายละเอียดความผิดปกติหรืออาการชำรุดของ ${title}...`}
+              value={note || ''}
+              onChange={(e) => onNoteChange(e.target.value)}
+              className="w-full p-2.5 text-xs bg-[var(--bg-canvas)] border border-rose-300 dark:border-rose-800/80 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 rounded-xl outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all resize-none shadow-xs"
+            />
+          </div>
+
+          {/* Unlimited Photo Attachments */}
+          {onPhotosChange && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-[var(--text-secondary)]">
+                  <Camera className="w-3.5 h-3.5 text-rose-600" />
+                  <span>แนบรูปภาพจุดที่ชำรุด/หลักฐาน (ไม่จำกัดจำนวน):</span>
+                </label>
+                <label className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs">
+                  {uploadingPhotos ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>กำลังอัปโหลด...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud className="w-3.5 h-3.5" />
+                      <span>+ เพิ่มรูปภาพ (เลือกได้หลายรูป)</span>
+                    </>
+                  )}
+                  <input 
+                    type="file" 
+                    multiple 
+                    accept="image/*" 
+                    onChange={handleFileChange} 
+                    className="hidden" 
+                    disabled={uploadingPhotos}
+                  />
+                </label>
+              </div>
+
+              {photos && photos.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  {photos.map((url, idx) => (
+                    <div key={idx} className="relative group rounded-xl overflow-hidden border border-[var(--border-light)] bg-black/5 aspect-square shadow-xs">
+                      <img src={url} alt={`Evidence ${idx + 1}`} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(idx)}
+                          className="p-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-all cursor-pointer shadow-md"
+                          title="ลบรูปนี้"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

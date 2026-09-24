@@ -404,6 +404,7 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
       <SurveyRespondentPortal
         survey={selectedSurvey}
         onSubmit={handleSubmitResponse}
+        currentUser={user}
         onBack={() => {
           setCurrentView('list');
           setSelectedSurvey(null);

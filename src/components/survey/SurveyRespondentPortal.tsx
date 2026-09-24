@@ -57,6 +57,7 @@ interface SurveyRespondentPortalProps {
   onClose?: () => void;
   isReadonlyPreview?: boolean;
   isEmbedded?: boolean;
+  currentUser?: any;
 }
 
 export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
@@ -64,10 +65,17 @@ export const SurveyRespondentPortal: React.FC<SurveyRespondentPortalProps> = ({
   onSubmit,
   onBack,
   isEmbedded = false,
+  currentUser,
 }) => {
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
-  const [contactInfo, setContactInfo] = useState({ name: '', phone: '', email: '', dept: '', position: '' });
+  const [contactInfo, setContactInfo] = useState({ 
+    name: currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() : '', 
+    phone: currentUser?.phone || '', 
+    email: currentUser?.email || '', 
+    dept: currentUser?.department || '', 
+    position: currentUser?.position || '' 
+  });
   const [representativeInfo, setRepresentativeInfo] = useState({ name: '', position: '', phone: '', email: '' });
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);

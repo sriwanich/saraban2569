@@ -148,8 +148,11 @@ export function PublicQrVerifyViewer() {
       slug = searchParams.get('qr') || '';
     }
 
-    // Direct certificate verification check (e.g. /?verify_cert=CERT-12345)
-    const certNum = searchParams.get('verify_cert');
+    // Direct certificate verification check (e.g. /?verify_cert=CERT-12345 or /verify-certificate/CERT-12345)
+    const certNumFromQuery = searchParams.get('verify_cert');
+    const certNumFromPath = path.startsWith('/verify-certificate/') ? path.replace('/verify-certificate/', '') : null;
+    const certNum = certNumFromQuery || certNumFromPath;
+    
     if (certNum) {
       setQrData({
         title: `วุฒิบัตร / ใบประกาศนียบัตรอิเล็กทรอนิกส์ (e-Certificate: ${certNum})`,

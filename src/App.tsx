@@ -50,9 +50,11 @@ export default function App() {
   const isPublicQrVerify = 
     pathname.startsWith('/qr/') ||
     pathname.startsWith('/verify') ||
+    pathname.startsWith('/verify-certificate/') ||
     pathname.startsWith('/public/verify') ||
     hash.includes('/qr/') ||
     hash.includes('/verify') ||
+    hash.includes('/verify-certificate/') ||
     searchParams.has('slug') ||
     searchParams.has('qr') ||
     searchParams.has('verify_cert') ||

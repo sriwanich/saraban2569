@@ -198,6 +198,7 @@ export interface CertificateDesignerConfig {
   logoPosition: 'top-left' | 'top-center' | 'top-right';
   fontFamily: 'sarabun' | 'prompt' | 'kanit';
   signatureImageUrl?: string;
+  signaturePosition?: 'bottom-left' | 'bottom-center' | 'bottom-right';
 }
 
 export interface SurveySettings {
