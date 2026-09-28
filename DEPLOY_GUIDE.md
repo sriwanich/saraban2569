@@ -184,3 +184,89 @@ https://your-domain.com/api/health
 * แต่ในระบบ Server จริงที่เป็น **Linux** ชื่อตารางทั้งหมดใน MySQL จะเป็น **Case-sensitive** (ตัวพิมพ์เล็กและตัวพิมพ์ใหญ่ถือเป็นคนละตารางกัน!)
 * **วิธีแก้ไข**: มั่นใจว่าได้นำเข้าไฟล์ `database.sql` หรือ `disaster_office69.sql` ครบถ้วนแล้ว ซึ่งตัวฐานข้อมูล MySQL จะสร้างตารางยานพาหนะในรูปแบบพิมพ์เล็กทั้งหมด ได้แก่ `vehicles`, `vehicle_inspections`, และ `vehicle_maintenance` ตรงตามที่เขียนไว้ในโค้ดระบบ
 
+---
+
+## 🏢 คู่มือการติดตั้งระบบสารบรรณระดับ Enterprise (Vite + React + PHP 8.x API + PostgreSQL / MariaDB)
+
+ระบบได้รับการปรับปรุงโครงสร้างให้รองรับสถาปัตยกรรมระดับ **Enterprise** ครบวงจร โดยแบ่งสถาปัตยกรรมออกเป็น:
+1. **Frontend**: Vite 5 + React 18 + TypeScript + Tailwind CSS (SPA ประสิทธิภาพสูง)
+2. **Backend API**: PHP 8.2+ REST API (โฟลเดอร์ `php-api/` รองรับ PSR-4, PDO, JWT, Clean Architecture)
+3. **Database Dual-Engine**:
+   - **PostgreSQL 14+ / 16+**: สำหรับระบบสารบรรณขนาดใหญ่ระดับกระทรวง/กรม พร้อมรองรับ Transaction สูงและ JSONB (`database_postgresql.sql`)
+   - **MariaDB 10.5+ / 11.x**: สำหรับระบบสารบรรณมาตรฐานหน่วยงานราชการ ปภ. และ Shared Hosting (`database_mariadb.sql`)
+
+---
+
+### วิธีที่ 1: ติดตั้งผ่าน Docker Compose (แนะนำ สะดวกที่สุดใน 1 คำสั่ง)
+
+#### กรณีใช้งาน PostgreSQL 16 (Enterprise Standard):
+```bash
+docker compose -f docker-compose.postgres.yml up -d --build
+```
+ระบบจะสร้าง Container:
+* `saraban_frontend` (Nginx + Vite React SPA บน Port 80/443)
+* `saraban_php_api` (PHP 8.2-FPM Enterprise REST API)
+* `saraban_postgres` (PostgreSQL 16 พร้อมนำเข้า `database_postgresql.sql` อัตโนมัติ)
+
+#### กรณีใช้งาน MariaDB 11:
+```bash
+docker compose -f docker-compose.mariadb.yml up -d --build
+```
+
+---
+
+### วิธีที่ 2: ติดตั้งบน Nginx + PHP-FPM + PostgreSQL / MariaDB (Linux Server)
+
+1. **คอมไพล์ Frontend (React + Vite):**
+   ```bash
+   npm install
+   npm run build
+   ```
+   นำโฟลเดอร์ `dist/` ไปไว้ที่ `/var/www/saraban/frontend`
+
+2. **นำเข้าโครงสร้างฐานข้อมูล:**
+   - สำหรับ PostgreSQL:
+     ```bash
+     sudo -u postgres psql -d saraban_enterprise -f database_postgresql.sql
+     ```
+   - สำหรับ MariaDB / MySQL:
+     ```bash
+     mysql -u saraban_user -p saraban_enterprise < database_mariadb.sql
+     ```
+
+3. **วางโค้ด PHP API:**
+   นำโฟลเดอร์ `php-api/` ไปวางที่ `/var/www/saraban/api`
+
+4. **กำหนดค่า `.env` ใน `php-api/`:**
+   ```env
+   # สำหรับ PostgreSQL:
+   DB_DRIVER=pgsql
+   DB_HOST=127.0.0.1
+   DB_PORT=5432
+   DB_DATABASE=saraban_enterprise
+   DB_USERNAME=postgres
+   DB_PASSWORD=รหัสผ่าน_Postgres
+
+   # สำหรับ MariaDB:
+   # DB_DRIVER=mysql
+   # DB_HOST=127.0.0.1
+   # DB_PORT=3306
+   # DB_DATABASE=saraban_enterprise
+   # DB_USERNAME=saraban_user
+   # DB_PASSWORD=รหัสผ่าน_MariaDB
+   ```
+
+5. **ตั้งค่า Nginx Server Block:**
+   ใช้การตั้งค่าตามไฟล์ `nginx.enterprise.conf` ที่ระบบสร้างไว้ให้ เพื่อส่งต่อเส้นทาง `/api/` ไปยัง PHP-FPM และส่งหน้าเว็บทั่วไปไปยัง `dist/index.html`
+
+---
+
+### วิธีที่ 3: ติดตั้งบน Apache Web Server (Shared Hosting / cPanel พร้อม PHP + MariaDB หรือ PostgreSQL)
+
+1. นำโฟลเดอร์ `dist/` ของหน้าเว็บ Vite React ไปวางไว้ที่ root (`public_html`)
+2. นำโฟลเดอร์ `php-api/` ไปวางไว้ที่ `public_html/api/` หรือ `public_html/php-api/`
+3. ไฟล์ `php-api/.htaccess` จะทำหน้าที่แปลง URL ของ REST API ให้โดยอัตโนมัติ
+4. สร้างฐานข้อมูลใน phpMyAdmin (MariaDB) หรือ phpPgAdmin (PostgreSQL) แล้ว Import ไฟล์ `database_mariadb.sql` หรือ `database_postgresql.sql`
+5. ทดสอบ API Status ที่: `https://your-domain.com/api/enterprise/status`
+
+

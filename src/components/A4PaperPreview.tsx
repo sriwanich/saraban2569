@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { 
   Eye, ZoomIn, ZoomOut, RotateCcw, Printer,
   FileDown, Image as ImageIcon, Loader2, Check, ChevronDown
@@ -37,7 +37,13 @@ const getJsPdf = async (): Promise<any> => {
   return (window as any).jspdf?.jsPDF || (window as any).jsPDF;
 };
 
-interface A4PaperPreviewProps {
+export interface A4PaperPreviewRef {
+  exportPdf: () => Promise<void>;
+  exportImage: (format: 'png' | 'jpeg') => Promise<void>;
+  print: () => void;
+}
+
+export interface A4PaperPreviewProps {
   htmlContent?: string;
   children?: React.ReactNode;
   title?: string;
@@ -52,7 +58,7 @@ interface A4PaperPreviewProps {
   orientation?: 'portrait' | 'landscape';
 }
 
-export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
+export const A4PaperPreview = forwardRef<A4PaperPreviewRef, A4PaperPreviewProps>(({
   htmlContent,
   children,
   title = 'ตัวอย่างเอกสารขนาดต้นฉบับ',
@@ -65,7 +71,7 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
   className = '',
   paperClassName = '',
   orientation = 'portrait',
-}) => {
+}, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -85,14 +91,16 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
     const updateWidth = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        setContainerWidth(rect.width);
+        setContainerWidth((prev) => (Math.abs(prev - rect.width) < 1 ? prev : rect.width));
       }
     };
 
     updateWidth();
     window.addEventListener('resize', updateWidth);
 
-    const resizeObserver = new ResizeObserver(updateWidth);
+    const resizeObserver = new ResizeObserver(() => {
+      updateWidth();
+    });
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
@@ -133,11 +141,134 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
     setCustomZoom(100);
   };
 
+  const printPaperDirectly = () => {
+    const rootEl = paperRef.current;
+    if (!rootEl) {
+      window.print();
+      return;
+    }
+
+    try {
+      const oldFrame = document.getElementById('a4-isolated-print-frame');
+      if (oldFrame) {
+        oldFrame.remove();
+      }
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'a4-isolated-print-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0';
+      iframe.style.zIndex = '-9999';
+      document.body.appendChild(iframe);
+
+      const frameDoc = iframe.contentWindow?.document;
+      if (!frameDoc) {
+        window.print();
+        return;
+      }
+
+      let stylesHtml = '';
+      document.querySelectorAll('link[rel="stylesheet"], style').forEach((node) => {
+        stylesHtml += node.outerHTML;
+      });
+
+      const printFixCss = `
+        <style>
+          @page {
+            size: A4 ${orientation};
+            margin: 0mm;
+          }
+          *, *::before, *::after {
+            box-sizing: border-box;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            font-family: 'TH Sarabun New', 'TH SarabunPSK', 'Sarabun', sans-serif !important;
+          }
+          #a4-printable-paper {
+            width: 100% !important;
+            max-width: 210mm !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+            background: #ffffff !important;
+            transform: none !important;
+          }
+          .sheet, .a4-page-sheet {
+            width: 100% !important;
+            max-width: 210mm !important;
+            height: 296mm !important;
+            max-height: 296.5mm !important;
+            min-height: unset !important;
+            padding: 6mm 8mm !important;
+            margin: 0 auto !important;
+            box-shadow: none !important;
+            border: none !important;
+            background: #ffffff !important;
+            overflow: hidden !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            box-sizing: border-box !important;
+          }
+          .sheet:last-child, .a4-page-sheet:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        </style>
+      `;
+
+      frameDoc.open();
+      frameDoc.write(`
+        <!DOCTYPE html>
+        <html lang="th">
+          <head>
+            <meta charset="utf-8" />
+            <title>${title || 'พิมพ์เอกสาร A4'}</title>
+            ${stylesHtml}
+            ${printFixCss}
+          </head>
+          <body>
+            <div id="a4-printable-paper">
+              ${rootEl.innerHTML}
+            </div>
+          </body>
+        </html>
+      `);
+      frameDoc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch {
+          window.print();
+        }
+      }, 350);
+    } catch {
+      window.print();
+    }
+  };
+
   const handlePrintClick = () => {
     if (onPrint) {
       onPrint();
     } else {
-      window.print();
+      printPaperDirectly();
     }
   };
 
@@ -362,6 +493,12 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
     }
   };
 
+  useImperativeHandle(ref, () => ({
+    exportPdf: handleExportPdf,
+    exportImage: handleExportImage,
+    print: printPaperDirectly
+  }));
+
   return (
     <div className={`flex flex-col w-full space-y-3 ${className}`}>
       {/* Control Toolbar */}
@@ -519,9 +656,10 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
       {/* A4 Desk Container */}
       <div
         ref={containerRef}
-        className="w-full bg-slate-200/90 dark:bg-slate-950 p-2 sm:p-6 md:p-8 rounded-2xl border border-[var(--border-light)] overflow-x-auto custom-scrollbar flex justify-center shadow-inner relative"
+        className="a4-desk-container w-full bg-slate-200/90 dark:bg-slate-950 p-2 sm:p-6 md:p-8 rounded-2xl border border-[var(--border-light)] overflow-x-auto custom-scrollbar flex justify-center shadow-inner relative print:p-0 print:m-0 print:border-none print:bg-white print:overflow-visible print:block print:shadow-none"
       >
         <div
+          className="a4-scale-wrapper print:transform-none print:w-auto print:block"
           style={{
             transform: `scale(${effectiveScale})`,
             transformOrigin: 'top center',
@@ -582,6 +720,23 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
+          .a4-desk-container {
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            overflow: visible !important;
+            width: 100% !important;
+            display: block !important;
+          }
+          .a4-scale-wrapper {
+            transform: none !important;
+            width: 100% !important;
+            display: block !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
           body * {
             visibility: hidden;
           }
@@ -589,43 +744,52 @@ export const A4PaperPreview: React.FC<A4PaperPreviewProps> = ({
             visibility: visible;
           }
           #a4-printable-paper {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+            position: relative !important;
+            left: auto !important;
+            top: auto !important;
             width: ${orientation === 'portrait' ? '210mm' : '297mm'} !important;
-            min-height: ${orientation === 'portrait' ? '297mm' : '210mm'} !important;
-            max-height: ${orientation === 'portrait' ? '297mm' : '210mm'} !important;
+            min-height: auto !important;
+            max-height: none !important;
+            height: auto !important;
             transform: none !important;
             box-shadow: none !important;
             border: none !important;
-            margin: 0 !important;
+            margin: 0 auto !important;
             background: white !important;
             color: black !important;
             box-sizing: border-box !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          .a4-page-sheet {
+          .sheet, .a4-page-sheet {
             page-break-after: always !important;
             break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
             width: ${orientation === 'portrait' ? '210mm' : '297mm'} !important;
-            height: ${orientation === 'portrait' ? '297mm' : '210mm'} !important;
             min-height: ${orientation === 'portrait' ? '297mm' : '210mm'} !important;
-            max-height: ${orientation === 'portrait' ? '297mm' : '210mm'} !important;
-            margin: 0 !important;
+            max-height: none !important;
+            height: auto !important;
+            margin: 0 auto !important;
             box-shadow: none !important;
             border: none !important;
             background: white !important;
             box-sizing: border-box !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          .sheet:last-child, .a4-page-sheet:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
           }
         }
       `}</style>
     </div>
   );
-};
+});
+
+A4PaperPreview.displayName = 'A4PaperPreview';
 
 export default A4PaperPreview;

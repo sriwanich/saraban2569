@@ -1150,6 +1150,110 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
+// ==========================================
+// ENTERPRISE ARCHITECTURE: VITE + REACT + PHP API + POSTGRESQL / MARIADB
+// ==========================================
+app.get('/api/enterprise/status', async (req, res) => {
+  const driver = process.env.DB_DRIVER || 'mariadb';
+  let dbStatus = isMysqlOnline ? 'connected' : 'local_enterprise_store';
+  
+  res.json({
+    success: true,
+    system: 'ระบบสารบรรณอิเล็กทรอนิกส์ระดับ Enterprise (EDMS Saraban Enterprise)',
+    version: '2.6.0-Enterprise',
+    compliance: 'ระเบียบสำนักนายกรัฐมนตรีว่าด้วยงานสารบรรณ (ฉบับล่าสุด)',
+    architecture: {
+      frontend: 'Vite 5 + React 18 + TypeScript + Tailwind CSS (SPA)',
+      backendPhp: 'PHP 8.2+ REST API (PSR-4 / OOP / PDO Connector)',
+      backendNode: 'Node.js / Express Gateway (Development & High-Throughput Microservice)',
+      databaseEngines: {
+        postgresql: {
+          supported: true,
+          version: 'PostgreSQL 14+ / 16+',
+          schemaFile: 'database_postgresql.sql',
+          features: ['JSONB Support', 'ACID Transactions', 'GIN Indexing', 'Full-Text Search']
+        },
+        mariadb: {
+          supported: true,
+          version: 'MariaDB 10.5+ / 11.x / MySQL 8.0',
+          schemaFile: 'database_mariadb.sql',
+          features: ['InnoDB', 'utf8mb4_unicode_ci', 'High-speed Indexing', 'JSON columns']
+        }
+      },
+      currentDriver: driver === 'pgsql' ? 'PostgreSQL' : 'MariaDB / MySQL',
+      dbStatus,
+      deploymentMethods: [
+        { name: 'Docker Compose (PostgreSQL)', file: 'docker-compose.postgres.yml' },
+        { name: 'Docker Compose (MariaDB)', file: 'docker-compose.mariadb.yml' },
+        { name: 'Nginx + PHP-FPM (Enterprise)', file: 'nginx.enterprise.conf' },
+        { name: 'Apache + PHP + .htaccess (Government Shared/Cloud)', file: 'php-api/.htaccess' }
+      ]
+    },
+    phpApiEndpoints: [
+      { method: 'POST', path: '/api/login', controller: 'AuthController::login', description: 'เข้าสู่ระบบ Enterprise พร้อม JWT & Audit' },
+      { method: 'GET', path: '/api/me', controller: 'AuthController::me', description: 'ข้อมูลผู้ใช้งานปัจจุบันและสิทธิ์' },
+      { method: 'GET', path: '/api/documents', controller: 'DocumentController::getDocuments', description: 'ค้นหาและดึงทะเบียนหนังสือ (รับ/ส่ง/ภายใน/เวียน)' },
+      { method: 'POST', path: '/api/documents', controller: 'DocumentController::createDocument', description: 'สร้างเอกสารและออกเลขสารบรรณอัตโนมัติ' },
+      { method: 'PUT', path: '/api/documents/:id', controller: 'DocumentController::updateDocument', description: 'แก้ไขและอัปเดตสถานะเอกสาร' },
+      { method: 'DELETE', path: '/api/documents/:id', controller: 'DocumentController::deleteDocument', description: 'ลบเอกสารและย้ายไปคลังกู้คืน' },
+      { method: 'GET', path: '/api/urgent-incidents', controller: 'DisasterController::getIncidents', description: 'รายงานเหตุด่วนสาธารณภัย ปภ. 24 ชั่วโมง' },
+      { method: 'POST', path: '/api/urgent-incidents', controller: 'DisasterController::createIncident', description: 'บันทึกรายงานเหตุด่วนสาธารณภัย ปภ. 24 ชั่วโมง' },
+      { method: 'GET', path: '/api/vehicles', controller: 'VehicleController::getVehicles', description: 'ระบบบริหารยานพาหนะ ปภ.' },
+      { method: 'POST', path: '/api/vehicle-inspections', controller: 'VehicleController::createInspection', description: 'บันทึกตรวจสภาพรถพร้อมรูปภาพ' },
+      { method: 'GET', path: '/api/surveys', controller: 'SurveyController::getSurveys', description: 'ระบบแบบสำรวจและประเมินผล' },
+      { method: 'GET', path: '/api/infographics', controller: 'InfographicsController::getList', description: 'สื่อประชาสัมพันธ์และเตือนภัย Infographics' },
+      { method: 'GET', path: '/api/settings', controller: 'SettingsController::getSettings', description: 'การตั้งค่าระบบองค์กรและหน่วยงาน' },
+      { method: 'GET', path: '/api/enterprise/status', controller: 'EnterpriseController::getStatus', description: 'สถานะสถาปัตยกรรมระดับ Enterprise' },
+      { method: 'GET', path: '/api/enterprise/diagnostics', controller: 'EnterpriseController::getDiagnostics', description: 'วิเคราะห์และตรวจสภาพฐานข้อมูล' }
+    ],
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api/enterprise/diagnostics', async (req, res) => {
+  const tables = [
+    'users', 'departments', 'positions', 'folders',
+    'inbox_documents', 'outbox_documents', 'internal_documents', 'circular_documents',
+    'admin_documents', 'draft_documents', 'reserved_numbers', 'document_tracking',
+    'digital_signatures', 'urgent_incidents',
+    'vehicles', 'vehicle_inspections', 'vehicle_maintenance',
+    'surveys', 'survey_responses', 'workflow_templates', 'workflow_instances',
+    'infographics', 'changelogs', 'system_logs', 'settings'
+  ];
+
+  const results: Record<string, { status: string; count: number }> = {};
+  let totalRecords = 0;
+
+  for (const table of tables) {
+    let count = 0;
+    let status = 'OK';
+    if (isMysqlOnline) {
+      try {
+        const [rows]: any = await pool.query(`SELECT COUNT(*) as cnt FROM \`${table}\``);
+        count = Number(rows?.[0]?.cnt || 0);
+      } catch (err: any) {
+        status = 'ERROR';
+      }
+    } else {
+      // Local fallback count
+      const localData = (global as any)[`_${table}_cache`] || [];
+      count = Array.isArray(localData) ? localData.length : 1;
+    }
+    results[table] = { status, count };
+    totalRecords += count;
+  }
+
+  res.json({
+    success: true,
+    totalTablesChecked: tables.length,
+    totalRecords,
+    isMysqlOnline,
+    tables: results,
+    timestamp: new Date().toISOString()
+  });
+});
+
+
 
 app.use((req, res, next) => {
   // console.log(`[HTTP_REQ] ${req.method} ${req.url} - IP: ${req.ip}`); // Silenced to prevent user confusion
@@ -2217,10 +2321,7 @@ const pool = mysql.createPool({
   connectTimeout: 5000,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
-  multipleStatements: true,
-  sessionVariables: {
-    sql_mode: 'STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION'
-  }
+  multipleStatements: true
 });
 
 let isMysqlOnline = false;
@@ -4338,6 +4439,9 @@ async function handleLocalDbQuery(sql: string, params: any[] = []): Promise<[any
 
 const originalPoolQuery = pool.query.bind(pool);
 (pool as any).query = async (sql: string, params: any[] = []) => {
+  if (!isMysqlOnline) {
+    return await handleLocalDbQuery(sql, params);
+  }
   try {
     return await originalPoolQuery(sql, params);
   } catch (err: any) {
@@ -4349,6 +4453,9 @@ const originalPoolQuery = pool.query.bind(pool);
                          msg.includes('doesn\'t exist') ||
                          msg.includes('SUPER privilege');
     
+    // Mark MySQL offline so subsequent queries use fast local fallback without repeating network timeouts/refusals
+    isMysqlOnline = false;
+
     if (!isSchemaError) {
       console.warn('⚠️ MySQL Query failed, using local DB fallback:', msg);
     }
@@ -6036,6 +6143,48 @@ app.post('/api/vehicle-inspections', async (req, res) => {
     }
 
     res.json({ id, message: 'Inspection report submitted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/vehicle-inspections/:id', async (req, res) => {
+  try {
+    if (!isMysqlOnline) return res.status(503).json({ error: 'Database offline' });
+    const { id } = req.params;
+    const { results, inspector_name, inspector_position, mileage, status } = req.body;
+    
+    const updates: string[] = [];
+    const values: any[] = [];
+    
+    if (results !== undefined) {
+      updates.push('results = ?');
+      values.push(JSON.stringify(results || {}));
+    }
+    if (inspector_name !== undefined) {
+      updates.push('inspector_name = ?');
+      values.push(inspector_name);
+    }
+    if (inspector_position !== undefined) {
+      updates.push('inspector_position = ?');
+      values.push(inspector_position);
+    }
+    if (mileage !== undefined) {
+      updates.push('mileage = ?');
+      values.push(mileage);
+    }
+    if (status !== undefined) {
+      updates.push('status = ?');
+      values.push(status);
+    }
+    
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields provided for update' });
+    }
+    
+    values.push(id);
+    await pool.query(`UPDATE vehicle_inspections SET ${updates.join(', ')} WHERE id = ?`, values);
+    res.json({ message: 'Inspection record updated successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -20719,7 +20868,204 @@ ${selectedDoc ? `[เอกสาร/รายงานเหตุที่ผ�
   }
 });
 
+export async function sendNotificationEmail(
+  targetAssigneeOrDepts: string | string[],
+  subject: string,
+  htmlContent: string
+) {
+  if (smtpBlocked) {
+    console.log(`[Email Notification Skipped] SMTP blocked due to previous IP/Auth errors. Cannot send "${subject}".`);
+    return;
+  }
+  try {
+    let settings: any = {};
+    if (isMysqlOnline) {
+      try {
+        const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName FROM settings LIMIT 1');
+        if (settingsRows && settingsRows.length > 0) settings = settingsRows[0];
+      } catch (err: any) {
+        console.warn('Could not read settings from MySQL:', err.message);
+      }
+    }
+    if (!settings.smtpHost && localDb.settings && localDb.settings.length > 0) {
+      settings = localDb.settings[0];
+    }
 
+    if (!settings.smtpHost || !settings.smtpUser) {
+      console.log(`[Email Notification Skipped] SMTP not configured. Cannot send "${subject}".`);
+      return;
+    }
+
+    const targets: string[] = Array.isArray(targetAssigneeOrDepts) 
+      ? targetAssigneeOrDepts.map(t => String(t).trim()).filter(Boolean)
+      : [String(targetAssigneeOrDepts).trim()].filter(Boolean);
+
+    if (targets.length === 0) return;
+
+    let usersList: any[] = [];
+    if (isMysqlOnline) {
+      try {
+        const [users]: any = await pool.query(`SELECT id, username, email, firstName, lastName, department, emailNotifications FROM users WHERE email IS NOT NULL AND email != ''`);
+        if (users && users.length > 0) usersList = users;
+      } catch (err: any) {
+        console.warn('Could not query users from MySQL:', err.message);
+      }
+    }
+    if (usersList.length === 0 && localDb.users) {
+      usersList = localDb.users;
+    }
+
+    const matchingEmails = new Set<string>();
+
+    for (const target of targets) {
+      if (target.includes('@')) {
+        matchingEmails.add(target);
+        continue;
+      }
+
+      for (const u of usersList) {
+        if (!u.email || !String(u.email).trim()) continue;
+        
+        const isNotifEnabled = u.emailNotifications === undefined || u.emailNotifications === null || Number(u.emailNotifications) === 1 || u.emailNotifications === true;
+        if (!isNotifEnabled) continue;
+
+        const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+        const username = String(u.username || '').trim();
+        const department = String(u.department || '').trim();
+
+        if (
+          fullName === target ||
+          username === target ||
+          department === target ||
+          (target.length > 2 && (fullName.includes(target) || username.includes(target)))
+        ) {
+          matchingEmails.add(String(u.email).trim());
+        }
+      }
+    }
+
+    const recipientList = Array.from(matchingEmails);
+    if (recipientList.length === 0) {
+      console.log(`[Email Notification] No matching recipients with emailNotifications enabled found for targets: ${targets.join(', ')}`);
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: settings.smtpHost,
+      port: Number(settings.smtpPort) || 587,
+      secure: Number(settings.smtpPort) === 465,
+      connectionTimeout: 10000,
+      greetingTimeout: 8000,
+      socketTimeout: 15000,
+      auth: {
+        user: settings.smtpUser,
+        pass: settings.smtpPassword || '',
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+
+    const mailOptions = {
+      from: settings.smtpFrom ? settings.smtpFrom : `"${settings.orgName || 'ระบบสารบรรณ EDMS'}" <${settings.smtpUser}>`,
+      to: recipientList.join(','),
+      subject: subject,
+      html: htmlContent
+    };
+
+    transporter.sendMail(mailOptions, async (err: any, info: any) => {
+      if (err) {
+        const isIpError = err.message.includes('525') || err.message.includes('5.7.1') || err.message.includes('Unauthorized IP');
+        if (isIpError) {
+          smtpBlocked = true;
+          console.error('SMTP Authentication Error (IP/Auth): Disabling email notifications for the remainder of this session.', err.message);
+          return;
+        }
+        console.error('Error sending notification email:', err.message);
+        await addSystemLog('EMAIL_FAILED', `ส่งอีเมลแจ้งเตือน "${subject}" ไปยัง ${recipientList.join(', ')} ไม่สำเร็จ: ${err.message}`, 'ระบบอัตโนมัติ', '127.0.0.1');
+      } else {
+        console.log('Notification email sent successfully:', info.response || info.messageId);
+        await addSystemLog('EMAIL_SENT', `ส่งอีเมลแจ้งเตือน "${subject}" ไปยัง ${recipientList.join(', ')} สำเร็จ`, 'ระบบอัตโนมัติ', '127.0.0.1');
+      }
+    });
+  } catch (err: any) {
+    console.error('sendNotificationEmail Error:', err.message);
+  }
+}
+
+/**
+ * Helper to notify work change (Create, Update, Delete) via Email
+ */
+export async function notifyWorkChange(doc: any, action: 'CREATE' | 'UPDATE' | 'DELETE', type: string) {
+  const typeMap: any = {
+    inbox: 'หนังสือรับ',
+    outbox: 'หนังสือส่ง',
+    circular: 'หนังสือเวียน',
+    internal: 'บันทึกข้อความ',
+    admin: 'งานธุรการ/ประกาศ',
+    urgent_incident: 'รายงานเหตุด่วนสาธารณภัย'
+  };
+
+  const actionMap: any = {
+    CREATE: 'เพิ่ม/ลงทะเบียน',
+    UPDATE: 'แก้ไข/อัปเดต',
+    DELETE: 'ลบ (ย้ายไปคลังกู้คืน)'
+  };
+
+  const docTitle = doc.title || doc.docNumber || doc.location || 'ไม่ระบุชื่อ';
+  const docTypeLabel = typeMap[type] || type;
+  const actionLabel = actionMap[action] || action;
+  
+  const subject = `[แจ้งเตือน] ${actionLabel}${docTypeLabel}: ${docTitle}`;
+  const htmlContent = `
+    <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+      <h2 style="color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px;">การแจ้งเตือนจากระบบ EDMS</h2>
+      <p>เรียน ท่านผู้เกี่ยวข้อง,</p>
+      <p>มีการ <strong>${actionLabel}</strong> ข้อมูลในส่วนของ <strong>${docTypeLabel}</strong> ในระบบเรียบร้อยแล้ว ดังนี้:</p>
+      <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 5px 0; color: #64748b; width: 140px;"><strong>เรื่อง/สถานที่:</strong></td>
+            <td style="padding: 5px 0;">${docTitle}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>เลขที่:</strong></td>
+            <td style="padding: 5px 0;">${doc.docNumber || doc.receiveNumber || '-'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>วันที่:</strong></td>
+            <td style="padding: 5px 0;">${doc.date || doc.docDate || '-'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>ผู้รับผิดชอบ:</strong></td>
+            <td style="padding: 5px 0;">${doc.assignee || doc.reporterName || '-'}</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 0; color: #64748b;"><strong>สถานะ:</strong></td>
+            <td style="padding: 5px 0;"><span style="background-color: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">${doc.status || 'ปกติ'}</span></td>
+          </tr>
+        </table>
+      </div>
+      <p style="font-size: 0.9em; color: #666; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
+        ท่านได้รับอีเมลนี้เนื่องจากระบบตรวจพบว่าท่านเป็นผู้เกี่ยวข้องกับงานชิ้นนี้ และท่านได้เปิดการแจ้งเตือนทางอีเมลไว้ในเมนูตั้งค่าโปรไฟล์
+      </p>
+      <p style="font-size: 0.8em; color: #94a3b8; text-align: center;">นี่คือการแจ้งเตือนอัตโนมัติจากระบบ กรุณาอย่าตอบกลับอีเมลนี้</p>
+    </div>
+  `;
+
+  const targets = new Set<string>();
+  if (doc.assignee) targets.add(doc.assignee);
+  if (doc.createdBy) targets.add(doc.createdBy);
+  if (doc.reporterName) targets.add(doc.reporterName);
+  if (doc.fromPerson) targets.add(doc.fromPerson);
+  if (doc.toPerson) targets.add(doc.toPerson);
+
+  const targetList = Array.from(targets).filter(t => t && t !== 'ผู้ดูแลระบบ' && t !== 'Admin');
+
+  if (targetList.length > 0) {
+    await sendNotificationEmail(targetList, subject, htmlContent);
+  }
+}
 
 async function startServer() {
 
@@ -22007,272 +22353,6 @@ app.delete('/api/urgent-incidents/:id', async (req, res) => {
   }
 });
 
-
-  const listenPort = process.env.PORT || 3000;
-
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath, {
-      etag: true,
-      lastModified: true,
-      setHeaders: (res, filePath) => {
-        if (filePath.includes('/assets/') || filePath.includes('\\assets\\')) {
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-        } else {
-          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-          res.setHeader('Pragma', 'no-cache');
-          res.setHeader('Expires', '0');
-          res.setHeader('Surrogate-Control', 'no-store');
-        }
-      }
-    }));
-    app.get('*all', (req, res) => {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  // Express global error handling middleware for API routes
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (res.headersSent) {
-      return next(err);
-    }
-    console.error('💥 Express API Error Handler caught:', err?.message || err);
-    if (req.path.startsWith('/api/')) {
-      return res.status(err?.status || 500).json({
-        success: false,
-        error: err?.message || 'เกิดข้อผิดพลาดในการประมวลผลคำขอ'
-      });
-    }
-    return next(err);
-  });
-
-  const isNamedPipeOrSocket = isNaN(Number(listenPort));
-  if (isNamedPipeOrSocket) {
-    app.listen(listenPort, () => {
-      console.log(`Server running on Passenger socket pipe: ${listenPort}`);
-      startScheduledReservationEngine();
-      startAutomatedBackupEngine();
-    });
-  } else {
-    const portNum = Number(listenPort) || 3000;
-    app.listen(portNum, '0.0.0.0', () => {
-      console.log(`Server running on http://0.0.0.0:${portNum}`);
-      startScheduledReservationEngine();
-      startAutomatedBackupEngine();
-    });
-  }
-}
-
-startServer();
-
-export async function sendNotificationEmail(
-  targetAssigneeOrDepts: string | string[],
-  subject: string,
-  htmlContent: string
-) {
-  if (smtpBlocked) {
-    console.log(`[Email Notification Skipped] SMTP blocked due to previous IP/Auth errors. Cannot send "${subject}".`);
-    return;
-  }
-  try {
-    let settings: any = {};
-    if (isMysqlOnline) {
-      try {
-        const [settingsRows]: any = await pool.query('SELECT smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, orgName FROM settings LIMIT 1');
-        if (settingsRows && settingsRows.length > 0) settings = settingsRows[0];
-      } catch (err: any) {
-        console.warn('Could not read settings from MySQL:', err.message);
-      }
-    }
-    if (!settings.smtpHost && localDb.settings && localDb.settings.length > 0) {
-      settings = localDb.settings[0];
-    }
-
-    if (!settings.smtpHost || !settings.smtpUser) {
-      console.log(`[Email Notification Skipped] SMTP not configured. Cannot send "${subject}".`);
-      return;
-    }
-
-    const targets: string[] = Array.isArray(targetAssigneeOrDepts) 
-      ? targetAssigneeOrDepts.map(t => String(t).trim()).filter(Boolean)
-      : [String(targetAssigneeOrDepts).trim()].filter(Boolean);
-
-    if (targets.length === 0) return;
-
-    let usersList: any[] = [];
-    if (isMysqlOnline) {
-      try {
-        const [users]: any = await pool.query(`SELECT id, username, email, firstName, lastName, department, emailNotifications FROM users WHERE email IS NOT NULL AND email != ''`);
-        if (users && users.length > 0) usersList = users;
-      } catch (err: any) {
-        console.warn('Could not query users from MySQL:', err.message);
-      }
-    }
-    if (usersList.length === 0 && localDb.users) {
-      usersList = localDb.users;
-    }
-
-    const matchingEmails = new Set<string>();
-
-    for (const target of targets) {
-      if (target.includes('@')) {
-        matchingEmails.add(target);
-        continue;
-      }
-
-      for (const u of usersList) {
-        if (!u.email || !String(u.email).trim()) continue;
-        
-        const isNotifEnabled = u.emailNotifications === undefined || u.emailNotifications === null || Number(u.emailNotifications) === 1 || u.emailNotifications === true;
-        if (!isNotifEnabled) continue;
-
-        const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim();
-        const username = String(u.username || '').trim();
-        const department = String(u.department || '').trim();
-
-        if (
-          fullName === target ||
-          username === target ||
-          department === target ||
-          (target.length > 2 && (fullName.includes(target) || username.includes(target)))
-        ) {
-          matchingEmails.add(String(u.email).trim());
-        }
-      }
-    }
-
-    const recipientList = Array.from(matchingEmails);
-    if (recipientList.length === 0) {
-      console.log(`[Email Notification] No matching recipients with emailNotifications enabled found for targets: ${targets.join(', ')}`);
-      return;
-    }
-
-    const transporter = nodemailer.createTransport({
-      host: settings.smtpHost,
-      port: Number(settings.smtpPort) || 587,
-      secure: Number(settings.smtpPort) === 465,
-      connectionTimeout: 10000,
-      greetingTimeout: 8000,
-      socketTimeout: 15000,
-      auth: {
-        user: settings.smtpUser,
-        pass: settings.smtpPassword || '',
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    });
-
-    const mailOptions = {
-      from: settings.smtpFrom ? settings.smtpFrom : `"${settings.orgName || 'ระบบสารบรรณ EDMS'}" <${settings.smtpUser}>`,
-      to: recipientList.join(','),
-      subject: subject,
-      html: htmlContent
-    };
-
-    transporter.sendMail(mailOptions, async (err: any, info: any) => {
-      if (err) {
-        const isIpError = err.message.includes('525') || err.message.includes('5.7.1') || err.message.includes('Unauthorized IP');
-        if (isIpError) {
-          smtpBlocked = true;
-          console.error('SMTP Authentication Error (IP/Auth): Disabling email notifications for the remainder of this session.', err.message);
-          return;
-        }
-        console.error('Error sending notification email:', err.message);
-        await addSystemLog('EMAIL_FAILED', `ส่งอีเมลแจ้งเตือน "${subject}" ไปยัง ${recipientList.join(', ')} ไม่สำเร็จ: ${err.message}`, 'ระบบอัตโนมัติ', '127.0.0.1');
-      } else {
-        console.log('Notification email sent successfully:', info.response || info.messageId);
-        await addSystemLog('EMAIL_SENT', `ส่งอีเมลแจ้งเตือน "${subject}" ไปยัง ${recipientList.join(', ')} สำเร็จ`, 'ระบบอัตโนมัติ', '127.0.0.1');
-      }
-    });
-  } catch (err: any) {
-    console.error('sendNotificationEmail Error:', err.message);
-  }
-}
-
-/**
- * Helper to notify work change (Create, Update, Delete) via Email
- */
-export async function notifyWorkChange(doc: any, action: 'CREATE' | 'UPDATE' | 'DELETE', type: string) {
-  const typeMap: any = {
-    inbox: 'หนังสือรับ',
-    outbox: 'หนังสือส่ง',
-    circular: 'หนังสือเวียน',
-    internal: 'บันทึกข้อความ',
-    admin: 'งานธุรการ/ประกาศ',
-    urgent_incident: 'รายงานเหตุด่วนสาธารณภัย'
-  };
-
-  const actionMap: any = {
-    CREATE: 'เพิ่ม/ลงทะเบียน',
-    UPDATE: 'แก้ไข/อัปเดต',
-    DELETE: 'ลบ (ย้ายไปคลังกู้คืน)'
-  };
-
-  const docTitle = doc.title || doc.docNumber || doc.location || 'ไม่ระบุชื่อ';
-  const docTypeLabel = typeMap[type] || type;
-  const actionLabel = actionMap[action] || action;
-  
-  const subject = `[แจ้งเตือน] ${actionLabel}${docTypeLabel}: ${docTitle}`;
-  const htmlContent = `
-    <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
-      <h2 style="color: #2563eb; border-bottom: 2px solid #2563eb; padding-bottom: 10px;">การแจ้งเตือนจากระบบ EDMS</h2>
-      <p>เรียน ท่านผู้เกี่ยวข้อง,</p>
-      <p>มีการ <strong>${actionLabel}</strong> ข้อมูลในส่วนของ <strong>${docTypeLabel}</strong> ในระบบเรียบร้อยแล้ว ดังนี้:</p>
-      <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0;">
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 5px 0; color: #64748b; width: 140px;"><strong>เรื่อง/สถานที่:</strong></td>
-            <td style="padding: 5px 0;">${docTitle}</td>
-          </tr>
-          <tr>
-            <td style="padding: 5px 0; color: #64748b;"><strong>เลขที่:</strong></td>
-            <td style="padding: 5px 0;">${doc.docNumber || doc.receiveNumber || '-'}</td>
-          </tr>
-          <tr>
-            <td style="padding: 5px 0; color: #64748b;"><strong>วันที่:</strong></td>
-            <td style="padding: 5px 0;">${doc.date || doc.docDate || '-'}</td>
-          </tr>
-          <tr>
-            <td style="padding: 5px 0; color: #64748b;"><strong>ผู้รับผิดชอบ:</strong></td>
-            <td style="padding: 5px 0;">${doc.assignee || doc.reporterName || '-'}</td>
-          </tr>
-          <tr>
-            <td style="padding: 5px 0; color: #64748b;"><strong>สถานะ:</strong></td>
-            <td style="padding: 5px 0;"><span style="background-color: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">${doc.status || 'ปกติ'}</span></td>
-          </tr>
-        </table>
-      </div>
-      <p style="font-size: 0.9em; color: #666; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
-        ท่านได้รับอีเมลนี้เนื่องจากระบบตรวจพบว่าท่านเป็นผู้เกี่ยวข้องกับงานชิ้นนี้ และท่านได้เปิดการแจ้งเตือนทางอีเมลไว้ในเมนูตั้งค่าโปรไฟล์
-      </p>
-      <p style="font-size: 0.8em; color: #94a3b8; text-align: center;">นี่คือการแจ้งเตือนอัตโนมัติจากระบบ กรุณาอย่าตอบกลับอีเมลนี้</p>
-    </div>
-  `;
-
-  const targets = new Set<string>();
-  if (doc.assignee) targets.add(doc.assignee);
-  if (doc.createdBy) targets.add(doc.createdBy);
-  if (doc.reporterName) targets.add(doc.reporterName);
-  if (doc.fromPerson) targets.add(doc.fromPerson);
-  if (doc.toPerson) targets.add(doc.toPerson);
-
-  const targetList = Array.from(targets).filter(t => t && t !== 'ผู้ดูแลระบบ' && t !== 'Admin');
-
-  if (targetList.length > 0) {
-    await sendNotificationEmail(targetList, subject, htmlContent);
-  }
-}
-
 // ==========================================
 // ENHANCED AI INTEGRATION ENDPOINTS (iOS 26)
 // ==========================================
@@ -23343,3 +23423,81 @@ function analyzeThaiGovDocument(title: string, content: string) {
   return { type, category, priority, suggestedTo, summary };
 }
 
+
+  // Guaranteed JSON 404 for any unhandled /api endpoint (NEVER return HTML / index.html)
+  app.use('/api', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `ไม่พบ API ปลายทางที่ระบุ (${req.method} ${req.path})`
+    });
+  });
+
+
+  const args = process.argv.slice(2);
+  const portIndex = args.indexOf('--port');
+  const cliPort = portIndex !== -1 ? args[portIndex + 1] : undefined;
+  const listenPort = cliPort ? (isNaN(Number(cliPort)) ? cliPort : Number(cliPort)) : 3000;
+
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath, {
+      etag: true,
+      lastModified: true,
+      setHeaders: (res, filePath) => {
+        if (filePath.includes('/assets/') || filePath.includes('\\assets\\')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+          res.setHeader('Surrogate-Control', 'no-store');
+        }
+      }
+    }));
+    app.get('*all', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  // Express global error handling middleware for API routes
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+    console.error('💥 Express API Error Handler caught:', err?.message || err);
+    if (req.path.startsWith('/api/')) {
+      return res.status(err?.status || 500).json({
+        success: false,
+        error: err?.message || 'เกิดข้อผิดพลาดในการประมวลผลคำขอ'
+      });
+    }
+    return next(err);
+  });
+
+  const isNamedPipeOrSocket = isNaN(Number(listenPort));
+  if (isNamedPipeOrSocket) {
+    app.listen(listenPort, () => {
+      console.log(`Server running on Passenger socket pipe: ${listenPort}`);
+      startScheduledReservationEngine();
+      startAutomatedBackupEngine();
+    });
+  } else {
+    const portNum = Number(listenPort) || 3000;
+    app.listen(portNum, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${portNum}`);
+      startScheduledReservationEngine();
+      startAutomatedBackupEngine();
+    });
+  }
+}
+
+startServer();

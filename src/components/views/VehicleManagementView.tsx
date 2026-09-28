@@ -52,16 +52,21 @@ import {
   UserPlus,
   Crown,
   Layers,
-  Info
+  Info,
+  FileDown,
+  Loader2,
+  QrCode
 } from 'lucide-react';
 import { formatThaiDate } from '../../types';
+import { VehicleQrModal } from './VehicleQrModal';
+import { BatchVehicleQrModal } from './BatchVehicleQrModal';
 import { 
   DDPM_VEHICLE_CATEGORIES, 
   getDDPMVehicleCategory, 
   isDDPMHeavyMachinery 
 } from '../../data/ddpmVehicles';
 import { useConfirm } from '../../context/ConfirmContext';
-import { A4PaperPreview } from '../A4PaperPreview';
+import { A4PaperPreview, A4PaperPreviewRef } from '../A4PaperPreview';
 
 interface Vehicle {
   id: string;
@@ -201,6 +206,11 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [isSavingVehicle, setIsSavingVehicle] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  // QR Code Modals state
+  const [qrModalVehicle, setQrModalVehicle] = useState<Vehicle | null>(null);
+  const [isBatchQrModalOpen, setIsBatchQrModalOpen] = useState(false);
+  const [hasHandledDeepLink, setHasHandledDeepLink] = useState(false);
   
   const [vehicleForm, setVehicleForm] = useState({
     license_plate: '',
@@ -311,6 +321,34 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
       })
       .catch(err => console.error('Failed to fetch departments:', err));
   }, []);
+
+  // Handle scanned QR Code deep linking
+  useEffect(() => {
+    if (hasHandledDeepLink || vehicles.length === 0 || typeof window === 'undefined') return;
+
+    const sp = new URLSearchParams(window.location.search);
+    const targetVehicleId = sp.get('vehicle_id') || sp.get('v_id');
+    const targetPlate = sp.get('plate');
+
+    if (targetVehicleId || targetPlate) {
+      const found = vehicles.find(v => 
+        (targetVehicleId && String(v.id) === String(targetVehicleId)) ||
+        (targetVehicleId && v.license_plate === targetVehicleId) ||
+        (targetVehicleId && v.vehicle_number && v.vehicle_number === targetVehicleId) ||
+        (targetPlate && v.license_plate === decodeURIComponent(targetPlate))
+      );
+
+      if (found) {
+        setSelectedVehicle(found);
+        // Focus on the vehicle in the main list view without jumping to inspect screen
+        if (found.license_plate) {
+          setSearchTerm(found.license_plate);
+        }
+        setActiveView('list');
+        setHasHandledDeepLink(true);
+      }
+    }
+  }, [vehicles, hasHandledDeepLink]);
 
   // Department options list: based on configured system departments
   const departments = useMemo(() => {
@@ -651,19 +689,14 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
                 {user?.role === 'admin' ? (
                   <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1.5">
                     <Crown className="w-3.5 h-3.5" />
-                    <span>ผู้ดูแลระบบ (Admin) • ดูแลจัดการยานพาหนะทั้งหมด</span>
+                    <span>ผู้ดูแลระบบ (Admin)</span>
                   </span>
                 ) : user?.role === 'moderator' ? (
                   <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex items-center gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>ผู้ตรวจสอบ/สารบรรณ (Moderator) • ดูแลจัดการยานพาหนะทั้งหมด</span>
+                    <span>ผู้ตรวจสอบ/สารบรรณ (Moderator)</span>
                   </span>
-                ) : (
-                  <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                    <UserCheck className="w-3.5 h-3.5" />
-                    <span>ผู้รับผิดชอบยานพาหนะ • แสดงเฉพาะรถที่ได้รับมอบหมาย ({accessibleVehicles.length} คัน)</span>
-                  </span>
-                )}
+                ) : null}
               </div>
               <p className="text-xs sm:text-sm text-[var(--text-muted)] font-medium mt-1">
                 {isAdminOrModerator 
@@ -673,7 +706,44 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto self-end lg:self-center">
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto self-end lg:self-center">
+            <button
+              onClick={() => setIsBatchQrModalOpen(true)}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-3 bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-light)] text-[var(--text-primary)] rounded-2xl text-xs sm:text-sm font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
+              title="พิมพ์ QR Code ประจำรถ"
+            >
+              <QrCode className="w-4 h-4 text-indigo-500 shrink-0" />
+              <span>พิมพ์ QR Code ประจำรถ</span>
+            </button>
+
+            {/* View Mode Switcher: Grid vs Table */}
+            <div className="flex items-center gap-1 p-1 bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  viewMode === 'grid'
+                    ? 'bg-[var(--primary-color)] text-white shadow-xs'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
+                }`}
+                title="มุมมองแบบการ์ด (Card Grid View)"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                <span className="hidden md:inline">การ์ด</span>
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`p-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  viewMode === 'table'
+                    ? 'bg-[var(--primary-color)] text-white shadow-xs'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
+                }`}
+                title="มุมมองแบบตารางข้อมูล (Table List View)"
+              >
+                <List className="w-4 h-4" />
+                <span className="hidden md:inline">ตาราง</span>
+              </button>
+            </div>
+
             <button
               onClick={fetchVehicles}
               disabled={loading}
@@ -693,256 +763,9 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
             )}
           </div>
         </div>
-
-        {/* 2. Key Performance Indicators (KPI Summary Cards) */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mt-6 pt-6 border-t border-[var(--border-lighter)] relative z-10">
-          <div 
-            onClick={() => { setStatusFilter('all'); setTypeFilter('all'); }}
-            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-              statusFilter === 'all' && typeFilter === 'all'
-                ? 'bg-[var(--bg-surface)] border-[var(--primary-color)] shadow-sm ring-2 ring-[var(--primary-color)]/15' 
-                : 'bg-[var(--bg-surface)]/60 border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:border-[var(--border-medium)]'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">ทั้งหมด</span>
-              <Car className="w-4 h-4 text-[var(--primary-color)]" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-[var(--text-primary)] mt-1.5">{stats.total}</div>
-            <div className="text-[11px] text-[var(--text-muted)] mt-0.5">ยานพาหนะในระบบ</div>
-          </div>
-
-          <div 
-            onClick={() => setStatusFilter('active')}
-            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-              statusFilter === 'active' 
-                ? 'bg-emerald-500/10 border-emerald-500 shadow-sm ring-2 ring-emerald-500/20' 
-                : 'bg-[var(--bg-surface)]/60 border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:border-emerald-500/40'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">พร้อมใช้งาน</span>
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400 mt-1.5">{stats.active}</div>
-            <div className="text-[11px] text-[var(--text-muted)] mt-0.5">สถานะปกติ พร้อมปฏิบัติงาน</div>
-          </div>
-
-          <div 
-            onClick={() => setStatusFilter('maintenance')}
-            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-              statusFilter === 'maintenance' 
-                ? 'bg-amber-500/10 border-amber-500 shadow-sm ring-2 ring-amber-500/20' 
-                : 'bg-[var(--bg-surface)]/60 border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:border-amber-500/40'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">แจ้งซ่อม/บำรุง</span>
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 mt-1.5">{stats.maintenance}</div>
-            <div className="text-[11px] text-[var(--text-muted)] mt-0.5">รอหรือกำลังซ่อมบำรุง</div>
-          </div>
-
-          <div 
-            onClick={() => setTypeFilter(typeFilter === 'cat:เครื่องจักรกลสาธารณภัย' ? 'all' : 'cat:เครื่องจักรกลสาธารณภัย')}
-            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-              typeFilter === 'cat:เครื่องจักรกลสาธารณภัย'
-                ? 'bg-orange-500/10 border-orange-500 shadow-sm ring-2 ring-orange-500/20' 
-                : 'bg-[var(--bg-surface)]/60 border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:border-orange-500/40'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider">เครื่องจักรกล ปภ.</span>
-              <Wrench className="w-4 h-4 text-orange-500" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-orange-600 dark:text-orange-400 mt-1.5">{stats.machinery}</div>
-            <div className="text-[11px] text-[var(--text-muted)] mt-0.5">เครื่องจักรกลหนัก/กู้ภัย</div>
-          </div>
-
-          <div 
-            onClick={() => setStatusFilter('inactive')}
-            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-              statusFilter === 'inactive' 
-                ? 'bg-rose-500/10 border-rose-500 shadow-sm ring-2 ring-rose-500/20' 
-                : 'bg-[var(--bg-surface)]/60 border-[var(--border-light)] hover:bg-[var(--bg-surface)] hover:border-rose-500/40'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">ระงับใช้งาน</span>
-              <XCircle className="w-4 h-4 text-slate-400" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-[var(--text-secondary)] mt-1.5">{stats.inactive}</div>
-            <div className="text-[11px] text-[var(--text-muted)] mt-0.5">ปลดประจำการ/งดใช้</div>
-          </div>
-        </div>
       </div>
 
-      {/* 3. Search & Interactive Filter Bar */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-2xl p-4 shadow-xs flex flex-col gap-3">
-        {/* Admin/Moderator Scope Selector Tabs */}
-        {isAdminOrModerator && (
-          <div className="flex items-center gap-1.5 p-1 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl w-fit">
-            <button
-              onClick={() => setScopeFilter('all')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                scopeFilter === 'all'
-                  ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>ยานพาหนะทั้งหมด ({vehicles.length})</span>
-            </button>
-            <button
-              onClick={() => setScopeFilter('my_vehicles')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                scopeFilter === 'my_vehicles'
-                  ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              <span>เฉพาะรถที่ฉันรับผิดชอบ ({myVehiclesCount})</span>
-            </button>
-          </div>
-        )}
-
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          {/* Search Input */}
-          <div className="relative flex-1 group">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] group-focus-within:text-[var(--primary-color)] transition-colors" />
-            <input 
-              type="text" 
-              placeholder="ค้นหาเลขทะเบียน, ยี่ห้อ, รุ่น, หรือหมายเลขรถ..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-9 py-2.5 bg-[var(--bg-canvas)] border border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl text-xs sm:text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition-all"
-            />
-            {searchTerm && (
-              <button 
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Controls Right: View Mode Toggle & Reset Button */}
-          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
-            {(searchTerm || statusFilter !== 'all' || departmentFilter !== 'all' || typeFilter !== 'all') && (
-              <button
-                onClick={() => {
-                  setSearchTerm('');
-                  setStatusFilter('all');
-                  setDepartmentFilter('all');
-                  setTypeFilter('all');
-                }}
-                className="px-3 py-2 bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] text-rose-500 rounded-xl text-xs font-bold transition-all border border-[var(--border-light)] flex items-center gap-1 cursor-pointer"
-                title="ล้างตัวกรองทั้งหมด"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>ล้างตัวกรอง</span>
-              </button>
-            )}
-
-            {/* View Mode Switcher: Grid vs Table */}
-            <div className="flex items-center gap-1 p-1 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  viewMode === 'grid'
-                    ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
-                }`}
-                title="มุมมองแบบการ์ด (Card Grid View)"
-              >
-                <LayoutGrid className="w-4 h-4" />
-                <span className="hidden sm:inline">การ์ด</span>
-              </button>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`p-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  viewMode === 'table'
-                    ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
-                }`}
-                title="มุมมองแบบตารางข้อมูล (Table List View)"
-              >
-                <List className="w-4 h-4" />
-                <span className="hidden sm:inline">ตาราง</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Filter Row 2: Status tabs + Department + DDPM Types */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-2 border-t border-[var(--border-lighter)]">
-          {/* Status Filter Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 custom-scrollbar">
-            {[
-              { id: 'all', label: 'ทั้งหมด' },
-              { id: 'active', label: 'พร้อมใช้งาน' },
-              { id: 'maintenance', label: 'แจ้งซ่อม' },
-              { id: 'inactive', label: 'ระงับ' }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setStatusFilter(tab.id as any)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                  statusFilter === tab.id
-                    ? 'bg-[var(--primary-color)] text-white shadow-xs'
-                    : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--border-light)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            {/* Department Filter (if departments exist) */}
-            {departments.length > 0 && (
-              <div className="w-full sm:w-56 shrink-0">
-                <select
-                  value={departmentFilter}
-                  onChange={(e) => setDepartmentFilter(e.target.value)}
-                  className="w-full py-2 px-3 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl text-xs font-semibold text-[var(--text-primary)] outline-none cursor-pointer focus:border-[var(--primary-color)]"
-                >
-                  <option value="all">ทุกฝ่ายงาน / กลุ่มงาน ปภ.</option>
-                  {departments.map((dept, idx) => (
-                    <option key={idx} value={dept}>{dept}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* DDPM Vehicle & Machinery Type Filter */}
-            <div className="w-full sm:w-64 shrink-0">
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                className="w-full py-2 px-3 bg-[var(--bg-canvas)] border border-[var(--border-light)] rounded-xl text-xs font-semibold text-[var(--text-primary)] outline-none cursor-pointer focus:border-[var(--primary-color)]"
-              >
-                <option value="all">ทุกประเภทรถ / เครื่องจักรกล ปภ.</option>
-                {DDPM_VEHICLE_CATEGORIES.map((cat, idx) => (
-                  <optgroup key={idx} label={`หมวด: ${cat.category}`}>
-                    <option value={`cat:${cat.category}`}>↳ ดูทั้งหมดในหมวด {cat.category}</option>
-                    {cat.types.map((t, tIdx) => (
-                      <option key={tIdx} value={t.name}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Vehicles Grid or Table View */}
+      {/* Vehicles Grid or Table View */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {[1, 2, 3, 4, 5, 6].map(i => (
@@ -999,9 +822,6 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
             const isVehicleMaintenance = vehicle.status === 'maintenance';
             const categoryInfo = getDDPMVehicleCategory(vehicle.vehicle_type);
             const isMachinery = isDDPMHeavyMachinery(vehicle.vehicle_type) || categoryInfo.isMachinery;
-            const latestInsp = latestInspections[vehicle.id];
-            const inspIssues = latestInsp ? getInspectionIssues(latestInsp.results) : [];
-            const hasInspDefects = inspIssues.length > 0;
 
             return (
               <div 
@@ -1219,47 +1039,16 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
                         )}
                       </div>
                     </div>
-
-                    {/* Latest Inspection Alert Card (Only show if defects found) */}
-                    {latestInsp && hasInspDefects && (
-                      <div className="p-3 rounded-2xl border transition-all bg-rose-500/10 dark:bg-rose-950/30 border-rose-300 dark:border-rose-800/80 shadow-xs">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-black text-xs min-w-0">
-                            <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 animate-bounce" />
-                            <span className="truncate">พบปัญหาการตรวจ ({formatThaiDate(latestInsp.submitted_at)})</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleViewHistory(vehicle)}
-                            className="text-[10px] font-black text-rose-600 dark:text-rose-400 hover:underline shrink-0 cursor-pointer"
-                          >
-                            ดูในประวัติ
-                          </button>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-rose-300/40 dark:border-rose-800/40">
-                          {inspIssues.map((issue, idx) => (
-                            <span 
-                              key={idx} 
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-400/30"
-                            >
-                              <span>{issue.name}:</span>
-                              <span className="font-medium text-rose-600 dark:text-rose-400">{issue.note}</span>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   {/* Actions */}
                   <div className="pt-2 flex items-center gap-2 border-t border-[var(--border-lighter)]">
                     <button 
                       onClick={() => handleStartInspection(vehicle)}
-                      className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white rounded-xl text-xs font-extrabold shadow-sm hover:shadow-md transition-all active:scale-95 cursor-pointer"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2.5 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white rounded-xl text-xs font-extrabold shadow-sm hover:shadow-md transition-all active:scale-95 cursor-pointer min-w-0"
                     >
-                      <ClipboardCheck className="w-4 h-4" />
-                      <span>ตรวจสภาพประจำวัน</span>
+                      <ClipboardCheck className="w-4 h-4 shrink-0" />
+                      <span className="truncate">ตรวจสภาพ</span>
                     </button>
                     
                     <button 
@@ -1268,7 +1057,16 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
                       title="ประวัติการตรวจ"
                     >
                       <History className="w-4 h-4 text-indigo-500 shrink-0" />
-                      <span className="truncate">ประวัติการตรวจ</span>
+                      <span className="truncate">ประวัติ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setQrModalVehicle(vehicle)}
+                      className="p-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shrink-0"
+                      title="ดูและพิมพ์ป้าย QR Code รถคันนี้"
+                    >
+                      <QrCode className="w-4 h-4" />
                     </button>
 
                     {isAdminOrModerator && (
@@ -1278,7 +1076,7 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
                         title="ประวัติบำรุงรักษา"
                       >
                         <Wrench className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                        <span className="truncate">ประวัติบำรุงรักษา</span>
+                        <span className="truncate">บำรุงรักษา</span>
                       </button>
                     )}
                   </div>
@@ -1311,9 +1109,6 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
                   const isVehicleMaintenance = vehicle.status === 'maintenance';
                   const categoryInfo = getDDPMVehicleCategory(vehicle.vehicle_type);
                   const isMachinery = isDDPMHeavyMachinery(vehicle.vehicle_type) || categoryInfo.isMachinery;
-                  const latestInsp = latestInspections[vehicle.id];
-                  const inspIssues = latestInsp ? getInspectionIssues(latestInsp.results) : [];
-                  const hasInspDefects = inspIssues.length > 0;
 
                   return (
                     <tr 
@@ -1450,25 +1245,6 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
                               {isVehicleActive ? 'พร้อมใช้งาน' : isVehicleMaintenance ? 'แจ้งซ่อม' : 'ระงับ'}
                             </span>
                           </span>
-
-                          {latestInsp && hasInspDefects && (
-                            <div className="flex flex-col items-center gap-0.5 mt-0.5">
-                              <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3 text-rose-500 shrink-0" />
-                                <span>พบปัญหา</span>
-                              </span>
-                              <div className="flex flex-wrap justify-center gap-1 max-w-[180px]">
-                                {inspIssues.slice(0, 2).map((issue, idx) => (
-                                  <span key={idx} className="px-1.5 py-0.2 text-[9px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded border border-rose-300/40 truncate max-w-[150px]">
-                                    {issue.name}: {issue.note}
-                                  </span>
-                                ))}
-                                {inspIssues.length > 2 && (
-                                  <span className="text-[9px] text-rose-500 font-bold">+{inspIssues.length - 2} รายการ</span>
-                                )}
-                              </div>
-                            </div>
-                          )}
                         </div>
                       </td>
 
@@ -1489,6 +1265,14 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
                             title="ประวัติการตรวจ"
                           >
                             <History className="w-3.5 h-3.5 text-indigo-500" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setQrModalVehicle(vehicle)}
+                            className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 rounded-xl transition-all cursor-pointer"
+                            title="ดูและพิมพ์ป้าย QR Code รถคันนี้"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
                           </button>
                           {isAdminOrModerator && (
                             <button
@@ -2119,6 +1903,26 @@ export const VehicleManagementView: React.FC<{ user: any; hasPermission?: (key: 
           </div>
         </div>
       )}
+
+      {/* Vehicle QR Code Modal */}
+      {qrModalVehicle && (
+        <VehicleQrModal 
+          vehicle={qrModalVehicle}
+          isOpen={Boolean(qrModalVehicle)}
+          onClose={() => setQrModalVehicle(null)}
+          user={user}
+        />
+      )}
+
+      {/* Batch Vehicle QR Code Printing Modal */}
+      {isBatchQrModalOpen && (
+        <BatchVehicleQrModal 
+          vehicles={accessibleVehicles}
+          isOpen={isBatchQrModalOpen}
+          onClose={() => setIsBatchQrModalOpen(false)}
+          departments={departments}
+        />
+      )}
     </div>
   );
 };
@@ -2173,26 +1977,26 @@ const InspectionForm: React.FC<{
   const [verifierName, setVerifierName] = useState(defaultVerifier);
 
   const [results, setResults] = useState<Record<string, any>>({
-    '1_body': { status: 'normal', note: '' },
-    '2_tires': { status: 'normal', note: '' },
-    '3_radiator': { status: 'normal', low: false, refilled: false, frequent: false, note: '' },
-    '4_hose': { status: 'normal', note: '' },
-    '5_belt': { status: 'normal', note: '' },
-    '6_brake_fluid': { status: 'normal', refilled: false, frequent: false, note: '' },
-    '7_battery_water': { status: 'normal', refilled: false, frequent: false, note: '' },
-    '8_engine_oil': { status: 'normal', frequent: false, mixed: false, note: '' },
-    '9_engine_start': { status: 'normal', subStatus: '', note: '' },
-    '10_brake': { status: 'normal', note: '' },
-    '11_clutch': { status: 'normal', note: '' },
-    '12_steering': { status: 'normal', note: '' },
-    '13_horn': { status: 'normal', note: '' },
-    '14_lights': { status: 'normal', note: '' },
-    '15_wiper': { status: 'normal', note: '' },
+    '1_body': { status: 'normal', note: '', photos: [] },
+    '2_tires': { status: 'normal', note: '', photos: [] },
+    '3_radiator': { status: 'normal', low: false, refilled: false, frequent: false, note: '', photos: [] },
+    '4_hose': { status: 'normal', note: '', photos: [] },
+    '5_belt': { status: 'normal', note: '', photos: [] },
+    '6_brake_fluid': { status: 'normal', refilled: false, frequent: false, note: '', photos: [] },
+    '7_battery_water': { status: 'normal', refilled: false, frequent: false, note: '', photos: [] },
+    '8_engine_oil': { status: 'normal', frequent: false, mixed: false, note: '', photos: [] },
+    '9_engine_start': { status: 'normal', subStatus: '', note: '', photos: [] },
+    '10_brake': { status: 'normal', note: '', photos: [] },
+    '11_clutch': { status: 'normal', note: '', photos: [] },
+    '12_steering': { status: 'normal', note: '', photos: [] },
+    '13_horn': { status: 'normal', note: '', photos: [] },
+    '14_lights': { status: 'normal', note: '', photos: [] },
+    '15_wiper': { status: 'normal', note: '', photos: [] },
     '17_fuel': { level: 'half' },
-    '18_air': { status: 'normal', note: '' },
-    '19_cleanliness': { status: 'done', note: '' },
+    '18_air': { status: 'normal', note: '', photos: [] },
+    '19_cleanliness': { status: 'done', note: '', photos: [] },
     '20_last_used': { note: '' },
-    '21_others': { note: '' }
+    '21_others': { note: '', photos: [] }
   });
 
   const updateResult = (key: string, value: any) => {
@@ -2237,6 +2041,7 @@ const InspectionForm: React.FC<{
         if (!v) return false;
         if (v.status === 'not_normal' || v.status === 'not_done' || v.status === 'hard' || v.status === 'wont_start') return true;
         if (v.note && v.note.trim() && k !== '20_last_used' && k !== '21_others') return true;
+        if (Array.isArray(v.photos) && v.photos.length > 0) return true;
         return false;
       });
 
@@ -2391,6 +2196,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('1_body', { status: s })}
                 note={results['1_body']?.note}
                 onNoteChange={(n) => updateResult('1_body', { note: n })}
+                photos={results['1_body']?.photos || []}
+                onPhotosChange={(p) => updateResult('1_body', { photos: p })}
                 notePlaceholder="ระบุรอยยุบ สีถลอก ชน ชำรุด หรือตำหนิตัวถังที่พบ..."
               />
 
@@ -2401,6 +2208,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('2_tires', { status: s })}
                 note={results['2_tires']?.note}
                 onNoteChange={(n) => updateResult('2_tires', { note: n })}
+                photos={results['2_tires']?.photos || []}
+                onPhotosChange={(p) => updateResult('2_tires', { photos: p })}
                 notePlaceholder="ระบุล้อที่มีปัญหา ความดันลมอ่อน ยางแบน หรือดอกยางสึก..."
               />
 
@@ -2411,6 +2220,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('3_radiator', { status: s })}
                 note={results['3_radiator']?.note}
                 onNoteChange={(n) => updateResult('3_radiator', { note: n })}
+                photos={results['3_radiator']?.photos || []}
+                onPhotosChange={(p) => updateResult('3_radiator', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น น้ำแห้งผิดปกติ ต่ำกว่าระดับ Min พบคราบน้ำรั่วซึม..."
               >
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -2428,6 +2239,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('4_hose', { status: s })}
                 note={results['4_hose']?.note}
                 onNoteChange={(n) => updateResult('4_hose', { note: n })}
+                photos={results['4_hose']?.photos || []}
+                onPhotosChange={(p) => updateResult('4_hose', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น ท่อยางบวม แตกลายงา แข็งกรอบ หรือมีคราบน้ำรั่วซึม..."
               />
 
@@ -2438,6 +2251,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('5_belt', { status: s })}
                 note={results['5_belt']?.note}
                 onNoteChange={(n) => updateResult('5_belt', { note: n })}
+                photos={results['5_belt']?.photos || []}
+                onPhotosChange={(p) => updateResult('5_belt', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น สายพานหย่อน มีเสียงดังเอี๊ยด หรือเนื้อยางแตกลายงา..."
               />
 
@@ -2448,6 +2263,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('6_brake_fluid', { status: s })}
                 note={results['6_brake_fluid']?.note}
                 onNoteChange={(n) => updateResult('6_brake_fluid', { note: n })}
+                photos={results['6_brake_fluid']?.photos || []}
+                onPhotosChange={(p) => updateResult('6_brake_fluid', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น น้ำมันลดฮวบ ต่ำกว่าระดับ Min หรือมีรอยน้ำมันรั่วซึม..."
               >
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -2464,6 +2281,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('7_battery_water', { status: s })}
                 note={results['7_battery_water']?.note}
                 onNoteChange={(n) => updateResult('7_battery_water', { note: n })}
+                photos={results['7_battery_water']?.photos || []}
+                onPhotosChange={(p) => updateResult('7_battery_water', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น น้ำกลั่นแห้ง มีขี้เกลือเกาะที่ขั้ว หรือแบตเตอรี่บวม..."
               >
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -2480,6 +2299,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('8_engine_oil', { status: s })}
                 note={results['8_engine_oil']?.note}
                 onNoteChange={(n) => updateResult('8_engine_oil', { note: n })}
+                photos={results['8_engine_oil']?.photos || []}
+                onPhotosChange={(p) => updateResult('8_engine_oil', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น น้ำมันเครื่องดำคล้ำมาก พร่องต่ำกว่าขีด L หรือมีสิ่งเจือปน..."
               >
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -2503,6 +2324,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('9_engine_start', { status: s })}
                 note={results['9_engine_start']?.note}
                 onNoteChange={(n) => updateResult('9_engine_start', { note: n })}
+                photos={results['9_engine_start']?.photos || []}
+                onPhotosChange={(p) => updateResult('9_engine_start', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น บิดกุญแจแล้วเงียบ ไดสตาร์ตหมุนอืด สตาร์ตหลายครั้ง..."
               >
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -2519,6 +2342,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('10_brake', { status: s })}
                 note={results['10_brake']?.note}
                 onNoteChange={(n) => updateResult('10_brake', { note: n })}
+                photos={results['10_brake']?.photos || []}
+                onPhotosChange={(p) => updateResult('10_brake', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น เบรกลึก เบรกจม เบรกแล้วปัด แป้นเบรกสั่น มีเสียงดัง..."
               />
 
@@ -2529,6 +2354,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('11_clutch', { status: s })}
                 note={results['11_clutch']?.note}
                 onNoteChange={(n) => updateResult('11_clutch', { note: n })}
+                photos={results['11_clutch']?.photos || []}
+                onPhotosChange={(p) => updateResult('11_clutch', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น คลัตช์จม คลัตช์ลื่น เข้าเกียร์ยาก แป้นคลัตช์แข็งผิดปกติ..."
               />
 
@@ -2539,6 +2366,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('12_steering', { status: s })}
                 note={results['12_steering']?.note}
                 onNoteChange={(n) => updateResult('12_steering', { note: n })}
+                photos={results['12_steering']?.photos || []}
+                onPhotosChange={(p) => updateResult('12_steering', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น พวงมาลัยหนัก เลี้ยวมีเสียงดัง ระยะฟรีมาก พวงมาลัยดึงข้าง..."
               />
 
@@ -2549,6 +2378,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('13_horn', { status: s })}
                 note={results['13_horn']?.note}
                 onNoteChange={(n) => updateResult('13_horn', { note: n })}
+                photos={results['13_horn']?.photos || []}
+                onPhotosChange={(p) => updateResult('13_horn', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น แตรไม่ดังเลย เสียงเบามาก หรือเสียงแตกผิดปกติ..."
               />
 
@@ -2559,6 +2390,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('14_lights', { status: s })}
                 note={results['14_lights']?.note}
                 onNoteChange={(n) => updateResult('14_lights', { note: n })}
+                photos={results['14_lights']?.photos || []}
+                onPhotosChange={(p) => updateResult('14_lights', { photos: p })}
                 notePlaceholder="ระบุจุดที่หลอดไฟขาด หรือไม่ติด (เช่น ไฟหน้าซ้าย, ไฟเลี้ยวขวา, ไฟเบรก)..."
               />
 
@@ -2569,6 +2402,8 @@ const InspectionForm: React.FC<{
                 onStatusChange={(s) => updateResult('15_wiper', { status: s })}
                 note={results['15_wiper']?.note}
                 onNoteChange={(n) => updateResult('15_wiper', { note: n })}
+                photos={results['15_wiper']?.photos || []}
+                onPhotosChange={(p) => updateResult('15_wiper', { photos: p })}
                 notePlaceholder="ระบุปัญหา เช่น ยางปัดฉีกขาด ปัดไม่เกลี้ยง ปัดสะดุด น้ำฉีดกระจกไม่ออก..."
               />
             </div>
@@ -2620,7 +2455,7 @@ const InspectionForm: React.FC<{
                     { id: 'empty', label: 'ต่ำกว่า 1/4' },
                     { id: 'quarter', label: '1 ใน 4 ถัง' },
                     { id: 'half', label: 'ครึ่งถัง (1/2)' },
-                    { id: 'full', label: 'เต็มถัง (Full)' }
+                    { id: 'full', label: 'มากกว่าครึ่งถัง' }
                   ].map(fuelOption => (
                     <button
                       key={fuelOption.id}
@@ -2649,6 +2484,8 @@ const InspectionForm: React.FC<{
                   onStatusChange={(s) => updateResult('18_air', { status: s })}
                   note={results['18_air']?.note}
                   onNoteChange={(n) => updateResult('18_air', { note: n })}
+                  photos={results['18_air']?.photos || []}
+                  onPhotosChange={(p) => updateResult('18_air', { photos: p })}
                   notePlaceholder="ระบุปัญหา เช่น แอร์ไม่เย็น ลมเป่าเบา มีกลิ่นเหม็นอับ คอมแอร์เสียงดัง..."
                 />
 
@@ -2659,6 +2496,8 @@ const InspectionForm: React.FC<{
                   onStatusChange={(s) => updateResult('19_cleanliness', { status: s === 'normal' ? 'done' : 'not_normal' })}
                   note={results['19_cleanliness']?.note}
                   onNoteChange={(n) => updateResult('19_cleanliness', { note: n })}
+                  photos={results['19_cleanliness']?.photos || []}
+                  onPhotosChange={(p) => updateResult('19_cleanliness', { photos: p })}
                   notePlaceholder="ระบุจุดที่ไม่สะอาด เช่น ตัวถังเปื้อนโคลน, ภายในห้องโดยสารสกปรก..."
                 >
                   <div className="flex gap-2 mt-3">
@@ -2753,17 +2592,76 @@ const InspectionForm: React.FC<{
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1.5">
-                  21. อื่นๆ / หมายเหตุเพิ่มเติม
-                </label>
+              <div className="p-4 rounded-2xl bg-[var(--bg-canvas)] border border-[var(--border-light)] space-y-2.5">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="block text-xs font-bold text-[var(--text-secondary)]">
+                    21. อื่นๆ / หมายเหตุเพิ่มเติม
+                  </label>
+                  <label className="flex items-center gap-1.5 px-3 py-1 bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border border-[var(--border-light)] rounded-xl text-xs font-bold text-[var(--text-secondary)] cursor-pointer transition active:scale-95 shadow-xs">
+                    <Camera className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>แนบรูปเพิ่มเติม (เซิร์ฟเวอร์)</span>
+                    <input 
+                      type="file" 
+                      multiple 
+                      accept="image/*" 
+                      onChange={async (e) => {
+                        const files = e.target.files;
+                        if (!files || files.length === 0) return;
+                        const currentOthersPhotos = [...(results['21_others']?.photos || [])];
+                        for (let i = 0; i < files.length; i++) {
+                          const file = files[i];
+                          if (!file.type.startsWith('image/')) continue;
+                          const formData = new FormData();
+                          formData.append('subfolder', 'vehicles/inspection');
+                          formData.append('files', file);
+                          try {
+                            const res = await fetch('/api/upload?subfolder=vehicles/inspection', {
+                              method: 'POST',
+                              body: formData
+                            });
+                            if (res.ok) {
+                              const data = await res.json();
+                              const url = data.files?.[0]?.url || data.url;
+                              if (url) currentOthersPhotos.push(url);
+                            }
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }
+                        updateResult('21_others', { photos: currentOthersPhotos });
+                        e.target.value = '';
+                      }} 
+                      className="hidden" 
+                    />
+                  </label>
+                </div>
                 <textarea 
                   placeholder="ระบุข้อสังเกตเพิ่มเติม (ถ้ามี)..."
                   value={results['21_others']?.note || ''}
                   onChange={(e) => updateResult('21_others', { note: e.target.value })}
-                  className="w-full p-3 bg-[var(--bg-canvas)] border border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl text-xs text-[var(--text-primary)] outline-none"
+                  className="w-full p-2.5 bg-[var(--bg-surface)] border border-[var(--border-light)] focus:border-[var(--primary-color)] rounded-xl text-xs text-[var(--text-primary)] outline-none"
                   rows={2}
                 />
+                {results['21_others']?.photos && results['21_others'].photos.length > 0 && (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 pt-1">
+                    {results['21_others'].photos.map((url: string, idx: number) => (
+                      <div key={idx} className="relative group rounded-xl overflow-hidden border border-[var(--border-light)] aspect-square bg-black/5">
+                        <img src={url} alt={`Other ${idx + 1}`} className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const filtered = results['21_others'].photos.filter((_: any, i: number) => i !== idx);
+                            updateResult('21_others', { photos: filtered });
+                          }}
+                          className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-md opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                          title="ลบรูปนี้"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -3002,6 +2900,7 @@ const InspectionHistory: React.FC<{
   const { confirm } = useConfirm();
   const [history, setHistory] = useState<Inspection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
 
   const fetchHistory = async () => {
     try {
@@ -3077,13 +2976,25 @@ const InspectionHistory: React.FC<{
           </div>
         </div>
 
-        <button 
-          onClick={onStartNewInspection}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white rounded-2xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>บันทึกตรวจสภาพใหม่</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            type="button"
+            onClick={() => setIsQrModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-light)] text-[var(--text-primary)] border border-[var(--border-light)] rounded-2xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-2xs"
+            title="ดูและพิมพ์ป้าย QR Code รถคันนี้"
+          >
+            <QrCode className="w-4 h-4 text-indigo-500" />
+            <span>ป้าย QR Code</span>
+          </button>
+
+          <button 
+            onClick={onStartNewInspection}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[var(--primary-color)] hover:bg-[var(--primary-hover)] text-white rounded-2xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>บันทึกตรวจสภาพใหม่</span>
+          </button>
+        </div>
       </div>
 
       {/* History List */}
@@ -3116,7 +3027,7 @@ const InspectionHistory: React.FC<{
         <div className="space-y-3">
           {history.map((item, idx) => {
             const itemResults = typeof item.results === 'string' ? JSON.parse(item.results || '{}') : (item.results || {});
-            const issueList: { name: string; note: string }[] = [];
+            const issueList: { name: string; note: string; photoCount?: number }[] = [];
             
             const fieldTitles: Record<string, string> = {
               '1_body': 'สภาพตัวถัง/สี',
@@ -3142,10 +3053,12 @@ const InspectionHistory: React.FC<{
               if (!v) return;
               const isAbnormal = v.status === 'not_normal' || v.status === 'not_done' || v.status === 'hard' || v.status === 'wont_start';
               const hasNote = v.note && v.note.trim() && k !== '20_last_used' && k !== '21_others';
-              if (isAbnormal || hasNote) {
+              const photoCount = Array.isArray(v.photos) ? v.photos.length : 0;
+              if (isAbnormal || hasNote || photoCount > 0) {
                 issueList.push({
                   name: fieldTitles[k] || k,
-                  note: v.note || (v.status === 'not_normal' ? 'ไม่ปกติ' : v.status === 'not_done' ? 'ยังไม่ได้ทำความสะอาด' : '')
+                  note: v.note || (v.status === 'not_normal' ? 'ไม่ปกติ' : v.status === 'not_done' ? 'ยังไม่ได้ทำความสะอาด' : ''),
+                  photoCount
                 });
               }
             });
@@ -3220,9 +3133,15 @@ const InspectionHistory: React.FC<{
                     {hasDefects && (
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {issueList.slice(0, 3).map((issue, i) => (
-                          <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/5 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[11px]">
+                          <span key={i} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-rose-500/5 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[11px]">
                             <span className="font-bold">{issue.name}:</span>
                             <span className="truncate max-w-[150px]">{issue.note || 'ไม่ปกติ'}</span>
+                            {issue.photoCount > 0 && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold px-1 rounded">
+                                <Camera className="w-2.5 h-2.5" />
+                                {issue.photoCount}
+                              </span>
+                            )}
                           </span>
                         ))}
                         {issueList.length > 3 && (
@@ -3269,6 +3188,16 @@ const InspectionHistory: React.FC<{
           })}
         </div>
       )}
+
+      {/* Vehicle QR Modal */}
+      {isQrModalOpen && (
+        <VehicleQrModal 
+          vehicle={vehicle}
+          isOpen={isQrModalOpen}
+          onClose={() => setIsQrModalOpen(false)}
+          user={user}
+        />
+      )}
     </div>
   );
 };
@@ -3289,7 +3218,8 @@ const InspectionItem: React.FC<{
   children?: React.ReactNode;
 }> = ({ num, title, status, onStatusChange, note, onNoteChange, notePlaceholder, photos = [], onPhotosChange, children }) => {
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
-  const isNotNormal = status === 'not_normal';
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const isNotNormal = status === 'not_normal' || status === 'not_done' || status === 'hard' || status === 'wont_start';
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -3302,7 +3232,10 @@ const InspectionItem: React.FC<{
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (!file.type.startsWith('image/')) continue;
-        if (file.size > 15 * 1024 * 1024) continue;
+        if (file.size > 20 * 1024 * 1024) {
+          alert(`ไฟล์ "${file.name}" มีขนาดเกิน 20MB`);
+          continue;
+        }
 
         const formData = new FormData();
         formData.append('subfolder', 'vehicles/inspection');
@@ -3318,12 +3251,15 @@ const InspectionItem: React.FC<{
           if (url) {
             newPhotos.push(url);
           }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          alert(`ไม่สามารถอัปโหลดไฟล์ "${file.name}": ${errData.error || 'ข้อผิดพลาดจากเซิร์ฟเวอร์'}`);
         }
       }
       onPhotosChange(newPhotos);
     } catch (err) {
       console.error('Photo upload error:', err);
-      alert('เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ');
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์เพื่ออัปโหลดรูปภาพ');
     } finally {
       setUploadingPhotos(false);
       e.target.value = '';
@@ -3395,32 +3331,52 @@ const InspectionItem: React.FC<{
       {children}
 
       {/* Auto-render problem input and photo attachments if not normal */}
-      {isNotNormal && onNoteChange && (
-        <div className="mt-3.5 pt-3 border-t border-rose-200 dark:border-rose-900/40 animate-fade-in space-y-3">
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-              <span>ระบุปัญหา / อาการชำรุดที่พบ :</span>
-              <span className="text-[10px] font-medium text-rose-500/80">(ระบุรายละเอียดเพื่อแจ้งซ่อมบำรุง)</span>
-            </label>
-            <textarea 
-              rows={2}
-              placeholder={notePlaceholder || `ระบุรายละเอียดความผิดปกติหรืออาการชำรุดของ ${title}...`}
-              value={note || ''}
-              onChange={(e) => onNoteChange(e.target.value)}
-              className="w-full p-2.5 text-xs bg-[var(--bg-canvas)] border border-rose-300 dark:border-rose-800/80 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 rounded-xl outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all resize-none shadow-xs"
-            />
-          </div>
-
-          {/* Unlimited Photo Attachments */}
-          {onPhotosChange && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <label className="flex items-center gap-1.5 text-xs font-bold text-[var(--text-secondary)]">
-                  <Camera className="w-3.5 h-3.5 text-rose-600" />
-                  <span>แนบรูปภาพจุดที่ชำรุด/หลักฐาน (ไม่จำกัดจำนวน):</span>
+      {isNotNormal && (
+        <div className="mt-3.5 pt-3.5 border-t border-rose-200 dark:border-rose-900/40 animate-fade-in space-y-3.5">
+          {/* Note Input */}
+          {onNoteChange && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs font-black text-rose-600 dark:text-rose-400">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>ระบุปัญหา / อาการชำรุดที่พบ :</span>
                 </label>
-                <label className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs">
+                <span className="text-[10px] font-semibold text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded-md">
+                  จำเป็นต้องระบุรายละเอียด
+                </span>
+              </div>
+              <textarea 
+                rows={2}
+                placeholder={notePlaceholder || `ระบุรายละเอียดความผิดปกติหรืออาการชำรุดของ ${title}...`}
+                value={note || ''}
+                onChange={(e) => onNoteChange(e.target.value)}
+                className="w-full p-2.5 text-xs bg-[var(--bg-canvas)] border border-rose-300 dark:border-rose-800/80 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 rounded-xl outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all resize-none shadow-xs"
+              />
+            </div>
+          )}
+
+          {/* Photo Attachments to Server (Optional) */}
+          {onPhotosChange && (
+            <div className="space-y-2 p-3 rounded-xl bg-white/70 dark:bg-slate-900/50 border border-rose-200 dark:border-rose-900/40">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs font-black text-[var(--text-primary)]">
+                    <Camera className="w-4 h-4 text-rose-500" />
+                    <span>แนบรูปภาพลงเซิร์ฟเวอร์</span>
+                    <span className="text-[10px] font-semibold text-[var(--text-muted)] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                      (จะแนบหรือไม่แนบก็ได้)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                    บันทึกภาพถ่ายจุดที่ชำรุดหรือหลักฐานลงเซิร์ฟเวอร์ เพื่อแสดงในรายงาน A4
+                  </p>
+                </div>
+
+                <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                  uploadingPhotos 
+                    ? 'bg-slate-400 text-white cursor-not-allowed' 
+                    : 'bg-rose-600 hover:bg-rose-700 text-white active:scale-95'
+                }`}>
                   {uploadingPhotos ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -3429,7 +3385,7 @@ const InspectionItem: React.FC<{
                   ) : (
                     <>
                       <UploadCloud className="w-3.5 h-3.5" />
-                      <span>+ เพิ่มรูปภาพ (เลือกได้หลายรูป)</span>
+                      <span>+ แนบรูปภาพ</span>
                     </>
                   )}
                   <input 
@@ -3443,25 +3399,65 @@ const InspectionItem: React.FC<{
                 </label>
               </div>
 
+              {/* Photos Gallery */}
               {photos && photos.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                   {photos.map((url, idx) => (
                     <div key={idx} className="relative group rounded-xl overflow-hidden border border-[var(--border-light)] bg-black/5 aspect-square shadow-xs">
-                      <img src={url} alt={`Evidence ${idx + 1}`} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <img 
+                        src={url} 
+                        alt={`Evidence ${idx + 1}`} 
+                        className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform" 
+                        onClick={() => setPreviewPhoto(url)}
+                      />
+                      <span className="absolute bottom-1 left-1 px-1 py-0.5 rounded bg-black/60 text-[9px] font-bold text-white leading-none">
+                        #{idx + 1}
+                      </span>
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewPhoto(url)}
+                          className="p-1.5 bg-white/90 text-slate-800 rounded-lg hover:bg-white transition cursor-pointer"
+                          title="ดูรูปขนาดใหญ่"
+                        >
+                          <ZoomIn className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => removePhoto(idx)}
-                          className="p-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-all cursor-pointer shadow-md"
+                          className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition cursor-pointer"
                           title="ลบรูปนี้"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Lightbox Modal */}
+          {previewPhoto && (
+            <div 
+              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+              onClick={() => setPreviewPhoto(null)}
+            >
+              <div className="relative max-w-2xl w-full bg-slate-900 rounded-2xl overflow-hidden shadow-2xl p-2" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-2 text-white">
+                  <span className="text-xs font-bold truncate">รูปภาพหลักฐาน ({title})</span>
+                  <button 
+                    onClick={() => setPreviewPhoto(null)}
+                    className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="w-full max-h-[75vh] flex items-center justify-center overflow-hidden rounded-xl bg-black">
+                  <img src={previewPhoto} alt="Preview" className="max-w-full max-h-[75vh] object-contain" />
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -3495,6 +3491,11 @@ interface ReportPrintViewProps {
   customVerifierName?: string;
   customFormNumber?: string;
   fontSize?: 'sm' | 'base' | 'lg';
+  borderWidth?: 'ultrathin' | 'thin' | 'normal' | 'thick';
+  includePhotos?: boolean;
+  includeVehiclePhoto?: boolean;
+  photosPerPage?: 2 | 4 | 6 | 8;
+  additionalPhotos?: { title: string; note: string; url: string }[];
 }
 
 const ReportPrintView: React.FC<ReportPrintViewProps> = ({ 
@@ -3504,7 +3505,12 @@ const ReportPrintView: React.FC<ReportPrintViewProps> = ({
   customDriverName,
   customVerifierName,
   customFormNumber,
-  fontSize = 'base'
+  fontSize = 'base',
+  borderWidth = 'thin',
+  includePhotos = true,
+  includeVehiclePhoto = true,
+  photosPerPage = 2,
+  additionalPhotos = []
 }) => {
   const r = typeof inspection.results === 'string' ? JSON.parse(inspection.results) : (inspection.results || {});
   const date = new Date(inspection.submitted_at || Date.now());
@@ -3537,87 +3543,269 @@ const ReportPrintView: React.FC<ReportPrintViewProps> = ({
 
   const fontSizePx = fontSize === 'sm' ? '13px' : fontSize === 'lg' ? '16px' : '14.5px';
 
+  // Extract all photos for Appendix pages
+  const allPhotos: { title: string; note: string; url: string; category: 'vehicle' | 'defect' | 'evidence' | 'extra' }[] = [];
+
+  // 1. Vehicle main image (if enabled & available)
+  if (includeVehiclePhoto && vehicle.image_url) {
+    allPhotos.push({
+      title: `ภาพถ่ายยานพาหนะ (ทะเบียน ${vehicle.license_plate} ${vehicle.province || 'ระยอง'})`,
+      note: `${vehicle.brand || ''} ${vehicle.model || ''} • หมายเลขประจำรถ: ${vehicle.vehicle_number || '-'}${vehicle.department ? ` • ${vehicle.department}` : ''}`,
+      url: vehicle.image_url,
+      category: 'vehicle'
+    });
+  }
+
+  // 2. Inspection check items photos
+  const fieldTitles: Record<string, string> = {
+    '1_body': 'ข้อ 1. สภาพตัวถัง/สี',
+    '2_tires': 'ข้อ 2. ลมยางและสภาพยาง',
+    '3_radiator': 'ข้อ 3. น้ำในหม้อน้ำ/น้ำยาหล่อเย็น',
+    '4_hose': 'ข้อ 4. ท่อยางหม้อน้ำ',
+    '5_belt': 'ข้อ 5. สายพานเครื่องยนต์',
+    '6_brake_fluid': 'ข้อ 6. น้ำมันคลัช เบรก',
+    '7_battery_water': 'ข้อ 7. น้ำกลั่นแบตเตอรี่',
+    '8_engine_oil': 'ข้อ 8. น้ำมันเครื่อง',
+    '9_engine_start': 'ข้อ 9. ติดเครื่องยนต์',
+    '10_brake': 'ข้อ 10. ระบบเบรก',
+    '11_clutch': 'ข้อ 11. ระบบคลัช',
+    '12_steering': 'ข้อ 12. พวงมาลัย',
+    '13_horn': 'ข้อ 13. แตรสัญญาณ',
+    '14_lights': 'ข้อ 14. ดวงไฟสัญญาณต่างๆ',
+    '15_wiper': 'ข้อ 15. ที่ปัดน้ำฝน',
+    '16_mileage': 'ข้อ 16. เลขไมล์วัดระยะทาง',
+    '17_fuel': 'ข้อ 17. ระดับน้ำมันเชื้อเพลิง',
+    '18_air': 'ข้อ 18. ระบบแอร์รถยนต์',
+    '19_cleanliness': 'ข้อ 19. ความสะอาดทั่วไป',
+    '20_last_used': 'ข้อ 20. ใช้รถครั้งสุดท้าย',
+    '21_others': 'ข้อ 21. อื่นๆ / ข้อสังเกตเพิ่มเติม'
+  };
+
+  Object.entries(r).forEach(([k, v]: [string, any]) => {
+    if (!v) return;
+    const itemTitle = fieldTitles[k] || k;
+    const itemNote = v.note || (v.status === 'not_normal' ? 'พบข้อบกพร่อง/ชำรุด' : '');
+    if (Array.isArray(v.photos)) {
+      v.photos.forEach((photoUrl: string, pIdx: number) => {
+        if (photoUrl && typeof photoUrl === 'string') {
+          allPhotos.push({
+            title: v.photos.length > 1 ? `${itemTitle} (ภาพที่ ${pIdx + 1})` : itemTitle,
+            note: itemNote || 'ภาพถ่ายสภาพจุดตรวจเช็ค',
+            url: photoUrl,
+            category: 'defect'
+          });
+        }
+      });
+    }
+  });
+
+  // 3. Top-level photos array in results or inspection
+  const extraList = r.photos || r.damage_photos || r.evidence_photos || (inspection as any).photos || (inspection as any).evidence_photos;
+  if (Array.isArray(extraList)) {
+    extraList.forEach((photoUrl: string, idx: number) => {
+      if (photoUrl && typeof photoUrl === 'string' && !allPhotos.some(p => p.url === photoUrl)) {
+        allPhotos.push({
+          title: `ภาพถ่ายหลักฐานการตรวจสภาพ ที่ ${idx + 1}`,
+          note: 'ภาพประกอบการตรวจสภาพประจำวัน',
+          url: photoUrl,
+          category: 'evidence'
+        });
+      }
+    });
+  }
+
+  // 4. Additional photos from user upload in modal
+  if (additionalPhotos && additionalPhotos.length > 0) {
+    additionalPhotos.forEach(p => {
+      if (p.url && !allPhotos.some(existing => existing.url === p.url)) {
+        allPhotos.push({
+          title: p.title || 'ภาพถ่ายประกอบเพิ่มเติม',
+          note: p.note || 'ภาพถ่ายแนบเพิ่มเติมในรายงาน',
+          url: p.url,
+          category: 'extra'
+        });
+      }
+    });
+  }
+
+  const chunkSize = photosPerPage || 2;
+  const photoPages: typeof allPhotos[] = [];
+  if (includePhotos && allPhotos.length > 0) {
+    for (let i = 0; i < allPhotos.length; i += chunkSize) {
+      photoPages.push(allPhotos.slice(i, i + chunkSize));
+    }
+  }
+
+  const toThaiNum = (num: number | string) => {
+    return String(num);
+  };
+
+  // Border thickness config
+  const getBorderConfig = () => {
+    switch (borderWidth) {
+      case 'ultrathin':
+        return {
+          screen: '0.45px solid #475569',
+          screenOuter: '0.65px solid #334155',
+          print: '0.3pt solid #333333',
+          printOuter: '0.45pt solid #222222',
+        };
+      case 'normal':
+        return {
+          screen: '1px solid #1e293b',
+          screenOuter: '1.25px solid #0f172a',
+          print: '0.75pt solid #111111',
+          printOuter: '1pt solid #000000',
+        };
+      case 'thick':
+        return {
+          screen: '1.5px solid #000000',
+          screenOuter: '2px solid #000000',
+          print: '1.2pt solid #000000',
+          printOuter: '1.5pt solid #000000',
+        };
+      case 'thin':
+      default:
+        return {
+          screen: '0.6px solid #475569',
+          screenOuter: '0.85px solid #334155',
+          print: '0.45pt solid #2a2a2a',
+          printOuter: '0.65pt solid #1a1a1a',
+        };
+    }
+  };
+  const borderCfg = getBorderConfig();
+
   return (
-    <div className="sheet a4-page-sheet">
+    <>
       <style>{`
         :root {
           --ink: #000;
-          --line: #000;
+          --line: #475569;
         }
         .sheet {
-          width: 100%;
-          max-width: 210mm;
+          width: 794px;
+          height: 1123px;
+          max-height: 1123px;
           background: #fff;
-          padding: 8mm 9mm;
-          box-shadow: none;
+          padding: 6.5mm 8mm;
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
           font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
           color: var(--ink);
-          margin: 0 auto;
+          margin: 0 auto 20px auto;
           box-sizing: border-box;
+          position: relative;
+          overflow: hidden;
+        }
+        .sheet:last-child {
+          margin-bottom: 0;
         }
         @media print {
           @page {
             size: A4 portrait;
-            margin: 0;
+            margin: 0mm !important;
           }
           body {
             margin: 0 !important;
             padding: 0 !important;
             background: #fff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .no-print {
+            display: none !important;
           }
           .sheet {
             box-shadow: none !important;
-            padding: 8mm 9mm !important;
-            width: 210mm !important;
+            padding: 6mm 8mm !important;
+            width: 100% !important;
+            max-width: 210mm !important;
+            height: 296mm !important;
+            max-height: 296.5mm !important;
+            min-height: unset !important;
+            margin: 0 auto !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            box-sizing: border-box !important;
+            background: #fff !important;
+            overflow: hidden !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .sheet:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+          table.outer {
+            border: ${borderCfg.printOuter} !important;
+          }
+          table.outer > tbody > tr > td {
+            border-left: ${borderCfg.print} !important;
+            border-right: ${borderCfg.print} !important;
+            border-bottom: ${borderCfg.print} !important;
           }
         }
         table.outer {
           width: 100%;
           border-collapse: collapse;
-          border: 1px solid var(--line);
+          border: ${borderCfg.screenOuter};
           table-layout: fixed;
           font-size: ${fontSizePx};
-          line-height: 1.42;
+          line-height: 1.38;
           font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
           color: var(--ink);
         }
         table.outer col.c1 { width: 50%; }
         table.outer col.c2 { width: 50%; }
         table.outer > tbody > tr > td {
-          border-left: 1px solid var(--line);
-          border-right: 1px solid var(--line);
-          border-bottom: 1px solid var(--line);
+          border-left: ${borderCfg.screen};
+          border-right: ${borderCfg.screen};
+          border-bottom: ${borderCfg.screen};
           vertical-align: top;
-          padding: 3px 7px;
-          overflow: hidden;
+          padding: 3.5px 8px;
+          box-sizing: border-box;
         }
         .header-cell {
           text-align: center;
-          padding: 6px 6px 5px !important;
+          padding: 6px 10px 5px !important;
         }
-        .header-cell .t1 { font-size: 18px; font-weight: 700; display: block; margin-bottom: 2px; }
-        .header-cell .t2 { display: block; margin-bottom: 1px; }
-        .header-cell .t3 { display: block; }
+        .header-cell .t1 { font-size: 17.5px; font-weight: 700; display: block; margin-bottom: 2px; line-height: 1.3; }
+        .header-cell .t2 { display: block; margin-bottom: 2px; line-height: 1.35; }
+        .header-cell .t3 { display: block; line-height: 1.35; }
         .dots { letter-spacing: 1px; }
-        .col-head-row td { font-weight: 700; }
-        .col-head-row td.blank-left { height: 22px; }
-        .rules-cell u { text-underline-offset: 2px; }
-        .rules-cell ol { margin: 3px 0 0 0; padding-left: 20px; }
-        .rules-cell li { margin-bottom: 2px; }
-        td.item-cell { padding: 3px 7px; }
+        .col-head-row td { 
+          font-weight: 700; 
+          padding: 4px 8px !important;
+          line-height: 1.35;
+        }
+        .col-head-row td.blank-left { height: 20px; }
+        .rules-cell u { text-underline-offset: 3px; }
+        .rules-cell ol { margin: 2px 0 0 0; padding-left: 18px; }
+        .rules-cell li { margin-bottom: 1.5px; line-height: 1.38; }
+        td.item-cell { padding: 3px 8px; }
         .item-num { font-weight: 700; }
-        .opt-row { margin: 0 0 1px 2px; }
-        .opt { display: inline-block; white-space: nowrap; margin-right: 26px; }
-        .note-line { margin-left: 2px; }
-        .full-dots-row td { height: 16px; padding: 2px 7px; }
-        .footer-head td { font-weight: 700; }
-        .footer-body td { vertical-align: top; padding: 4px 7px 6px; }
-        .footer-body p { margin: 2px 0; }
+        .opt-row { margin: 1px 0 1.5px 2px; line-height: 1.38; }
+        .opt { display: inline-block; white-space: nowrap; margin-right: 18px; }
+        .note-line { margin: 1px 0 1px 2px; line-height: 1.38; }
+        .full-dots-row td { height: 16px; padding: 2px 8px; }
+        .footer-head td { 
+          font-weight: 700; 
+          padding: 4px 8px !important;
+          text-align: center;
+        }
+        .footer-body td { 
+          vertical-align: top; 
+          padding: 4px 8px 6px !important; 
+          line-height: 1.38;
+        }
+        .footer-body p { margin: 1.5px 0; }
         .footer-sign-wrapper {
           display: flex;
           justify-content: center;
           align-items: flex-start;
-          margin: 3px 0 2px;
+          margin: 2px 0 2px;
         }
         .footer-sign-col {
           display: inline-flex;
@@ -3635,7 +3823,7 @@ const ReportPrintView: React.FC<ReportPrintViewProps> = ({
           display: block;
           text-align: center;
           white-space: nowrap;
-          margin-top: 2px;
+          margin-top: 1.5px;
           line-height: 1.25;
         }
         .footer-sign-role {
@@ -3644,12 +3832,16 @@ const ReportPrintView: React.FC<ReportPrintViewProps> = ({
           line-height: 1.25;
         }
         .top-form-meta {
-          text-align: right;
+          display: flex;
+          justify-content: flex-end;
+          align-items: center;
           font-size: 11px;
-          color: #333;
-          margin-bottom: 2px;
+          color: #1a1a1a;
+          margin-bottom: 5px;
+          padding: 0 0 2px 0;
           font-weight: 600;
-          line-height: 1;
+          line-height: 1.3;
+          letter-spacing: 0.2px;
         }
         .bottom-system-meta {
           display: flex;
@@ -3658,27 +3850,16 @@ const ReportPrintView: React.FC<ReportPrintViewProps> = ({
           font-size: 9px;
           color: #666;
           margin-top: 3px;
-          line-height: 1;
+          padding-top: 1px;
+          line-height: 1.2;
         }
-        .last-note { font-size: 13.5px; }
-
-        @media print {
-          body { background: #fff !important; }
-          .no-print { display: none !important; }
-          .page-wrap { padding: 0 !important; }
-          .sheet { 
-            box-shadow: none !important; 
-            width: 100% !important; 
-            min-height: auto !important; 
-            padding: 4mm 6mm 2mm !important; 
-            margin: 0 !important; 
-          }
-          @page { size: A4; margin: 6mm 7mm 4mm 7mm; }
-        }
+        .last-note { font-size: 13px; }
       `}</style>
 
-      <div className="top-form-meta">{customFormNumber || 'แบบ ปภ. รย-01'}</div>
-      <table className="outer">
+      {/* PAGE 1: Checklist Table Form */}
+      <div className="sheet a4-page-sheet">
+        <div className="top-form-meta">{customFormNumber || 'FM-DPM-PPO-001 | Rev.00'}</div>
+        <table className="outer">
         <colgroup>
           <col className="c1" />
           <col className="c2" />
@@ -3985,9 +4166,104 @@ const ReportPrintView: React.FC<ReportPrintViewProps> = ({
       </table>
 
       <div className="bottom-system-meta">
-        <span>พิมพ์จากระบบบริหารจัดการงานสารบรรณและยานพาหนะ ปภ. ระยอง (DDPM Rayong Smart EDMS)</span>
+        <span>ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)</span>
       </div>
     </div>
+
+    {/* PAGE 2 ONWARDS: APPENDIX INSPECTION PHOTOS */}
+    {includePhotos && photoPages.map((pagePhotos, pageIdx) => {
+      return (
+        <div key={pageIdx} className="sheet a4-page-sheet flex flex-col justify-between">
+          <div>
+            {/* Header Meta */}
+            <div className="top-form-meta">
+              <span>{customFormNumber || 'FM-DPM-PPO-001 | Rev.00'} | หน้า {pageIdx + 2} (ภาคผนวกภาพถ่าย)</span>
+            </div>
+
+            {/* Title Header */}
+            <div className="text-center my-2">
+              <span className="text-[16px] font-bold block text-black">บันทึกรายงานตรวจความเรียบร้อยรถยนต์ประจำวัน</span>
+              <span className="text-[13.5px] font-bold block mt-0.5 text-black">
+                ภาคผนวกภาพถ่ายการตรวจสภาพและความเรียบร้อยของยานพาหนะ (ชุดที่ {pageIdx + 1} จาก {photoPages.length} หน้า)
+              </span>
+              <span className="text-[12.5px] block mt-1 text-black">
+                <b>รถยนต์หมายเลข</b> <span className="dots px-1 font-normal">{vehicle.vehicle_number || '-'}</span> 
+                &nbsp;&nbsp;<b>หมายเลขทะเบียน</b> <span className="dots px-1 font-normal">{vehicle.license_plate} {vehicle.province || 'ระยอง'}</span> 
+                &nbsp;&nbsp;<b>วันที่ตรวจ</b> <span className="dots px-1 font-normal">{day} {month} {year}</span>
+              </span>
+            </div>
+
+            {/* Photos Grid */}
+            <div className={`mt-2 ${
+              photosPerPage === 2 ? 'flex flex-col gap-3' : 
+              photosPerPage === 4 ? 'grid grid-cols-2 gap-2.5' : 
+              photosPerPage === 6 ? 'grid grid-cols-2 gap-2' : 
+              'grid grid-cols-2 gap-1.5'
+            }`}>
+              {pagePhotos.map((photo, pIndex) => {
+                const globalIdx = pageIdx * chunkSize + pIndex + 1;
+                const imgHeight = 
+                  photosPerPage === 2 ? 'h-[280px]' : 
+                  photosPerPage === 4 ? 'h-[185px]' : 
+                  photosPerPage === 6 ? 'h-[130px]' : 
+                  'h-[95px]';
+                const isCompact = photosPerPage === 6 || photosPerPage === 8;
+                return (
+                  <div 
+                    key={pIndex} 
+                    className="rounded-lg overflow-hidden bg-white"
+                    style={{ border: borderCfg.screen, breakInside: 'avoid' }}
+                  >
+                    <div 
+                      className={`w-full bg-slate-50 flex items-center justify-center relative overflow-hidden ${
+                        isCompact ? 'p-1' : 'p-2'
+                      } ${imgHeight}`}
+                    >
+                      <img 
+                        src={photo.url} 
+                        alt={photo.title}
+                        crossOrigin="anonymous"
+                        loading="eager"
+                        className="w-full h-full object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23999" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
+                        }}
+                      />
+                    </div>
+                    <div 
+                      className={`${isCompact ? 'p-1.5' : 'p-2'} bg-neutral-50 text-left`} 
+                      style={{ borderTop: borderCfg.screen }}
+                    >
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className={`font-bold ${photosPerPage === 8 ? 'text-[11px]' : photosPerPage === 6 ? 'text-[12px]' : 'text-[13px]'} text-black truncate`}>
+                          ภาพที่ {globalIdx}: {photo.title}
+                        </span>
+                        <span className={`${photosPerPage === 8 ? 'text-[9px] px-1 py-0.2' : 'text-[10px] px-1.5 py-0.5'} border border-neutral-400 rounded bg-white text-neutral-800 shrink-0 font-medium`}>
+                          {photo.category === 'vehicle' ? 'ภาพตัวรถ' : photo.category === 'defect' ? 'จุดตรวจ/ชำรุด' : 'ภาพหลักฐาน'}
+                        </span>
+                      </div>
+                      {photo.note && (
+                        <div className={`${photosPerPage === 8 ? 'text-[10px] line-clamp-1' : photosPerPage === 6 ? 'text-[11px] line-clamp-1' : 'text-[11.5px]'} text-neutral-800 mt-0.5 leading-snug`}>
+                          <b>รายละเอียด:</b> {photo.note}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Footer System Meta Only (Signatures Removed for Page 2 Onwards) */}
+          <div className="mt-2 pt-2" style={{ borderTop: borderCfg.screen }}>
+            <div className="bottom-system-meta">
+              <span>ระบบสารบรรณและบริหารเอกสารอิเล็กทรอนิกส์ (EDMS)</span>
+            </div>
+          </div>
+        </div>
+      );
+    })}
+    </>
   );
 };
 
@@ -4002,6 +4278,8 @@ export const VehiclePrintablePaperModal: React.FC<{
 }> = ({ vehicle, inspection, user, onClose }) => {
   const r = typeof inspection.results === 'string' ? JSON.parse(inspection.results) : (inspection.results || {});
   
+  const previewRef = React.useRef<A4PaperPreviewRef>(null);
+
   const [driverName, setDriverName] = useState<string>(() => {
     return r?.driver_name || r?.reporter_name || (inspection as any)?.driver_name || inspection.inspector_name || (user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username : '') || '';
   });
@@ -4013,37 +4291,180 @@ export const VehiclePrintablePaperModal: React.FC<{
   const [formNumber, setFormNumber] = useState<string>(() => {
     const d = String(vehicle.department || '').trim();
     if (d.includes('ป้องกัน') || d.includes('ปฏิบัติการ')) {
-      return 'รหัสแบบฟอร์ม: FM-DPM-PPO-001 | Rev.00 | วันที่บังคับใช้ 21/09/2569';
+      return 'FM-DPM-PPO-001 | Rev.00';
     }
     if (d.includes('สงเคราะห์') || d.includes('ผู้ประสบภัย')) {
-      return 'รหัสแบบฟอร์ม: FM-DPM-RLF-001 | Rev.00 | วันที่บังคับใช้ 21/09/2569';
+      return 'FM-DPM-RLF-001 | Rev.00';
     }
     if (d.includes('ยุทธศาสตร์') || d.includes('จัดการ')) {
-      return 'รหัสแบบฟอร์ม: FM-DPM-SMG-001 | Rev.00 | วันที่บังคับใช้ 21/09/2569';
+      return 'FM-DPM-SMG-001 | Rev.00';
     }
-    return 'รหัสแบบฟอร์ม: FM-DPM-PPO-001 | Rev.00 | วันที่บังคับใช้ 21/09/2569'; // fallback
+    return 'FM-DPM-PPO-001 | Rev.00';
   });
+
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
+  const [borderWidth, setBorderWidth] = useState<'ultrathin' | 'thin' | 'normal' | 'thick'>('thin');
+  const [includePhotos, setIncludePhotos] = useState<boolean>(true);
+  const [includeVehiclePhoto, setIncludeVehiclePhoto] = useState<boolean>(true);
+  const [photosPerPage, setPhotosPerPage] = useState<2 | 4 | 6 | 8>(2);
+  const [additionalPhotos, setAdditionalPhotos] = useState<{ title: string; note: string; url: string }[]>([]);
+  
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState<boolean>(false);
+  const [isSavingPhotos, setIsSavingPhotos] = useState<boolean>(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [showMobileSettings, setShowMobileSettings] = useState<boolean>(false);
 
+  // Count available photos in inspection
+  const totalFoundPhotos = useMemo(() => {
+    let count = 0;
+    if (includeVehiclePhoto && vehicle.image_url) count++;
+    Object.values(r).forEach((v: any) => {
+      if (Array.isArray(v?.photos)) count += v.photos.length;
+    });
+    const extraList = r.photos || r.damage_photos || r.evidence_photos || (inspection as any).photos || (inspection as any).evidence_photos;
+    if (Array.isArray(extraList)) count += extraList.length;
+    count += additionalPhotos.length;
+    return count;
+  }, [vehicle.image_url, includeVehiclePhoto, r, inspection, additionalPhotos]);
+
   const handlePrint = () => {
-    window.print();
+    if (previewRef.current) {
+      previewRef.current.print();
+    } else {
+      window.print();
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (isExportingPdf) return;
+    setIsExportingPdf(true);
+    try {
+      if (previewRef.current) {
+        await previewRef.current.exportPdf();
+      } else {
+        window.print();
+      }
+    } catch (err) {
+      console.error('Failed to export PDF:', err);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  const handleExportImage = () => {
+    previewRef.current?.exportImage('png');
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setIsUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      const uploadedUrls: string[] = [];
+      if (Array.isArray(data.files)) {
+        data.files.forEach((f: any) => {
+          if (f.url) uploadedUrls.push(f.url);
+        });
+      } else if (data.url) {
+        uploadedUrls.push(data.url);
+      }
+      
+      const newItems = uploadedUrls.map((url, idx) => ({
+        title: `ภาพถ่ายแนบเพิ่มเติม ที่ ${additionalPhotos.length + idx + 1}`,
+        note: 'แนบเพิ่มเติม ณ ขณะจัดพิมพ์รายงาน A4',
+        url
+      }));
+      setAdditionalPhotos(prev => [...prev, ...newItems]);
+    } catch (err) {
+      console.error('Failed to upload photos:', err);
+    } finally {
+      setIsUploadingPhoto(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveAdditionalPhoto = (idx: number) => {
+    setAdditionalPhotos(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSaveInspectionPhotos = async () => {
+    if (additionalPhotos.length === 0) return;
+    setIsSavingPhotos(true);
+    try {
+      const currentResults = typeof inspection.results === 'string' ? JSON.parse(inspection.results) : (inspection.results || {});
+      const existingExtra = currentResults.evidence_photos || [];
+      const newUrls = additionalPhotos.map(p => p.url);
+      const combined = Array.from(new Set([...existingExtra, ...newUrls]));
+      
+      const updatedResults = {
+        ...currentResults,
+        evidence_photos: combined
+      };
+
+      const res = await fetch(`/api/vehicle-inspections/${inspection.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ results: updatedResults })
+      });
+      if (res.ok) {
+        setSaveSuccessMsg('บันทึกรูปภาพลงฐานข้อมูลสำเร็จ');
+        setTimeout(() => setSaveSuccessMsg(null), 3000);
+      }
+    } catch (err) {
+      console.error('Error updating inspection photos:', err);
+    } finally {
+      setIsSavingPhotos(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col lg:flex-row items-stretch justify-stretch bg-slate-900/95 backdrop-blur-md overflow-hidden print:p-0 print:bg-white print:block print:overflow-visible">
+    <div className="vehicle-print-modal-root fixed inset-0 z-50 flex flex-col lg:flex-row items-stretch justify-stretch bg-slate-900/95 backdrop-blur-md overflow-hidden print:static print:inset-auto print:p-0 print:m-0 print:bg-white print:block print:overflow-visible print:h-auto print:w-auto">
       
       <style>{`
         @media print {
-          body {
+          @page {
+            size: A4 portrait;
+            margin: 0mm !important;
+          }
+          html, body {
             background-color: #ffffff !important;
             color: #000000 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-          #printable-sidebar {
+          #printable-sidebar, .no-print {
             display: none !important;
           }
-          .no-print {
-            display: none !important;
+          .vehicle-print-modal-root {
+            position: static !important;
+            overflow: visible !important;
+            height: auto !important;
+            width: 100% !important;
+            display: block !important;
+            background: #ffffff !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .vehicle-print-canvas-area {
+            overflow: visible !important;
+            height: auto !important;
+            width: 100% !important;
+            display: block !important;
+            background: #ffffff !important;
+            padding: 0 !important;
+            margin: 0 !important;
           }
         }
       `}</style>
@@ -4071,11 +4492,20 @@ export const VehiclePrintablePaperModal: React.FC<{
           </button>
           <button
             type="button"
+            onClick={handleExportPdf}
+            disabled={isExportingPdf}
+            className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-70"
+          >
+            {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+            <span>PDF</span>
+          </button>
+          <button
+            type="button"
             onClick={handlePrint}
-            className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-1 shadow-sm cursor-pointer"
+            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-1 shadow-sm cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>พิมพ์ / PDF</span>
+            <span>พิมพ์</span>
           </button>
         </div>
       </div>
@@ -4083,18 +4513,18 @@ export const VehiclePrintablePaperModal: React.FC<{
       {/* 1. Left Control Panel Sidebar */}
       <div 
         id="printable-sidebar" 
-        className={`w-full lg:w-[380px] bg-slate-800 border-b lg:border-b-0 lg:border-r border-slate-700 flex-col overflow-y-auto shrink-0 p-5 space-y-5 no-print ${
+        className={`w-full lg:w-[380px] bg-slate-800 border-b lg:border-b-0 lg:border-r border-slate-700 flex-col overflow-y-auto shrink-0 p-5 space-y-5 no-print print:hidden ${
           showMobileSettings ? 'flex' : 'hidden lg:flex'
         }`}
       >
-        <div className="flex items-center justify-between border-b border-slate-700 pb-4">
+        <div className="flex items-center justify-between border-b border-slate-700 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-400 shadow-xs">
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-black text-white">ตั้งค่าการจัดพิมพ์กระดาษ A4</h3>
-              <span className="text-[10px] text-slate-400">แบบรายงานความเรียบร้อยของรถยนต์</span>
+              <h3 className="text-sm font-black text-white">แบบรายงานความเรียบร้อยรถยนต์</h3>
+              <span className="text-[10px] text-slate-400">ขนาดกระดาษมาตรฐาน A4 พร้อมรูปภาพ</span>
             </div>
           </div>
           <button 
@@ -4108,17 +4538,205 @@ export const VehiclePrintablePaperModal: React.FC<{
 
         {/* Action Buttons */}
         <div className="space-y-2">
+          {/* Main Action: PDF Export Exactly Like Screen Preview */}
           <button
-            onClick={handlePrint}
-            className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-md active:scale-98"
+            onClick={handleExportPdf}
+            disabled={isExportingPdf}
+            className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-black text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-indigo-600/30 active:scale-98 disabled:opacity-70"
           >
-            <Printer className="w-4 h-4" />
-            <span>สั่งพิมพ์กระดาษ A4 / บันทึก PDF</span>
+            {isExportingPdf ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-white" />
+                <span>กำลังประมวลผล PDF ตาม Preview...</span>
+              </>
+            ) : (
+              <>
+                <FileDown className="w-4 h-4 text-white" />
+                <span>ดาวน์โหลด PDF ขนาด A4 (คมชัด 100%)</span>
+              </>
+            )}
           </button>
-          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 px-1">
-            <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <span>รองรับการบันทึกเป็น PDF และพิมพ์ลงกระดาษ A4 มาตรฐาน</span>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handlePrint}
+              className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md active:scale-98"
+            >
+              <Printer className="w-4 h-4" />
+              <span>พิมพ์กระดาษ A4</span>
+            </button>
+            <button
+              onClick={handleExportImage}
+              className="py-2.5 px-3 rounded-xl bg-slate-700 hover:bg-slate-650 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer border border-slate-600 active:scale-98"
+            >
+              <Camera className="w-4 h-4 text-slate-300" />
+              <span>บันทึก PNG</span>
+            </button>
           </div>
+
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 px-1 pt-0.5">
+            <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span>PDF คมชัดสูง ภาพและตารางตรงกับ Preview บนหน้าจอ 100%</span>
+          </div>
+        </div>
+
+        {/* Photo Appendix Settings */}
+        <div className="space-y-3 bg-slate-700/40 p-3.5 rounded-xl border border-slate-600/50">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-black text-indigo-300 uppercase tracking-wider block">
+              ภาคผนวกภาพถ่ายในเอกสาร (A4)
+            </label>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
+              {totalFoundPhotos} ภาพ
+            </span>
+          </div>
+
+          <label className="flex items-center justify-between text-xs text-slate-300 p-2 rounded-lg bg-slate-800/60 border border-slate-700 cursor-pointer hover:bg-slate-800 transition">
+            <span className="font-medium">พิมพ์แนบภาพถ่ายในรายงาน A4</span>
+            <input 
+              type="checkbox"
+              checked={includePhotos}
+              onChange={(e) => setIncludePhotos(e.target.checked)}
+              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+            />
+          </label>
+
+          {includePhotos && (
+            <>
+              {vehicle.image_url && (
+                <label className="flex items-center justify-between text-xs text-slate-300 p-2 rounded-lg bg-slate-800/60 border border-slate-700 cursor-pointer hover:bg-slate-800 transition">
+                  <span className="font-medium">รวมภาพถ่ายหลักตัวรถ</span>
+                  <input 
+                    type="checkbox"
+                    checked={includeVehiclePhoto}
+                    onChange={(e) => setIncludeVehiclePhoto(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+                  />
+                </label>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] text-slate-400 font-medium block">
+                  จำนวนภาพต่อหน้ากระดาษ A4:
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPhotosPerPage(2)}
+                    className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                      photosPerPage === 2 
+                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' 
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>2 ภาพ/หน้า (ใหญ่)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPhotosPerPage(4)}
+                    className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                      photosPerPage === 4 
+                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' 
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>4 ภาพ/หน้า (กริด)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPhotosPerPage(6)}
+                    className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                      photosPerPage === 6 
+                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' 
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>6 ภาพ/หน้า (กริด)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPhotosPerPage(8)}
+                    className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                      photosPerPage === 8 
+                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' 
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>8 ภาพ/หน้า (กริด)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Extra Photos Upload */}
+              <div className="pt-2 border-t border-slate-700/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-slate-300 font-medium">แนบภาพถ่ายเพิ่มเติมสำหรับรอบนี้:</span>
+                  {additionalPhotos.length > 0 && (
+                    <span className="text-[10px] text-emerald-400 font-bold">
+                      +{additionalPhotos.length} ภาพ
+                    </span>
+                  )}
+                </div>
+                
+                <label className="w-full py-2 px-3 rounded-lg border border-dashed border-slate-600 hover:border-indigo-400 bg-slate-800/40 hover:bg-slate-800/80 text-slate-300 text-xs font-medium flex items-center justify-center gap-2 cursor-pointer transition">
+                  {isUploadingPhoto ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                  ) : (
+                    <Camera className="w-4 h-4 text-indigo-400" />
+                  )}
+                  <span>{isUploadingPhoto ? 'กำลังอัปโหลด...' : '+ เลือกรูปภาพแนบเพิ่ม'}</span>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    multiple 
+                    onChange={handlePhotoUpload} 
+                    className="hidden" 
+                    disabled={isUploadingPhoto}
+                  />
+                </label>
+
+                {additionalPhotos.length > 0 && (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
+                    {additionalPhotos.map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-1.5 bg-slate-800 rounded border border-slate-700 text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <img src={p.url} alt="" className="w-7 h-7 object-cover rounded shrink-0 bg-slate-700" />
+                          <span className="text-slate-300 truncate text-[11px]">{p.title}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAdditionalPhoto(idx)}
+                          className="p-1 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded cursor-pointer"
+                          title="ลบรูป"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={handleSaveInspectionPhotos}
+                      disabled={isSavingPhotos}
+                      className="w-full mt-1 py-1.5 px-2 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded text-[11px] font-bold transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                    >
+                      {isSavingPhotos ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />}
+                      <span>{isSavingPhotos ? 'กำลังบันทึก...' : 'บันทึกภาพถ่ายลงฐานข้อมูลถาวร'}</span>
+                    </button>
+                  </div>
+                )}
+
+                {saveSuccessMsg && (
+                  <div className="p-1.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded text-[10px] text-center font-bold">
+                    {saveSuccessMsg}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Editable Signatures Settings */}
@@ -4161,7 +4779,7 @@ export const VehiclePrintablePaperModal: React.FC<{
               type="text"
               value={formNumber}
               onChange={(e) => setFormNumber(e.target.value)}
-              placeholder="เช่น แบบ ปภ. รย-01"
+              placeholder="เช่น FM-DPM-PPO-001 | Rev.00"
               className="w-full p-2.5 bg-slate-900/80 border border-slate-600 focus:border-indigo-500 rounded-lg text-xs text-white outline-none"
             />
           </div>
@@ -4200,6 +4818,47 @@ export const VehiclePrintablePaperModal: React.FC<{
           </div>
         </div>
 
+        {/* Border Thickness Settings */}
+        <div className="space-y-2">
+          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+            ความหนาเส้นกรอบตาราง
+          </label>
+          <div className="grid grid-cols-4 gap-1.5">
+            <button
+              onClick={() => setBorderWidth('ultrathin')}
+              className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                borderWidth === 'ultrathin' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 text-slate-300 border-slate-600'
+              }`}
+            >
+              บางมาก
+            </button>
+            <button
+              onClick={() => setBorderWidth('thin')}
+              className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                borderWidth === 'thin' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 text-slate-300 border-slate-600'
+              }`}
+            >
+              บาง (แนะนำ)
+            </button>
+            <button
+              onClick={() => setBorderWidth('normal')}
+              className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                borderWidth === 'normal' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 text-slate-300 border-slate-600'
+              }`}
+            >
+              ปานกลาง
+            </button>
+            <button
+              onClick={() => setBorderWidth('thick')}
+              className={`p-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                borderWidth === 'thick' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 text-slate-300 border-slate-600'
+              }`}
+            >
+              หนา
+            </button>
+          </div>
+        </div>
+
         {/* Exit Button */}
         <div className="pt-2 border-t border-slate-700">
           <button
@@ -4213,9 +4872,68 @@ export const VehiclePrintablePaperModal: React.FC<{
       </div>
 
       {/* 2. Right Canvas Area using A4PaperPreview */}
-      <div className="flex-1 bg-slate-950/80 p-2 sm:p-4 lg:p-6 overflow-y-auto flex justify-center custom-scrollbar print:p-0 print:bg-white print:block">
-        <div className="w-full max-w-[860px]">
+      <div className="vehicle-print-canvas-area flex-1 bg-slate-950/80 p-2 sm:p-4 lg:p-6 overflow-y-auto flex justify-center custom-scrollbar print:p-0 print:m-0 print:bg-white print:block print:overflow-visible print:w-full print:h-auto">
+        <div className="w-full max-w-[860px] print:max-w-none print:w-full print:m-0 print:p-0">
+          {includePhotos && (
+            <div className="no-print mb-3 bg-slate-800/90 backdrop-blur border border-slate-700/80 rounded-2xl p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
+                <LayoutGrid className="w-4 h-4 text-indigo-400" />
+                <span>ตัวเลือกจำนวนภาพต่อหน้ากระดาษ A4:</span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setPhotosPerPage(2)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border flex items-center gap-1 ${
+                    photosPerPage === 2
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                      : 'bg-slate-700/80 border-slate-600 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>2 ภาพ/หน้า (ใหญ่)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotosPerPage(4)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border flex items-center gap-1 ${
+                    photosPerPage === 4
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                      : 'bg-slate-700/80 border-slate-600 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>4 ภาพ (2x2)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotosPerPage(6)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border flex items-center gap-1 ${
+                    photosPerPage === 6
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                      : 'bg-slate-700/80 border-slate-600 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>6 ภาพ (2x3)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotosPerPage(8)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border flex items-center gap-1 ${
+                    photosPerPage === 8
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
+                      : 'bg-slate-700/80 border-slate-600 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>8 ภาพ (2x4)</span>
+                </button>
+              </div>
+            </div>
+          )}
           <A4PaperPreview
+            ref={previewRef}
             title="แบบรายงานความเรียบร้อยของรถยนต์ (A4)"
             subtitle={`${vehicle.license_plate} ${vehicle.province || 'ระยอง'} (${vehicle.vehicle_number || vehicle.vehicle_type})`}
             onPrint={handlePrint}
@@ -4230,6 +4948,11 @@ export const VehiclePrintablePaperModal: React.FC<{
               customVerifierName={verifierName}
               customFormNumber={formNumber}
               fontSize={fontSize}
+              borderWidth={borderWidth}
+              includePhotos={includePhotos}
+              includeVehiclePhoto={includeVehiclePhoto}
+              photosPerPage={photosPerPage}
+              additionalPhotos={additionalPhotos}
             />
           </A4PaperPreview>
         </div>

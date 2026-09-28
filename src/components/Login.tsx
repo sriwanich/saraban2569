@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu, Sparkles, AlertTriangle, HelpCircle, Activity, Apple, Monitor, Smartphone, Tablet, Terminal, Users } from 'lucide-react';
+import { LogIn, User, Lock, ArrowLeft, ShieldCheck, Mail, Send, Eye, EyeOff, Server, Clock, Sun, Moon, Building2, Cpu, Sparkles, AlertTriangle, HelpCircle, Activity, Apple, Monitor, Smartphone, Tablet, Terminal, Users, Car, QrCode } from 'lucide-react';
 import ChangelogModal from './ChangelogModal';
 import VersionBadge from './VersionBadge';
 import { realtimeSync } from '../utils/realtimeSync';
@@ -243,6 +243,12 @@ export default function Login({ onLogin }: LoginProps) {
   const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
     return typeof window !== 'undefined' ? realtimeSync.getOnlineUsers() : 0;
   });
+
+  // Check if user arrived by scanning a Vehicle QR Code
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const isVehicleQrScan = searchParams.get('view') === 'vehicles' || searchParams.get('view') === 'vehicle' || searchParams.has('vehicle_id');
+  const vehicleAction = searchParams.get('action');
+  const vehiclePlate = searchParams.get('plate');
   
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -687,6 +693,40 @@ export default function Login({ onLogin }: LoginProps) {
             <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
             
             <div className="p-6 sm:p-8 relative z-10">
+              {isVehicleQrScan && (
+                <div className="mb-5 p-4 rounded-2xl bg-gradient-to-r from-blue-500/15 via-indigo-500/10 to-sky-500/15 border border-blue-500/30 text-[var(--text-primary)] shadow-sm animate-slide-up">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shrink-0 mt-0.5">
+                      <Car className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 text-xs">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-sm text-blue-600 dark:text-blue-400">สแกน QR Code ตรวจสอบยานพาหนะ</span>
+                        {vehicleAction === 'inspect' && (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-extrabold text-[10px] tracking-wide">
+                            ตรวจสภาพประจำวัน
+                          </span>
+                        )}
+                        {vehicleAction === 'history' && (
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white font-extrabold text-[10px] tracking-wide">
+                            ดูประวัติการตรวจ
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[var(--text-secondary)] mt-1.5 leading-relaxed font-medium">
+                        กรุณาเข้าสู่ระบบด้วย <b>Username & Password</b> ของท่าน ระบบจะนำเข้าสู่ <b>ระบบบริหารจัดการยานพาหนะ</b> และเปิดรถคันนี้ให้โดยตรงทันที
+                      </p>
+                      {vehiclePlate && (
+                        <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/70 dark:bg-black/30 border border-blue-400/30 text-blue-700 dark:text-blue-300 font-bold text-[11px]">
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>ทะเบียน: {decodeURIComponent(vehiclePlate)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {alert && (
                 <div className={`mb-4 p-4 rounded-xl text-sm font-medium flex items-start gap-3 border backdrop-blur-md ${
                   alert.type === 'error' 

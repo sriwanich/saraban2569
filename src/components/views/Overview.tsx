@@ -15,9 +15,10 @@ interface Props {
   onCreateDoc: (type?: 'inbox' | 'outbox' | 'admin', prefillData?: Partial<DocumentItem>) => void;
   onViewDoc: (doc: DocumentItem) => void;
   enabledFeatures?: Record<string, boolean>;
+  onNavigateTab?: (tab: string, subTab?: string) => void;
 }
 
-export default function Overview({ documents, user, onCreateDoc, onViewDoc, enabledFeatures }: Props) {
+export default function Overview({ documents, user, onCreateDoc, onViewDoc, enabledFeatures, onNavigateTab }: Props) {
   const [selectedYear, setSelectedYear] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
 

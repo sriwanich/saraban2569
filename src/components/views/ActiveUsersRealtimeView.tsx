@@ -7,7 +7,7 @@ import {
   Sparkles, Hash, Layers, CheckCircle2, User as UserIcon, Crown, 
   ArrowRight, LogOut, MessageSquare, ExternalLink, Zap, Trash2, 
   Check, Info, UserCheck, ShieldAlert, Wifi, Cpu, Workflow,
-  Copy, Building2
+  Copy, Building2, Car, Truck
 } from 'lucide-react';
 import { useRealtimeSync, realtimeSync } from '../../utils/realtimeSync';
 
@@ -289,6 +289,11 @@ export default function ActiveUsersRealtimeView({
         return { label: 'ศูนย์ลงนามดิจิทัล (ETDA)', icon: ShieldCheck, bg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20' };
       case 'qr_generator':
         return { label: 'สร้าง QR Code สารบรรณ', icon: Hash, bg: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20' };
+      case 'vehicles':
+      case 'vehicle':
+      case 'vehicle_management':
+      case 'vehicles_portal':
+        return { label: 'ระบบบริหารจัดการยานพาหนะหลัก (Vehicle Dashboard)', icon: Car, bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' };
       case 'urgent_incidents':
         return { label: 'แบบรายงานเหตุด่วนสาธารณภัย', icon: AlertTriangle, bg: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' };
       case 'recycle_bin':

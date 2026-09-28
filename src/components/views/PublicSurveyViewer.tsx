@@ -79,12 +79,13 @@ export function PublicSurveyViewer() {
     try {
       // 1. Try fetching from server API
       const res = await fetch(`/api/surveys/${encodeURIComponent(id)}`);
+      const contentType = res.headers.get('content-type') || '';
       if (res.status === 404) {
         setError('ไม่พบแบบสำรวจ หรือแบบสำรวจนี้ถูกลบออกจากระบบแล้ว');
         setLoading(false);
         return;
       }
-      if (res.ok) {
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (data && data.id) {
           setSurvey(data);

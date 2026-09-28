@@ -21,7 +21,10 @@ const SurveyPublicViewer: React.FC<SurveyPublicViewerProps> = ({ surveyId }) => 
       setLoading(true);
       setError(null);
       const res = await fetch(`/api/surveys/${surveyId}`);
-      if (!res.ok) throw new Error('Survey not found');
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        throw new Error('ไม่พบแบบสำรวจ หรือเซิร์ฟเวอร์ยังไม่พร้อมให้บริการ');
+      }
       const data = await res.json();
       setSurvey(data);
       

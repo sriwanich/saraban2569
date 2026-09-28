@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # 1. Frontend: Vite + React SPA (Nginx)
+  frontend:
+    image: nginx:alpine
+    container_name: saraban_frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./dist:/usr/share/nginx/html
+      - ./nginx.enterprise.conf:/etc/nginx/conf.d/default.conf
+      - ./uploads:/var/www/uploads
+    depends_on:
+      - php-api
+    restart: unless-stopped
+
+  # 2. Backend: PHP 8.2-FPM Enterprise REST API
+  php-api:
+    image: php:8.2-fpm-alpine
+    container_name: saraban_php_api
+    working_dir: /var/www/html
+    volumes:
+      - ./php-api:/var/www/html
+      - ./uploads:/var/www/uploads
+    environment:
+      - DB_DRIVER=mysql
+      - DB_HOST=mariadb
+      - DB_PORT=3306
+      - DB_DATABASE=saraban_enterprise
+      - DB_USERNAME=saraban_user
+      - DB_PASSWORD=saraban_secure_password_2569
+      - JWT_SECRET=saraban-enterprise-secure-jwt-secret-key-2569
+    depends_on:
+      - mariadb
+    restart: unless-stopped
+
+  # 3. Database: MariaDB 11.x
+  mariadb:
+    image: mariadb:11-jammy
+    container_name: saraban_mariadb
+    environment:
+      MYSQL_ROOT_PASSWORD: saraban_root_password_2569
+      MYSQL_DATABASE: saraban_enterprise
+      MYSQL_USER: saraban_user
+      MYSQL_PASSWORD: saraban_secure_password_2569
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./database_mariadb.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+
+volumes:
+  mariadb_data:

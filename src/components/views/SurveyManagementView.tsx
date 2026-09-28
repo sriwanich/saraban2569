@@ -30,7 +30,8 @@ import {
   X,
   ChevronRight,
   PauseCircle,
-  Printer
+  Printer,
+  ClipboardList
 } from 'lucide-react';
 import { Survey, SurveyResponse } from '../../types/survey';
 import { OFFICIAL_SURVEY_TEMPLATES } from '../../data/surveyTemplates';
@@ -82,9 +83,15 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
     setApiError(null);
     try {
       const res = await fetch('/api/surveys');
+      const contentType = res.headers.get('content-type') || '';
+      
+      if (!contentType.includes('application/json')) {
+        throw new Error('เซิร์ฟเวอร์ยังไม่พร้อมให้บริการหรือไม่สามารถเชื่อมต่อ API ได้ในขณะนี้');
+      }
+
       if (res.ok) {
         const data = await res.json();
-        setSurveys(data || []);
+        setSurveys(Array.isArray(data) ? data : []);
       } else {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'ไม่สามารถดึงข้อมูลแบบสำรวจจาก MySQL ได้');
@@ -106,9 +113,10 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
   const fetchSurveyResponses = async (surveyId: string) => {
     try {
       const res = await fetch(`/api/surveys/${surveyId}/responses`);
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        setResponses(prev => ({ ...prev, [surveyId]: data || [] }));
+        setResponses(prev => ({ ...prev, [surveyId]: Array.isArray(data) ? data : [] }));
       }
     } catch (e) {
       console.warn('Failed to load responses from MySQL API:', e);
@@ -273,6 +281,12 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
     if (!ok) return;
 
     handleSaveSurvey({ ...target, settings: { ...target.settings, status: newStatus } });
+  };
+
+  // Create New Survey
+  const handleCreateSurvey = () => {
+    setSelectedSurvey(null);
+    setCurrentView('builder');
   };
 
   // Create from Template
@@ -461,10 +475,7 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
             </button>
 
             <button
-              onClick={() => {
-                setSelectedSurvey(null);
-                setCurrentView('builder');
-              }}
+              onClick={handleCreateSurvey}
               className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-lg hover:shadow-blue-600/30 transition-all hover:scale-103 active:scale-97 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
@@ -650,45 +661,32 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
       )}
 
       {surveys.length === 0 ? (
-        <div className="p-12 sm:p-16 rounded-3xl bg-blue-500/5 border border-blue-500/10 text-center space-y-5 shadow-xs max-w-2xl mx-auto my-12">
+        <div className="p-12 sm:p-16 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-lighter)] text-center space-y-5 shadow-xs max-w-2xl mx-auto my-12">
           <div className="w-16 h-16 rounded-3xl bg-blue-500/10 text-blue-500 flex items-center justify-center mx-auto">
-            <Layers className="w-8 h-8 animate-pulse" />
+            <ClipboardList className="w-8 h-8" />
           </div>
           <div className="space-y-2">
             <h3 className="text-lg font-black text-[var(--text-primary)]">
-              ไม่พบข้อมูลแบบสำรวจในฐานข้อมูล MySQL
+              ยังไม่มีข้อมูลแบบสำรวจในระบบ
             </h3>
             <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto leading-relaxed">
-              ระบบไม่พบข้อมูลแบบสำรวจใดๆ ในเซิร์ฟเวอร์ขณะนี้ คุณสามารถสั่งให้ระบบติดตั้งและสร้างแบบสำรวจมาตรฐาน ปภ. อัจฉริยะ (จำนวน 6 ฟอร์ม) ลงฐานข้อมูลได้โดยตรงทันที
+              คุณสามารถเริ่มต้นสร้างแบบสำรวจใหม่ หรือเลือกใช้แม่แบบแบบสำรวจที่เตรียมไว้ได้ทันที
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             <button
-              onClick={async () => {
-                setIsLoading(true);
-                setApiError(null);
-                try {
-                  const res = await fetch('/api/surveys/seed-official', { method: 'POST' });
-                  if (res.ok) {
-                    const data = await res.json();
-                    alert(data.message || 'ติดตั้งแบบสำรวจมาตรฐานสำเร็จ!');
-                    await fetchSurveys();
-                  } else {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.error || 'ติดตั้งแบบสำรวจล้มเหลว');
-                  }
-                } catch (e: any) {
-                  alert(e.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ');
-                  setApiError(e.message);
-                } finally {
-                  setIsLoading(false);
-                }
-              }}
-              disabled={isLoading}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+              onClick={handleCreateSurvey}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
             >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>ติดตั้งแบบสำรวจมาตรฐาน ปภ. (6 แบบฟอร์ม)</span>
+              <Plus className="w-4 h-4" />
+              <span>สร้างแบบสำรวจใหม่</span>
+            </button>
+            <button
+              onClick={() => setShowTemplateModal(true)}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-2xl bg-[var(--bg-canvas)] hover:bg-[var(--bg-elevated)] border border-[var(--border-light)] text-[var(--text-primary)] text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Layers className="w-4 h-4 text-blue-500" />
+              <span>เลือกจากคลังแม่แบบ</span>
             </button>
           </div>
         </div>
@@ -702,7 +700,7 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
               ไม่พบแบบสำรวจที่ตรงกับเงื่อนไข
             </h3>
             <p className="text-xs text-[var(--text-muted)] max-w-md mx-auto">
-              ลองเปลี่ยนคำค้นหา ปรับเปลี่ยนตัวกรอง หรือเลือกสร้างแบบสำรวจใหม่จากคลังแม่แบบมาตรฐาน ปภ.
+              ลองเปลี่ยนคำค้นหา ปรับเปลี่ยนตัวกรอง หรือเลือกสร้างแบบสำรวจใหม่จากคลังแม่แบบ
             </p>
           </div>
           <div className="flex items-center justify-center gap-2 pt-2">
@@ -915,7 +913,7 @@ export const SurveyManagementView: React.FC<SurveyManagementViewProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-base text-[var(--text-primary)]">
-                    คลังแม่แบบแบบสำรวจมาตรฐาน ปภ. และราชการ (Official Templates)
+                    คลังแม่แบบแบบสำรวจสารสนเทศและราชการ (Official Templates)
                   </h3>
                   <p className="text-xs text-[var(--text-muted)]">
                     เลือกแม่แบบที่ผ่านการรับรองเพื่อเริ่มสร้างและปรับแต่งได้อย่างรวดเร็ว

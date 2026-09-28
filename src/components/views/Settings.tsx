@@ -9,6 +9,7 @@ import {
   DDPM_VEHICLE_CATEGORIES, 
   isDDPMHeavyMachinery 
 } from '../../data/ddpmVehicles';
+import EnterpriseArchitectureView from './EnterpriseArchitectureView';
 
 interface SettingsProps {
   onSettingsUpdated?: () => void;
@@ -23,7 +24,7 @@ interface SettingsProps {
 export default function Settings(props: SettingsProps) {
   const { confirm } = useConfirm();
   const { onSettingsUpdated } = props;
-  const [activeTab, setActiveTab] = useState<'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control' | 'vehicles'>('system');
+  const [activeTab, setActiveTab] = useState<'system' | 'enterprise_arch' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control' | 'vehicles'>('system');
   const [userSubTab, setUserSubTab] = useState<'list' | 'realtime'>('list');
   const [onlineUsersCount, setOnlineUsersCount] = useState<number>(() => {
     return typeof window !== 'undefined' ? realtimeSync.getOnlineUsers() : 0;
@@ -53,7 +54,7 @@ export default function Settings(props: SettingsProps) {
       } else if (canManageSystem) {
         setActiveTab('system');
       }
-    } else if (!canManageSystem && (activeTab === 'system' || activeTab === 'smtp' || activeTab === 'system_doc' || activeTab === 'backup' || activeTab === 'dedup')) {
+    } else if (!canManageSystem && (activeTab === 'system' || activeTab === 'enterprise_arch' || activeTab === 'smtp' || activeTab === 'system_doc' || activeTab === 'backup' || activeTab === 'dedup')) {
       if (canManageUsers) {
         setActiveTab('users');
       }
@@ -2141,7 +2142,7 @@ export default function Settings(props: SettingsProps) {
   const canBackup = !props.user?.role || (props.hasPermission ? props.hasPermission('backup_restore') : props.user?.role === 'admin');
 
   interface NavItem {
-    id: 'system' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control' | 'vehicles';
+    id: 'system' | 'enterprise_arch' | 'system_health' | 'system_doc' | 'users' | 'active_users' | 'permissions' | 'departments' | 'positions' | 'smtp' | 'backup' | 'dedup' | 'control' | 'vehicles';
     label: string;
     sublabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -2164,6 +2165,14 @@ export default function Settings(props: SettingsProps) {
           sublabel: 'ชื่อหน่วยงาน, ตราครุฑ, Gemini AI',
           icon: SettingsIcon,
           visible: canManageSystem
+        },
+        {
+          id: 'enterprise_arch',
+          label: 'สถาปัตยกรรม Enterprise',
+          sublabel: 'Vite + React + PHP API + PostgreSQL/MariaDB',
+          icon: Server,
+          visible: canManageSystem,
+          badge: 'Enterprise'
         },
         {
           id: 'system_health',
@@ -2213,7 +2222,7 @@ export default function Settings(props: SettingsProps) {
           label: 'ผู้ใช้ Real-time',
           sublabel: 'ติดตามผู้ใช้สด และหน้าจอที่เปิดอยู่',
           icon: Radio,
-          visible: canManageUsers,
+          visible: false,
           badge: onlineUsersCount > 0 ? `${onlineUsersCount} ออนไลน์` : undefined
         },
         {
@@ -3055,6 +3064,10 @@ export default function Settings(props: SettingsProps) {
           </div>
         )}
 
+        {activeTab === 'enterprise_arch' && (
+          <EnterpriseArchitectureView />
+        )}
+
         {activeTab === 'system' && (
           <div className="max-w-4xl space-y-6 animate-fade-in">
 
@@ -3860,25 +3873,6 @@ export default function Settings(props: SettingsProps) {
               >
                 <UserIcon className="w-4 h-4" />
                 <span>รายชื่อบุคลากร ({users.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setUserSubTab('realtime')}
-                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                  userSubTab === 'realtime'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'
-                }`}
-              >
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                </span>
-                <span>ติดตามกิจกรรมผู้ใช้ Real-time ({onlineUsersCount || 0})</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-700/30 text-white font-mono font-bold">
-                  LIVE
-                </span>
               </button>
             </div>
 

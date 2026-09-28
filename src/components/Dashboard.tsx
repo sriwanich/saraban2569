@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
-import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle, ClipboardCheck, Car, Award } from 'lucide-react';
+import { Menu, X, CheckCheck, Home, FileText, Bell, User, LogOut, Search, Send, FolderArchive, Settings as SettingsIcon, Sun, Moon, Monitor, FileSpreadsheet, FolderOpen, ShieldCheck, Key, Briefcase, AlertTriangle, Trash2, Building2, Camera, Download, FileEdit, GitMerge, Sparkles, Pin, QrCode, ShieldAlert, Lock, Workflow, BarChart3, HelpCircle, ClipboardCheck, Car, Award, Radio, Layers, Palette } from 'lucide-react';
 
 import { DocumentItem, DocType, ThemeMode } from '../types';
 import Overview from './views/Overview';
@@ -15,6 +15,7 @@ const ChangelogModal = lazyWithRetry(() => import('./ChangelogModal'), 'Changelo
 
 const DocumentList = lazyWithRetry(() => import('./views/DocumentList'), 'DocumentList');
 const Settings = lazyWithRetry(() => import('./views/Settings'), 'Settings');
+const EnterpriseArchitectureView = lazyWithRetry(() => import('./views/EnterpriseArchitectureView'), 'EnterpriseArchitectureView');
 const LogsView = lazyWithRetry(() => import('./views/LogsView'), 'LogsView');
 const AdminDocsView = lazyWithRetry(() => import('./views/AdminDocsView'), 'AdminDocsView');
 const FoldersView = lazyWithRetry(() => import('./views/FoldersView'), 'FoldersView');
@@ -27,10 +28,12 @@ const QrGeneratorView = lazyWithRetry(() => import('./views/QrGeneratorView'), '
 const UrgentIncidentReportView = lazyWithRetry(() => import('./views/disaster/UrgentIncidentReportView'), 'UrgentIncidentReportView');
 const WorkflowSlaView = lazyWithRetry(() => import('./views/WorkflowSlaView'), 'WorkflowSlaView');
 const InfographicsEditorView = lazyWithRetry(() => import('./views/InfographicsEditorView'), 'InfographicsEditorView');
+const UxUiStudioView = lazyWithRetry(() => import('./views/UxUiStudioView'), 'UxUiStudioView');
 import UserManualView from './views/UserManualView';
 import { SurveyManagementView } from './views/SurveyManagementView';
 import { ECertificateModal } from './survey/ECertificateModal';
 const VehicleManagementView = lazyWithRetry(() => import('./views/VehicleManagementView'), 'VehicleManagementView');
+const ActiveUsersRealtimeView = lazyWithRetry(() => import('./views/ActiveUsersRealtimeView'), 'ActiveUsersRealtimeView');
 import { parseEnabledFeatures, DEFAULT_ENABLED_FEATURES } from '../utils/featureFlags';
 import { useRealtimeSync } from '../utils/realtimeSync';
 import { useConfirm } from '../context/ConfirmContext';
@@ -48,9 +51,27 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     localStorage.setItem('edms_sidebar_collapsed', String(nextState));
   };
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const view = sp.get('view');
+      if (view === 'vehicles' || view === 'vehicle' || sp.has('vehicle_id')) {
+        return 'vehicles';
+      }
+    }
+    return 'overview';
+  });
   const [favActiveTab, setFavActiveTab] = useState<'inbox' | 'outbox' | 'admin'>('inbox');
-  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set(['overview']));
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const view = sp.get('view');
+      if (view === 'vehicles' || view === 'vehicle' || sp.has('vehicle_id')) {
+        return new Set(['overview', 'vehicles']);
+      }
+    }
+    return new Set(['overview']);
+  });
 
   useEffect(() => {
     setVisitedTabs(prev => {
@@ -70,6 +91,7 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
   const [selectedCertForView, setSelectedCertForView] = useState<any | null>(null);
   const [settingsSubTab, setSettingsSubTab] = useState<string>('system');
   const [isUserActive, setIsUserActive] = useState<boolean>(true);
+  const [onlineUsersCount, setOnlineUsersCount] = useState<number>(1);
 
   // User activity & idle state tracking for real-time presence
   useEffect(() => {
@@ -229,13 +251,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     if (currentUser.role === 'moderator') {
       return [
         'view_all_docs', 'create_docs', 'edit_all_docs', 'delete_docs', 'approve_docs', 'export_docs',
-        'admin_docs', 'vehicles', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'surveys', 'draft_docs',
+        'admin_docs', 'vehicles', 'active_users', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator', 'surveys', 'draft_docs',
         'digital_folders', 'workflow_sla', 'digital_signatures', 'recycle_bin'
       ].includes(key);
     }
     if (currentUser.role === 'user') {
       return [
-        'create_docs', 'export_docs', 'admin_docs', 'vehicles', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator',
+        'create_docs', 'export_docs', 'admin_docs', 'vehicles', 'active_users', 'urgent_incidents', 'ai_assistant', 'infographics', 'qr_generator',
         'surveys', 'draft_docs', 'digital_folders', 'workflow_sla'
       ].includes(key);
     }
@@ -453,6 +475,11 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         case 'qr_generator':
           viewTitle = 'สร้าง QR Code สารบรรณ';
           activeDetails = 'กำลังสร้างรหัส QR Code สำหรับเอกสารราชการ';
+          break;
+        case 'vehicles':
+        case 'vehicle':
+          viewTitle = 'ระบบบริหารจัดการยานพาหนะหลัก (Vehicle Dashboard)';
+          activeDetails = 'กำลังใช้งานระบบบริหารจัดการยานพาหนะ ตรวจสภาพรถประจำวัน และรายงาน';
           break;
         case 'surveys':
           viewTitle = 'แบบสำรวจประเมินผลและแบบตอบรับดิจิทัล';
@@ -955,6 +982,26 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
     }
   );
 
+  useRealtimeSync(
+    ['ACTIVE_USERS_UPDATED'],
+    (data) => {
+      if (typeof data?.count === 'number') {
+        setOnlineUsersCount(data.count);
+      }
+    }
+  );
+
+  useEffect(() => {
+    fetch('/api/active-users')
+      .then(res => res.json())
+      .then(data => {
+        if (typeof data?.count === 'number') {
+          setOnlineUsersCount(data.count);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     refreshData();
     fetchSettings();
@@ -1127,9 +1174,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         items: [
           { id: 'workflow_sla', icon: Workflow, label: 'ผังการเดินเอกสาร & SLA', permKey: 'workflow_sla' },
           { id: 'digital_signatures', icon: ShieldCheck, label: 'ศูนย์ลงนามดิจิทัล (ETDA)', permKey: 'digital_signatures' },
+          { id: 'vehicles', icon: Car, label: 'ระบบจัดการยานพาหนะ', permKey: 'vehicles' },
+          { id: 'ux_ui_studio', icon: Palette, label: 'ศูนย์ออกแบบ (UX/UI Studio)' },
           { id: 'infographics', icon: Camera, label: 'ออกแบบ Infographics', permKey: 'infographics' },
           { id: 'qr_generator', icon: QrCode, label: 'สร้าง QR Code สารบรรณ', permKey: 'qr_generator' },
-          { id: 'vehicles', icon: Car, label: 'ระบบจัดการยานพาหนะ', permKey: 'vehicles' },
           { id: 'surveys', icon: ClipboardCheck, label: 'แบบสำรวจ & ประเมินผล', permKey: 'surveys' },
           { id: 'urgent_incidents', icon: AlertTriangle, label: 'แบบรายงานเหตุด่วน', permKey: 'urgent_incidents', badge: urgentIncidentsCount > 0 ? urgentIncidentsCount : undefined, badgeColor: 'bg-rose-500 text-white' },
           { id: 'recycle_bin', icon: Trash2, label: 'คลังกู้คืนเอกสาร', permKey: 'recycle_bin', badge: recycleBinCount > 0 ? recycleBinCount : undefined, badgeColor: 'bg-slate-500 text-white' },
@@ -1230,6 +1278,10 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
           }} 
           onViewDoc={setSelectedDoc} 
           enabledFeatures={enabledFeatures} 
+          onNavigateTab={(tab, subTab) => {
+            setActiveTab(tab);
+            if (subTab) setSettingsSubTab(subTab);
+          }}
         />;
       case 'ai_assistant':
         return renderGuardedView('ai_assistant', 'ผู้ช่วย AI Smart สารบรรณ', (
@@ -1491,6 +1543,24 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
         return renderGuardedView('vehicles', 'ระบบจัดการยานพาหนะ', (
           <VehicleManagementView user={currentUser} hasPermission={hasPermission} />
         ));
+      case 'active_users':
+        return renderGuardedView('active_users', 'ติดตามผู้ใช้งานและหน้าจอที่เปิดใช้งานสด', (
+          <Suspense fallback={<LoadingIndicator fullScreen={false} message="กำลังโหลดศูนย์ติดตามผู้ใช้งานสด..." />}>
+            <ActiveUsersRealtimeView 
+              currentUser={currentUser} 
+              onNavigateToLogs={() => setActiveTab('logs')}
+              onNavigateTab={(tab, subTab, docId) => {
+                if (docId) {
+                  const found = documents.find(d => String(d.id) === String(docId) || d.docNumber === String(docId));
+                  if (found) setSelectedDoc(found);
+                }
+                if (tab) setActiveTab(tab);
+                if (subTab) setSettingsSubTab(subTab);
+              }}
+              departments={departmentsList}
+            />
+          </Suspense>
+        ));
       case 'urgent_incidents':
         return renderGuardedView('urgent_incidents', 'รายงานเหตุด่วนสาธารณภัย', (
           <UrgentIncidentReportView 
@@ -1499,6 +1569,13 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
             onClearPrefillData={() => setDisasterPrefillData(null)}
           />
         ));
+      case 'ux_ui_studio':
+        return (
+          <Suspense fallback={<LoadingIndicator fullScreen={false} message="กำลังโหลดศูนย์ออกแบบ UX/UI Studio..." />}>
+            <UxUiStudioView user={currentUser} onNavigateToTab={(tab, subTab) => { setActiveTab(tab); if (subTab) setSettingsSubTab(subTab as any); }} />
+          </Suspense>
+        );
+
       case 'user_manual':
         return (
           <Suspense fallback={<LoadingIndicator fullScreen={false} message="กำลังโหลดคู่มือการใช้งานระบบ..." />}>
@@ -1516,6 +1593,12 @@ export default function Dashboard({ onLogout, theme, setTheme, user, isSystemDar
       case 'logs':
         return renderGuardedView('audit_logs', 'บันทึกประวัติระบบ (Audit Logs)', (
           <LogsView user={currentUser} />
+        ));
+      case 'enterprise_arch':
+        return renderGuardedView('system_settings', 'สถาปัตยกรรมระดับองค์กร (Enterprise Architecture)', (
+          <Suspense fallback={<LoadingIndicator fullScreen={false} message="กำลังโหลดข้อมูลสถาปัตยกรรมระบบระดับองค์กร..." />}>
+            <EnterpriseArchitectureView user={currentUser} />
+          </Suspense>
         ));
       case 'settings':
         return <Settings onSettingsUpdated={fetchSettings} enabledFeatures={enabledFeatures} setEnabledFeatures={setEnabledFeatures} user={currentUser} hasPermission={hasPermission} onNavigateTab={(tab: string) => setActiveTab(tab)} onSubTabChange={setSettingsSubTab} />;

@@ -4,6 +4,7 @@ import { ConfirmProvider } from './context/ConfirmContext';
 import { LoadingIndicator } from './components/LoadingIndicator';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import { useRealtimeSync } from './utils/realtimeSync';
+import { applyThemeToDOM, getStoredThemeConfig } from './utils/themeEngine';
 
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -17,6 +18,9 @@ const PublicQrVerifyViewer = lazyWithRetry(() =>
 );
 const PublicSurveyViewer = lazyWithRetry(() => 
   import('./components/views/surveys/SurveyPublicViewer')
+);
+const StandaloneVehiclePortal = lazyWithRetry(() => 
+  import('./components/views/StandaloneVehiclePortal').then(m => ({ default: m.StandaloneVehiclePortal }))
 );
 
 
@@ -66,8 +70,19 @@ export default function App() {
     hash.includes('/public/survey/') ||
     searchParams.has('survey_id');
 
+  const isVehiclePortal = 
+    pathname.startsWith('/vehicle') ||
+    hash.includes('/vehicle') ||
+    searchParams.get('portal') === 'vehicle' ||
+    searchParams.get('mode') === 'vehicle' ||
+    searchParams.get('view') === 'vehicle_portal' ||
+    searchParams.get('view') === 'vehicle_qr' ||
+    searchParams.has('vehicle_id') ||
+    searchParams.has('v_id');
+
 
   useEffect(() => {
+    applyThemeToDOM(getStoredThemeConfig());
     const savedUser = localStorage.getItem('edms_user_data') || sessionStorage.getItem('edms_user_data');
     if (savedUser) {
       setUser(JSON.parse(savedUser));
@@ -274,6 +289,24 @@ export default function App() {
   }
 
   if (isLoggedIn) {
+    if (isVehiclePortal) {
+      return (
+        <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการโหลดระบบบริหารจัดการยานพาหนะ">
+          <ConfirmProvider>
+            <Suspense fallback={<LoadingIndicator message="กำลังเปิดระบบบริหารจัดการยานพาหนะ..." />}>
+              <StandaloneVehiclePortal 
+                user={user} 
+                onLogout={handleLogout} 
+                theme={theme} 
+                setTheme={handleSetTheme} 
+                isSystemDark={isSystemDark} 
+              />
+            </Suspense>
+          </ConfirmProvider>
+        </ErrorBoundary>
+      );
+    }
+
     return (
       <ErrorBoundary fallbackTitle="เกิดข้อผิดพลาดในการโหลดหน้าจอการทำงาน">
         <ConfirmProvider>
